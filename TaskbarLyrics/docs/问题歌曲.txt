@@ -1,0 +1,6 @@
+Title:              Stay In The Night（Ft.Belle）
+Artist:             Clear Sky
+
+SourceAppId:        cloudmusic.exe
+ResolvedSource:     Netease
+原因：音源歌词缺失

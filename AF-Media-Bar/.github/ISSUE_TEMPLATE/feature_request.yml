@@ -1,0 +1,33 @@
+name: 功能建议 / Feature request
+description: 说说你希望改进什么。 / Tell us what you would like to improve.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前请搜索相似 Issue。欢迎用中文或 English 描述想法。
+        Search for similar issues first. Chinese and English are both welcome.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 使用场景 / Use case
+      description: 你遇到了什么不便？ / What problem or inconvenience do you face?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 期望的改进 / Suggested improvement
+      description: 你希望它如何工作？ / How would you like it to work?
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充信息 / Additional context
+      description: 可添加截图、示例或目前的解决办法。 / Add screenshots, examples, or workarounds if helpful.

@@ -1,0 +1,20 @@
+# 仓库头部的 Sponsor 按钮 / The Sponsor button in the repository header
+#
+# GitHub 在仓库头部显示这个按钮的条件只有两条：**文件位于默认分支**（本仓库是 main），并且下面至少写了
+# 一个可用的入口。**不需要**加入 GitHub Sponsors 计划——`custom` 就是把按钮指向自己的赞助页，
+# 因此爱发电、微信/支付宝收款页都可以放在这里（最多 4 条）。
+# GitHub shows the button in the repository header when two things hold: **the file is on the default branch**
+# (main for this repository) and at least one entry below is usable. Enrolling in GitHub Sponsors is **not**
+# required — `custom` simply points the button at your own support pages, so Afdian and a WeChat/Alipay page can
+# live here (four entries at most).
+#
+# 其余可用的键（择一或并用）：github、patreon、open_collective、ko_fi、tidelift、community_bridge、liberapay、
+# issuehunt、polar、buy_me_a_coffee、thanks_dev。想把按钮同时指向 GitHub Sponsors 时，取消注释下一行并填账号名，
+# 但那需要先在该账号上启用 GitHub Sponsors（含收款与税务信息）。
+# Other usable keys (one or several): github, patreon, open_collective, ko_fi, tidelift, community_bridge,
+# liberapay, issuehunt, polar, buy_me_a_coffee, thanks_dev. To also point the button at GitHub Sponsors, uncomment
+# the next line and fill in the account name — that does require enabling GitHub Sponsors on that account first
+# (payout and tax details included).
+# github: [Fervent-Tempo]
+
+custom: ["https://ifdian.net/a/amorfate"]

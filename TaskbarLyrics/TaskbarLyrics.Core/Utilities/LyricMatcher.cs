@@ -1,0 +1,333 @@
+using System.Globalization;
+using System.Text;
+using System.Text.RegularExpressions;
+using F23.StringSimilarity;
+using TaskbarLyrics.Core.Models;
+using TaskbarLyrics.Core.Services;
+
+namespace TaskbarLyrics.Core.Utilities;
+
+public static class LyricMatcher
+{
+    private static readonly Regex BracketSuffixRegex = new(@"\s*[\(\[\{（【].*?[\)\]\}）】]\s*", RegexOptions.Compiled);
+    private static readonly Regex FeatureSuffixRegex = new(@"\s+(feat\.?|ft\.?|with)\s+.*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly string[] ConflictKeywords =
+    {
+        "live", "remix", "acoustic", "demo", "instrumental", "karaoke", "simlish", "from",
+        "vma", "award", "现场", "演唱会", "颁奖", "典礼"
+    };
+
+    // JaroWinkler 算法，适合短文本匹配
+    private static readonly JaroWinkler JaroWinklerAlgo = new();
+
+    public static int Score(
+        TrackInfo target,
+        string resultTitle,
+        string resultArtist,
+        int resultDurationInSeconds = 0,
+        string? resultAlbum = null)
+    {
+        if (IsUnknownTitle(target.Title) || IsUnknownTitle(resultTitle)) return 0;
+
+        // 2. 版本冲突检测 (Conflict Detection)
+        foreach (var keyword in ConflictKeywords)
+        {
+            if (HasVersionConflict(target.Title, resultTitle, keyword)) return 0;
+        }
+
+        var normalizedTargetTitle = NormalizeTitleForComparison(target.Title);
+        var normalizedResultTitle = NormalizeTitleForComparison(resultTitle);
+        var normalizedTargetArtist = NormalizeForSearch(target.Artist);
+        var normalizedResultArtist = NormalizeForSearch(resultArtist);
+        var normalizedTargetAlbum = NormalizeForSearch(target.Album);
+        var normalizedResultAlbum = NormalizeForSearch(resultAlbum);
+
+        double titleSim = GetStringSimilarity(normalizedTargetTitle, normalizedResultTitle);
+        double artistSim = GetStringSimilarity(normalizedTargetArtist, normalizedResultArtist);
+        double artistTokenOverlapSim = GetTokenOverlapSimilarity(normalizedTargetArtist, normalizedResultArtist);
+        if (artistTokenOverlapSim > 0)
+        {
+            artistSim = Math.Max(artistSim, artistTokenOverlapSim);
+        }
+        double durationSim = GetDurationSimilarity(target.Duration.TotalSeconds, resultDurationInSeconds);
+        double albumSim = GetStringSimilarity(normalizedTargetAlbum, normalizedResultAlbum);
+
+        bool hasTargetArtist = HasUsefulArtist(normalizedTargetArtist);
+        bool hasResultArtist = HasUsefulArtist(normalizedResultArtist);
+        bool hasDuration = target.Duration.TotalSeconds > 0 && resultDurationInSeconds > 0;
+        // 跨文字系统的歌手名（如「魚韻」vs「sakanaction」）通常是同一艺人的别名，
+        // 相似度算法无法比较；将歌手视为缺失证据而不是 0 分，避免错误惩罚正确候选。
+        bool artistsCrossScript = hasTargetArtist && hasResultArtist &&
+            IsCrossScript(normalizedTargetArtist, normalizedResultArtist);
+        bool scoreArtist = hasTargetArtist && hasResultArtist && !artistsCrossScript;
+
+        double totalScore;
+        if (scoreArtist && hasDuration)
+        {
+            totalScore = (titleSim * 0.50) + (artistSim * 0.30) + (durationSim * 0.20);
+        }
+        else if (scoreArtist)
+        {
+            totalScore = (titleSim * 0.60) + (artistSim * 0.40);
+        }
+        else if (hasDuration)
+        {
+            totalScore = (titleSim * 0.75) + (durationSim * 0.25);
+        }
+        else
+        {
+            totalScore = titleSim;
+        }
+
+        if (HasUsefulAlbum(normalizedTargetAlbum) && HasUsefulAlbum(normalizedResultAlbum))
+        {
+            const double AlbumWeight = 0.05;
+            totalScore = (totalScore * (1 - AlbumWeight)) + (albumSim * AlbumWeight);
+        }
+
+        // 跨语言歌手是「未验证的别名假设」，缺失的歌手证据不得在总分上
+        // 压过歌手证据确凿的同语言候选（如同名不同歌手的翻唱版本）。
+        if (artistsCrossScript)
+        {
+            totalScore = Math.Min(totalScore, LyricMatchingPolicy.CrossScriptArtistMaxScore / 100.0);
+        }
+
+        Log.Debug($"LyricMatcher: TitleSim={titleSim:F2}, ArtistSim={artistSim:F2}, AlbumSim={albumSim:F2}, DurationSim={durationSim:F2} -> BaseScore={(int)Math.Round(totalScore * 100)}");
+        return (int)Math.Round(totalScore * 100);
+    }
+
+    private static double GetStringSimilarity(string? s1, string? s2)
+    {
+        if (string.IsNullOrEmpty(s1) && string.IsNullOrEmpty(s2)) return 1.0;
+        if (string.IsNullOrEmpty(s1) || string.IsNullOrEmpty(s2)) return 0.0;
+
+        return JaroWinklerAlgo.Similarity(s1, s2);
+    }
+
+    private static double GetDurationSimilarity(double localSeconds, double? remoteSeconds)
+    {
+        if (remoteSeconds == null || remoteSeconds == 0 || localSeconds <= 0) return 0.0;
+
+        double diff = Math.Abs(localSeconds - remoteSeconds.Value);
+
+        // 差距 <= 1 秒：100% 相似
+        // 差距 >= 10 秒：0% 相似
+        // 中间线性插值
+        const double PerfectTolerance = 1.0;
+        const double MaxTolerance = 10.0;
+
+        if (diff <= PerfectTolerance) return 1.0;
+        if (diff >= MaxTolerance) return 0.0;
+
+        return 1.0 - ((diff - PerfectTolerance) / (MaxTolerance - PerfectTolerance));
+    }
+
+    private static bool HasUsefulArtist(string normalizedArtist)
+    {
+        return !string.IsNullOrWhiteSpace(normalizedArtist) &&
+               !string.Equals(normalizedArtist, "unknown artist", StringComparison.Ordinal);
+    }
+
+    private static bool HasUsefulAlbum(string normalizedAlbum)
+    {
+        return !string.IsNullOrWhiteSpace(normalizedAlbum) &&
+               !string.Equals(normalizedAlbum, "unknown album", StringComparison.Ordinal);
+    }
+
+    private enum TextScriptKind
+    {
+        Latin,
+        Cjk
+    }
+
+    private static bool IsCrossScript(string left, string right)
+    {
+        return TryGetPureScript(left, out var leftScript) &&
+               TryGetPureScript(right, out var rightScript) &&
+               leftScript != rightScript;
+    }
+
+    private static bool TryGetPureScript(string value, out TextScriptKind script)
+    {
+        script = default;
+        TextScriptKind? found = null;
+        foreach (var ch in value)
+        {
+            if (!char.IsLetter(ch))
+            {
+                continue;
+            }
+
+            var charScript = GetLetterScript(ch);
+            if (charScript is null)
+            {
+                return false;
+            }
+
+            if (found is null)
+            {
+                found = charScript;
+            }
+            else if (found != charScript)
+            {
+                return false;
+            }
+        }
+
+        if (found is null)
+        {
+            return false;
+        }
+
+        script = found.Value;
+        return true;
+    }
+
+    private static TextScriptKind? GetLetterScript(char ch) => ch switch
+    {
+        >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= '\u00C0' and <= '\u024F' => TextScriptKind.Latin,
+        >= '\u3040' and <= '\u30FF' or >= '\u3400' and <= '\u4DBF' or >= '\u4E00' and <= '\u9FFF' or
+            >= '\uAC00' and <= '\uD7AF' or >= '\uF900' and <= '\uFAFF' => TextScriptKind.Cjk,
+        _ => null
+    };
+
+    private static bool IsUnknownTitle(string? title)
+    {
+        return string.IsNullOrWhiteSpace(title) ||
+               string.Equals(title.Trim(), "Unknown Title", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static double GetTokenOverlapSimilarity(string s1, string s2)
+    {
+        var tokens1 = SplitComparableTokens(s1);
+        var tokens2 = SplitComparableTokens(s2);
+        if (tokens1.Count == 0 || tokens2.Count == 0)
+        {
+            return 0;
+        }
+
+        var overlap = tokens1.Intersect(tokens2, StringComparer.Ordinal).Count();
+        if (overlap == 0)
+        {
+            return 0;
+        }
+
+        return ((double)overlap / tokens1.Count + (double)overlap / tokens2.Count) / 2.0;
+    }
+
+    private static HashSet<string> SplitComparableTokens(string value)
+    {
+        return value
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(token => token.Length >= 2)
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    public static string NormalizeForSearch(string? value)
+        => Normalize(value, RemoveBracketedContent);
+
+    // Preserve semantic version markers when providers use brackets instead of a title suffix.
+    private static string NormalizeTitleForComparison(string? value)
+        => Normalize(value, PreserveVersionMarkerInsideBrackets);
+
+    private static string Normalize(string? value, MatchEvaluator normalizeBracketedContent)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+
+        var normalized = ChineseScriptConverter.ToSimplified(value).ToLowerInvariant();
+        normalized = RemoveDiacritics(normalized);
+
+        // 移除常见平台噪声标签
+        var noNoise = Regex.Replace(normalized, @"\s*[\(\[（【](explicit|deluxe|digital|premium|album|edit|version|special|anniversary|studio|remastered)[\)\]）】]\s*", " ", RegexOptions.IgnoreCase);
+
+        var pureTitle = BracketSuffixRegex.Replace(noNoise, normalizeBracketedContent);
+
+        // 移除歌手后缀
+        var noFeatures = FeatureSuffixRegex.Replace(pureTitle, string.Empty);
+
+        var sb = new StringBuilder();
+        foreach (var ch in noFeatures)
+        {
+            if (char.IsLetterOrDigit(ch) || char.IsWhiteSpace(ch)) sb.Append(ch);
+            else sb.Append(' ');
+        }
+
+        var collapsed = Regex.Replace(sb.ToString(), @"\s+", " ").Trim();
+        return CollapseSpacedCharacterRuns(collapsed);
+    }
+
+    // 部分平台会把名称按字符空格排版（如 QQ 音乐的歌手名「R I T U A L」）。
+    // 单字符 token 会被 token 重叠比较忽略，JaroWinkler 又惩罚插入的空格，
+    // 因此把连续单字符 token 折叠成整词；两侧对称应用，普通文本不受影响。
+    private static string CollapseSpacedCharacterRuns(string value)
+    {
+        var tokens = value.Split(' ');
+        var collapsed = new List<string>(tokens.Length);
+        var run = new StringBuilder();
+        foreach (var token in tokens)
+        {
+            if (token.Length != 1)
+            {
+                FlushCharacterRun(collapsed, run);
+                collapsed.Add(token);
+                continue;
+            }
+
+            run.Append(token);
+        }
+
+        FlushCharacterRun(collapsed, run);
+        return string.Join(' ', collapsed);
+    }
+
+    private static void FlushCharacterRun(List<string> collapsed, StringBuilder run)
+    {
+        if (run.Length == 0)
+        {
+            return;
+        }
+
+        collapsed.Add(run.ToString());
+        run.Clear();
+    }
+
+    private static string RemoveBracketedContent(Match _) => " ";
+
+    private static string PreserveVersionMarkerInsideBrackets(Match match)
+    {
+        if (!ContainsContentVersionMarker(match.Value))
+        {
+            return " ";
+        }
+
+        var content = match.Value
+            .Trim()
+            .Trim('(', '[', '{', '（', '【', ')', ']', '}', '）', '】');
+        return $" {content} ";
+    }
+
+    internal static bool ContainsContentVersionMarker(string? value)
+    {
+        return !string.IsNullOrWhiteSpace(value) &&
+               ConflictKeywords.Any(keyword => value.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string RemoveDiacritics(string text)
+    {
+        var normalizedString = text.Normalize(NormalizationForm.FormD);
+        var stringBuilder = new StringBuilder();
+        foreach (var c in normalizedString)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
+                stringBuilder.Append(c);
+        }
+        return stringBuilder.ToString().Normalize(NormalizationForm.FormC);
+    }
+
+    private static bool HasVersionConflict(string target, string result, string keyword)
+    {
+        bool targetHas = target.Contains(keyword, StringComparison.OrdinalIgnoreCase);
+        bool resultHas = result.Contains(keyword, StringComparison.OrdinalIgnoreCase);
+        return targetHas != resultHas;
+    }
+}

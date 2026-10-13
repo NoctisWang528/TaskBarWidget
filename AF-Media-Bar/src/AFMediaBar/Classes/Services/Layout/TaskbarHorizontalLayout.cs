@@ -1,0 +1,89 @@
+using AFMediaBar.Classes.Models.Layout;
+
+using AFMediaBar.Resources;
+
+namespace AFMediaBar.Classes.Services.Layout;
+
+/// <summary>
+/// 任务栏主题 - 横向布局（适配任务栏在屏幕顶部或底部）。
+/// Taskbar theme - horizontal layout (for taskbar at top or bottom).
+///
+/// 特点 Features:
+/// - 尺寸：300×44（匹配 TaskbarWindow 尺寸）
+///   Size: 300×44 (matches TaskbarWindow size)
+/// - 组件横向排列：封面 | 歌曲信息
+///   Components arranged horizontally: artwork | song info
+/// - 适合宽度有限的任务栏环境
+///   Suitable for taskbar environment with limited width
+///
+/// 组件布局 Component Layout:
+/// ┌────────────────────────────────────────┐
+/// │  [封面]  歌曲标题 - 艺术家              │
+/// │   40px     240px                        │
+/// └────────────────────────────────────────┘
+///    300px × 44px
+/// </summary>
+public static class TaskbarHorizontalLayout
+{
+    public static LayoutSchema Create() => new()
+    {
+        Orientation = LayoutOrientation.Horizontal,
+        Description = Translations.Get("Layout.Preset.TaskbarHorizontal"),
+        Canvas = new CanvasConfig
+        {
+            Width = 300,
+            Height = 44,
+            Background = "#00000000",
+            CornerRadius = 6,
+            Border = new BorderConfig
+            {
+                Thickness = 1.25,
+                Color = "#00FFFFFF",
+                TopOnly = true
+            },
+            Effects = new EffectsConfig
+            {
+                Blur = 80,
+                BackgroundOpacity = 0.4
+            }
+        },
+        Components = new List<ComponentConfig>
+        {
+            // 封面组件 Artwork Component
+            new ComponentConfig
+            {
+                Id = "artwork",
+                Type = "Artwork",
+                SpacingAfter = 8,
+                Bounds = new ComponentBounds(4, 2, 40, 40),
+                Properties = new Dictionary<string, object>
+                {
+                    ["cornerRadius"] = 5.5,
+                    ["showPlaceholder"] = true,
+                    ["placeholderIcon"] = "MusicNote220",
+                    ["placeholderIconSize"] = 27.0
+                }
+            },
+
+            // 歌曲信息组件 MediaText Component
+            new ComponentConfig
+            {
+                Id = "song-info",
+                Type = "MediaText",
+                AutoSizePrimary = true,
+                Bounds = new ComponentBounds(52, 2, 240, 40),
+                Properties = new Dictionary<string, object>
+                {
+                    ["showTitle"] = true,
+                    ["showArtist"] = true,
+                    ["titleFontSize"] = 14.0,
+                    ["artistFontSize"] = 12.0,
+                    ["lyricsFontSize"] = 12.0,
+                    ["artistOpacity"] = 0.5,
+                    ["layout"] = "vertical",
+                    ["verticalAlignment"] = "center"
+                }
+            }
+        }
+    };
+}

@@ -1,0 +1,80 @@
+<UserControl
+    x:Class="AFMediaBar.Components.SettingsCallout"
+    x:Name="Root"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="clr-namespace:AFMediaBar.Components"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    d:DesignHeight="60"
+    d:DesignWidth="400"
+    FontSize="12"
+    mc:Ignorable="d">
+
+    <UserControl.Resources>
+        <!--
+            三个语气状态都用 DataTrigger 声明，而不是在代码里换画刷：
+            这样主题切换和系统主色变化仍然由 DynamicResource 负责，代码只持有数据属性。
+            All three tone states are declared with DataTriggers instead of swapping brushes in code, so theme
+            and accent changes stay owned by DynamicResource and the code-behind only carries data.
+        -->
+        <Style x:Key="CalloutSurfaceStyle" TargetType="{x:Type Border}">
+            <Setter Property="Background" Value="{DynamicResource AfSettingsInfoSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AfSettingsBorderBrush}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsAccent, ElementName=Root}" Value="True">
+                    <Setter Property="BorderBrush" Value="{DynamicResource AfAccentBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="CalloutGlyphStyle" TargetType="{x:Type ui:SymbolIcon}">
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsAccent, ElementName=Root}" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource AfAccentBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="CalloutBodyStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsAccent, ElementName=Root}" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </UserControl.Resources>
+
+    <!-- Explanatory cards share the information surface; accent tone is conveyed by the stroke and glyph. -->
+    <Grid>
+        <Border
+            Padding="14,12"
+            BorderThickness="1"
+            CornerRadius="8"
+            Style="{StaticResource CalloutSurfaceStyle}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <ui:SymbolIcon
+                    Margin="0,1,10,0"
+                    VerticalAlignment="Top"
+                    FontSize="16"
+                    Style="{StaticResource CalloutGlyphStyle}"
+                    Symbol="{Binding Symbol, ElementName=Root}" />
+                <TextBlock
+                    Grid.Column="1"
+                    FontSize="{Binding FontSize, ElementName=Root}"
+                    LineHeight="18"
+                    LineStackingStrategy="BlockLineHeight"
+                    Style="{StaticResource CalloutBodyStyle}"
+                    Text="{Binding Text, ElementName=Root}"
+                    TextWrapping="Wrap" />
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

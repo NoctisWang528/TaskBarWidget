@@ -1,0 +1,281 @@
+using System.Collections.Generic;
+using System.IO;
+using System.Text.Json;
+using System.Windows;
+using System.Windows.Threading;
+using Microsoft.Web.WebView2.Core;
+
+namespace TaskbarLyrics.App;
+
+public partial class SpectrumTuningWindow : Wpf.Ui.Controls.FluentWindow
+{
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
+    private readonly Action<SpectrumTuningSettings> _apply;
+    private readonly DispatcherTimer _diagnosticsTimer;
+    private bool _isWebReady;
+    private bool _isClosed;
+
+    public SpectrumTuningSettings Settings { get; private set; }
+
+    public SpectrumTuningWindow(SpectrumTuningSettings settings, Action<SpectrumTuningSettings> apply)
+    {
+        InitializeComponent();
+        AppIconProvider.ApplyWindowIcon(this);
+        Settings = settings.Clone();
+        _apply = apply;
+        ApplyWindowTheme();
+
+        _diagnosticsTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+        _diagnosticsTimer.Tick += (_, _) => PushDiagnostics();
+
+        SourceInitialized += OnSourceInitialized;
+        Loaded += OnLoaded;
+        Closed += OnClosed;
+        NativeWindowTheme.ThemeChanged += OnWindowThemeChanged;
+    }
+
+    public void ApplyExternalSettings(SpectrumTuningSettings settings)
+    {
+        Settings = settings.Clone();
+        PushSettings();
+    }
+
+    private void OnSourceInitialized(object? sender, EventArgs e)
+    {
+        ApplyWindowTheme();
+    }
+
+    private void OnLoaded(object? sender, RoutedEventArgs e)
+    {
+        TaskObserver.Observe(InitializeWebViewAsync(), "spectrum tuning initialization");
+    }
+
+    private void OnClosed(object? sender, EventArgs e)
+    {
+        _isClosed = true;
+        NativeWindowTheme.ThemeChanged -= OnWindowThemeChanged;
+        _diagnosticsTimer.Stop();
+
+        if (TuningWebView.CoreWebView2 is not null)
+        {
+            TuningWebView.CoreWebView2.WebMessageReceived -= WebMessageReceived;
+            TuningWebView.CoreWebView2.Navigate("about:blank");
+        }
+
+        TuningWebView.Dispose();
+    }
+
+    private async Task InitializeWebViewAsync()
+    {
+        if (_isWebReady || _isClosed)
+        {
+            return;
+        }
+
+        var userDataFolder = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "TaskbarLyrics",
+            "WebView2",
+            "SpectrumTuning");
+        var environment = await CoreWebView2Environment.CreateAsync(null, userDataFolder);
+        if (_isClosed)
+        {
+            return;
+        }
+
+        try
+        {
+            await TuningWebView.EnsureCoreWebView2Async(environment);
+        }
+        catch (Exception) when (_isClosed)
+        {
+            return;
+        }
+
+        if (_isClosed)
+        {
+            return;
+        }
+
+        ApplyWindowTheme();
+
+        var core = TuningWebView.CoreWebView2;
+        core.Settings.IsStatusBarEnabled = false;
+        core.Settings.AreDefaultContextMenusEnabled = false;
+        core.Settings.AreDevToolsEnabled = false;
+        core.Settings.IsZoomControlEnabled = false;
+        core.Settings.IsBuiltInErrorPageEnabled = false;
+        core.WebMessageReceived += WebMessageReceived;
+
+        var htmlPath = Path.Combine(AppContext.BaseDirectory, "Web", "SpectrumTuning", "index.html");
+        TuningWebView.Source = new Uri(htmlPath);
+        _isWebReady = true;
+    }
+
+    private void WebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
+    {
+        var messageJson = e.TryGetWebMessageAsString();
+        if (string.IsNullOrWhiteSpace(messageJson))
+        {
+            messageJson = e.WebMessageAsJson;
+        }
+
+        var message = JsonSerializer.Deserialize<SpectrumMessage>(messageJson, JsonOptions);
+        if (message?.Type is null)
+        {
+            return;
+        }
+
+        switch (message.Type)
+        {
+            case "ready":
+                PushSettings();
+                PushDiagnostics();
+                _diagnosticsTimer.Start();
+                break;
+            case "update":
+                if (message.Key is not null && message.Value is not null)
+                {
+                    SetParam(message.Key, message.Value.Value);
+                    _apply(Settings.Clone());
+                }
+                break;
+            case "updateAll":
+                if (message.Values is not null)
+                {
+                    foreach (var (key, value) in message.Values)
+                    {
+                        SetParam(key, value);
+                    }
+                    _apply(Settings.Clone());
+                }
+                break;
+            case "reset":
+                Settings = SpectrumTuningSettings.CreateDefault();
+                _apply(Settings.Clone());
+                PushSettings();
+                break;
+            case "windowDrag":
+                NativeWindowInteraction.BeginDrag(this);
+                break;
+            case "windowResizeStart":
+                NativeWindowInteraction.BeginResize(this, message.Edge);
+                break;
+            case "windowMinimize":
+                WindowState = WindowState.Minimized;
+                break;
+            case "windowClose":
+                Close();
+                break;
+        }
+    }
+
+    private void SetParam(string key, double value)
+    {
+        switch (key)
+        {
+            case "SampleWindow": Settings.SampleWindow = CoerceSampleWindow((int)Math.Round(value)); break;
+            case "UpdateIntervalMs": Settings.UpdateIntervalMs = (int)Math.Round(value); break;
+            case "BarCount":
+                Settings.BarCount = Math.Clamp(
+                (int)Math.Round(value),
+                SpectrumTuningSettings.MinBarCount,
+                SpectrumTuningSettings.MaxBarCount); break;
+            case "MinFrequency": Settings.MinFrequency = value; break;
+            case "MaxFrequency": Settings.MaxFrequency = value; break;
+            case "FrequencyDistributionBias": Settings.FrequencyDistributionBias = Math.Clamp(value, -1, 1); break;
+            case "PeakInitial": Settings.PeakInitial = value; break;
+            case "PeakDecay": Settings.PeakDecay = value; break;
+            case "PeakFloor": Settings.PeakFloor = value; break;
+            case "PeakCeiling": Settings.PeakCeiling = value; break;
+            case "NoiseFloor": Settings.NoiseFloor = value; break;
+            case "OutputCurve": Settings.OutputCurve = value; break;
+            case "LowBandGain": Settings.LowBandGain = value; break;
+            case "BandGainStep": Settings.BandGainStep = value; break;
+            case "FrequencyWeightBase": Settings.FrequencyWeightBase = value; break;
+            case "FrequencyWeightSlope": Settings.FrequencyWeightSlope = value; break;
+            case "BackendAttack": Settings.BackendAttack = value; break;
+            case "BackendRelease": Settings.BackendRelease = value; break;
+            case "FrontendRise": Settings.FrontendRise = value; break;
+            case "FrontendFall": Settings.FrontendFall = value; break;
+            case "MinBarHeight": Settings.MinBarHeight = value; break;
+            case "BarHeightRange": Settings.BarHeightRange = value; break;
+            case "BarOpacity": Settings.BarOpacity = value; break;
+        }
+    }
+
+    private static int CoerceSampleWindow(double value)
+    {
+        return value switch
+        {
+            <= 768 => 512,
+            <= 1536 => 1024,
+            _ => 2048
+        };
+    }
+
+    private void PushSettings()
+    {
+        if (!_isWebReady || TuningWebView.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        var json = JsonSerializer.Serialize(Settings, JsonOptions);
+        TaskObserver.Observe(
+            TuningWebView.ExecuteScriptAsync($"window.spectrumTuning?.setSettings({json});"),
+            "spectrum tuning settings update");
+    }
+
+    private void PushDiagnostics()
+    {
+        if (!_isWebReady || TuningWebView.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        var snap = SpectrumDiagnosticsState.Current;
+        var payload = new
+        {
+            snap.IsPlaying,
+            snap.IsPureMusicMode,
+            snap.InputPeak,
+            snap.OutputPeak,
+            snap.Bars,
+            snap.IsCaptureAvailable,
+            snap.Format
+        };
+        var json = JsonSerializer.Serialize(payload, JsonOptions);
+        TaskObserver.Observe(
+            TuningWebView.ExecuteScriptAsync($"window.spectrumTuning?.setDiagnostics({json});"),
+            "spectrum tuning diagnostics update");
+    }
+
+    private void OnWindowThemeChanged(object? sender, EventArgs e)
+    {
+        if (Dispatcher.HasShutdownStarted)
+        {
+            return;
+        }
+
+        Dispatcher.BeginInvoke(ApplyWindowTheme);
+    }
+
+    private void ApplyWindowTheme()
+    {
+        NativeWindowTheme.Apply(this, TuningWebView);
+    }
+
+    private sealed class SpectrumMessage
+    {
+        public string? Type { get; set; }
+        public string? Key { get; set; }
+        public double? Value { get; set; }
+        public Dictionary<string, double>? Values { get; set; }
+        public string? Edge { get; set; }
+    }
+}

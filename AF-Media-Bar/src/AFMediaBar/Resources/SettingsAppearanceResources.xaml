@@ -1,0 +1,779 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:components="clr-namespace:AFMediaBar.Components"
+    xmlns:sys="clr-namespace:System;assembly=System.Runtime"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+
+    <!--
+        设置页外观令牌：字号、间距、版心和动效曲线。
+        这些资源把原本散落在各设置页里的内联 Opacity、字号和列宽收敛到一个位置；
+        设置页只需要引用语义化样式，不再自行决定视觉层级。
+        Settings appearance tokens: type scale, spacing, measure, and easing curves.
+        They replace the inline Opacity, font sizes, and column widths that were previously
+        duplicated per page, so pages express intent instead of raw values.
+    -->
+
+    <!-- 版心与字段宽度 / Content measure and field widths -->
+    <sys:Double x:Key="AfSettingsContentMaxWidth">820</sys:Double>
+    <sys:Double x:Key="AfSettingsFieldWidth">380</sys:Double>
+    <sys:Double x:Key="AfSettingsFieldWidthWide">440</sys:Double>
+    <!-- 单个下拉框的最小宽度；以前每页各自写 180/190/200/220/320，读起来像随机值。 -->
+    <!-- Minimum width for a single select; pages previously used 180/190/200/220/320, which read as random. -->
+    <sys:Double x:Key="AfSettingsSelectMinWidth">200</sys:Double>
+
+    <!-- 间距刻度 4/8/12/16/24/32 / Spacing scale -->
+    <Thickness x:Key="AfSettingsPageMargin">28,24,28,40</Thickness>
+    <Thickness x:Key="AfSettingsCardGap">0,0,0,8</Thickness>
+    <Thickness x:Key="AfSettingsCardGapLast">0,0,0,24</Thickness>
+    <Thickness x:Key="AfSettingsSectionGap">0,24,0,0</Thickness>
+    <Thickness x:Key="AfSettingsFieldLabelGap">0,0,0,6</Thickness>
+    <!--
+        固定页头与滚动区域各自的外边距。页头在滚动容器之外，因此它自己带上下留白；
+        以前这两组值分别写在六个页面里，改一处就要改六处。
+        Margins for the pinned header and the scroll area. The header sits outside the scroll container, so it
+        carries its own vertical padding; these values used to be repeated in all six pages.
+    -->
+    <Thickness x:Key="AfSettingsHeaderMargin">28,20,28,0</Thickness>
+    <Thickness x:Key="AfSettingsScrollMargin">28,14,28,0</Thickness>
+
+    <!-- 字段标签列宽：以前交互页在 8 处各写 MinWidth="190"，读起来像随机值。 -->
+    <!-- Field label column width; the interaction page previously repeated MinWidth="190" in eight places. -->
+    <sys:Double x:Key="AfSettingsSelectLabelWidth">190</sys:Double>
+
+    <!--
+        行排布令牌 / Row layout tokens
+
+        设置页的每一行都是「一行一个选项、一行一个控件」：控件永远落在同一条竖线上，
+        眼睛只需要沿一列往下扫。行间距取 4 DIP，让同一分组的行贴成一条连续列表；分组之间才用 20 DIP 拉开。
+        Every settings row holds one option and exactly one control, so controls always land on the same vertical
+        line and the eye travels down a single column. A 4 DIP row gap welds the rows of one group into a
+        continuous list; only groups get 20 DIP.
+    -->
+    <Thickness x:Key="AfSettingsRowGap">0,0,0,4</Thickness>
+    <Thickness x:Key="AfSettingsRowGapLast">0,0,0,20</Thickness>
+    <sys:Double x:Key="AfSettingsRowSliderWidth">150</sys:Double>
+    <sys:Double x:Key="AfSettingsRowValueWidth">58</sys:Double>
+    <!-- Fluent page refresh: immediate movement followed by a gentle stop. -->
+    <KeySpline x:Key="AfSplineFluentEntrance">0.23,1,0.32,1</KeySpline>
+
+    <Style x:Key="AfSettingsRowTitleStyle" TargetType="{x:Type TextBlock}">
+        <Setter Property="FontSize" Value="15" />
+        <Setter Property="FontWeight" Value="{DynamicResource AppTextMediumFontWeight}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="AfSettingsRowDescriptionStyle" TargetType="{x:Type TextBlock}">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="LineHeight" Value="17" />
+        <Setter Property="LineStackingStrategy" Value="BlockLineHeight" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+        <Setter Property="Margin" Value="0,3,0,0" />
+    </Style>
+
+    <!--
+        行内滑杆与数值读出成对出现。读出用固定宽度，拖动时右列不会跟着数字宽度左右跳动；
+        滑杆固定 150 DIP，因此所有滑杆的左右端点都落在同一条竖线上。
+        An in-row slider and its value readout travel in pairs. The readout has a fixed width so the right column
+        does not jitter with the number's width while dragging, and the slider is fixed at 150 DIP so every
+        slider's endpoints land on the same two vertical lines.
+    -->
+    <!--
+        强调色调节条：轨道在滑块之前的一半用系统强调色，之后的一半保持中性轨道色，滑块是带强调色芯的圆点。
+        同一套样式同时服务设置页滑杆、完整层进度/音量、紧凑菜单的竖向音量与托盘音频面板，
+        因此"左强调色/右中性色"在整个应用里只有一处定义。
+        Accent adjustment bar: the part of the track before the thumb uses the system accent color, the remainder keeps the
+        neutral track color, and the thumb is a circle with an accent core. One definition serves settings sliders, the full
+        panel progress/volume, the compact menu's vertical volume, and the tray audio panel.
+    -->
+    <!--
+        强调色一律引用组合根发布的五个应用级画刷（AfAccentBrush / AfAccentHoverBrush / AfAccentPressedBrush /
+        AfAccentTintBrush / AfOnAccentBrush），它们由 ApplicationThemeCoordinator 从系统原始强调色派生，
+        并在强调色或主题变化时整体重发。不得直接引用任何第三方库的强调色键（WPF-UI 的 Accent*、SystemAccentColor*、
+        MicaWPF.Brushes.* 都属于第三方）：它们各自维护不同的一档派生色，正是"设置页是粉色、媒体栏是默认蓝"的来源。
+        Every accent reference goes through the five application-level brushes published by the composition root
+        (AfAccentBrush / AfAccentHoverBrush / AfAccentPressedBrush / AfAccentTintBrush / AfOnAccentBrush). They are derived
+        from the raw system accent by ApplicationThemeCoordinator and republished as a set whenever the accent or theme
+        changes. Never reference a third-party accent key (WPF-UI's Accent*, SystemAccentColor*, MicaWPF.Brushes.*): each
+        library maintains its own derived shade, which is exactly what split settings-pink from media-blue.
+    -->
+    <Style x:Key="AfAccentSliderThumbStyle" TargetType="{x:Type Thumb}">
+        <Setter Property="OverridesDefaultStyle" Value="True" />
+        <Setter Property="Height" Value="18" />
+        <Setter Property="Width" Value="18" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type Thumb}">
+                    <Grid Background="Transparent">
+                        <Border CornerRadius="9"
+                                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                BorderThickness="3" />
+                        <Ellipse Width="8" Height="8"
+                                 Fill="{DynamicResource AfAccentBrush}" />
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--
+        填充段由 PART_SelectionRange 承担：它由 Slider 自己按 Value 定尺寸与位置（横向贴滑块左侧、竖向贴滑块下方），
+        Track 的减/增重复按钮只保留翻页点击行为、不再负责画颜色 —— 依赖它们画填充时它们拿到的是 0 宽度，
+        填充因此永远不会出现。
+        The filled segment comes from PART_SelectionRange: the Slider itself sizes and positions it from Value (left of the
+        thumb when horizontal, below it when vertical). The Track's decrease/increase repeat buttons keep only the paging
+        click behavior and no longer paint: when they are expected to paint, the Track gives them zero width and the fill
+        never appears.
+    -->
+    <Style x:Key="AfAccentSliderStyle" TargetType="{x:Type Slider}">
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="IsSelectionRangeEnabled" Value="True" />
+        <Setter Property="SelectionStart" Value="{Binding Minimum, RelativeSource={RelativeSource Self}}" />
+        <Setter Property="SelectionEnd" Value="{Binding Value, RelativeSource={RelativeSource Self}}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type Slider}">
+                    <Grid Background="Transparent">
+                        <Border Height="4" CornerRadius="2" VerticalAlignment="Center"
+                                Background="{DynamicResource ControlStrokeColorDefaultBrush}" />
+                        <Border x:Name="PART_SelectionRange" Height="4" CornerRadius="2"
+                                VerticalAlignment="Center" HorizontalAlignment="Left"
+                                Background="{DynamicResource AfAccentBrush}" />
+                        <Track x:Name="PART_Track" Orientation="{TemplateBinding Orientation}">
+                            <Track.DecreaseRepeatButton>
+                                <RepeatButton Command="{x:Static Slider.DecreaseLarge}" Focusable="False" IsTabStop="False">
+                                    <RepeatButton.Template>
+                                        <ControlTemplate TargetType="{x:Type RepeatButton}">
+                                            <Border Background="Transparent" />
+                                        </ControlTemplate>
+                                    </RepeatButton.Template>
+                                </RepeatButton>
+                            </Track.DecreaseRepeatButton>
+                            <Track.Thumb>
+                                <Thumb x:Name="SliderThumb" Style="{StaticResource AfAccentSliderThumbStyle}" />
+                            </Track.Thumb>
+                            <Track.IncreaseRepeatButton>
+                                <RepeatButton Command="{x:Static Slider.IncreaseLarge}" Focusable="False" IsTabStop="False">
+                                    <RepeatButton.Template>
+                                        <ControlTemplate TargetType="{x:Type RepeatButton}">
+                                            <Border Background="Transparent" />
+                                        </ControlTemplate>
+                                    </RepeatButton.Template>
+                                </RepeatButton>
+                            </Track.IncreaseRepeatButton>
+                        </Track>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <!--
+                            禁用的滑杆只让滑块变暗，轨道与填充保持满强度：完整层的进度条在会话不支持跳转时被禁用，
+                            而它旁边的音量条是启用的 —— 整条降透明度会让两个同色组件看起来深浅不一。
+                            A disabled slider only dims its thumb; the track and fill keep full strength. The full panel's progress
+                            slider is disabled while the session cannot seek and the volume slider next to it is enabled, so
+                            fading the whole control made two same-colored components look different.
+                        -->
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="SliderThumb" Property="Opacity" Value="0.4" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <!-- 竖向滑杆需要转置的轨道与填充段，用第二个模板而不是在触发器里改尺寸（嵌套模板里的元素无法被外层 TargetName 命中）。 -->
+            <!-- A vertical slider needs the transposed track and fill; use a second template instead of resizing from a
+                 trigger, because elements inside a nested template cannot be addressed by the outer TargetName. -->
+            <Trigger Property="Orientation" Value="Vertical">
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type Slider}">
+                            <Grid Background="Transparent">
+                                <Border Width="4" CornerRadius="2" HorizontalAlignment="Center"
+                                        Background="{DynamicResource ControlStrokeColorDefaultBrush}" />
+                                <Border x:Name="PART_SelectionRange" Width="4" CornerRadius="2"
+                                        HorizontalAlignment="Center" VerticalAlignment="Bottom"
+                                        Background="{DynamicResource AfAccentBrush}" />
+                                <Track x:Name="PART_Track" Orientation="{TemplateBinding Orientation}">
+                                    <Track.DecreaseRepeatButton>
+                                        <RepeatButton Command="{x:Static Slider.DecreaseLarge}" Focusable="False" IsTabStop="False">
+                                            <RepeatButton.Template>
+                                                <ControlTemplate TargetType="{x:Type RepeatButton}">
+                                                    <Border Background="Transparent" />
+                                                </ControlTemplate>
+                                            </RepeatButton.Template>
+                                        </RepeatButton>
+                                    </Track.DecreaseRepeatButton>
+                                    <Track.Thumb>
+                                        <Thumb x:Name="SliderThumb" Style="{StaticResource AfAccentSliderThumbStyle}" />
+                                    </Track.Thumb>
+                                    <Track.IncreaseRepeatButton>
+                                        <RepeatButton Command="{x:Static Slider.IncreaseLarge}" Focusable="False" IsTabStop="False">
+                                            <RepeatButton.Template>
+                                                <ControlTemplate TargetType="{x:Type RepeatButton}">
+                                                    <Border Background="Transparent" />
+                                                </ControlTemplate>
+                                            </RepeatButton.Template>
+                                        </RepeatButton>
+                                    </Track.IncreaseRepeatButton>
+                                </Track>
+                            </Grid>
+                            <ControlTemplate.Triggers>
+                                <!-- 与横向模板一致：禁用只压暗滑块，轨道与填充保持满强度。 -->
+                                <!-- Same as the horizontal template: disabled dims only the thumb, never the track or fill. -->
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter TargetName="SliderThumb" Property="Opacity" Value="0.4" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!--
+        隐式样式让应用里"剩下的每一个滑杆"（例如屏幕与位置页的长度/粗细/偏移滑杆）都得到同一套双色轨道，
+        不依赖每个页面记得声明；局部显式样式（如行内滑杆的固定宽度）仍然优先。
+        键盘与滚轮的选中调节默认开启：设置页滑杆都要能用，而任务栏表面的滑杆（紧凑菜单竖向音量）
+        在使用处显式关闭，因为那里的滚轮属于播放器与音频手势。
+        The implicit style gives every remaining slider in the application (for example the length/thickness/offset sliders on
+        the screen-and-position page) the same two-tone track without each page having to remember; local explicit styles such
+        as the fixed-width row slider still win. Selection-driven keyboard and wheel adjustment is on by default because every
+        settings slider needs it; the taskbar-surface sliders (the compact menu's vertical volume) opt out where they are used,
+        because the wheel there belongs to the player and audio gestures.
+    -->
+    <Style TargetType="{x:Type Slider}" BasedOn="{StaticResource AfAccentSliderStyle}">
+        <Setter Property="components:SliderInputBehavior.IsEnabled" Value="True" />
+    </Style>
+
+    <!--
+        强调色进度条：只展示进度，没有滑块也不接受输入；高度默认 4 DIP，调用方可以再压薄。
+        Accent progress bar: display only, no thumb and no input; 4 DIP tall by default, callers may go thinner.
+    -->
+    <Style x:Key="AfAccentProgressBarStyle" TargetType="{x:Type ProgressBar}">
+        <Setter Property="Height" Value="4" />
+        <Setter Property="IsHitTestVisible" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ProgressBar}">
+                    <Grid Background="Transparent">
+                        <Border x:Name="PART_Track" CornerRadius="2"
+                                Background="{DynamicResource ControlStrokeColorDefaultBrush}" />
+                        <Border x:Name="PART_Indicator" CornerRadius="2" HorizontalAlignment="Left"
+                                Background="{DynamicResource AfAccentBrush}" />
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="AfSettingsRowSliderStyle" TargetType="{x:Type Slider}"
+           BasedOn="{StaticResource AfAccentSliderStyle}">
+        <Setter Property="Width" Value="{StaticResource AfSettingsRowSliderWidth}" />
+        <Setter Property="IsMoveToPointEnabled" Value="True" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <!--
+            行内滑杆要显示自己的选中框：基础样式把 FocusVisualStyle 置空，那个决定是为任务栏的进度/音量条做的
+            （它们不是键盘控件），而设置页滑杆正是要靠它告诉用户"现在选中了我"。
+            A row slider shows its own selection frame: the base style clears FocusVisualStyle, a decision made for the taskbar's
+            progress and volume bars, which are not keyboard controls, while a settings slider is exactly the control that needs
+            to tell the user it is the selected one.
+        -->
+        <Setter Property="FocusVisualStyle" Value="{DynamicResource AfFocusVisualStyle}" />
+        <Setter Property="components:SliderInputBehavior.IsEnabled" Value="True" />
+    </Style>
+
+    <Style x:Key="AfSettingsRowValueStyle" TargetType="{x:Type TextBlock}">
+        <Setter Property="Width" Value="{StaticResource AfSettingsRowValueWidth}" />
+        <Setter Property="Margin" Value="12,0,0,0" />
+        <Setter Property="TextAlignment" Value="Right" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+    </Style>
+
+    <!--
+        动效曲线：0.23,1 0.32,1 是强 ease-out，用于入场揭示与减少动效时的淡入。
+        WPF 没有任意贝塞尔缓动函数（只有 CubicEase 等具名曲线），因此以 KeySpline 形式提供，
+        由 SettingsRevealAnimator 通过 SplineDoubleKeyFrame 使用。
+        Motion curve: 0.23,1 0.32,1 is the strong ease-out used for entrance reveals and reduced-motion fades.
+        WPF exposes no arbitrary-bezier easing function, only named curves such as CubicEase, so it
+        is published as a KeySpline and consumed by SettingsRevealAnimator through SplineDoubleKeyFrame.
+    -->
+    <KeySpline x:Key="AfSplineEaseOut">0.23,1 0.32,1</KeySpline>
+    <!-- The easeInOutQuart Bézier approximation gives page handoffs a measured start and finish. -->
+    <KeySpline x:Key="AfSplineEaseInOut">0.76,0 0.24,1</KeySpline>
+
+    <!--
+
+        文本角色 / Text roles
+
+        四个角色必须保持可区分：页面标题 > 分组标题 > 卡片标题 > 说明。
+        以前字段标签、卡片说明和分组提示共用同一套外观，这是“选项主体文字不突出”的直接原因。
+        Four roles must stay distinguishable: page title, section title, card title, description.
+        Field labels, card descriptions, and section hints previously shared one appearance, which is
+        exactly why option labels stopped standing out.
+    -->
+
+    <Style x:Key="AfSettingsPageTitleStyle" TargetType="{x:Type TextBlock}">
+        <Setter Property="FontSize" Value="30" />
+        <Setter Property="FontWeight" Value="{DynamicResource AppTextStrongFontWeight}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+    </Style>
+
+    <Style x:Key="AfSettingsPageSubtitleStyle" TargetType="{x:Type TextBlock}">
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="LineHeight" Value="20" />
+        <Setter Property="LineStackingStrategy" Value="BlockLineHeight" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+        <Setter Property="Margin" Value="0,3,0,0" />
+    </Style>
+
+    <Style x:Key="AfSettingsPageIntroStyle" TargetType="{x:Type Grid}">
+        <Setter Property="Margin" Value="0,4,0,0" />
+    </Style>
+
+    <!-- Page identity scrolls with its content; the fixed strip only navigates groups. -->
+    <Style x:Key="AfSettingsPageIconStyle" TargetType="{x:Type ContentControl}">
+        <Setter Property="Width" Value="38" />
+        <Setter Property="Height" Value="38" />
+        <Setter Property="VerticalAlignment" Value="Top" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Foreground" Value="{DynamicResource AfOnAccentBrush}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ContentControl}">
+                    <Grid Width="38" Height="38" TextElement.Foreground="{DynamicResource AfOnAccentBrush}">
+                        <Border Background="{DynamicResource AfAccentBrush}" CornerRadius="10" />
+                        <ContentControl HorizontalAlignment="Center" VerticalAlignment="Center"
+                                        Content="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}"
+                                        Focusable="False" />
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="AfSettingsSectionTitleStyle" TargetType="{x:Type TextBlock}">
+        <Setter Property="FontSize" Value="18" />
+        <Setter Property="FontWeight" Value="{DynamicResource AppTextStrongFontWeight}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <Style x:Key="AfSettingsCardTitleStyle" TargetType="{x:Type TextBlock}">
+        <Setter Property="FontSize" Value="14" />
+        <Setter Property="FontWeight" Value="{DynamicResource AppTextStrongFontWeight}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+    </Style>
+
+    <Style x:Key="AfSettingsCardDescriptionStyle" TargetType="{x:Type TextBlock}">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="LineHeight" Value="18" />
+        <Setter Property="LineStackingStrategy" Value="BlockLineHeight" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+        <Setter Property="Margin" Value="0,4,0,0" />
+    </Style>
+
+    <Style x:Key="AfSettingsFieldLabelStyle" TargetType="{x:Type TextBlock}">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontWeight" Value="{DynamicResource AppTextMediumFontWeight}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="AfSettingsFieldValueStyle" TargetType="{x:Type TextBlock}">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="HorizontalAlignment" Value="Right" />
+        <Setter Property="MinWidth" Value="46" />
+    </Style>
+
+    <Style x:Key="AfSettingsHintTextStyle" TargetType="{x:Type TextBlock}">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="LineHeight" Value="18" />
+        <Setter Property="LineStackingStrategy" Value="BlockLineHeight" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+    </Style>
+
+    <!--
+        分组标题模板：左侧 3 DIP 主色竖条把分组从一长串卡片里分离出来。
+        用法 / Usage: <ContentControl ContentTemplate="{StaticResource AfSettingsSectionHeaderTemplate}" Content="字体" />
+        Section header template: a 3 DIP accent rail separates a group from the surrounding card stack.
+    -->
+    <DataTemplate x:Key="AfSettingsSectionHeaderTemplate">
+        <Grid Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Border
+                Width="3"
+                Margin="0,2,10,2"
+                VerticalAlignment="Stretch"
+                Background="{DynamicResource AfAccentBrush}"
+                CornerRadius="2" />
+            <TextBlock
+                Grid.Column="1"
+                Style="{StaticResource AfSettingsSectionTitleStyle}"
+                Text="{Binding}" />
+        </Grid>
+    </DataTemplate>
+
+    <!--
+
+        卡片 / Card
+
+        上游 CardControl 模板没有任何 IsMouseOver 或 IsPressed 触发器，四十多张卡片因此完全同质。
+        这里替换模板：主色图标底片、1 DIP 描边、悬停时的描边响应，以及卡片内边距和间距刻度。
+        悬停只改变描边，不做位移或缩放，因为卡片被高频划过，位移会变成噪声。
+        The upstream CardControl template ships without hover or pressed triggers, which made every card
+        look identical. This template adds the accent icon chip, a 1 DIP stroke, and a stroke-only hover
+        response. Hover never moves the card: cards are crossed tens of times per session.
+    -->
+
+    <Style x:Key="AfSettingsCardStyle" TargetType="{x:Type ui:CardControl}">
+        <Setter Property="Background" Value="{DynamicResource CardBackground}" />
+        <Setter Property="Foreground" Value="{DynamicResource CardForeground}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CardBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="16,18" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="FontSize" Value="{DynamicResource ControlContentThemeFontSize}" />
+        <Setter Property="FontWeight" Value="Normal" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="FocusVisualStyle" Value="{DynamicResource AfFocusVisualStyle}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ui:CardControl}">
+                    <Grid>
+<Border
+                        x:Name="CardBorder"
+                        Background="{TemplateBinding Background}"
+                        BorderBrush="{TemplateBinding BorderBrush}"
+                        BorderThickness="{TemplateBinding BorderThickness}"
+                        CornerRadius="{TemplateBinding CornerRadius}"
+                        SnapsToDevicePixels="True" IsHitTestVisible="False" components:SettingsHoverShadow.IsEnabled="True" />
+                    <Border Padding="{TemplateBinding Padding}" BorderThickness="{TemplateBinding BorderThickness}" BorderBrush="Transparent" Background="Transparent">
+                        <Grid
+                            HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalAlignment="{TemplateBinding VerticalContentAlignment}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <!--  图标底片：单独一层低透明度主色，避免把不透明度叠加到图标本体上。  -->
+                            <!--  Icon chip: the tint is its own layer so opacity never washes out the glyph.  -->
+                            <Grid
+                                x:Name="IconChip"
+                                Grid.Column="0"
+                                Width="32"
+                                Height="32"
+                                Margin="0,0,14,0"
+                                VerticalAlignment="Center"
+                                TextElement.Foreground="{DynamicResource AfAccentBrush}">
+                                <Border
+                                    Background="{DynamicResource AfAccentBrush}"
+                                    CornerRadius="8"
+                                    Opacity="0.14" />
+                                <ContentControl
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Content="{TemplateBinding Icon}"
+                                    Focusable="False"
+                                    KeyboardNavigation.IsTabStop="False" />
+                            </Grid>
+
+                            <ContentPresenter
+                                x:Name="HeaderHost"
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                Content="{TemplateBinding Header}"
+                                TextElement.Foreground="{TemplateBinding Foreground}" />
+                            <ContentPresenter
+                                x:Name="ContentHost"
+                                Grid.Column="2"
+                                Margin="14,0,0,0"
+                                VerticalAlignment="Center"
+                                Content="{TemplateBinding Content}"
+                                TextElement.Foreground="{TemplateBinding Foreground}" />
+                        </Grid>
+                    </Border>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="Icon" Value="{x:Null}">
+                            <Setter TargetName="IconChip" Property="Margin" Value="0" />
+                            <Setter TargetName="IconChip" Property="Visibility" Value="Collapsed" />
+                        </Trigger>
+                        <Trigger Property="Header" Value="{x:Null}">
+                            <Setter TargetName="IconChip" Property="Margin" Value="0" />
+                        </Trigger>
+                        <Trigger Property="Header" Value="">
+                            <Setter TargetName="IconChip" Property="Margin" Value="0" />
+                        </Trigger>
+                        <Trigger Property="Content" Value="{x:Null}">
+                            <Setter TargetName="ContentHost" Property="Margin" Value="0" />
+                        </Trigger>
+                        <Trigger Property="Content" Value="">
+                            <Setter TargetName="ContentHost" Property="Margin" Value="0" />
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="CardBorder" Property="BorderBrush" Value="{DynamicResource ControlStrokeColorSecondaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="CardBorder" Property="BorderBrush" Value="{DynamicResource AfAccentBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--  隐式应用：设置页里的卡片不再逐一声明样式，LayoutPage 等历史页面共用同一外观。  -->
+    <!--  Implicit application: settings cards declare no style, and the legacy LayoutPage shares the look.  -->
+    <Style BasedOn="{StaticResource AfSettingsCardStyle}" TargetType="{x:Type ui:CardControl}" />
+
+    <!--
+        禁用卡片：用于功能预留和当前模式不可用的分组，让禁用状态看起来是刻意的。
+        只有真的处于禁用状态才降透明度——原实现无条件写死 0.62，于是可交互时也显灰，
+        让这些卡片读起来像坏掉了。
+        Disabled card for reserved features and groups unavailable in the current mode. The dimming applies
+        only while the card really is disabled: the previous version set 0.62 unconditionally, so an
+        interactive card still looked grey and read as broken.
+    -->
+    <Style
+        x:Key="AfSettingsCardDisabledStyle"
+        BasedOn="{StaticResource AfSettingsCardStyle}"
+        TargetType="{x:Type ui:CardControl}">
+        <Style.Triggers>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.62" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!--
+
+        选项卡片 / Choice card
+
+        同一个 RadioButton 或 ToggleButton 控件、同一套绑定，只替换外观为分段选择样式。
+        选中时主色描边加一层 10% 主色底片，直接更新以保持键盘与关闭系统动效时的反馈。
+        同一份控件和绑定保持不变，只把外观换成选项卡片。
+        Same RadioButton or ToggleButton control and bindings; only the appearance becomes a segmented
+        choice. Selection paints an accent stroke plus a 10% accent tint immediately, including for keyboard input
+        and when system animation is disabled.
+    -->
+
+    <ControlTemplate x:Key="AfSettingsChoiceTemplate" TargetType="{x:Type ToggleButton}">
+        <Grid>
+
+            <Border
+                x:Name="ChoiceBorder"
+                Background="{DynamicResource AfSettingsCardBrush}"
+                BorderBrush="{DynamicResource AfSettingsBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="8" IsHitTestVisible="False" components:SettingsHoverShadow.IsEnabled="True" />
+<Border
+                x:Name="ChoiceTint"
+                Background="{DynamicResource AfAccentBrush}"
+                CornerRadius="8"
+                Opacity="0" />
+            <Border Padding="{TemplateBinding Padding}" BorderThickness="1" BorderBrush="Transparent" Background="Transparent">
+                <ContentPresenter
+                    HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                    VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                    TextElement.Foreground="{DynamicResource CardForeground}" />
+            </Border>
+        </Grid>
+        <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="ChoiceBorder" Property="BorderBrush" Value="{DynamicResource ControlStrokeColorSecondaryBrush}" />
+            </Trigger>
+            <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="ChoiceBorder" Property="BorderBrush" Value="{DynamicResource AfAccentBrush}" />
+                <Setter TargetName="ChoiceBorder" Property="BorderThickness" Value="1.5" />
+                <Setter TargetName="ChoiceTint" Property="Opacity" Value="0.10" />
+            </Trigger>
+            <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="ChoiceBorder" Property="BorderBrush" Value="{DynamicResource AfAccentBrush}" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+            </Trigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+
+    <Style x:Key="AfSettingsChoiceCardStyle" TargetType="{x:Type ToggleButton}">
+        <Setter Property="Template" Value="{StaticResource AfSettingsChoiceTemplate}" />
+        <Setter Property="Padding" Value="14,12" />
+        <Setter Property="MinHeight" Value="68" />
+        <Setter Property="Margin" Value="0,0,8,8" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Foreground" Value="{DynamicResource CardForeground}" />
+        <Setter Property="FocusVisualStyle" Value="{DynamicResource AfFocusVisualStyle}" />
+        <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
+        <Setter Property="RenderTransform">
+            <Setter.Value>
+                <ScaleTransform ScaleX="1" ScaleY="1" />
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <Trigger Property="IsPressed" Value="True">
+                <Setter Property="RenderTransform">
+                    <Setter.Value>
+                        <ScaleTransform ScaleX="0.99" ScaleY="0.99" />
+                    </Setter.Value>
+                </Setter>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!--  RadioButton 是 ToggleButton 的派生类型，因此可以复用同一个模板和基础样式。  -->
+    <!--  RadioButton derives from ToggleButton, so it reuses the same template and base style.  -->
+    <Style
+        x:Key="AfSettingsChoiceRadioStyle"
+        BasedOn="{StaticResource AfSettingsChoiceCardStyle}"
+        TargetType="{x:Type RadioButton}">
+        <Setter Property="MinHeight" Value="40" />
+        <Setter Property="Margin" Value="0,0,8,0" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+    </Style>
+
+    <!--
+
+        行 / Rows
+
+        用于来源列表和快速启动列表；行悬停只改变底色，不改变布局。
+        Used by the source and quick-launch lists; row hover changes only the fill, never the layout.
+    -->
+
+    <Style x:Key="AfSettingsRowStyle" TargetType="{x:Type Border}">
+        <Setter Property="Padding" Value="10,8" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Background" Value="Transparent" />
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!--
+
+        按钮 / Buttons
+
+        缩放按 0.98 而不是 0.95：设置页按钮宽度大，位移按比例放大，过小的缩放值会让整行文字明显晃动。
+        只做按下反馈，不做悬停位移——悬停是高频动作，位移会变成噪声。
+        Scale lands on 0.98 rather than 0.95: settings buttons are wide, so the movement scales with them and a
+        smaller value would visibly shake a whole row of text. Press feedback only; hover never moves, because
+        hover is high frequency and movement there reads as noise.
+    -->
+
+    <Style
+        x:Key="AfSettingsButtonStyle"
+        BasedOn="{StaticResource {x:Type ui:Button}}"
+        TargetType="{x:Type ui:Button}">
+        <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
+        <Setter Property="RenderTransform">
+            <Setter.Value>
+                <ScaleTransform ScaleX="1" ScaleY="1" />
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <Trigger Property="IsPressed" Value="True">
+                <Setter Property="RenderTransform">
+                    <Setter.Value>
+                        <ScaleTransform ScaleX="0.98" ScaleY="0.98" />
+                    </Setter.Value>
+                </Setter>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style
+        x:Key="AfSettingsIconButtonStyle"
+        BasedOn="{StaticResource AfSettingsButtonStyle}"
+        TargetType="{x:Type ui:Button}">
+        <Setter Property="Width" Value="32" />
+        <Setter Property="Height" Value="32" />
+        <Setter Property="Padding" Value="0" />
+    </Style>
+
+    <!--
+        强调色色块：外观页的色板用它。模板里不使用 WPF-UI 的按钮外观，因为色块的整块面积就是颜色本身；
+        颜色由使用处就地写进 Background（局部值优先于样式触发器），因此悬停与按下的反馈只能落在模板自己的
+        边框画刷与缩放到属性上——那两项不写局部值就不会被覆盖。
+        Accent swatch, used by the appearance page's palette. The template does not use the WPF-UI button look, because the whole
+        area of a swatch is the colour itself. The colour is written into Background at the point of use (a local value outranks
+        style triggers), so hover and press feedback can only live on the template's own border brush and scale — neither of which
+        is overwritten as long as no local value is set for them.
+    -->
+    <Style x:Key="AfSettingsColorSwatchStyle" TargetType="{x:Type Button}">
+        <Setter Property="Width" Value="26" />
+        <Setter Property="Height" Value="26" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type Button}">
+                    <Border
+                        x:Name="SwatchSurface"
+                        Background="{TemplateBinding Background}"
+                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="5"
+                        RenderTransformOrigin="0.5,0.5">
+                        <Border.RenderTransform>
+                            <ScaleTransform ScaleX="1" ScaleY="1" />
+                        </Border.RenderTransform>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="SwatchSurface" Property="BorderBrush" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="SwatchSurface" Property="RenderTransform">
+                                <Setter.Value>
+                                    <ScaleTransform ScaleX="0.88" ScaleY="0.88" />
+                                </Setter.Value>
+                            </Setter>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+
+    <!-- Settings-only surface tiers; the application publishes theme/material-specific alpha at runtime. -->
+    <SolidColorBrush x:Key="AfSettingsCardBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="AfSettingsInfoSurfaceBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="AfSettingsGroupSurfaceBrush" Color="#F8F8F8" />
+    <SolidColorBrush x:Key="AfSettingsInputBrush" Color="#F7F7F7" />
+    <SolidColorBrush x:Key="AfSettingsBorderBrush" Color="#D8D8D8" />
+    <SolidColorBrush x:Key="AfSettingsNavigationBrush" Color="#ECECEC" />
+    <SolidColorBrush x:Key="AfSettingsSectionBrush" Color="#F8F8F8" />
+    <SolidColorBrush x:Key="AfSettingsHeaderBridgeBrush" Color="Transparent" />
+    <Style x:Key="AfSettingsInfoSurfaceStyle" TargetType="{x:Type Border}">
+        <Setter Property="Background" Value="{DynamicResource AfSettingsInfoSurfaceBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AfSettingsBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="14,10" />
+    </Style>
+
+</ResourceDictionary>

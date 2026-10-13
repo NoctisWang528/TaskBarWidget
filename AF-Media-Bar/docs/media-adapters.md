@@ -1,0 +1,34 @@
+# 媒体适配器接入规则
+
+适用于新增播放器适配、修改来源身份和双通道仲裁，以及移动媒体实现。功能与兼容性方案的讨论要求见 [CONTRIBUTING.md](../CONTRIBUTING.md)；本页规定实现接入方式。
+
+## 按所有权放置实现
+
+| 位置（相对 `src/AFMediaBar/Classes/`） | 职责 |
+| --- | --- |
+| `Services/Media/` | 通用来源目录、选择、过滤、激活与协调；协调者可调用 SMTC 通道实现 |
+| `Services/Media/Smtc/` | SMTC 会话目录、有效性检查、快照转换、重连策略及目录资源租约 |
+| `Services/Media/Sources/<来源>/` | 一个播放器的 Provider、身份和合并策略、内存读取器、私有元数据解析、连续性处理 |
+| `Abstractions/` | 跨实现共享的 Provider 与策略契约；独立公开契约按类型名建文件 |
+| `Models/` | 跨模块传递的快照和候选数据 |
+| `Services/Lyrics/` | 歌词提供器与获取流程，即使与媒体来源同属一个播放器也由此处负责 |
+
+SMTC 是多个播放器共享的系统通道，与 `Sources/` 并列。来源专属代码集中在对应来源目录，不再拆到 `Services/Players/`。新目录的命名空间使用 `AFMediaBar.Classes.Services.Media.Smtc` 或 `AFMediaBar.Classes.Services.Media.Sources.<来源>`。
+
+`MediaSnapshotBuilder` 位于 `Smtc/`，因为它以 SMTC 会话为输入，并持有该通道的补全缓存；歌词获取委托给 `LyricsService`。未来需要跨通道共享补全时，先确认实际复用和缓存所有权，再提取共用实现。
+
+## 接入步骤
+
+1. **选择能力。** 只增强当前 SMTC 快照时实现 `IMediaSourceProvider`，参考酷狗；需要没有 SMTC 时仍可被选择时，实现 `IIndependentMediaSourceProvider`，参考网易云。Provider 负责轮询、读取器、取消和释放，纯策略不持有外部资源。
+2. **定义身份与仲裁。** 独立来源提供稳定的 `SourcePolicy`。`SourceId` 和 `SelectionKey` 在注册来源间唯一，既有值保持兼容；`Matches` 同时识别规范 ID 和别名，别名互不重叠。`CanHandle` 与策略使用一致的来源识别规则。
+3. **组合候选与快照。** `Combine` 保留其他来源候选及相对顺序，只合并自己的通道；无 SMTC 时允许 `SessionKey` 为空，通道到达、消失、重建时维持稳定选择键。`Merge` 明确新鲜度、失效回退和同曲目判断，只继承本来源可用通道的控制能力。
+4. **注册。** 在 `App.xaml.cs` 注册 Provider，并以 `IMediaSourceProvider` 解析同一个实例；需要内存剪枝时，`IMemoryPrunable` 也绑定该实例。`MediaSourceRegistry` 从 Provider 自动发现独立能力，无需第二份来源名单。资源启动、事件订阅与释放沿用现有协调流程，目录不接管 Provider 生命周期。
+5. **接通设置。** 通用管线和设置页通过目录归一化来源，过滤使用同一身份规则。独立来源即使未连接或被禁用也应可配置。Provider 内部判断是否允许读取时，可给 `MediaSourceFilterPolicy` 传入自身的归一化规则。新适配器不要求在协调者、过滤器或 ViewModel 中新增播放器分支。
+6. **验证。** 除本来源读取测试外，通过目录验证无 SMTC 候选、别名过滤、双通道去重、失效回退和与另一来源共存；验证手动选择不会被其他来源抢占。覆盖取消后晚到结果、重复停止及释放等受影响的资源路径，再按贡献指南串行构建和测试，并运行架构检查。
+
+## 完成条件
+
+- 来源专属实现均归入自己的目录，通用管线和设置页没有新增具体适配器依赖。
+- 注册后能通过现有目录参与发现、选择、过滤和解析，SMTC 增强器不必实现独立来源能力。
+- 保持原有来源 ID、选择键、设置格式与失败回退语义；若要改变，单独说明兼容性方案。
+- 构建、测试和架构检查结果如实记录；真实播放器切换、退出与资源清理未验证时标为“待维护者验收”。

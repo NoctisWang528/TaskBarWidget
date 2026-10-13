@@ -1,0 +1,1049 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug (lite)|ARM64EC">
+      <Configuration>Debug (lite)</Configuration>
+      <Platform>ARM64EC</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug (lite)|Win32">
+      <Configuration>Debug (lite)</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug (lite)|x64">
+      <Configuration>Debug (lite)</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|ARM64EC">
+      <Configuration>Debug</Configuration>
+      <Platform>ARM64EC</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release (lite)|ARM64EC">
+      <Configuration>Release (lite)</Configuration>
+      <Platform>ARM64EC</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release (lite)|Win32">
+      <Configuration>Release (lite)</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release (lite)|x64">
+      <Configuration>Release (lite)</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|ARM64EC">
+      <Configuration>Release</Configuration>
+      <Platform>ARM64EC</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{09483BED-B1E9-4827-8120-A18302C84AA8}</ProjectGuid>
+    <RootNamespace>TrafficMonitor</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <Keyword>MFCProj</Keyword>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseOfMfc>Dynamic</UseOfMfc>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug (lite)|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseOfMfc>Dynamic</UseOfMfc>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseOfMfc>Dynamic</UseOfMfc>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release (lite)|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseOfMfc>Dynamic</UseOfMfc>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseOfMfc>Dynamic</UseOfMfc>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64EC'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseOfMfc>Dynamic</UseOfMfc>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug (lite)|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseOfMfc>Dynamic</UseOfMfc>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug (lite)|ARM64EC'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseOfMfc>Dynamic</UseOfMfc>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseOfMfc>Dynamic</UseOfMfc>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64EC'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseOfMfc>Dynamic</UseOfMfc>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release (lite)|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseOfMfc>Dynamic</UseOfMfc>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release (lite)|ARM64EC'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseOfMfc>Dynamic</UseOfMfc>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug (lite)|Win32'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release (lite)|Win32'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64EC'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug (lite)|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug (lite)|ARM64EC'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64EC'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release (lite)|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release (lite)|ARM64EC'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <LinkIncremental>true</LinkIncremental>
+    <ExcludePath />
+    <OutDir>$(SolutionDir)Bin\$(Configuration)\</OutDir>
+    <IncludePath>$(ProjectDir);$(ProjectDir)..\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)lib\;$(OutDir);$(LibraryPath)</LibraryPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug (lite)|Win32'">
+    <LinkIncremental>true</LinkIncremental>
+    <ExcludePath />
+    <OutDir>$(SolutionDir)Bin\$(Configuration)\</OutDir>
+    <IncludePath>$(ProjectDir);$(ProjectDir)..\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)lib\;$(OutDir);$(LibraryPath)</LibraryPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <LinkIncremental>true</LinkIncremental>
+    <ExcludePath />
+    <OutDir>$(SolutionDir)Bin\$(Platform)\$(Configuration)\</OutDir>
+    <IncludePath>$(ProjectDir);$(ProjectDir)..\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)lib\x64;$(OutDir);$(LibraryPath)</LibraryPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64EC'">
+    <LinkIncremental>true</LinkIncremental>
+    <ExcludePath />
+    <OutDir>$(SolutionDir)Bin\$(Platform)\$(Configuration)\</OutDir>
+    <IncludePath>$(ProjectDir);$(ProjectDir)..\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)lib\x64;$(OutDir);$(SolutionDir)Bin\x64\$(Configuration)\;$(LibraryPath)</LibraryPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug (lite)|x64'">
+    <LinkIncremental>true</LinkIncremental>
+    <ExcludePath />
+    <OutDir>$(SolutionDir)Bin\$(Platform)\$(Configuration)\</OutDir>
+    <IncludePath>$(ProjectDir);$(ProjectDir)..\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)lib\x64;$(OutDir);$(LibraryPath)</LibraryPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug (lite)|ARM64EC'">
+    <LinkIncremental>true</LinkIncremental>
+    <ExcludePath />
+    <OutDir>$(SolutionDir)Bin\$(Platform)\$(Configuration)\</OutDir>
+    <IncludePath>$(ProjectDir);$(ProjectDir)..\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)lib\x64;$(OutDir);$(SolutionDir)Bin\x64\$(Configuration)\;$(LibraryPath)</LibraryPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <LinkIncremental>false</LinkIncremental>
+    <ExcludePath />
+    <OutDir>$(SolutionDir)Bin\$(Configuration)\</OutDir>
+    <IncludePath>$(ProjectDir);$(ProjectDir)..\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)lib\;$(OutDir);$(LibraryPath)</LibraryPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release (lite)|Win32'">
+    <LinkIncremental>false</LinkIncremental>
+    <ExcludePath />
+    <OutDir>$(SolutionDir)Bin\$(Configuration)\</OutDir>
+    <IncludePath>$(ProjectDir);$(ProjectDir)..\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)lib\;$(OutDir);$(LibraryPath)</LibraryPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <LinkIncremental>false</LinkIncremental>
+    <ExcludePath />
+    <OutDir>$(SolutionDir)Bin\$(Platform)\$(Configuration)\</OutDir>
+    <IncludePath>$(ProjectDir);$(ProjectDir)..\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)lib\x64;$(OutDir);$(LibraryPath)</LibraryPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64EC'">
+    <LinkIncremental>false</LinkIncremental>
+    <ExcludePath />
+    <OutDir>$(SolutionDir)Bin\$(Platform)\$(Configuration)\</OutDir>
+    <IncludePath>$(ProjectDir);$(ProjectDir)..\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)lib\x64;$(OutDir);$(SolutionDir)Bin\x64\$(Configuration)\;$(LibraryPath)</LibraryPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release (lite)|x64'">
+    <LinkIncremental>false</LinkIncremental>
+    <ExcludePath />
+    <OutDir>$(SolutionDir)Bin\$(Platform)\$(Configuration)\</OutDir>
+    <IncludePath>$(ProjectDir);$(ProjectDir)..\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)lib\x64;$(OutDir);$(LibraryPath)</LibraryPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release (lite)|ARM64EC'">
+    <LinkIncremental>false</LinkIncremental>
+    <ExcludePath />
+    <OutDir>$(SolutionDir)Bin\$(Platform)\$(Configuration)\</OutDir>
+    <IncludePath>$(ProjectDir);$(ProjectDir)..\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)lib\x64;$(OutDir);$(SolutionDir)Bin\x64\$(Configuration)\;$(LibraryPath)</LibraryPath>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <SDLCheck>true</SDLCheck>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <AdditionalDependencies>OpenHardwareMonitorApi.lib;%(AdditionalDependencies);pdh.lib;Powrprof.lib;Dwmapi.lib</AdditionalDependencies>
+      <UACExecutionLevel>RequireAdministrator</UACExecutionLevel>
+      <DelayLoadDLLs>powrprof.dll;api-ms-win-core-winrt-error-l1-1-1.dll;api-ms-win-core-winrt-l1-1-0.dll</DelayLoadDLLs>
+    </Link>
+    <Midl>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <ValidateAllParameters>true</ValidateAllParameters>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0804</Culture>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <PreBuildEvent>
+      <Command>print_compile_time.bat</Command>
+    </PreBuildEvent>
+    <FxCompile>
+      <AdditionalIncludeDirectories>$(UM_IncludePath);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </FxCompile>
+    <PreLinkEvent>
+      <Command>
+      </Command>
+      <Message>
+      </Message>
+    </PreLinkEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug (lite)|Win32'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;_DEBUG;%(PreprocessorDefinitions);WITHOUT_TEMPERATURE</PreprocessorDefinitions>
+      <SDLCheck>true</SDLCheck>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <AdditionalDependencies>%(AdditionalDependencies);pdh.lib;Powrprof.lib;Dwmapi.lib</AdditionalDependencies>
+      <DelayLoadDLLs>powrprof.dll;api-ms-win-core-winrt-error-l1-1-1.dll;api-ms-win-core-winrt-l1-1-0.dll</DelayLoadDLLs>
+    </Link>
+    <Midl>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <ValidateAllParameters>true</ValidateAllParameters>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0804</Culture>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <PreBuildEvent>
+      <Command>print_compile_time.bat</Command>
+    </PreBuildEvent>
+    <FxCompile>
+      <AdditionalIncludeDirectories>$(UM_IncludePath);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </FxCompile>
+    <PreLinkEvent>
+      <Command>
+      </Command>
+      <Message>
+      </Message>
+    </PreLinkEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>_WINDOWS;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <SDLCheck>true</SDLCheck>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <AdditionalDependencies>OpenHardwareMonitorApi.lib;%(AdditionalDependencies);pdh.lib;Powrprof.lib;Dwmapi.lib</AdditionalDependencies>
+      <UACExecutionLevel>RequireAdministrator</UACExecutionLevel>
+      <DelayLoadDLLs>powrprof.dll;api-ms-win-core-winrt-error-l1-1-1.dll;api-ms-win-core-winrt-l1-1-0.dll</DelayLoadDLLs>
+    </Link>
+    <Midl>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <ValidateAllParameters>true</ValidateAllParameters>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0804</Culture>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <PreBuildEvent>
+      <Command>print_compile_time.bat</Command>
+    </PreBuildEvent>
+    <FxCompile>
+      <AdditionalIncludeDirectories>$(UM_IncludePath);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </FxCompile>
+    <PreLinkEvent>
+      <Command>
+      </Command>
+      <Message>
+      </Message>
+    </PreLinkEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64EC'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>_WINDOWS;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <SDLCheck>true</SDLCheck>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <AdditionalDependencies>OpenHardwareMonitorApi.lib;%(AdditionalDependencies);pdh.lib;Powrprof.lib;Dwmapi.lib</AdditionalDependencies>
+      <UACExecutionLevel>RequireAdministrator</UACExecutionLevel>
+      <DelayLoadDLLs>powrprof.dll</DelayLoadDLLs>
+    </Link>
+    <Midl>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <ValidateAllParameters>true</ValidateAllParameters>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0804</Culture>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <PreBuildEvent>
+      <Command>print_compile_time.bat</Command>
+    </PreBuildEvent>
+    <FxCompile>
+      <AdditionalIncludeDirectories>$(UM_IncludePath);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </FxCompile>
+    <PreLinkEvent>
+      <Command>
+      </Command>
+      <Message>
+      </Message>
+    </PreLinkEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug (lite)|x64'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>_WINDOWS;_DEBUG;%(PreprocessorDefinitions);WITHOUT_TEMPERATURE</PreprocessorDefinitions>
+      <SDLCheck>true</SDLCheck>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <AdditionalDependencies>%(AdditionalDependencies);pdh.lib;Powrprof.lib;Dwmapi.lib</AdditionalDependencies>
+      <DelayLoadDLLs>powrprof.dll;api-ms-win-core-winrt-error-l1-1-1.dll;api-ms-win-core-winrt-l1-1-0.dll</DelayLoadDLLs>
+    </Link>
+    <Midl>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <ValidateAllParameters>true</ValidateAllParameters>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0804</Culture>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <PreBuildEvent>
+      <Command>print_compile_time.bat</Command>
+    </PreBuildEvent>
+    <FxCompile>
+      <AdditionalIncludeDirectories>$(UM_IncludePath);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </FxCompile>
+    <PreLinkEvent>
+      <Command>
+      </Command>
+      <Message>
+      </Message>
+    </PreLinkEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug (lite)|ARM64EC'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>_WINDOWS;_DEBUG;%(PreprocessorDefinitions);WITHOUT_TEMPERATURE</PreprocessorDefinitions>
+      <SDLCheck>true</SDLCheck>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <AdditionalDependencies>%(AdditionalDependencies);pdh.lib;Powrprof.lib;Dwmapi.lib</AdditionalDependencies>
+      <DelayLoadDLLs>powrprof.dll</DelayLoadDLLs>
+    </Link>
+    <Midl>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <ValidateAllParameters>true</ValidateAllParameters>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0804</Culture>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <PreBuildEvent>
+      <Command>print_compile_time.bat</Command>
+    </PreBuildEvent>
+    <FxCompile>
+      <AdditionalIncludeDirectories>$(UM_IncludePath);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </FxCompile>
+    <PreLinkEvent>
+      <Command>
+      </Command>
+      <Message>
+      </Message>
+    </PreLinkEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalOptions>$(ExternalCompilerOptions) %(AdditionalOptions)</AdditionalOptions>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalDependencies>OpenHardwareMonitorApi.lib;%(AdditionalDependencies);pdh.lib;Powrprof.lib;Dwmapi.lib</AdditionalDependencies>
+      <UACExecutionLevel>RequireAdministrator</UACExecutionLevel>
+      <DelayLoadDLLs>powrprof.dll;api-ms-win-core-winrt-error-l1-1-1.dll;api-ms-win-core-winrt-l1-1-0.dll</DelayLoadDLLs>
+    </Link>
+    <Midl>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <ValidateAllParameters>true</ValidateAllParameters>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0804</Culture>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <PreBuildEvent>
+      <Command>print_compile_time.bat</Command>
+    </PreBuildEvent>
+    <FxCompile>
+      <AdditionalIncludeDirectories>$(UM_IncludePath);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </FxCompile>
+    <PreLinkEvent>
+      <Command>
+      </Command>
+      <Message>
+      </Message>
+    </PreLinkEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release (lite)|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;NDEBUG;%(PreprocessorDefinitions);WITHOUT_TEMPERATURE</PreprocessorDefinitions>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalOptions>$(ExternalCompilerOptions) %(AdditionalOptions)</AdditionalOptions>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalDependencies>%(AdditionalDependencies);pdh.lib;Powrprof.lib;Dwmapi.lib</AdditionalDependencies>
+      <DelayLoadDLLs>powrprof.dll;api-ms-win-core-winrt-error-l1-1-1.dll;api-ms-win-core-winrt-l1-1-0.dll</DelayLoadDLLs>
+    </Link>
+    <Midl>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <ValidateAllParameters>true</ValidateAllParameters>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0804</Culture>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <PreBuildEvent>
+      <Command>print_compile_time.bat</Command>
+    </PreBuildEvent>
+    <FxCompile>
+      <AdditionalIncludeDirectories>$(UM_IncludePath);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </FxCompile>
+    <PreLinkEvent>
+      <Command>
+      </Command>
+      <Message>
+      </Message>
+    </PreLinkEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <PreprocessorDefinitions>_WINDOWS;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <SDLCheck>true</SDLCheck>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalDependencies>OpenHardwareMonitorApi.lib;%(AdditionalDependencies);pdh.lib;Powrprof.lib;Dwmapi.lib</AdditionalDependencies>
+      <UACExecutionLevel>RequireAdministrator</UACExecutionLevel>
+      <DelayLoadDLLs>powrprof.dll;api-ms-win-core-winrt-error-l1-1-1.dll;api-ms-win-core-winrt-l1-1-0.dll</DelayLoadDLLs>
+    </Link>
+    <Midl>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <ValidateAllParameters>true</ValidateAllParameters>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0804</Culture>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <PreBuildEvent>
+      <Command>print_compile_time.bat</Command>
+    </PreBuildEvent>
+    <FxCompile>
+      <AdditionalIncludeDirectories>$(UM_IncludePath);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </FxCompile>
+    <PreLinkEvent>
+      <Command>
+      </Command>
+      <Message>
+      </Message>
+    </PreLinkEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64EC'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <PreprocessorDefinitions>_WINDOWS;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <SDLCheck>true</SDLCheck>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalDependencies>OpenHardwareMonitorApi.lib;%(AdditionalDependencies);pdh.lib;Powrprof.lib;Dwmapi.lib</AdditionalDependencies>
+      <UACExecutionLevel>RequireAdministrator</UACExecutionLevel>
+      <DelayLoadDLLs>powrprof.dll</DelayLoadDLLs>
+    </Link>
+    <Midl>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <ValidateAllParameters>true</ValidateAllParameters>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0804</Culture>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <PreBuildEvent>
+      <Command>print_compile_time.bat</Command>
+    </PreBuildEvent>
+    <FxCompile>
+      <AdditionalIncludeDirectories>$(UM_IncludePath);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </FxCompile>
+    <PreLinkEvent>
+      <Command>
+      </Command>
+      <Message>
+      </Message>
+    </PreLinkEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release (lite)|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <PreprocessorDefinitions>_WINDOWS;NDEBUG;%(PreprocessorDefinitions);WITHOUT_TEMPERATURE</PreprocessorDefinitions>
+      <SDLCheck>true</SDLCheck>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalDependencies>%(AdditionalDependencies);pdh.lib;Powrprof.lib;Dwmapi.lib</AdditionalDependencies>
+      <DelayLoadDLLs>powrprof.dll;api-ms-win-core-winrt-error-l1-1-1.dll;api-ms-win-core-winrt-l1-1-0.dll</DelayLoadDLLs>
+    </Link>
+    <Midl>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <ValidateAllParameters>true</ValidateAllParameters>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0804</Culture>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <PreBuildEvent>
+      <Command>print_compile_time.bat</Command>
+    </PreBuildEvent>
+    <FxCompile>
+      <AdditionalIncludeDirectories>$(UM_IncludePath);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </FxCompile>
+    <PreLinkEvent>
+      <Command>
+      </Command>
+      <Message>
+      </Message>
+    </PreLinkEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release (lite)|ARM64EC'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <PreprocessorDefinitions>_WINDOWS;NDEBUG;%(PreprocessorDefinitions);WITHOUT_TEMPERATURE</PreprocessorDefinitions>
+      <SDLCheck>true</SDLCheck>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalDependencies>%(AdditionalDependencies);pdh.lib;Powrprof.lib;Dwmapi.lib</AdditionalDependencies>
+      <DelayLoadDLLs>powrprof.dll</DelayLoadDLLs>
+    </Link>
+    <Midl>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <ValidateAllParameters>true</ValidateAllParameters>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0804</Culture>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <PreBuildEvent>
+      <Command>print_compile_time.bat</Command>
+    </PreBuildEvent>
+    <FxCompile>
+      <AdditionalIncludeDirectories>$(UM_IncludePath);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </FxCompile>
+    <PreLinkEvent>
+      <Command>
+      </Command>
+      <Message>
+      </Message>
+    </PreLinkEvent>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <Text Include="compile_time.txt" />
+    <Text Include="ReadMe.txt" />
+    <Text Include="res\Acknowledgement.txt" />
+    <Text Include="res\Acknowledgement_en.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\include\PluginInterface.h" />
+    <ClInclude Include="AboutDlg.h" />
+    <ClInclude Include="AdapterCommon.h" />
+    <ClInclude Include="AppAlreadyRuningDlg.h" />
+    <ClInclude Include="auto_start_helper.h" />
+    <ClInclude Include="BaseDialog.h" />
+    <ClInclude Include="CalendarHelper.h" />
+    <ClInclude Include="CAutoAdaptSettingsDlg.h" />
+    <ClInclude Include="ClassicalTaskbarDlg.h" />
+    <ClInclude Include="CMFCColorDialogEx.h" />
+    <ClInclude Include="ColorSettingListCtrl.h" />
+    <ClInclude Include="ComboBox2.h" />
+    <ClInclude Include="crashtool.h" />
+    <ClInclude Include="CTabCtrlEx.h" />
+    <ClInclude Include="CVariant.h" />
+    <ClInclude Include="D2D1Support.h" />
+    <ClInclude Include="D3D10Support1.h" />
+    <ClInclude Include="DCompositionSupport.h" />
+    <ClInclude Include="DisplayItem.h" />
+    <ClInclude Include="DisplayTextSettingDlg.h" />
+    <ClInclude Include="DllFunctions.h" />
+    <ClInclude Include="DrawCommonEx.h" />
+    <ClInclude Include="DrawCommonFactory.h" />
+    <ClInclude Include="DrawCommonHelper.h" />
+    <ClInclude Include="DrawTextManager.h" />
+    <ClInclude Include="Dxgi1Support2.h" />
+    <ClInclude Include="FileDialogEx.h" />
+    <ClInclude Include="FilePathHelper.h" />
+    <ClInclude Include="HighResolutionTimer.h" />
+    <ClInclude Include="HistoryTrafficCalendarDlg.h" />
+    <ClInclude Include="HistoryTrafficFile.h" />
+    <ClInclude Include="HistoryTrafficListDlg.h" />
+    <ClInclude Include="HResultException.h" />
+    <ClInclude Include="IDrawCommon.h" />
+    <ClInclude Include="Image2DEffect.h" />
+    <ClInclude Include="language.h" />
+    <ClInclude Include="LinkStatic.h" />
+    <ClInclude Include="ColorStatic.h" />
+    <ClInclude Include="Common.h" />
+    <ClInclude Include="CommonData.h" />
+    <ClInclude Include="CSkinPreviewView.h" />
+    <ClInclude Include="DrawCommon.h" />
+    <ClInclude Include="GeneralSettingsDlg.h" />
+    <ClInclude Include="HistoryTrafficDlg.h" />
+    <ClInclude Include="IconSelectDlg.h" />
+    <ClInclude Include="IniHelper.h" />
+    <ClInclude Include="HistoryTrafficListCtrl.h" />
+    <ClInclude Include="ListCtrlEx.h" />
+    <ClInclude Include="MainWndColorDlg.h" />
+    <ClInclude Include="MainWndSettingsDlg.h" />
+    <ClInclude Include="MessageDlg.h" />
+    <ClInclude Include="NetworkInfoDlg.h" />
+    <ClInclude Include="Nullable.hpp" />
+    <ClInclude Include="OptionsDlg.h" />
+    <ClInclude Include="PdhHardwareQuery\CPUUsage.h" />
+    <ClInclude Include="PdhHardwareQuery\CpuFreq.h" />
+    <ClInclude Include="PdhHardwareQuery\GpuUsage.h" />
+    <ClInclude Include="PdhHardwareQuery\DiskUsage.h" />
+    <ClInclude Include="PdhHardwareQuery\PdhQuery.h" />
+    <ClInclude Include="PictureStatic.h" />
+    <ClInclude Include="PluginInfoDlg.h" />
+    <ClInclude Include="PluginManager.h" />
+    <ClInclude Include="PluginManagerDlg.h" />
+    <ClInclude Include="PluginUpdateHelper.h" />
+    <ClInclude Include="RenderAPISupport.h" />
+    <ClInclude Include="Resource.h" />
+    <ClInclude Include="SelectConnectionsDlg.h" />
+    <ClInclude Include="SetItemOrderDlg.h" />
+    <ClInclude Include="SettingsHelper.h" />
+    <ClInclude Include="SimpleXML.h" />
+    <ClInclude Include="SkinAutoAdaptSettingDlg.h" />
+    <ClInclude Include="SkinDlg.h" />
+    <ClInclude Include="SkinFile.h" />
+    <ClInclude Include="SkinManager.h" />
+    <ClInclude Include="SpinEdit.h" />
+    <ClInclude Include="StaticEx.h" />
+    <ClInclude Include="stdafx.h" />
+    <ClInclude Include="StrTable.h" />
+    <ClInclude Include="SupportedRenderEnums.h" />
+    <ClInclude Include="TabDlg.h" />
+    <ClInclude Include="targetver.h" />
+    <ClInclude Include="TaskbarColorDlg.h" />
+    <ClInclude Include="TaskbarDefaultStyle.h" />
+    <ClInclude Include="TaskBarDlg.h" />
+    <ClInclude Include="TaskBarDlgDrawCommon.h" />
+    <ClInclude Include="TaskbarHelper.h" />
+    <ClInclude Include="TaskbarItemOrderHelper.h" />
+    <ClInclude Include="TaskBarSettingsDlg.h" />
+    <ClInclude Include="Test.h" />
+    <ClInclude Include="TinyXml2Helper.h" />
+    <ClInclude Include="tinyxml2\tinyxml2.h" />
+    <ClInclude Include="TrafficMonitor.h" />
+    <ClInclude Include="TrafficMonitorDlg.h" />
+    <ClInclude Include="UpdateHelper.h" />
+    <ClInclude Include="WIC.h" />
+    <ClInclude Include="Win11TaskbarDlg.h" />
+    <ClInclude Include="Win11TaskbarSettingDlg.h" />
+    <ClInclude Include="WindowsSettingHelper.h" />
+    <ClInclude Include="WindowsWebExperienceDetector.h" />
+    <ClInclude Include="WineTaskbarDlg.h" />
+    <ClInclude Include="WinVersionHelper.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="AboutDlg.cpp" />
+    <ClCompile Include="AdapterCommon.cpp" />
+    <ClCompile Include="AppAlreadyRuningDlg.cpp" />
+    <ClCompile Include="auto_start_helper.cpp" />
+    <ClCompile Include="BaseDialog.cpp" />
+    <ClCompile Include="CalendarHelper.cpp" />
+    <ClCompile Include="CAutoAdaptSettingsDlg.cpp" />
+    <ClCompile Include="ClassicalTaskbarDlg.cpp" />
+    <ClCompile Include="CMFCColorDialogEx.cpp" />
+    <ClCompile Include="ColorSettingListCtrl.cpp" />
+    <ClCompile Include="ComboBox2.cpp" />
+    <ClCompile Include="CommonData.cpp" />
+    <ClCompile Include="crashtool.cpp" />
+    <ClCompile Include="CTabCtrlEx.cpp" />
+    <ClCompile Include="CVariant.cpp" />
+    <ClCompile Include="D2D1Support.cpp" />
+    <ClCompile Include="D3D10Support1.cpp" />
+    <ClCompile Include="DCompositionSupport.cpp" />
+    <ClCompile Include="DisplayItem.cpp" />
+    <ClCompile Include="DisplayTextSettingDlg.cpp" />
+    <ClCompile Include="DllFunctions.cpp" />
+    <ClCompile Include="DrawCommonEx.cpp" />
+    <ClCompile Include="DrawCommonFactory.cpp" />
+    <ClCompile Include="DrawCommonHelper.cpp" />
+    <ClCompile Include="DrawTextManager.cpp" />
+    <ClCompile Include="Dxgi1Support2.cpp" />
+    <ClCompile Include="FileDialogEx.cpp" />
+    <ClCompile Include="FilePathHelper.cpp" />
+    <ClCompile Include="HistoryTrafficCalendarDlg.cpp" />
+    <ClCompile Include="HistoryTrafficFile.cpp" />
+    <ClCompile Include="HistoryTrafficListDlg.cpp" />
+    <ClCompile Include="HResultException.cpp" />
+    <ClCompile Include="IDrawCommon.cpp" />
+    <ClCompile Include="Image2DEffect.cpp" />
+    <ClCompile Include="LinkStatic.cpp" />
+    <ClCompile Include="ColorStatic.cpp" />
+    <ClCompile Include="Common.cpp" />
+    <ClCompile Include="CSkinPreviewView.cpp" />
+    <ClCompile Include="DrawCommon.cpp" />
+    <ClCompile Include="GeneralSettingsDlg.cpp" />
+    <ClCompile Include="HistoryTrafficDlg.cpp" />
+    <ClCompile Include="IconSelectDlg.cpp" />
+    <ClCompile Include="IniHelper.cpp" />
+    <ClCompile Include="HistoryTrafficListCtrl.cpp" />
+    <ClCompile Include="ListCtrlEx.cpp" />
+    <ClCompile Include="MainWndColorDlg.cpp" />
+    <ClCompile Include="MainWndSettingsDlg.cpp" />
+    <ClCompile Include="MessageDlg.cpp" />
+    <ClCompile Include="NetworkInfoDlg.cpp" />
+    <ClCompile Include="OptionsDlg.cpp" />
+    <ClCompile Include="PdhHardwareQuery\CPUUsage.cpp" />
+    <ClCompile Include="PdhHardwareQuery\CpuFreq.cpp" />
+    <ClCompile Include="PdhHardwareQuery\GpuUsage.cpp" />
+    <ClCompile Include="PdhHardwareQuery\DiskUsage.cpp" />
+    <ClCompile Include="PdhHardwareQuery\PdhQuery.cpp" />
+    <ClCompile Include="PictureStatic.cpp" />
+    <ClCompile Include="PluginInfoDlg.cpp" />
+    <ClCompile Include="PluginManager.cpp" />
+    <ClCompile Include="PluginManagerDlg.cpp" />
+    <ClCompile Include="PluginUpdateHelper.cpp" />
+    <ClCompile Include="SelectConnectionsDlg.cpp" />
+    <ClCompile Include="SetItemOrderDlg.cpp" />
+    <ClCompile Include="SettingsHelper.cpp" />
+    <ClCompile Include="SimpleXML.cpp" />
+    <ClCompile Include="SkinAutoAdaptSettingDlg.cpp" />
+    <ClCompile Include="SkinDlg.cpp" />
+    <ClCompile Include="SkinFile.cpp" />
+    <ClCompile Include="SkinManager.cpp" />
+    <ClCompile Include="SpinEdit.cpp" />
+    <ClCompile Include="StaticEx.cpp" />
+    <ClCompile Include="stdafx.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug (lite)|Win32'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64EC'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug (lite)|x64'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug (lite)|ARM64EC'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release (lite)|Win32'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|ARM64EC'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release (lite)|x64'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release (lite)|ARM64EC'">Create</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="StrTable.cpp" />
+    <ClCompile Include="SupportedRenderEnums.cpp" />
+    <ClCompile Include="TabDlg.cpp" />
+    <ClCompile Include="TaskbarColorDlg.cpp" />
+    <ClCompile Include="TaskbarDefaultStyle.cpp" />
+    <ClCompile Include="TaskBarDlg.cpp" />
+    <ClCompile Include="TaskBarDlgDrawCommon.cpp" />
+    <ClCompile Include="TaskbarHelper.cpp" />
+    <ClCompile Include="TaskbarItemOrderHelper.cpp" />
+    <ClCompile Include="TaskBarSettingsDlg.cpp" />
+    <ClCompile Include="Test.cpp" />
+    <ClCompile Include="TinyXml2Helper.cpp" />
+    <ClCompile Include="tinyxml2\tinyxml2.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug (lite)|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release (lite)|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64EC'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug (lite)|x64'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug (lite)|ARM64EC'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|ARM64EC'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release (lite)|x64'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release (lite)|ARM64EC'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="TrafficMonitor.cpp" />
+    <ClCompile Include="TrafficMonitorDlg.cpp" />
+    <ClCompile Include="UpdateHelper.cpp" />
+    <ClCompile Include="WIC.cpp" />
+    <ClCompile Include="Win11TaskbarDlg.cpp" />
+    <ClCompile Include="Win11TaskbarSettingDlg.cpp" />
+    <ClCompile Include="WindowsSettingHelper.cpp" />
+    <ClCompile Include="WindowsWebExperienceDetector.cpp" />
+    <ClCompile Include="WineTaskbarDlg.cpp" />
+    <ClCompile Include="WinVersionHelper.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="TrafficMonitor.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\LICENSE" />
+    <None Include="..\LICENSE_CN" />
+    <None Include="language\English.ini" />
+    <None Include="language\Simplified_Chinese.ini" />
+    <None Include="language\Traditional_Chinese.ini" />
+    <None Include="res\TrafficMonitor.rc2" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="res\about_background.bmp" />
+    <Image Include="res\about_background_hd.bmp" />
+    <Image Include="res\bitmap3.bmp" />
+    <Image Include="res\menu_icon\close.ico" />
+    <Image Include="res\menu_icon\connection.ico" />
+    <Image Include="res\menu_icon\exit.ico" />
+    <Image Include="res\menu_icon\function.ico" />
+    <Image Include="res\menu_icon\help.ico" />
+    <Image Include="res\menu_icon\info.ico" />
+    <Image Include="res\menu_icon\item.ico" />
+    <Image Include="res\menu_icon\lock.ico" />
+    <Image Include="res\menu_icon\main_window.ico" />
+    <Image Include="res\menu_icon\more.ico" />
+    <Image Include="res\menu_icon\mouse.ico" />
+    <Image Include="res\menu_icon\notify.ico" />
+    <Image Include="res\menu_icon\pin.ico" />
+    <Image Include="res\menu_icon\plugins.ico" />
+    <Image Include="res\menu_icon\plugin_disabled.ico" />
+    <Image Include="res\menu_icon\setting.ico" />
+    <Image Include="res\menu_icon\skn.ico" />
+    <Image Include="res\menu_icon\statistics.ico" />
+    <Image Include="res\menu_icon\taskbar_window.ico" />
+    <Image Include="res\menu_icon\task_manager.ico" />
+    <Image Include="res\notifyicon.ico" />
+    <Image Include="res\notifyicon2.ico" />
+    <Image Include="res\notifyicon3.ico" />
+    <Image Include="res\notifyicon4.ico" />
+    <Image Include="res\notifyicon5.ico" />
+    <Image Include="res\notify_preview.bmp" />
+    <Image Include="res\notify_preview_light.bmp" />
+    <Image Include="res\TrafficMonitor.ico" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+  <ProjectExtensions>
+    <VisualStudio>
+      <UserProperties RESOURCE_FILE="TrafficMonitor.rc" />
+    </VisualStudio>
+  </ProjectExtensions>
+</Project>

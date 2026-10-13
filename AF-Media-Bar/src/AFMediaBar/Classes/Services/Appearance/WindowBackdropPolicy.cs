@@ -1,0 +1,73 @@
+using AFMediaBar.Classes.Settings;
+
+namespace AFMediaBar.Classes.Services;
+
+/// <summary>
+/// 计算窗口请求材质在当前系统环境下的有效材质，以及 Accent 模糊路径要用的底色。
+/// Resolves the effective window backdrop for the requested mode and current system environment, and the tint the Accent blur path
+/// has to use.
+/// </summary>
+public static class WindowBackdropPolicy
+{
+    /// <summary>
+    /// 按系统能力回退：高对比度一律纯色；云母 Alt 在拿不到它时退到云母，两种系统材质都拿不到时退到 Acrylic。
+    ///
+    /// 回退链而不是"不支持就纯色"是刻意的：云母 Alt 只在 Windows 11 22621 之后存在，而 22000 那一档已经有云母，
+    /// 让用户为了一个新材质在选择与纯色之间二选一是没必要的；Windows 10 上没有系统材质（云母不存在，Acrylic 走 Accent 模糊路径，
+    /// 那条路径由窗口自己绘制、在 Windows 10 上可用），因此退到 Acrylic 仍然给到半透明表面，而不是把默认材质变成一块纯色。
+    /// 若那条路径在个别系统上失败，适配器会返回"没应用上"，调用方随即退回纯色（`WindowAppearanceService.ApplyWindow`）。
+    /// Falls back by system capability: high contrast is always solid; Mica Alt falls back to Mica when it is unavailable, and to
+    /// Acrylic when neither system material is available.
+    ///
+    /// A chain rather than "unsupported means solid" is deliberate: Mica Alt exists only from Windows 11 22621 on, while the 22000
+    /// tier already has Mica, so forcing the user to choose between a new material and a solid surface would be pointless. Windows 10
+    /// has no system material at all (no Mica, and Acrylic goes through the window-painted Accent blur path, which does work there),
+    /// so falling back to Acrylic still yields a translucent surface instead of turning the default material into a slab of colour. If
+    /// that path fails on some system the adapter reports "not applied" and the caller falls back to solid
+    /// (`WindowAppearanceService.ApplyWindow`).
+    /// </summary>
+    /// <param name="requested">设置里请求的材质。/ Requested backdrop from the settings.</param>
+    /// <param name="highContrast">是否处于高对比度。/ Whether high contrast is active.</param>
+    /// <param name="supportsMica">系统是否支持云母（Windows 11 22000+）。/ Whether the system supports Mica (Windows 11 22000+).</param>
+    /// <param name="supportsMicaAlt">系统是否支持云母 Alt（Windows 11 22621+）。/ Whether the system supports Mica Alt (Windows 11 22621+).</param>
+    public static ApplicationBackdropMode Resolve(
+        ApplicationBackdropMode requested,
+        bool highContrast,
+        bool supportsMica,
+        bool supportsMicaAlt)
+    {
+        if (highContrast)
+            return ApplicationBackdropMode.FluentSolid;
+
+        if (requested == ApplicationBackdropMode.MicaAlt && !supportsMicaAlt)
+            requested = supportsMica ? ApplicationBackdropMode.Mica : ApplicationBackdropMode.Acrylic;
+
+        if (requested == ApplicationBackdropMode.Mica && !supportsMica)
+            return ApplicationBackdropMode.Acrylic;
+
+        return requested;
+    }
+
+    /// <summary>
+    /// Accent 模糊路径的底色：材质浓度按比例映射成 alpha，颜色跟随主题明暗。
+    ///
+    /// 这条路径由窗口自己绘制，因此浓度就是它的不透明度；Windows 的系统材质（云母/亚克力/Mica Alt）由 DWM 绘制，浓度对它们无效。
+    /// The tint of the Accent blur path: the material concentration maps onto alpha, and the colour follows the theme brightness.
+    ///
+    /// This path is painted by the window itself, so the concentration is literally its opacity; the Windows system materials
+    /// (Mica, Acrylic, Mica Alt) are painted by DWM and are unaffected by it.
+    /// </summary>
+    /// <param name="dark">是否深色主题，决定底色是深灰还是浅白。/ Whether the theme is dark, which picks a dark or a light base colour.</param>
+    /// <param name="opacityPercent">材质浓度（0–100）。/ Material concentration (0-100).</param>
+    /// <returns>ARGB 底色，直接交给 <c>AccentPolicy.GradientColor</c>。/ ARGB tint handed straight to <c>AccentPolicy.GradientColor</c>.</returns>
+    public static int ResolveLegacyTint(bool dark, int opacityPercent)
+    {
+        var percent = Math.Clamp(
+            opacityPercent,
+            AppearanceSettings.MinimumBackdropTintOpacityPercent,
+            AppearanceSettings.MaximumBackdropTintOpacityPercent);
+        var alpha = (int)Math.Round(percent / 100.0 * 255, MidpointRounding.AwayFromZero);
+        var rgb = dark ? 0x00202020 : 0x00F9F9F9;
+        return (alpha << 24) | rgb;
+    }
+}

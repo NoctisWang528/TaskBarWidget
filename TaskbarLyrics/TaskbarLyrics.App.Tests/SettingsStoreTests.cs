@@ -1,0 +1,652 @@
+using System.IO;
+using Xunit;
+
+namespace TaskbarLyrics.App.Tests;
+
+public sealed class SettingsStoreTests
+{
+    [Theory]
+    [InlineData("{}", true)]
+    [InlineData("{\"EnableControlPanel\":false}", false)]
+    [InlineData("{\"EnableControlPanel\":true}", true)]
+    public void ControlPanelSwitchPreservesDefaultAndRoundTrips(string json, bool expected)
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        var filePath = Path.Combine(directory, "settings.json");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.WriteAllText(filePath, json);
+            var store = new SettingsStore(filePath);
+            var loaded = store.Load();
+            Assert.Equal(expected, loaded.EnableControlPanel);
+            Assert.Equal(expected, loaded.Clone().EnableControlPanel);
+            Assert.True(store.Save(loaded));
+            Assert.Equal(expected, store.Load().EnableControlPanel);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("{}", true)]
+    [InlineData("{\"EnableWordScanning\":false}", false)]
+    [InlineData("{\"EnableWordScanning\":true}", true)]
+    public void LoadPreservesWordScanningDefaultAndExplicitValue(
+        string json,
+        bool expectedEnabled)
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        var filePath = Path.Combine(directory, "settings.json");
+        Directory.CreateDirectory(directory);
+
+        try
+        {
+            File.WriteAllText(filePath, json);
+
+            var loaded = new SettingsStore(filePath).Load();
+
+            Assert.Equal(expectedEnabled, loaded.EnableWordScanning);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData("{}", true)]
+    [InlineData("{\"AutoHideWhenNoPlayback\":false}", false)]
+    [InlineData("{\"AutoHideWhenNoPlayback\":true}", true)]
+    public void LoadPreservesAutoHideDefaultAndExplicitValue(
+        string json,
+        bool expectedEnabled)
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        var filePath = Path.Combine(directory, "settings.json");
+        Directory.CreateDirectory(directory);
+
+        try
+        {
+            File.WriteAllText(filePath, json);
+
+            var loaded = new SettingsStore(filePath).Load();
+
+            Assert.Equal(expectedEnabled, loaded.AutoHideWhenNoPlayback);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(0, ForegroundColorMode.Dark)]
+    [InlineData(1, ForegroundColorMode.Light)]
+    [InlineData(2, ForegroundColorMode.Custom)]
+    public void LoadPreservesLegacyForegroundColorModeValues(
+        int persistedValue,
+        ForegroundColorMode expectedMode)
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        var filePath = Path.Combine(directory, "settings.json");
+        Directory.CreateDirectory(directory);
+
+        try
+        {
+            File.WriteAllText(filePath, $"{{\"ForegroundColorMode\":{persistedValue}}}");
+
+            var loaded = new SettingsStore(filePath).Load();
+
+            Assert.Equal(expectedMode, loaded.ForegroundColorMode);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void SavePersistsSystemForegroundColorModeAsTheNextEnumValue()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        var filePath = Path.Combine(directory, "settings.json");
+        Directory.CreateDirectory(directory);
+
+        try
+        {
+            var settings = new AppSettings
+            {
+                ForegroundColorMode = ForegroundColorMode.System
+            };
+
+            var saved = new SettingsStore(filePath).Save(settings);
+
+            Assert.True(saved);
+            Assert.Contains("\"ForegroundColorMode\": 3", File.ReadAllText(filePath), StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void SaveReplacesTheSettingsFileWithoutLeavingTemporaryFiles()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        var filePath = Path.Combine(directory, "settings.json");
+        Directory.CreateDirectory(directory);
+
+        try
+        {
+            var store = new SettingsStore(filePath);
+            var settings = new AppSettings
+            {
+                FontSize = 28,
+                ForegroundColor = "#FF336699",
+                ShowCover = false
+            };
+
+            var saved = store.Save(settings);
+
+            Assert.True(saved);
+            var loaded = store.Load();
+            Assert.Equal(28, loaded.FontSize);
+            Assert.Equal("#FF336699", loaded.ForegroundColor);
+            Assert.False(loaded.ShowCover);
+            Assert.Empty(Directory.EnumerateFiles(directory, ".settings.json.*.tmp"));
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void SaveWhenTargetCannotBeReplacedReportsFailure()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        var filePath = Path.Combine(directory, "settings.json");
+        Directory.CreateDirectory(filePath);
+
+        try
+        {
+            var saved = new SettingsStore(filePath).Save(new AppSettings());
+
+            Assert.False(saved);
+            Assert.Empty(Directory.EnumerateFiles(directory, ".settings.json.*.tmp"));
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void LoadWhenSettingsJsonIsInvalidReturnsDefaultSettings()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        var filePath = Path.Combine(directory, "settings.json");
+        Directory.CreateDirectory(directory);
+
+        try
+        {
+            File.WriteAllText(filePath, "{ invalid json }");
+
+            var loaded = new SettingsStore(filePath).Load();
+
+            Assert.Equal(new AppSettings().FontSize, loaded.FontSize);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void LoadWithoutLayoutScaleUsesOneHundredPercentAndPreservesLegacyBaseValues()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        var filePath = Path.Combine(directory, "settings.json");
+        Directory.CreateDirectory(directory);
+
+        try
+        {
+            File.WriteAllText(filePath, "{\"FontSize\":14.3,\"CoverSize\":34.3,\"UseSafeFontSizeRange\":false,\"UseSafeCoverSizeRange\":false}");
+
+            var loaded = new SettingsStore(filePath).Load();
+
+            Assert.Equal(14.3, loaded.FontSize);
+            Assert.Equal(34.3, loaded.CoverSize);
+            Assert.Equal(AppSettings.DefaultLyricsLayoutScalePercent, loaded.LyricsLayoutScalePercent);
+            Assert.True(loaded.ShowCover);
+            Assert.Equal(ForegroundColorMode.System, loaded.ForegroundColorMode);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void LoadUndefinedLyricsTextAlignmentFallsBackToLeft()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        var filePath = Path.Combine(directory, "settings.json");
+        Directory.CreateDirectory(directory);
+
+        try
+        {
+            File.WriteAllText(filePath, "{\"LyricsTextAlignment\":999}");
+
+            var store = new SettingsStore(filePath);
+            var loaded = store.Load();
+
+            Assert.Equal(LyricsTextAlignment.Left, loaded.LyricsTextAlignment);
+            Assert.True(store.Save(loaded));
+            Assert.Contains("\"LyricsTextAlignment\": 0", File.ReadAllText(filePath), StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(LyricsTextAlignment.Left)]
+    [InlineData(LyricsTextAlignment.Center)]
+    [InlineData(LyricsTextAlignment.Right)]
+    public void SaveAndLoadRoundTripsLyricsTextAlignment(LyricsTextAlignment alignment)
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        var filePath = Path.Combine(directory, "settings.json");
+        Directory.CreateDirectory(directory);
+
+        try
+        {
+            var store = new SettingsStore(filePath);
+            Assert.True(store.Save(new AppSettings { LyricsTextAlignment = alignment }));
+
+            Assert.Equal(alignment, store.Load().LyricsTextAlignment);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void LoadClampsLayoutSettingsToExtendedHardBoundaries()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        var filePath = Path.Combine(directory, "settings.json");
+        Directory.CreateDirectory(directory);
+
+        try
+        {
+            File.WriteAllText(filePath, "{\"FontSize\":200,\"CoverSize\":500,\"CoverGap\":500,\"CoverCornerRadius\":500,\"LyricsLayoutScalePercent\":500}");
+
+            var loaded = new SettingsStore(filePath).Load();
+
+            Assert.Equal(AppSettings.ExtendedFontSizeMax, loaded.FontSize);
+            Assert.Equal(AppSettings.ExtendedCoverSizeMax, loaded.CoverSize);
+            Assert.Equal(AppSettings.CoverGapMax, loaded.CoverGap);
+            Assert.Equal(AppSettings.ExtendedCoverSizeMax / 2, loaded.CoverCornerRadius);
+            Assert.Equal(AppSettings.MaximumLyricsLayoutScalePercent, loaded.LyricsLayoutScalePercent);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void LoadMigratesLegacySpectrumSwitchAndSaveDropsLegacyFields()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        var filePath = Path.Combine(directory, "settings.json");
+        Directory.CreateDirectory(directory);
+
+        try
+        {
+            File.WriteAllText(filePath, "{\"EnableSpectrum\":false,\"EnablePureMusicSpectrum\":true,\"ShowSpectrumWhenLyricsNotFound\":false}");
+            var store = new SettingsStore(filePath);
+
+            var loaded = store.Load();
+            store.Save(loaded);
+
+            Assert.Equal(SpectrumDisplayMode.Disabled, loaded.SpectrumDisplayMode);
+            var saved = File.ReadAllText(filePath);
+            Assert.DoesNotContain("EnableSpectrum", saved, StringComparison.Ordinal);
+            Assert.DoesNotContain("EnablePureMusicSpectrum", saved, StringComparison.Ordinal);
+            Assert.DoesNotContain("ShowSpectrumWhenLyricsNotFound", saved, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData("{\"SpectrumDisplayMode\":2}", SpectrumDisplayMode.Disabled, false)]
+    [InlineData("{\"SpectrumDisplayMode\":2,\"SpectrumAudioAccessGranted\":true}", SpectrumDisplayMode.Always, true)]
+    public void LoadMigratesSpectrumAudioAccessAndPreservesAuthorizedMode(
+        string json,
+        SpectrumDisplayMode expectedMode,
+        bool expectedAccess)
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        var filePath = Path.Combine(directory, "settings.json");
+        Directory.CreateDirectory(directory);
+
+        try
+        {
+            File.WriteAllText(filePath, json);
+
+            var loaded = new SettingsStore(filePath).Load();
+
+            Assert.Equal(expectedMode, loaded.SpectrumDisplayMode);
+            Assert.Equal(expectedAccess, loaded.SpectrumAudioAccessGranted);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void SaveWhenCalledConcurrentlyKeepsAValidSettingsFile()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        var filePath = Path.Combine(directory, "settings.json");
+        var fontSizes = Enumerable.Range(12, 16).Select(value => (double)value).ToArray();
+        Directory.CreateDirectory(directory);
+
+        try
+        {
+            Parallel.ForEach(fontSizes, fontSize =>
+            {
+                new SettingsStore(filePath).Save(new AppSettings { FontSize = fontSize });
+            });
+
+            var loaded = new SettingsStore(filePath).Load();
+            Assert.Contains(loaded.FontSize, fontSizes);
+            Assert.Empty(Directory.EnumerateFiles(directory, ".settings.json.*.tmp"));
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"SelectedDisplayIds\":null}")]
+    public void LoadOldSettingsDefaultsToAllDisplays(string json)
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        var filePath = Path.Combine(directory, "settings.json");
+        Directory.CreateDirectory(directory);
+
+        try
+        {
+            File.WriteAllText(filePath, json);
+
+            var loaded = new SettingsStore(filePath).Load();
+
+            Assert.Equal(LyricsDisplayMode.All, loaded.LyricsDisplayMode);
+            Assert.Empty(loaded.SelectedDisplayIds);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void SaveAndLoadRoundTripsSelectedDisplayIds()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        var filePath = Path.Combine(directory, "settings.json");
+        Directory.CreateDirectory(directory);
+
+        try
+        {
+            var store = new SettingsStore(filePath);
+            var settings = new AppSettings
+            {
+                LyricsDisplayMode = LyricsDisplayMode.Selected,
+                SelectedDisplayIds = [" display-a ", "DISPLAY-A", "display-b"]
+            };
+
+            Assert.True(store.Save(settings));
+            var loaded = store.Load();
+
+            Assert.Equal(LyricsDisplayMode.Selected, loaded.LyricsDisplayMode);
+            Assert.Equal(["display-a", "display-b"], loaded.SelectedDisplayIds);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void LoadMigratesLegacyEmbeddedPresentationToSharedWindowLayout()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        var filePath = Path.Combine(directory, "settings.json");
+        Directory.CreateDirectory(directory);
+
+        try
+        {
+            File.WriteAllText(
+                filePath,
+                "{\"TaskbarEmbeddingEnabled\":true,\"EmbeddedTaskbarWidth\":500,\"EmbeddedTaskbarHorizontalOffset\":12,\"EmbeddedTaskbarVerticalOffset\":-4,\"LyricsLayoutScalePercent\":125}");
+
+            var store = new SettingsStore(filePath);
+            var loaded = store.Load();
+
+            Assert.False(loaded.UseFloatingWindow);
+            Assert.Equal(400, loaded.WindowWidth);
+            Assert.Equal(12, loaded.XOffset);
+            Assert.Equal(-4, loaded.YOffset);
+
+            Assert.True(store.Save(loaded));
+            var saved = File.ReadAllText(filePath);
+            Assert.Contains("\"UseFloatingWindow\": false", saved, StringComparison.Ordinal);
+            Assert.Contains("\"WindowWidth\": 400", saved, StringComparison.Ordinal);
+            Assert.DoesNotContain("TaskbarEmbeddingEnabled", saved, StringComparison.Ordinal);
+            Assert.DoesNotContain("EmbeddedTaskbarWidth", saved, StringComparison.Ordinal);
+            Assert.DoesNotContain("EmbeddedTaskbarHorizontalOffset", saved, StringComparison.Ordinal);
+            Assert.DoesNotContain("EmbeddedTaskbarVerticalOffset", saved, StringComparison.Ordinal);
+
+            var roundTripped = store.Load();
+            Assert.False(roundTripped.UseFloatingWindow);
+            Assert.Equal(loaded.WindowWidth, roundTripped.WindowWidth);
+            Assert.Equal(loaded.XOffset, roundTripped.XOffset);
+            Assert.Equal(loaded.YOffset, roundTripped.YOffset);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void LoadMigratesLegacyFloatingPresentationAndPreservesSharedLayout()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        var filePath = Path.Combine(directory, "settings.json");
+        Directory.CreateDirectory(directory);
+
+        try
+        {
+            File.WriteAllText(
+                filePath,
+                "{\"TaskbarEmbeddingEnabled\":false,\"WindowWidth\":100,\"XOffset\":-36,\"YOffset\":18}");
+
+            var store = new SettingsStore(filePath);
+            var loaded = store.Load();
+
+            Assert.True(loaded.UseFloatingWindow);
+            Assert.Equal(100, loaded.WindowWidth);
+            Assert.Equal(-36, loaded.XOffset);
+            Assert.Equal(18, loaded.YOffset);
+            Assert.True(store.Save(loaded));
+            Assert.Equal(100, store.Load().WindowWidth);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void LoadDefaultsToEmbeddedWhenNoPresentationFieldExists()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        var filePath = Path.Combine(directory, "settings.json");
+        Directory.CreateDirectory(directory);
+
+        try
+        {
+            File.WriteAllText(filePath, "{}");
+
+            var loaded = new SettingsStore(filePath).Load();
+
+            Assert.False(loaded.UseFloatingWindow);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void NewPresentationFieldTakesPrecedenceOverLegacyPresentationFields()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        var filePath = Path.Combine(directory, "settings.json");
+        Directory.CreateDirectory(directory);
+
+        try
+        {
+            File.WriteAllText(
+                filePath,
+                "{\"UseFloatingWindow\":true,\"TaskbarEmbeddingEnabled\":true,\"EmbeddedTaskbarWidth\":600}");
+
+            var loaded = new SettingsStore(filePath).Load();
+
+            Assert.True(loaded.UseFloatingWindow);
+            Assert.Equal(AppSettings.DefaultWindowWidth, loaded.WindowWidth);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+    [Theory]
+    [InlineData(CoverPosition.Left)]
+    [InlineData(CoverPosition.Right)]
+    public void SaveAndLoadRoundTripsCoverPositionWithoutChangingAlignment(CoverPosition position)
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var store = new SettingsStore(Path.Combine(directory, "settings.json"));
+            Assert.True(store.Save(new AppSettings { CoverPosition = position, LyricsTextAlignment = LyricsTextAlignment.Center }));
+            var loaded = store.Load();
+            Assert.Equal(position, loaded.CoverPosition);
+            Assert.Equal(LyricsTextAlignment.Center, loaded.LyricsTextAlignment);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"CoverPosition\":999}")]
+    public void LoadMissingOrInvalidCoverPositionPreservesExistingLayout(string json)
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "settings.json");
+            File.WriteAllText(path, json);
+            Assert.Equal(CoverPosition.Left, new SettingsStore(path).Load().CoverPosition);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+}

@@ -1,0 +1,6 @@
+# 语言文件按字节保真：Inno Setup 的 .isl 是纯文本，但行尾一旦被转换（core.autocrlf=true 会把 LF 换成 CRLF），
+# 仓库里那份缓存文件的 SHA-256 就与脚本里固定的期望值不一致，构建会以"文件被替换"为由失败。
+# Language files are kept byte-for-byte: an Inno Setup .isl is plain text, but any line-ending conversion (core.autocrlf=true
+# turns LF into CRLF) changes the SHA-256 of the cached file away from the value pinned in the build script, and the build then
+# fails claiming the file was replaced.
+installer/languages/*.isl -text

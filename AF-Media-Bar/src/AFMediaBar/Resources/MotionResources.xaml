@@ -1,0 +1,43 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Duration x:Key="AfMotionFastDuration">0:0:0.12</Duration>
+    <Duration x:Key="AfMotionStandardDuration">0:0:0.18</Duration>
+    <Duration x:Key="AfMotionPanelDuration">0:0:0.18</Duration>
+    <Duration x:Key="AfMotionPositionDuration">0:0:0.22</Duration>
+    <Duration x:Key="AfMotionExitDuration">0:0:0.12</Duration>
+
+    <PowerEase x:Key="AfEaseOut" Power="3" EasingMode="EaseOut" />
+    <PowerEase x:Key="AfEaseInOut" Power="3" EasingMode="EaseInOut" />
+
+    <!-- 阴影按控件层级分档；低性能/高对比度路径由宿主清除。 -->
+    <!-- Shadow tiers stay resource-backed; hosts clear them on low-performance/high-contrast paths. -->
+    <DropShadowEffect x:Key="AfButtonShadowEffect" BlurRadius="6" ShadowDepth="1" Opacity="0.16" />
+    <DropShadowEffect x:Key="AfPanelShadowEffect" BlurRadius="24" ShadowDepth="6" Opacity="0.28" />
+    <DropShadowEffect x:Key="AfFlyoutShadowEffect" BlurRadius="16" ShadowDepth="3" Opacity="0.24" />
+    <DropShadowEffect x:Key="AfNotificationShadowEffect" BlurRadius="12" ShadowDepth="2" Opacity="0.24" />
+
+    <CornerRadius x:Key="AfButtonCornerRadius">4</CornerRadius>
+    <CornerRadius x:Key="AfSurfaceCornerRadius">8</CornerRadius>
+    <CornerRadius x:Key="AfNotificationCornerRadius">10</CornerRadius>
+
+    <!--
+        焦点框：强调色 + 与设置行相同的 8 DIP 圆角。原先用系统高亮色的 4 DIP 方框，与它包着的卡片（8 DIP 圆角）不是同一套语言，
+        看起来像贴上去的。高对比度下不需要额外分支：AfAccentBrush 本身就是系统高亮色（见 AccentColorPolicy）。
+        Focus frame: accent colour with the same 8 DIP radius as the settings rows. The previous system-highlight rectangle used a
+        4 DIP radius, which is not the language of the card it wraps (8 DIP) and read as something stuck on. Under high contrast
+        no extra branch is needed: AfAccentBrush is the system highlight colour there (see AccentColorPolicy).
+    -->
+    <Style x:Key="AfFocusVisualStyle" TargetType="Control">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate>
+                    <Border Margin="-2"
+                            BorderBrush="{DynamicResource AfAccentBrush}"
+                            BorderThickness="2"
+                            CornerRadius="{StaticResource AfSurfaceCornerRadius}" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+</ResourceDictionary>

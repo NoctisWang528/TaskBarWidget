@@ -1,0 +1,33 @@
+name: 报告问题 / Bug report
+description: 告诉我们哪里出了问题。 / Tell us what went wrong.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前请搜索相似 Issue。安全问题请[私下报告](https://github.com/Fervent-Tempo/AF-Media-Bar/security/advisories/new)。
+        Search for similar issues first. [Report security issues privately](https://github.com/Fervent-Tempo/AF-Media-Bar/security/advisories/new).
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述 / What happened
+      description: 说说实际发生了什么，以及你原本希望怎样。 / Describe what happened and what you expected.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现方法 / How to reproduce
+      description: 简单写下操作过程；如果偶尔出现，也请说明。 / List the steps, or say if it happens only sometimes.
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 环境与附件 / Environment and attachments
+      description: 如果方便，请提供 AF Media Bar 和 Windows 版本、播放器或网站，以及截图、录屏或错误信息。分享前请删除隐私信息。 / If available, add app and Windows versions, player or website, screenshots, recordings, or errors. Remove private information first.

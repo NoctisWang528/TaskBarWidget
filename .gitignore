@@ -1,0 +1,9 @@
+# Workspace-local tools, credentials, and temporary files
+/.vs/
+/.idea/
+/.vscode/
+/tmp/
+/.env
+/.env.*
+
+# Each application maintains its own build and runtime exclusions.

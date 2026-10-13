@@ -1,0 +1,2712 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--StringsZhHans stores one UI language; Translations owns lookup and runtime WPF publication.-->
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <data name="About.Header.Subtitle" xml:space="preserve">
+    <value>开发人员、赞助者与开源许可</value>
+  </data>
+  <data name="About.Language.Description" xml:space="preserve">
+    <value>选择界面语言；跟随系统时使用 Windows 显示语言。</value>
+  </data>
+  <data name="About.Language.English" xml:space="preserve">
+    <value>English</value>
+  </data>
+  <data name="About.Language.FollowSystem" xml:space="preserve">
+    <value>跟随系统</value>
+  </data>
+  <data name="About.Language.SimplifiedChinese" xml:space="preserve">
+    <value>简体中文</value>
+  </data>
+  <data name="About.Language.Title" xml:space="preserve">
+    <value>界面语言</value>
+  </data>
+  <data name="About.Language.TraditionalChinese" xml:space="preserve">
+    <value>繁體中文</value>
+  </data>
+  <data name="About.Language.Vietnamese" xml:space="preserve">
+    <value>Tiếng Việt</value>
+  </data>
+  <data name="About.ResetScope" xml:space="preserve">
+    <value>所有设置</value>
+  </data>
+  <data name="About.Row.AutoCheck.Description" xml:space="preserve">
+    <value>启动后约 20 秒检查更新；成功后每 24 小时、失败后 1 小时重试。发现新版本时通知。</value>
+  </data>
+  <data name="About.Row.AutoCheck.Title" xml:space="preserve">
+    <value>自动检查更新</value>
+  </data>
+  <data name="About.Row.ClearDefaults.Description" xml:space="preserve">
+    <value>删除保存的默认设置，改用程序内置默认值。</value>
+  </data>
+  <data name="About.Row.ClearDefaults.Title" xml:space="preserve">
+    <value>清除我的默认设置</value>
+  </data>
+  <data name="About.Row.Download.Download" xml:space="preserve">
+    <value>下载并安装</value>
+  </data>
+  <data name="About.Row.DownloadPage.Description" xml:space="preserve">
+    <value>GitHub 无法打开时，通过加速站点访问下载页。</value>
+  </data>
+  <data name="About.Row.DownloadPage.Mirror" xml:space="preserve">
+    <value>加速镜像</value>
+  </data>
+  <data name="About.Row.DownloadPage.Title" xml:space="preserve">
+    <value>打开下载页</value>
+  </data>
+  <data name="About.Row.Install.Description" xml:space="preserve">
+    <value>下载并校验后，可立即安装或在下次启动时安装。</value>
+  </data>
+  <data name="About.Row.Install.Now" xml:space="preserve">
+    <value>立即重启并安装</value>
+  </data>
+  <data name="About.Row.Install.Title" xml:space="preserve">
+    <value>安装更新</value>
+  </data>
+  <data name="About.Row.OpenFolder.Description" xml:space="preserve">
+    <value>打开设置文件夹，便于备份或替换。</value>
+  </data>
+  <data name="About.Row.OpenFolder.Title" xml:space="preserve">
+    <value>打开设置文件夹</value>
+  </data>
+  <data name="About.Row.LogFolder.Description" xml:space="preserve">
+    <value>打开日志文件夹；反馈问题时可附上 logs\app.log。</value>
+  </data>
+  <data name="About.Row.LogFolder.Title" xml:space="preserve">
+    <value>日志文件</value>
+  </data>
+  <data name="About.Row.TrimMemory.Button" xml:space="preserve">
+    <value>立即压缩</value>
+  </data>
+  <data name="About.Row.TrimMemory.Description" xml:space="preserve">
+    <value>将暂时不用的物理内存交还系统；再次使用时可能短暂卡顿。</value>
+  </data>
+  <data name="About.Row.TrimMemory.Title" xml:space="preserve">
+    <value>压缩内存占用</value>
+  </data>
+  <data name="Common.Group.Developers" xml:space="preserve">
+    <value>开发人员</value>
+  </data>
+  <data name="Common.Group.Diagnostics" xml:space="preserve">
+    <value>诊断与日志</value>
+  </data>
+  <data name="About.Row.Portable.Badge" xml:space="preserve">
+    <value>便携版</value>
+  </data>
+  <data name="About.Row.Portable.Description" xml:space="preserve">
+    <value>便携版无法自动安装；请下载安装包或手动替换文件。</value>
+  </data>
+  <data name="About.Row.Portable.Title" xml:space="preserve">
+    <value>自动更新不可用</value>
+  </data>
+  <data name="About.Row.Progress.Title" xml:space="preserve">
+    <value>下载进度</value>
+  </data>
+  <data name="About.Row.Project.Description" xml:space="preserve">
+    <value>项目仍在积极开发中，遇到问题欢迎反馈</value>
+  </data>
+  <data name="About.Row.Project.Issues" xml:space="preserve">
+    <value>问题反馈</value>
+  </data>
+  <data name="About.Row.Project.Star" xml:space="preserve">
+    <value>在 GitHub 点 Star</value>
+  </data>
+  <data name="About.Row.ResetAll.Button" xml:space="preserve">
+    <value>重置全部</value>
+  </data>
+  <data name="About.Row.ResetAll.Description" xml:space="preserve">
+    <value>将所有设置恢复为当前保存的默认值。</value>
+  </data>
+  <data name="About.Row.ResetAll.Title" xml:space="preserve">
+    <value>重置全部设置</value>
+  </data>
+  <data name="About.Row.SaveDefaults.NotSaved" xml:space="preserve">
+    <value>未保存：各页的「恢复默认设置」回到程序内置默认值</value>
+  </data>
+  <data name="About.Row.SaveDefaults.Saved" xml:space="preserve">
+    <value>已保存：各页的「恢复默认设置」都会回到这份快照</value>
+  </data>
+  <data name="About.Row.SaveDefaults.Title" xml:space="preserve">
+    <value>保存当前设置为默认</value>
+  </data>
+  <data name="About.Row.Skip.Clear" xml:space="preserve">
+    <value>取消跳过</value>
+  </data>
+  <data name="About.Row.Skip.Description" xml:space="preserve">
+    <value>不再自动提示此版本；手动检查时仍会显示。</value>
+  </data>
+  <data name="About.Licenses.Open" xml:space="preserve">
+    <value>查看项目</value>
+  </data>
+  <data name="About.Support.Alipay" xml:space="preserve">
+    <value>支付宝</value>
+  </data>
+  <data name="About.Support.Pending" xml:space="preserve">
+    <value>收款码图片缺失；上方路径是应放入的文件位置</value>
+  </data>
+  <data name="About.Support.SponsorNote" xml:space="preserve">
+    <value>大于 10 元的赞助可以进入赞助者名单，请在备注中留下 id</value>
+  </data>
+  <data name="About.Support.WeChat" xml:space="preserve">
+    <value>微信</value>
+  </data>
+  <data name="Credits.Contributions" xml:space="preserve">
+    <value>提交 {0} 次</value>
+  </data>
+  <data name="Credits.Reason.ContributorsEmpty" xml:space="preserve">
+    <value>贡献者列表为空</value>
+  </data>
+  <data name="Credits.Reason.ContributorsShape" xml:space="preserve">
+    <value>贡献者列表结构不正确</value>
+  </data>
+  <data name="Credits.Reason.Empty" xml:space="preserve">
+    <value>名单内容为空</value>
+  </data>
+  <data name="Credits.Reason.InvalidJson" xml:space="preserve">
+    <value>名单内容不是有效的 JSON</value>
+  </data>
+  <data name="Credits.Reason.Unavailable" xml:space="preserve">
+    <value>在线名单暂不可用，请稍后重试。</value>
+  </data>
+  <data name="Credits.Reason.SchemaTooNew" xml:space="preserve">
+    <value>赞助名单的结构版本（{0}）高于本程序支持的版本（{1}）</value>
+  </data>
+  <data name="Credits.Reason.SponsorsShape" xml:space="preserve">
+    <value>赞助名单结构不正确</value>
+  </data>
+  <data name="Credits.Sponsors.Count" xml:space="preserve">
+    <value>共 {0} 位赞助者</value>
+  </data>
+  <data name="Credits.Sponsors.None" xml:space="preserve">
+    <value>暂无赞助者。如果这份名单没有出现，请点「重试」，或在仓库的 docs/sponsors.json 里补充</value>
+  </data>
+  <data name="Credits.SponsorSeparator" xml:space="preserve">
+    <value>、</value>
+  </data>
+  <data name="Credits.Status.Failed" xml:space="preserve">
+    <value>暂时无法获取名单：{0}</value>
+  </data>
+  <data name="Credits.Status.Partial" xml:space="preserve">
+    <value>部分名单暂未更新，已保留现有内容。</value>
+  </data>
+  <data name="Credits.Status.PartialCached" xml:space="preserve">
+    <value>上次只取到一部分名单</value>
+  </data>
+  <data name="Credits.Status.Loading" xml:space="preserve">
+    <value>正在更新开发人员与赞助者名单…</value>
+  </data>
+  <data name="Credits.Retry" xml:space="preserve">
+    <value>重试</value>
+  </data>
+  <data name="Credits.Status.Title" xml:space="preserve">
+    <value>名单更新</value>
+  </data>
+  <data name="Credits.Updating" xml:space="preserve">
+    <value>更新中…</value>
+  </data>
+  <data name="About.Row.Startup.Description" xml:space="preserve">
+    <value>登录 Windows 后自动启动，仅影响当前用户。</value>
+  </data>
+  <data name="About.Row.Startup.Title" xml:space="preserve">
+    <value>开机自动启动</value>
+  </data>
+  <data name="About.Row.Version.Check" xml:space="preserve">
+    <value>检查更新</value>
+  </data>
+  <data name="About.Row.Version.Description" xml:space="preserve">
+    <value>查看当前版本与可用的最新版本。</value>
+  </data>
+  <data name="About.Row.Version.Title" xml:space="preserve">
+    <value>版本</value>
+  </data>
+  <data name="About.Status.ClearDefaultsFailed" xml:space="preserve">
+    <value>无法删除默认设置：{0}</value>
+  </data>
+  <data name="About.Status.SaveDefaultsFailed" xml:space="preserve">
+    <value>无法保存默认设置：{0}</value>
+  </data>
+  <data name="About.Status.StartupUnknown" xml:space="preserve">
+    <value>无法核实开机启动项。开关保留原设置，实际登记状态未知。</value>
+  </data>
+  <data name="About.Status.StartupFailed" xml:space="preserve">
+    <value>无法修改启动项：{0}</value>
+  </data>
+  <data name="Appearance.Accent.Custom" xml:space="preserve">
+    <value>自定义</value>
+  </data>
+  <data name="Appearance.Accent.FollowSystem" xml:space="preserve">
+    <value>跟随系统</value>
+  </data>
+  <data name="Appearance.Accent.HexLabel" xml:space="preserve">
+    <value>色值</value>
+  </data>
+  <data name="Appearance.Accent.Hint" xml:space="preserve">
+    <value>强调色用于选中项、开关、进度条和媒体栏高亮；自定义颜色只影响本程序。高对比度模式使用系统颜色。</value>
+  </data>
+  <data name="Appearance.Accent.PaletteLabel" xml:space="preserve">
+    <value>选择主题色</value>
+  </data>
+  <data name="Appearance.Backdrop.Acrylic" xml:space="preserve">
+    <value>亚克力（Acrylic）</value>
+  </data>
+  <data name="Appearance.Backdrop.Mica" xml:space="preserve">
+    <value>云母（Mica）</value>
+  </data>
+  <data name="Appearance.Backdrop.MicaAlt" xml:space="preserve">
+    <value>云母 Alt（Mica Alt）</value>
+  </data>
+  <data name="Appearance.Backdrop.Solid" xml:space="preserve">
+    <value>纯色</value>
+  </data>
+  <data name="Appearance.BackdropTint.Hint" xml:space="preserve">
+    <value>仅影响程序绘制的背景，如 Windows 10 窗口和曲目通知；Windows 11 的系统材质不受影响。</value>
+  </data>
+  <data name="Appearance.CjkFont.FollowSystem" xml:space="preserve">
+    <value>跟随系统</value>
+  </data>
+  <data name="Appearance.CjkFont.Sample" xml:space="preserve">
+    <value>中文字体示例</value>
+  </data>
+  <data name="Appearance.Font.PreviewLabel" xml:space="preserve">
+    <value>预览</value>
+  </data>
+  <data name="Appearance.LatinFont.FollowSystem" xml:space="preserve">
+    <value>跟随系统</value>
+  </data>
+  <data name="Appearance.LatinFont.Sample" xml:space="preserve">
+    <value>Aa Bb 123</value>
+  </data>
+  <data name="Appearance.Header.Subtitle" xml:space="preserve">
+    <value>字体、主题、媒体栏宽度与交互按钮外观</value>
+  </data>
+  <data name="Appearance.Group.RestLayout" xml:space="preserve">
+    <value>文字布局</value>
+  </data>
+  <data name="Appearance.Group.InteractionButtons" xml:space="preserve">
+    <value>交互按钮</value>
+  </data>
+  <data name="Appearance.Row.InteractionButtonSize.Title" xml:space="preserve">
+    <value>交互按钮大小</value>
+  </data>
+  <data name="Appearance.Row.InteractionButtonSize.Description" xml:space="preserve">
+    <value>调整常驻状态和快捷控制按钮及图标的大小。</value>
+  </data>
+  <data name="Appearance.Motion.Detail.Full" xml:space="preserve">
+    <value>保留展开、反馈和频谱过渡</value>
+  </data>
+  <data name="Appearance.Motion.Detail.Instant" xml:space="preserve">
+    <value>跟随系统设置，避免过渡延迟</value>
+  </data>
+  <data name="Appearance.Motion.Detail.Reduced" xml:space="preserve">
+    <value>已关闭模糊、跑马灯和连续频谱</value>
+  </data>
+  <data name="Appearance.Motion.Mode.Full" xml:space="preserve">
+    <value>完整动效</value>
+  </data>
+  <data name="Appearance.Motion.Mode.Instant" xml:space="preserve">
+    <value>即时更新</value>
+  </data>
+  <data name="Appearance.Motion.Mode.Reduced" xml:space="preserve">
+    <value>轻量动效</value>
+  </data>
+  <data name="Appearance.Preview.DarkWallpaper" xml:space="preserve">
+    <value>深色壁纸</value>
+  </data>
+  <data name="Appearance.Preview.Hint" xml:space="preserve">
+    <value>预览仅供参考；自动文字色取决于实际任务栏背景。</value>
+  </data>
+  <data name="Appearance.Preview.LightWallpaper" xml:space="preserve">
+    <value>浅色壁纸</value>
+  </data>
+  <data name="Appearance.Row.Accent.Description" xml:space="preserve">
+    <value>跟随 Windows 强调色，或只为本程序选择颜色。</value>
+  </data>
+  <data name="Appearance.Row.Accent.Title" xml:space="preserve">
+    <value>强调色</value>
+  </data>
+  <data name="Appearance.Row.Backdrop.Description" xml:space="preserve">
+    <value>选择设置窗口等窗口表面的背景材质；菜单保持纯色。</value>
+  </data>
+  <data name="Appearance.Row.Backdrop.Title" xml:space="preserve">
+    <value>窗口背景材质</value>
+  </data>
+  <data name="Appearance.Row.TaskbarBackground.Description" xml:space="preserve">
+    <value>为媒体栏添加半透明磨砂底色，在透明任务栏上保持内容清晰。</value>
+  </data>
+  <data name="Appearance.Row.TaskbarBackground.Title" xml:space="preserve">
+    <value>任务栏磨砂背景</value>
+  </data>
+  <data name="Appearance.Row.TaskbarFrostedStyle.Description" xml:space="preserve">
+    <value>选择灰雾色调，或让模糊封面更明显。</value>
+  </data>
+  <data name="Appearance.Row.TaskbarFrostedStyle.Title" xml:space="preserve">
+    <value>材质风格</value>
+  </data>
+  <data name="Appearance.TaskbarFrostedStyle.Neutral" xml:space="preserve">
+    <value>自适应灰雾</value>
+  </data>
+  <data name="Appearance.TaskbarFrostedStyle.Cool" xml:space="preserve">
+    <value>冷灰</value>
+  </data>
+  <data name="Appearance.TaskbarFrostedStyle.Warm" xml:space="preserve">
+    <value>暖灰</value>
+  </data>
+  <data name="Appearance.TaskbarFrostedStyle.Artwork" xml:space="preserve">
+    <value>封面氛围</value>
+  </data>
+  <data name="Appearance.Row.TaskbarBackgroundWhenIdle.Description" xml:space="preserve">
+    <value>未连接媒体时也显示背景；关闭后保留小音符及常驻组件。</value>
+  </data>
+  <data name="Appearance.Row.TaskbarBackgroundWhenIdle.Title" xml:space="preserve">
+    <value>无媒体时显示背景</value>
+  </data>
+  <data name="Appearance.Row.TaskbarBackgroundBorder.Description" xml:space="preserve">
+    <value>在媒体栏边缘显示细边框。</value>
+  </data>
+  <data name="Appearance.Row.TaskbarBackgroundBorder.Title" xml:space="preserve">
+    <value>显示边框</value>
+  </data>
+  <data name="Appearance.Row.TaskbarBackgroundTexture.Description" xml:space="preserve">
+    <value>有封面时显示模糊纹理；高对比度模式下不显示。</value>
+  </data>
+  <data name="Appearance.Row.TaskbarBackgroundTexture.Title" xml:space="preserve">
+    <value>显示封面纹理</value>
+  </data>
+  <data name="Appearance.Row.TaskbarBackgroundTint.Description" xml:space="preserve">
+    <value>显示磨砂底色，可独立搭配边框和封面纹理。</value>
+  </data>
+  <data name="Appearance.Row.TaskbarBackgroundTint.Title" xml:space="preserve">
+    <value>显示底色</value>
+  </data>
+  <data name="Appearance.Row.TaskbarBackgroundOpacity.Description" xml:space="preserve">
+    <value>数值越高，灰色遮罩越浓，透明任务栏上的内容越清晰。</value>
+  </data>
+  <data name="Appearance.Row.TaskbarBackgroundOpacity.Title" xml:space="preserve">
+    <value>磨砂程度</value>
+  </data>
+  <data name="Appearance.Row.BackdropTint.Description" xml:space="preserve">
+    <value>调整 Windows 10 窗口和曲目通知的背景浓度（30%–100%）；Windows 11 系统绘制的窗口材质不受影响。</value>
+  </data>
+  <data name="Appearance.Row.BackdropTint.Title" xml:space="preserve">
+    <value>材质浓度</value>
+  </data>
+  <data name="Appearance.Row.CjkFont.Description" xml:space="preserve">
+    <value>选择中文等东亚文字使用的字体。</value>
+  </data>
+  <data name="Appearance.Row.CjkFont.Title" xml:space="preserve">
+    <value>中文字体</value>
+  </data>
+  <data name="Appearance.Row.FontWeight.Description" xml:space="preserve">
+    <value>调整设置页、媒体栏和通知的文字粗细。</value>
+  </data>
+  <data name="Appearance.Row.FontWeight.Title" xml:space="preserve">
+    <value>字体粗细</value>
+  </data>
+  <data name="Appearance.Row.LatinFont.Description" xml:space="preserve">
+    <value>选择字母和数字使用的字体。</value>
+  </data>
+  <data name="Appearance.Row.LatinFont.Title" xml:space="preserve">
+    <value>西文字体</value>
+  </data>
+  <data name="Appearance.Row.MediaFontSize.Description" xml:space="preserve">
+    <value>缩放媒体栏标题、歌手和歌词的字号（80%–125%）。</value>
+  </data>
+  <data name="Appearance.Row.MediaFontSize.Title" xml:space="preserve">
+    <value>媒体文字大小</value>
+  </data>
+  <data name="Appearance.Row.Motion.Title" xml:space="preserve">
+    <value>交互动效</value>
+  </data>
+  <data name="Appearance.Row.TextColor.Description" xml:space="preserve">
+    <value>设置媒体栏文字颜色；自动模式根据背景选择深色或浅色文字。</value>
+  </data>
+  <data name="Appearance.Row.TextColor.Title" xml:space="preserve">
+    <value>文字颜色</value>
+  </data>
+  <data name="Appearance.Row.Theme.Description" xml:space="preserve">
+    <value>跟随 Windows 的浅色或深色模式，或手动选择。</value>
+  </data>
+  <data name="Appearance.Row.Theme.Title" xml:space="preserve">
+    <value>应用主题</value>
+  </data>
+  <data name="Appearance.Specimen.Label" xml:space="preserve">
+    <value>字样预览</value>
+  </data>
+  <data name="Appearance.TextColor.Automatic" xml:space="preserve">
+    <value>自动（根据背景）</value>
+  </data>
+  <data name="Appearance.TextColor.DarkText" xml:space="preserve">
+    <value>始终深色文字</value>
+  </data>
+  <data name="Appearance.TextColor.LightText" xml:space="preserve">
+    <value>始终浅色文字</value>
+  </data>
+  <data name="Appearance.Theme.Automatic" xml:space="preserve">
+    <value>自动（跟随系统）</value>
+  </data>
+  <data name="Appearance.Theme.Dark" xml:space="preserve">
+    <value>深色</value>
+  </data>
+  <data name="Appearance.Theme.Light" xml:space="preserve">
+    <value>浅色</value>
+  </data>
+  <data name="Audio.Application.SystemSounds" xml:space="preserve">
+    <value>系统声音</value>
+  </data>
+  <data name="Audio.Error.CreateDeviceEnumerator" xml:space="preserve">
+    <value>无法创建 Windows 音频设备枚举器。</value>
+  </data>
+  <data name="Audio.Error.CreatePolicyConfig" xml:space="preserve">
+    <value>无法创建 Windows 音频策略服务。</value>
+  </data>
+  <data name="Audio.OutputDevice.Unavailable" xml:space="preserve">
+    <value>输出设备：不可用</value>
+  </data>
+  <data name="Audio.OutputDevice.Unchanged" xml:space="preserve">
+    <value>输出设备：未改变</value>
+  </data>
+  <data name="Audio.OutputDevice.Value" xml:space="preserve">
+    <value>输出设备：{0}</value>
+  </data>
+  <data name="Audio.Spatial.Enabled" xml:space="preserve">
+    <value>已启用</value>
+  </data>
+  <data name="Audio.Spatial.NoDevice" xml:space="preserve">
+    <value>无输出设备</value>
+  </data>
+  <data name="Audio.Spatial.Off" xml:space="preserve">
+    <value>关闭</value>
+  </data>
+  <data name="Audio.Spatial.Unavailable" xml:space="preserve">
+    <value>状态不可用</value>
+  </data>
+  <data name="Audio.Spatial.Unsupported" xml:space="preserve">
+    <value>此设备不支持</value>
+  </data>
+  <data name="Audio.Status.AdjustApplicationVolumeFailed" xml:space="preserve">
+    <value>调节 {0} 音量失败：{1}</value>
+  </data>
+  <data name="Audio.Status.NoSessions" xml:space="preserve">
+    <value>当前没有应用音频会话</value>
+  </data>
+  <data name="Audio.Status.OpenSoundSettingsFailed" xml:space="preserve">
+    <value>无法打开系统声音设置：{0}</value>
+  </data>
+  <data name="Audio.Status.ReadFailed" xml:space="preserve">
+    <value>读取音频状态失败：{0}</value>
+  </data>
+  <data name="Audio.Status.SwitchOutputDeviceFailed" xml:space="preserve">
+    <value>切换输出设备失败：{0}</value>
+  </data>
+  <data name="Audio.Tooltip.AdjustVolumeFailed" xml:space="preserve">
+    <value>音量调节失败</value>
+  </data>
+  <data name="Audio.Tooltip.SwitchOutputDeviceFailed" xml:space="preserve">
+    <value>输出设备切换失败</value>
+  </data>
+  <data name="Audio.Tooltip.WheelDisabled" xml:space="preserve">
+    <value>托盘滚轮已禁用</value>
+  </data>
+  <data name="Audio.Volume.CurrentValue" xml:space="preserve">
+    <value>{0} {1}%</value>
+  </data>
+  <data name="Audio.Volume.Unavailable" xml:space="preserve">
+    <value>当前媒体音量：不可用</value>
+  </data>
+  <data name="Audio.Volume.Unchanged" xml:space="preserve">
+    <value>当前媒体音量：未改变</value>
+  </data>
+  <data name="Audio.Volume.Value" xml:space="preserve">
+    <value>{0}：{1}%</value>
+  </data>
+  <data name="Common.ActivateSourceApplication" xml:space="preserve">
+    <value>打开播放中的程序</value>
+  </data>
+  <data name="Common.AdjustCurrentMediaVolume" xml:space="preserve">
+    <value>调节当前媒体音量</value>
+  </data>
+  <data name="Common.AlignCenter" xml:space="preserve">
+    <value>居中</value>
+  </data>
+  <data name="Common.AlignLeft" xml:space="preserve">
+    <value>左对齐</value>
+  </data>
+  <data name="Common.AlignRight" xml:space="preserve">
+    <value>右对齐</value>
+  </data>
+  <data name="Common.AudioControl" xml:space="preserve">
+    <value>音频控制</value>
+  </data>
+  <data name="Common.Cancel" xml:space="preserve">
+    <value>取消</value>
+  </data>
+  <data name="Common.Clear" xml:space="preserve">
+    <value>清除</value>
+  </data>
+  <data name="Common.DynamicIsland" xml:space="preserve">
+    <value>灵动岛</value>
+  </data>
+  <data name="Common.Exit" xml:space="preserve">
+    <value>退出</value>
+  </data>
+  <data name="Common.FullLayer" xml:space="preserve">
+    <value>完整面板</value>
+  </data>
+  <data name="Common.Group.Application" xml:space="preserve">
+    <value>应用</value>
+  </data>
+  <data name="Common.Group.ChooseDisplayMode" xml:space="preserve">
+    <value>运行模式</value>
+  </data>
+  <data name="Common.Group.Fonts" xml:space="preserve">
+    <value>通用字体</value>
+  </data>
+  <data name="Common.Group.InAppRestLayer" xml:space="preserve">
+    <value>媒体栏点击</value>
+  </data>
+  <data name="Common.Group.IslandAppearance" xml:space="preserve">
+    <value>灵动岛外观</value>
+  </data>
+  <data name="Common.Group.Licenses" xml:space="preserve">
+    <value>开源许可</value>
+  </data>
+  <data name="Common.Group.LyricsAlignment" xml:space="preserve">
+    <value>对齐</value>
+  </data>
+  <data name="Common.Group.LyricsDisplay" xml:space="preserve">
+    <value>显示</value>
+  </data>
+  <data name="Common.Group.LyricsSources" xml:space="preserve">
+    <value>取词来源</value>
+  </data>
+  <data name="Common.Group.MediaBarText" xml:space="preserve">
+    <value>媒体栏文字</value>
+  </data>
+  <data name="Common.Group.MediaBarWidth" xml:space="preserve">
+    <value>长度与间距</value>
+  </data>
+  <data name="Common.Group.ProjectInfo" xml:space="preserve">
+    <value>项目信息</value>
+  </data>
+  <data name="Common.Group.QuickLaunch" xml:space="preserve">
+    <value>快速启动</value>
+  </data>
+  <data name="Common.Group.RestLayerComponents" xml:space="preserve">
+    <value>常驻状态组件</value>
+  </data>
+  <data name="Common.Group.ScreenAndPlacement" xml:space="preserve">
+    <value>屏幕与位置</value>
+  </data>
+  <data name="Common.Group.SettingsFile" xml:space="preserve">
+    <value>设置文件</value>
+  </data>
+  <data name="Common.Group.SharedModifier" xml:space="preserve">
+    <value>共用的按键</value>
+  </data>
+  <data name="Common.Group.Sponsors" xml:space="preserve">
+    <value>赞助者名单</value>
+  </data>
+  <data name="Common.Group.Support" xml:space="preserve">
+    <value>赞助我</value>
+  </data>
+  <data name="Common.Group.ThemeAndBackdrop" xml:space="preserve">
+    <value>所有窗口</value>
+  </data>
+  <data name="Common.Group.TrackChangeNotification" xml:space="preserve">
+    <value>曲目切换通知</value>
+  </data>
+  <data name="Common.HoverLayer" xml:space="preserve">
+    <value>快捷控制</value>
+  </data>
+  <data name="Common.MediaSource" xml:space="preserve">
+    <value>媒体来源</value>
+  </data>
+  <data name="Common.Modifier.LeftMouseButton" xml:space="preserve">
+    <value>鼠标左键</value>
+  </data>
+  <data name="Common.Modifier.RightMouseButton" xml:space="preserve">
+    <value>鼠标右键</value>
+  </data>
+  <data name="Common.Modifier.Shift" xml:space="preserve">
+    <value>Shift 键</value>
+  </data>
+  <data name="Common.Monitor.PrimarySuffix" xml:space="preserve">
+    <value>（主显示器）</value>
+  </data>
+  <data name="Common.NextTrack" xml:space="preserve">
+    <value>下一首</value>
+  </data>
+  <data name="Common.NotBound" xml:space="preserve">
+    <value>未绑定</value>
+  </data>
+  <data name="Common.NotImplemented" xml:space="preserve">
+    <value>未实现</value>
+  </data>
+  <data name="Common.OpenFolder" xml:space="preserve">
+    <value>打开文件夹</value>
+  </data>
+  <data name="Common.OpenFullPanel" xml:space="preserve">
+    <value>打开完整面板</value>
+  </data>
+  <data name="Common.OutputDevice" xml:space="preserve">
+    <value>输出设备</value>
+  </data>
+  <data name="Common.Page.About" xml:space="preserve">
+    <value>关于</value>
+  </data>
+  <data name="Common.Page.Application" xml:space="preserve">
+    <value>应用</value>
+  </data>
+  <data name="Common.Page.Appearance" xml:space="preserve">
+    <value>外观</value>
+  </data>
+  <data name="Common.Page.Components" xml:space="preserve">
+    <value>组件设置</value>
+  </data>
+  <data name="Common.Page.DisplayModes" xml:space="preserve">
+    <value>显示模式</value>
+  </data>
+  <data name="Common.Page.Interaction" xml:space="preserve">
+    <value>交互</value>
+  </data>
+  <data name="Common.Page.Lyrics" xml:space="preserve">
+    <value>歌词</value>
+  </data>
+  <data name="Common.Page.MediaAndNotifications" xml:space="preserve">
+    <value>媒体与通知</value>
+  </data>
+  <data name="Common.PlayPause" xml:space="preserve">
+    <value>播放 / 暂停</value>
+  </data>
+  <data name="Common.PreviousNextTrack" xml:space="preserve">
+    <value>上一首 / 下一首</value>
+  </data>
+  <data name="Common.PreviousTrack" xml:space="preserve">
+    <value>上一首</value>
+  </data>
+  <data name="Common.ReconnectSmtc" xml:space="preserve">
+    <value>重新连接 SMTC</value>
+  </data>
+  <data name="Common.ReloadTaskbarHost" xml:space="preserve">
+    <value>重新加载任务栏媒体栏</value>
+  </data>
+  <data name="Common.ResetDialog.Confirm" xml:space="preserve">
+    <value>恢复</value>
+  </data>
+  <data name="Common.ResetDialog.AllContent" xml:space="preserve">
+    <value>将所有页面的设置恢复为当前保存的默认值；若未保存，则恢复为程序内置默认值。</value>
+  </data>
+  <data name="Common.ResetDialog.Content" xml:space="preserve">
+    <value>将重置「{0}」中的全部选项，其它页面与当前播放不受影响。</value>
+  </data>
+  <data name="Common.ResetDialog.Title" xml:space="preserve">
+    <value>恢复默认设置</value>
+  </data>
+  <data name="Common.ResetPageDefaults" xml:space="preserve">
+    <value>恢复本页默认设置</value>
+  </data>
+  <data name="Common.ResetPosition" xml:space="preserve">
+    <value>重置位置</value>
+  </data>
+  <data name="Common.RestLayer" xml:space="preserve">
+    <value>常驻状态</value>
+  </data>
+  <data name="Common.Save" xml:space="preserve">
+    <value>保存</value>
+  </data>
+  <data name="Common.Settings" xml:space="preserve">
+    <value>设置</value>
+  </data>
+  <data name="Common.SkipVersion" xml:space="preserve">
+    <value>跳过此版本</value>
+  </data>
+  <data name="Common.SwitchMediaSource" xml:space="preserve">
+    <value>切换媒体源</value>
+  </data>
+  <data name="Common.SwitchOutputDevice" xml:space="preserve">
+    <value>切换输出设备</value>
+  </data>
+  <data name="Common.SwitchPlayer" xml:space="preserve">
+    <value>切换播放器</value>
+  </data>
+  <data name="Common.TargetMonitor" xml:space="preserve">
+    <value>目标显示器</value>
+  </data>
+  <data name="Common.TrayIcon" xml:space="preserve">
+    <value>托盘图标</value>
+  </data>
+  <data name="Diagram.DynamicIslandSurface.Caption" xml:space="preserve">
+    <value>此模式尚未实现，以下选项只读；它们与任务栏设置独立。</value>
+  </data>
+  <data name="Diagram.InputGestures.Caption" xml:space="preserve">
+    <value>媒体栏上仅这两个区域可以点击，并且可分别设置；展开面板中的按钮不受影响。</value>
+  </data>
+  <data name="Diagram.InputGestures.Label.ArtworkClick" xml:space="preserve">
+    <value>点击封面</value>
+  </data>
+  <data name="Diagram.InputGestures.Label.TextClick" xml:space="preserve">
+    <value>点击标题或歌词</value>
+  </data>
+  <data name="Diagram.LayerFull.Caption" xml:space="preserve">
+    <value>点击媒体栏可打开完整面板；四个分区可分别关闭，至少保留一个。</value>
+  </data>
+  <data name="Diagram.LayerFull.Label.MediaInfo" xml:space="preserve">
+    <value>媒体信息</value>
+  </data>
+  <data name="Diagram.LayerFull.Label.Performance" xml:space="preserve">
+    <value>性能</value>
+  </data>
+  <data name="Diagram.LayerFull.Label.Playback" xml:space="preserve">
+    <value>播放控制</value>
+  </data>
+  <data name="Diagram.LayerHover.Caption" xml:space="preserve">
+    <value>启用后，鼠标移入媒体栏会显示快捷控制；各项控制可在本组开关。</value>
+  </data>
+  <data name="Diagram.LayerRest.Caption" xml:space="preserve">
+    <value>常驻状态显示媒体信息；显隐、组件参数和顺序统一在本页设置。</value>
+  </data>
+  <data name="Diagram.LyricsAlignment.Caption" xml:space="preserve">
+    <value>仅调整歌词对齐；标题与歌手的对齐位于「外观 → 常驻状态外观」。</value>
+  </data>
+  <data name="Diagram.LyricsTwoLine.Caption" xml:space="preserve">
+    <value>第一行显示当前歌词；第二行按所选顺序显示下一句、翻译或音译，空间不足时隐藏。</value>
+  </data>
+  <data name="Diagram.LyricsTwoLine.Label.FirstLine" xml:space="preserve">
+    <value>第一行</value>
+  </data>
+  <data name="Diagram.LyricsTwoLine.Label.SecondLine" xml:space="preserve">
+    <value>第二行</value>
+  </data>
+  <data name="Diagram.NotificationPlacement.Caption" xml:space="preserve">
+    <value>共六个位置可选，高亮方块为当前选择；切换显示器只改变出现位置。</value>
+  </data>
+  <data name="Diagram.NotificationPlacement.Label.AvoidTaskbar" xml:space="preserve">
+    <value>底部位置会自动避开任务栏</value>
+  </data>
+  <data name="Diagram.NotificationPlacement.Label.InsideMonitor" xml:space="preserve">
+    <value>通知出现在选中的显示器内</value>
+  </data>
+  <data name="Diagram.Spectrum.Caption" xml:space="preserve">
+    <value>图示为 9 根频谱柱，最右一根处于关闭状态。刷新率决定响应速度，灵敏度决定相同音量下的柱高。</value>
+  </data>
+  <data name="Diagram.TaskbarLength.Caption" xml:space="preserve">
+    <value>跟随内容时宽度自动变化；关闭跟随后可输入固定宽度，范围随任务栏可用空间更新。</value>
+  </data>
+  <data name="Diagram.TaskbarLength.Label.MinimumWidth" xml:space="preserve">
+    <value>所需最小宽度</value>
+  </data>
+  <data name="Diagram.TaskbarLength.Label.TaskbarLimit" xml:space="preserve">
+    <value>任务栏安全上限</value>
+  </data>
+  <data name="Diagram.TaskbarPlacement.Caption" xml:space="preserve">
+    <value>开启避让后，媒体栏会避开任务栏图标；厚度方向偏移用于上下或左右微调。</value>
+  </data>
+  <data name="Diagram.TaskbarPlacement.Label.EdgeOffset" xml:space="preserve">
+    <value>厚度方向偏移：−20 至 +20 DIP</value>
+  </data>
+  <data name="Diagram.TaskbarPlacement.Label.TaskbarIcons" xml:space="preserve">
+    <value>任务栏图标</value>
+  </data>
+  <data name="Diagram.TrayOverflow.Caption" xml:space="preserve">
+    <value>高亮方块为本程序。图标位于任务栏托盘或隐藏图标区时，点击与滚轮均可生效。</value>
+  </data>
+  <data name="Diagram.TrayOverflow.Label.OverflowArrow" xml:space="preserve">
+    <value>隐藏图标区</value>
+  </data>
+  <data name="Diagram.TrayOverflow.Label.TrayArea" xml:space="preserve">
+    <value>托盘区</value>
+  </data>
+  <data name="Diagram.WheelGestures.Caption" xml:space="preserve">
+    <value>向上与向下没有固定含义，取决于绑定的动作。切换设备时先显示候选，停止滚动约 1.2 秒后应用。</value>
+  </data>
+  <data name="Diagram.WheelGestures.Label.MediaBar" xml:space="preserve">
+    <value>媒体栏上</value>
+  </data>
+  <data name="Diagram.WheelGestures.Label.MediaBarResults" xml:space="preserve">
+    <value>上一首/下一首、切换设备、切换播放器或调节音量</value>
+  </data>
+  <data name="Diagram.WheelGestures.Label.TrayResults" xml:space="preserve">
+    <value>切换设备或调节音量</value>
+  </data>
+  <data name="DisplayModes.Full.Expander.Description" xml:space="preserve">
+    <value>选择完整面板显示的区域；至少保留一个。</value>
+  </data>
+  <data name="DisplayModes.Full.Expander.Title" xml:space="preserve">
+    <value>完整面板内容</value>
+  </data>
+  <data name="DisplayModes.Full.Group.Description" xml:space="preserve">
+    <value>点击媒体栏后展开的控制面板。</value>
+  </data>
+  <data name="DisplayModes.Full.Preset.Compact" xml:space="preserve">
+    <value>紧凑</value>
+  </data>
+  <data name="DisplayModes.Full.Preset.Custom" xml:space="preserve">
+    <value>自定义</value>
+  </data>
+  <data name="DisplayModes.Full.Preset.Full" xml:space="preserve">
+    <value>完整</value>
+  </data>
+  <data name="DisplayModes.Full.Row.Enable.Description" xml:space="preserve">
+    <value>点击媒体栏时打开完整控制面板。</value>
+  </data>
+  <data name="DisplayModes.Full.Row.Enable.Title" xml:space="preserve">
+    <value>启用完整面板</value>
+  </data>
+  <data name="DisplayModes.Full.Row.MediaControls.Title" xml:space="preserve">
+    <value>播放控制</value>
+  </data>
+  <data name="DisplayModes.Full.Row.MediaInfo.Title" xml:space="preserve">
+    <value>媒体信息</value>
+  </data>
+  <data name="DisplayModes.Full.Row.Performance.Title" xml:space="preserve">
+    <value>性能信息</value>
+  </data>
+  <data name="DisplayModes.Full.Row.Preset.Description" xml:space="preserve">
+    <value>快速套用一组完整面板布局。</value>
+  </data>
+  <data name="DisplayModes.Full.Row.Preset.Title" xml:space="preserve">
+    <value>套用预设</value>
+  </data>
+  <data name="DisplayModes.Header.Subtitle" xml:space="preserve">
+    <value>选择显示模式，配置常驻状态、快捷控制和完整面板。</value>
+  </data>
+  <data name="DisplayModes.Hover.Expander.Description" xml:space="preserve">
+    <value>选择鼠标悬停时显示的控制项。</value>
+  </data>
+  <data name="DisplayModes.Hover.Expander.Title" xml:space="preserve">
+    <value>快捷控制内容</value>
+  </data>
+  <data name="DisplayModes.Hover.Group.Description" xml:space="preserve">
+    <value>鼠标移入媒体栏时显示的快捷控制。</value>
+  </data>
+  <data name="DisplayModes.Hover.Row.Enable.Description" xml:space="preserve">
+    <value>鼠标移入媒体栏时显示快捷控制。</value>
+  </data>
+  <data name="DisplayModes.Hover.Row.Enable.Title" xml:space="preserve">
+    <value>启用快捷控制</value>
+  </data>
+  <data name="DisplayModes.Island.Group.Description" xml:space="preserve">
+    <value>灵动岛的外观设置，不影响任务栏。</value>
+  </data>
+  <data name="DisplayModes.Island.Notice" xml:space="preserve">
+    <value>灵动岛尚未实现；以下选项只读，不影响当前任务栏媒体栏。</value>
+  </data>
+  <data name="DisplayModes.Island.Row.Corner.Description" xml:space="preserve">
+    <value>0–24 DIP</value>
+  </data>
+  <data name="DisplayModes.Island.Row.Corner.Title" xml:space="preserve">
+    <value>圆角</value>
+  </data>
+  <data name="DisplayModes.Island.Row.Opacity.Description" xml:space="preserve">
+    <value>数值越高越不透明</value>
+  </data>
+  <data name="DisplayModes.Island.Row.Opacity.Title" xml:space="preserve">
+    <value>背景不透明度</value>
+  </data>
+  <data name="DisplayModes.Island.Row.Surface.Description" xml:space="preserve">
+    <value>灵动岛自身的背景样式</value>
+  </data>
+  <data name="DisplayModes.Island.Row.Surface.Title" xml:space="preserve">
+    <value>背景样式</value>
+  </data>
+  <data name="DisplayModes.Island.Surface.Automatic" xml:space="preserve">
+    <value>自动</value>
+  </data>
+  <data name="DisplayModes.Island.Surface.Solid" xml:space="preserve">
+    <value>纯色</value>
+  </data>
+  <data name="DisplayModes.Island.Surface.ThemeTint" xml:space="preserve">
+    <value>主题色调</value>
+  </data>
+  <data name="DisplayModes.Mode.Current" xml:space="preserve">
+    <value>当前模式</value>
+  </data>
+  <data name="DisplayModes.Mode.DesktopCard" xml:space="preserve">
+    <value>桌面卡片</value>
+  </data>
+  <data name="DisplayModes.Mode.DesktopCard.Caption" xml:space="preserve">
+    <value>在桌面放置可自由布局的媒体卡片</value>
+  </data>
+  <data name="DisplayModes.Mode.DynamicIsland.Caption" xml:space="preserve">
+    <value>以屏幕边缘浮层承载媒体状态</value>
+  </data>
+  <data name="DisplayModes.Mode.FloatingBall" xml:space="preserve">
+    <value>悬浮球</value>
+  </data>
+  <data name="DisplayModes.Mode.FloatingBall.Caption" xml:space="preserve">
+    <value>以紧凑悬浮入口展开控制</value>
+  </data>
+  <data name="DisplayModes.Mode.PreviewNotice" xml:space="preserve">
+    <value>当前仅运行任务栏模式；选择其他模式只预览本页设置。</value>
+  </data>
+  <data name="DisplayModes.Mode.Taskbar" xml:space="preserve">
+    <value>任务栏</value>
+  </data>
+  <data name="DisplayModes.Mode.Taskbar.Caption" xml:space="preserve">
+    <value>置于 Windows 任务栏，含常驻状态、快捷控制与完整面板</value>
+  </data>
+  <data name="DisplayModes.Monitor.DisconnectedSuffix" xml:space="preserve">
+    <value>（当前未连接）</value>
+  </data>
+  <data name="DisplayModes.Placement.Group.Description" xml:space="preserve">
+    <value>媒体栏所在的显示器与任务栏位置</value>
+  </data>
+  <data name="DisplayModes.Placement.Orientation.Auto" xml:space="preserve">
+    <value>自动（跟随任务栏）</value>
+  </data>
+  <data name="DisplayModes.Placement.Orientation.Horizontal" xml:space="preserve">
+    <value>强制横向</value>
+  </data>
+  <data name="DisplayModes.Placement.Orientation.Vertical" xml:space="preserve">
+    <value>强制纵向</value>
+  </data>
+  <data name="DisplayModes.Placement.ResetAction" xml:space="preserve">
+    <value>重置</value>
+  </data>
+  <data name="DisplayModes.Placement.Row.AvoidIcons.Description" xml:space="preserve">
+    <value>自动避开任务栏图标，防止遮挡。</value>
+  </data>
+  <data name="DisplayModes.Placement.Row.AvoidIcons.Title" xml:space="preserve">
+    <value>避开任务栏图标</value>
+  </data>
+  <data name="DisplayModes.Placement.Row.Lock.Description" xml:space="preserve">
+    <value>锁定后阻止拖动</value>
+  </data>
+  <data name="DisplayModes.Placement.Row.Lock.Title" xml:space="preserve">
+    <value>锁定位置</value>
+  </data>
+  <data name="DisplayModes.Placement.Row.Monitor.Description" xml:space="preserve">
+    <value>选择显示媒体栏的屏幕，可多选；至少保留一块。</value>
+  </data>
+  <data name="DisplayModes.Placement.Row.Offset.Description" xml:space="preserve">
+    <value>沿任务栏厚度方向微调媒体栏位置（−20 至 +20 DIP）。</value>
+  </data>
+  <data name="DisplayModes.Placement.Row.Offset.Title" xml:space="preserve">
+    <value>厚度方向偏移</value>
+  </data>
+  <data name="DisplayModes.Placement.Row.Orientation.Description" xml:space="preserve">
+    <value>由当前显示器的系统任务栏自动决定。</value>
+  </data>
+  <data name="DisplayModes.Placement.Row.Orientation.Title" xml:space="preserve">
+    <value>任务栏朝向</value>
+  </data>
+  <data name="DisplayModes.Placement.Row.Reset.Description" xml:space="preserve">
+    <value>恢复自动计算的位置。</value>
+  </data>
+  <data name="DisplayModes.Rest.Component.Artwork" xml:space="preserve">
+    <value>封面</value>
+  </data>
+  <data name="DisplayModes.Rest.Component.Artwork.Description" xml:space="preserve">
+    <value>显示当前封面；无媒体时可显示快速启动音符。</value>
+  </data>
+  <data name="DisplayModes.Rest.Component.MediaText" xml:space="preserve">
+    <value>媒体文字</value>
+  </data>
+  <data name="DisplayModes.Rest.Component.MediaText.Description" xml:space="preserve">
+    <value>显示标题和歌手；启用歌词时显示歌词。</value>
+  </data>
+  <data name="DisplayModes.Rest.Component.OutputDevice" xml:space="preserve">
+    <value>输出设备按钮</value>
+  </data>
+  <data name="DisplayModes.Rest.Component.OutputDevice.Description" xml:space="preserve">
+    <value>点击选择输出设备，滚动切换设备。</value>
+  </data>
+  <data name="DisplayModes.Rest.Component.Performance" xml:space="preserve">
+    <value>性能监控</value>
+  </data>
+  <data name="DisplayModes.Rest.Component.Performance.Description" xml:space="preserve">
+    <value>轮流显示所选的系统性能指标。</value>
+  </data>
+  <data name="DisplayModes.Rest.Component.QuickLaunchNote" xml:space="preserve">
+    <value>快速启动小音符</value>
+  </data>
+  <data name="DisplayModes.Rest.Component.QuickLaunchNote.Description" xml:space="preserve">
+    <value>无媒体时显示音符；点击或滚动可选择播放器。</value>
+  </data>
+  <data name="DisplayModes.Rest.Component.Spectrum" xml:space="preserve">
+    <value>频谱</value>
+  </data>
+  <data name="DisplayModes.Rest.Component.Spectrum.Description" xml:space="preserve">
+    <value>显示当前输出设备所有声音的实时频谱。</value>
+  </data>
+  <data name="DisplayModes.Rest.Component.Volume" xml:space="preserve">
+    <value>音量按钮</value>
+  </data>
+  <data name="DisplayModes.Rest.Component.Volume.Description" xml:space="preserve">
+    <value>点击打开音量菜单，滚动调节当前来源的音量。</value>
+  </data>
+  <data name="DisplayModes.Rest.ContentLayout.AdaptiveStack" xml:space="preserve">
+    <value>上下两行</value>
+  </data>
+  <data name="DisplayModes.Rest.ContentLayout.CompactInline" xml:space="preserve">
+    <value>一行显示</value>
+  </data>
+  <data name="DisplayModes.Rest.Density.Balanced" xml:space="preserve">
+    <value>中</value>
+  </data>
+  <data name="DisplayModes.Rest.Density.Information" xml:space="preserve">
+    <value>大</value>
+  </data>
+  <data name="DisplayModes.Rest.Density.Minimal" xml:space="preserve">
+    <value>小</value>
+  </data>
+  <data name="DisplayModes.Rest.Group.Description" xml:space="preserve">
+    <value>媒体栏常驻的封面、文字和附加组件。</value>
+  </data>
+  <data name="DisplayModes.Rest.Group.Status" xml:space="preserve">
+    <value>始终开启</value>
+  </data>
+  <data name="DisplayModes.Rest.Idle.Expander.Description" xml:space="preserve">
+    <value>选择无媒体时仍显示的组件；全关后隐藏媒体栏。</value>
+  </data>
+  <data name="DisplayModes.Rest.Idle.Expander.Title" xml:space="preserve">
+    <value>没有媒体时显示</value>
+  </data>
+  <data name="DisplayModes.Rest.Idle.Notice" xml:space="preserve">
+    <value>封面和媒体文字仅在有媒体时显示；无媒体时可保留小音符，用于快速启动播放器。</value>
+  </data>
+  <data name="DisplayModes.Rest.Notice" xml:space="preserve">
+    <value>频谱与性能参数在“小组件”分组中调整，文字大小在“外观”页调整。</value>
+  </data>
+  <data name="DisplayModes.Rest.Order.Expander.Description" xml:space="preserve">
+    <value>封面和文字固定在逻辑起始侧；排序仅调整附加组件，展开方向决定实际坐标方向。</value>
+  </data>
+  <data name="DisplayModes.Rest.Order.Expander.Title" xml:space="preserve">
+    <value>常驻状态组件顺序</value>
+  </data>
+  <data name="DisplayModes.Rest.Order.Notice" xml:space="preserve">
+    <value>封面和媒体文字固定在逻辑起始侧，不参与排序。</value>
+  </data>
+  <data name="DisplayModes.Rest.Order.Reset.Description" xml:space="preserve">
+    <value>频谱、性能监控、输出设备按钮、音量按钮</value>
+  </data>
+  <data name="DisplayModes.Rest.Order.Reset.Title" xml:space="preserve">
+    <value>恢复默认顺序</value>
+  </data>
+  <data name="DisplayModes.Rest.Row.Alignment.Description" xml:space="preserve">
+    <value>设置标题和歌手的水平对齐方式。</value>
+  </data>
+  <data name="DisplayModes.Rest.Row.Alignment.Title" xml:space="preserve">
+    <value>标题与歌手对齐</value>
+  </data>
+  <data name="DisplayModes.Hover.Row.Size.Description" xml:space="preserve">
+    <value>调整悬停按钮和图标，也影响常驻状态按钮。</value>
+  </data>
+  <data name="DisplayModes.Hover.Row.Size.Title" xml:space="preserve">
+    <value>控件尺寸</value>
+  </data>
+  <data name="DisplayModes.Hover.Row.Spacing.Description" xml:space="preserve">
+    <value>调整快捷控制按钮之间的距离。</value>
+  </data>
+  <data name="DisplayModes.Hover.Row.Spacing.Title" xml:space="preserve">
+    <value>悬停按钮间距</value>
+  </data>
+  <data name="DisplayModes.Rest.Row.DeviceButton.Description" xml:space="preserve">
+    <value>常驻输出设备按钮，占用文字空间；点击选设备，滚动切换。</value>
+  </data>
+  <data name="DisplayModes.Rest.Row.DeviceButton.Title" xml:space="preserve">
+    <value>常驻状态显示输出设备按钮</value>
+  </data>
+  <data name="DisplayModes.Rest.Row.Entry.Description" xml:space="preserve">
+    <value>通过悬停媒体栏或点击顶部入口打开完整面板。</value>
+  </data>
+  <data name="DisplayModes.Rest.Row.Entry.Title" xml:space="preserve">
+    <value>显示进入完整面板的入口</value>
+  </data>
+  <data name="DisplayModes.Rest.Row.Layout.Description" xml:space="preserve">
+    <value>标题与歌手并排一行，或上下两行；紧凑任务栏可能只显示标题。</value>
+  </data>
+  <data name="DisplayModes.Rest.Row.Layout.Title" xml:space="preserve">
+    <value>标题与歌手显示方式</value>
+  </data>
+  <data name="DisplayModes.Rest.Row.Progress.Description" xml:space="preserve">
+    <value>在常驻状态底部显示只读进度；无时长时隐藏。</value>
+  </data>
+  <data name="DisplayModes.Rest.Row.Artwork.Description" xml:space="preserve">
+    <value>有媒体时显示封面；不影响无媒体时的小音符。</value>
+  </data>
+  <data name="DisplayModes.Rest.Row.Artwork.Title" xml:space="preserve">
+    <value>显示封面</value>
+  </data>
+  <data name="DisplayModes.Rest.Row.Progress.Title" xml:space="preserve">
+    <value>显示播放进度</value>
+  </data>
+  <data name="DisplayModes.Rest.Row.VolumeButton.Description" xml:space="preserve">
+    <value>常驻音量按钮，占用文字空间；点击打开菜单，滚动调节音量。</value>
+  </data>
+  <data name="DisplayModes.Rest.Row.VolumeButton.Title" xml:space="preserve">
+    <value>常驻状态显示音量按钮</value>
+  </data>
+  <data name="DisplayModes.Status.Current" xml:space="preserve">
+    <value>当前：{0}</value>
+  </data>
+  <data name="DisplayModes.Unimplemented.DesktopCard" xml:space="preserve">
+    <value>桌面卡片模式尚未实现，暂时没有可调整的设置。每个模式将拥有各自的设置页。</value>
+  </data>
+  <data name="DisplayModes.Unimplemented.FloatingBall" xml:space="preserve">
+    <value>悬浮球模式尚未实现，暂时没有可调整的设置。每个模式将拥有各自的设置页。</value>
+  </data>
+  <data name="DisplayModes.Width.Group.Description" xml:space="preserve">
+    <value>整体长度、歌词区域长度及组件间距。</value>
+  </data>
+  <data name="DisplayModes.Width.RangeText" xml:space="preserve">
+    <value>可用范围：{0:0}–{1:0} DIP</value>
+  </data>
+  <data name="DisplayModes.Width.Row.Fixed.Badge" xml:space="preserve">
+    <value>需先关闭跟随</value>
+  </data>
+  <data name="DisplayModes.Width.Row.Fixed.Description" xml:space="preserve">
+    <value>在所需最小宽度与任务栏可用宽度之间调整。</value>
+  </data>
+  <data name="DisplayModes.Width.Row.Fixed.Title" xml:space="preserve">
+    <value>固定长度</value>
+  </data>
+  <data name="DisplayModes.Width.Row.Follow.Description" xml:space="preserve">
+    <value>根据媒体内容自动调整宽度。</value>
+  </data>
+  <data name="DisplayModes.Width.Row.Follow.Title" xml:space="preserve">
+    <value>跟随内容长度</value>
+  </data>
+  <data name="DisplayModes.Width.Row.Spacing.Description" xml:space="preserve">
+    <value>调整封面、文字与附加组件之间的距离。</value>
+  </data>
+  <data name="DisplayModes.Width.Row.Spacing.Title" xml:space="preserve">
+    <value>组件间距</value>
+  </data>
+  <data name="Interaction.Header.Subtitle" xml:space="preserve">
+    <value>为媒体栏与托盘上的每种操作指定结果</value>
+  </data>
+  <data name="Interaction.InApp.Group.Description" xml:space="preserve">
+    <value>设置常驻状态的点击与滚轮操作。</value>
+  </data>
+  <data name="Interaction.Row.ArtworkClick.Description" xml:space="preserve">
+    <value>单独设置封面区域的点击操作。</value>
+  </data>
+  <data name="Interaction.Row.ArtworkClick.Title" xml:space="preserve">
+    <value>点击封面</value>
+  </data>
+  <data name="Interaction.Row.ArtworkHover.Description" xml:space="preserve">
+    <value>鼠标放到封面上时的放大方式。原地放大让封面顶出任务栏上方，大图预览弹出一张独立的大图，关闭则只在栏内轻微放大。</value>
+  </data>
+  <data name="Interaction.Row.ArtworkHover.Title" xml:space="preserve">
+    <value>悬停封面放大</value>
+  </data>
+  <data name="Interaction.Row.ArtworkHover.Mode.Off" xml:space="preserve">
+    <value>关闭（1.1×）</value>
+  </data>
+  <data name="Interaction.Row.ArtworkHover.Mode.Zoom" xml:space="preserve">
+    <value>原地放大（2×）</value>
+  </data>
+  <data name="Interaction.Row.ArtworkHover.Mode.Preview" xml:space="preserve">
+    <value>大图预览</value>
+  </data>
+  <data name="Interaction.Row.ChordWheel.Description" xml:space="preserve">
+    <value>按住组合键并滚动时执行的操作。</value>
+  </data>
+  <data name="Interaction.Row.Modifier.Description" xml:space="preserve">
+    <value>媒体栏和托盘共用此组合键。</value>
+  </data>
+  <data name="Interaction.Row.Modifier.Title" xml:space="preserve">
+    <value>组合滚轮按键</value>
+  </data>
+  <data name="Interaction.Row.PrimaryWheel.Description" xml:space="preserve">
+    <value>未按组合键时滚轮执行的操作。</value>
+  </data>
+  <data name="Interaction.Row.WheelTooltip.Title" xml:space="preserve">
+    <value>显示滚轮提示</value>
+  </data>
+  <data name="Interaction.Row.WheelTooltip.Description" xml:space="preserve">
+    <value>显示滚轮操作提示；关闭后托盘仍显示设备或音量状态及调节结果。</value>
+  </data>
+  <data name="Interaction.Row.TextClick.Title" xml:space="preserve">
+    <value>点击标题或歌词</value>
+  </data>
+  <data name="Interaction.Row.TrayChordWheel.Description" xml:space="preserve">
+    <value>暂时禁用</value>
+  </data>
+  <data name="Interaction.Row.TrayClick.Description" xml:space="preserve">
+    <value>设置托盘左键操作；右键始终打开菜单。</value>
+  </data>
+  <data name="Interaction.Row.TrayClick.Title" xml:space="preserve">
+    <value>点击托盘图标</value>
+  </data>
+  <data name="Interaction.Row.TrayPrimaryWheel.Description" xml:space="preserve">
+    <value>仅在鼠标指向托盘图标时生效。</value>
+  </data>
+  <data name="Interaction.SharedModifier.Callout" xml:space="preserve">
+    <value>组合键用于媒体栏滚轮。托盘组合滚轮当前不提供编辑入口。</value>
+  </data>
+  <data name="Interaction.SharedModifier.Group.Description" xml:space="preserve">
+    <value>选择触发组合滚轮操作的按键。</value>
+  </data>
+  <data name="Interaction.Disabled" xml:space="preserve">
+    <value>禁用</value>
+  </data>
+  <data name="Interaction.TrayAction.OpenAudioControl" xml:space="preserve">
+    <value>打开音频控制菜单</value>
+  </data>
+  <data name="Interaction.TrayAction.OpenContextMenu" xml:space="preserve">
+    <value>打开右键菜单</value>
+  </data>
+  <data name="Interaction.TrayAction.OpenCurrentAppVolumeMenu" xml:space="preserve">
+    <value>打开当前应用音量菜单</value>
+  </data>
+  <data name="Interaction.TrayAction.OpenOutputDeviceMenu" xml:space="preserve">
+    <value>打开输出设备菜单</value>
+  </data>
+  <data name="Interaction.TrayAction.OpenSettings" xml:space="preserve">
+    <value>打开设置页</value>
+  </data>
+  <data name="Interaction.Wheel.Chord.Title" xml:space="preserve">
+    <value>组合滚轮</value>
+  </data>
+  <data name="Interaction.Wheel.Primary.Title" xml:space="preserve">
+    <value>普通滚轮</value>
+  </data>
+  <data name="Layout.Arrangement.Auto" xml:space="preserve">
+    <value>自动</value>
+  </data>
+  <data name="Layout.Arrangement.Horizontal" xml:space="preserve">
+    <value>横向</value>
+  </data>
+  <data name="Layout.Arrangement.Vertical" xml:space="preserve">
+    <value>纵向</value>
+  </data>
+  <data name="Layout.Group.Position" xml:space="preserve">
+    <value>位置</value>
+  </data>
+  <data name="Layout.Group.Size" xml:space="preserve">
+    <value>尺寸</value>
+  </data>
+  <data name="Layout.Group.Window" xml:space="preserve">
+    <value>窗口</value>
+  </data>
+  <data name="Layout.IslandBackground.SystemTheme" xml:space="preserve">
+    <value>系统主题背景</value>
+  </data>
+  <data name="Layout.IslandBackground.Transparent" xml:space="preserve">
+    <value>透明背景</value>
+  </data>
+  <data name="Layout.Page.Subtitle" xml:space="preserve">
+    <value>调整窗口模式、排列方式和尺寸</value>
+  </data>
+  <data name="Layout.Page.Title" xml:space="preserve">
+    <value>布局</value>
+  </data>
+  <data name="Layout.Preset.DynamicIslandHorizontal" xml:space="preserve">
+    <value>灵动岛主题（横向）：可拖动并支持桌面边缘收起</value>
+  </data>
+  <data name="Layout.Preset.DynamicIslandVertical" xml:space="preserve">
+    <value>灵动岛主题（竖向）：可拖动并支持桌面边缘收起</value>
+  </data>
+  <data name="Layout.Preset.TaskbarHorizontal" xml:space="preserve">
+    <value>任务栏主题（横向）：适配任务栏在屏幕顶部或底部</value>
+  </data>
+  <data name="Layout.Preset.TaskbarVertical" xml:space="preserve">
+    <value>任务栏主题（竖向）：适配任务栏在屏幕左侧或右侧</value>
+  </data>
+  <data name="Layout.Reset.Button" xml:space="preserve">
+    <value>恢复默认</value>
+  </data>
+  <data name="Layout.Row.Arrangement.Description" xml:space="preserve">
+    <value>设置媒体内容的排列方向</value>
+  </data>
+  <data name="Layout.Row.Arrangement.Title" xml:space="preserve">
+    <value>排列方式</value>
+  </data>
+  <data name="Layout.Row.AvoidIcons.Description" xml:space="preserve">
+    <value>自动限制长度和位置，避免遮挡任务栏图标</value>
+  </data>
+  <data name="Layout.Row.AvoidIcons.Title" xml:space="preserve">
+    <value>避开任务栏图标</value>
+  </data>
+  <data name="Layout.Row.EdgeOffset.Description" xml:space="preserve">
+    <value>水平任务栏上下移动，垂直任务栏左右移动</value>
+  </data>
+  <data name="Layout.Row.EdgeOffset.Title" xml:space="preserve">
+    <value>边缘偏移</value>
+  </data>
+  <data name="Layout.Row.IslandBackground.Description" xml:space="preserve">
+    <value>使用系统主题配色或透明背景</value>
+  </data>
+  <data name="Layout.Row.IslandBackground.Title" xml:space="preserve">
+    <value>背景方案</value>
+  </data>
+  <data name="Layout.Row.LengthScale.Description" xml:space="preserve">
+    <value>调整封面、歌词、标题等组件之间的间距</value>
+  </data>
+  <data name="Layout.Row.LengthScale.Title" xml:space="preserve">
+    <value>组件间距缩放</value>
+  </data>
+  <data name="Layout.Row.LockPosition.Description" xml:space="preserve">
+    <value>固定媒体栏当前位置</value>
+  </data>
+  <data name="Layout.Row.LockPosition.Title" xml:space="preserve">
+    <value>锁定位置</value>
+  </data>
+  <data name="Layout.Row.ResetPage.Description" xml:space="preserve">
+    <value>恢复窗口、方向、缩放、任务栏和灵动岛设置</value>
+  </data>
+  <data name="Layout.Row.ResetPosition.Description" xml:space="preserve">
+    <value>恢复默认位置</value>
+  </data>
+  <data name="Layout.Row.ThicknessScale.Description" xml:space="preserve">
+    <value>按比例缩放所有组件大小，保持组件间距不变</value>
+  </data>
+  <data name="Layout.Row.ThicknessScale.Title" xml:space="preserve">
+    <value>粗细缩放</value>
+  </data>
+  <data name="Layout.Row.WindowMode.Description" xml:space="preserve">
+    <value>选择媒体栏显示在哪里</value>
+  </data>
+  <data name="Layout.Row.WindowMode.Title" xml:space="preserve">
+    <value>窗口模式</value>
+  </data>
+  <data name="Layout.WindowMode.Taskbar" xml:space="preserve">
+    <value>停靠任务栏</value>
+  </data>
+  <data name="Lyrics.Callout.Display" xml:space="preserve">
+    <value>有歌词时，媒体栏显示歌词；没有歌词时显示标题与歌手。</value>
+  </data>
+  <data name="Lyrics.Header.Subtitle" xml:space="preserve">
+    <value>在任务栏常驻状态显示当前歌词</value>
+  </data>
+  <data name="Lyrics.Row.Alignment.Description" xml:space="preserve">
+    <value>只调整歌词在文字区域内的对齐；标题与歌手可使用不同的对齐方式。</value>
+  </data>
+  <data name="Lyrics.Row.Alignment.Title" xml:space="preserve">
+    <value>歌词对齐</value>
+  </data>
+  <data name="Lyrics.Row.InfoLines.Description" xml:space="preserve">
+    <value>隐藏作词、作曲等署名行。</value>
+  </data>
+  <data name="Lyrics.Row.InfoLines.Title" xml:space="preserve">
+    <value>过滤署名行</value>
+  </data>
+  <data name="Lyrics.Row.ChineseConversion.Title" xml:space="preserve">
+    <value>歌词繁简转换</value>
+  </data>
+  <data name="Lyrics.Row.ChineseConversion.Description" xml:space="preserve">
+    <value>把显示的歌词改成简体或繁体；只改显示，不改动取到的歌词本身。</value>
+  </data>
+  <data name="Lyrics.Row.ChineseConversion.Direction.Title" xml:space="preserve">
+    <value>转换方向</value>
+  </data>
+  <data name="Lyrics.Row.ChineseConversion.Direction.Description" xml:space="preserve">
+    <value>选择要转成的字形；选「不转换」时按歌词原样显示。</value>
+  </data>
+  <data name="Lyrics.Row.ChineseConversion.Option.Off" xml:space="preserve">
+    <value>不转换</value>
+  </data>
+  <data name="Lyrics.Row.ChineseConversion.Option.ToTraditional" xml:space="preserve">
+    <value>简体 → 繁体</value>
+  </data>
+  <data name="Lyrics.Row.ChineseConversion.Option.ToSimplified" xml:space="preserve">
+    <value>繁体 → 简体</value>
+  </data>
+  <data name="Lyrics.Row.BrowserVideo.Title" xml:space="preserve">
+    <value>浏览器及视频应用取词</value>
+  </data>
+  <data name="Lyrics.Row.BrowserVideo.Description" xml:space="preserve">
+    <value>为浏览器和已识别的视频应用匹配歌词；默认关闭。</value>
+  </data>
+  <data name="Lyrics.Row.SecondLine.Description" xml:space="preserve">
+    <value>设置第二行显示什么；缺失时尝试下一项。</value>
+  </data>
+  <data name="Lyrics.Row.SecondLine.Note" xml:space="preserve">
+    <value>顺序即优先级：排在上面的来源优先使用，没有内容时依次往下取</value>
+  </data>
+  <data name="Lyrics.Row.SecondLine.OrderRow.Description" xml:space="preserve">
+    <value>上移即提高优先级</value>
+  </data>
+  <data name="Lyrics.Row.SecondLine.Title" xml:space="preserve">
+    <value>第二行内容</value>
+  </data>
+  <data name="Lyrics.Row.ShowLyrics.Description" xml:space="preserve">
+    <value>随播放进度显示歌词；关闭后显示标题和歌手。</value>
+  </data>
+  <data name="Lyrics.Row.ShowLyrics.Title" xml:space="preserve">
+    <value>显示实时歌词</value>
+  </data>
+  <data name="Lyrics.Row.SyllableHighlight.Description" xml:space="preserve">
+    <value>有逐字时间轴时随播放高亮；暂停或关闭动画时停用。</value>
+  </data>
+  <data name="Lyrics.Row.SyllableHighlight.Title" xml:space="preserve">
+    <value>逐字擦亮</value>
+  </data>
+  <data name="Lyrics.Row.TwoLine.Badge" xml:space="preserve">
+    <value>需先启用歌词</value>
+  </data>
+  <data name="Lyrics.Row.TwoLine.Description" xml:space="preserve">
+    <value>在当前句下方再显示一行</value>
+  </data>
+  <data name="Lyrics.Row.TwoLine.Title" xml:space="preserve">
+    <value>双行歌词</value>
+  </data>
+  <data name="Lyrics.Row.UnsungOpacity.Badge" xml:space="preserve">
+    <value>需先开启逐字擦亮</value>
+  </data>
+  <data name="Lyrics.Row.UnsungOpacity.Description" xml:space="preserve">
+    <value>调整尚未唱到的文字透明度；数值越低，对比越明显。</value>
+  </data>
+  <data name="Lyrics.Row.UnsungOpacity.Title" xml:space="preserve">
+    <value>未唱部分不透明度</value>
+  </data>
+  <data name="Lyrics.Row.LineGap.Badge" xml:space="preserve">
+    <value>需先开启双行歌词</value>
+  </data>
+  <data name="Lyrics.Row.LineGap.Description" xml:space="preserve">
+    <value>增加两行歌词的间距；空间不足时自动收紧。</value>
+  </data>
+  <data name="Lyrics.Row.LineGap.Title" xml:space="preserve">
+    <value>行距</value>
+  </data>
+  <data name="Lyrics.Row.CharacterSpacing.Description" xml:space="preserve">
+    <value>调整歌词字距，中文和英文均生效。</value>
+  </data>
+  <data name="Lyrics.Row.CharacterSpacing.Title" xml:space="preserve">
+    <value>字间距</value>
+  </data>
+  <data name="Lyrics.Row.FixedWidth.Badge" xml:space="preserve">
+    <value>需先启用歌词</value>
+  </data>
+  <data name="Lyrics.Row.FixedWidth.Description" xml:space="preserve">
+    <value>固定歌词区域宽度，不随每句歌词变化。</value>
+  </data>
+  <data name="Lyrics.Row.FixedWidth.Title" xml:space="preserve">
+    <value>固定歌词框长度</value>
+  </data>
+  <data name="Lyrics.Row.FixedWidth.Length.Description" xml:space="preserve">
+    <value>设置固定宽度；任务栏空间不足时自动缩小。</value>
+  </data>
+  <data name="Lyrics.Row.FixedWidth.Length.Title" xml:space="preserve">
+    <value>歌词框长度</value>
+  </data>
+  <data name="Lyrics.SecondLine.NextLine" xml:space="preserve">
+    <value>下一句歌词</value>
+  </data>
+  <data name="Lyrics.SecondLine.Reset.Description" xml:space="preserve">
+    <value>把顺序恢复为 下一句 → 翻译 → 音译</value>
+  </data>
+  <data name="Lyrics.SecondLine.Reset.Title" xml:space="preserve">
+    <value>恢复默认顺序</value>
+  </data>
+  <data name="Lyrics.SecondLine.Romanization" xml:space="preserve">
+    <value>当前句音译</value>
+  </data>
+  <data name="Lyrics.SecondLine.Translation" xml:space="preserve">
+    <value>当前句翻译</value>
+  </data>
+  <data name="Lyrics.Source.Kugou" xml:space="preserve">
+    <value>酷狗音乐</value>
+  </data>
+  <data name="Lyrics.Source.LRCLIB" xml:space="preserve">
+    <value>LRCLIB</value>
+  </data>
+  <data name="Lyrics.Source.Netease" xml:space="preserve">
+    <value>网易云音乐</value>
+  </data>
+  <data name="Lyrics.Source.NeteaseSearch" xml:space="preserve">
+    <value>网易云音乐（搜索）</value>
+  </data>
+  <data name="Lyrics.Source.QQMusic" xml:space="preserve">
+    <value>QQ 音乐</value>
+  </data>
+  <data name="Lyrics.Source.SodaMusic" xml:space="preserve">
+    <value>汽水音乐</value>
+  </data>
+  <data name="Lyrics.Source.Unknown" xml:space="preserve">
+    <value>未知来源</value>
+  </data>
+  <data name="Lyrics.Sources.AllDisabled.Callout" xml:space="preserve">
+    <value>已关闭全部歌词来源：不会再发出任何歌词请求，媒体栏只显示标题与歌手。</value>
+  </data>
+  <data name="Lyrics.Sources.Callout" xml:space="preserve">
+    <value>优先搜索已启用的 QQ 音乐，匹配达到 85 分才下载歌词。否则并发查询其他启用来源，采纳最高分结果，包括确认无歌词的结果。</value>
+  </data>
+  <data name="Lyrics.Sources.Expander.Description" xml:space="preserve">
+    <value>选择允许获取歌词的来源；查询阶段与评分由应用统一管理。</value>
+  </data>
+  <data name="Lyrics.Sources.Expander.Title" xml:space="preserve">
+    <value>歌词来源</value>
+  </data>
+  <data name="Lyrics.Sources.MoveDown" xml:space="preserve">
+    <value>下移</value>
+  </data>
+  <data name="Lyrics.Sources.MoveUp" xml:space="preserve">
+    <value>上移</value>
+  </data>
+  <data name="Lyrics.Sources.Reset.Action" xml:space="preserve">
+    <value>启用全部来源</value>
+  </data>
+  <data name="Lyrics.Sources.Reset.Description" xml:space="preserve">
+    <value>重新启用全部歌词来源。</value>
+  </data>
+  <data name="Lyrics.Sources.Reset.Title" xml:space="preserve">
+    <value>恢复默认来源</value>
+  </data>
+  <data name="Lyrics.Sources.Row.Description" xml:space="preserve">
+    <value>允许从此来源获取歌词。</value>
+  </data>
+  <data name="Media.Badge.EnableFirst" xml:space="preserve">
+    <value>需先启用</value>
+  </data>
+  <data name="Media.Dialog.Browse.Filter" xml:space="preserve">
+    <value>应用和快捷方式 (*.exe;*.lnk)|*.exe;*.lnk</value>
+  </data>
+  <data name="Media.Dialog.Browse.Title" xml:space="preserve">
+    <value>选择媒体应用或快捷方式</value>
+  </data>
+  <data name="Media.Header.Subtitle" xml:space="preserve">
+    <value>媒体来源、快速启动与曲目通知</value>
+  </data>
+  <data name="Components.Header.Subtitle" xml:space="preserve">
+    <value>常驻状态组件的显示与参数</value>
+  </data>
+  <data name="Media.Metric.ProcessMemory.Title" xml:space="preserve">
+    <value>本程序内存</value>
+  </data>
+  <data name="Media.Metric.SystemMemory.Description" xml:space="preserve">
+    <value>至少选择一个性能指标。</value>
+  </data>
+  <data name="Media.Metric.SystemMemory.Title" xml:space="preserve">
+    <value>系统内存</value>
+  </data>
+  <data name="Media.Notification.Details.Description" xml:space="preserve">
+    <value>设置通知位置、显示时长和目标屏幕。</value>
+  </data>
+  <data name="Media.Notification.Details.Title" xml:space="preserve">
+    <value>通知细节</value>
+  </data>
+  <data name="Media.Notification.Duration.Title" xml:space="preserve">
+    <value>停留时间</value>
+  </data>
+  <data name="Media.Notification.Duration.Value" xml:space="preserve">
+    <value>{0} 秒</value>
+  </data>
+  <data name="Media.Notification.Enabled.Description" xml:space="preserve">
+    <value>切换曲目并开始播放时显示通知。</value>
+  </data>
+  <data name="Media.Notification.Enabled.Title" xml:space="preserve">
+    <value>启用通知</value>
+  </data>
+  <data name="Media.Notification.FixedMonitor.Title" xml:space="preserve">
+    <value>固定到哪一块显示器</value>
+  </data>
+  <data name="Media.Notification.Fullscreen.Description" xml:space="preserve">
+    <value>全屏应用运行时也显示通知。</value>
+  </data>
+  <data name="Media.Notification.Fullscreen.Title" xml:space="preserve">
+    <value>全屏时仍然显示</value>
+  </data>
+  <data name="Media.Notification.Position.BottomCenter" xml:space="preserve">
+    <value>中下</value>
+  </data>
+  <data name="Media.Notification.Position.BottomLeft" xml:space="preserve">
+    <value>左下</value>
+  </data>
+  <data name="Media.Notification.Position.BottomRight" xml:space="preserve">
+    <value>右下</value>
+  </data>
+  <data name="Media.Notification.Position.Title" xml:space="preserve">
+    <value>显示位置</value>
+  </data>
+  <data name="Media.Notification.Position.TopCenter" xml:space="preserve">
+    <value>中上</value>
+  </data>
+  <data name="Media.Notification.Position.TopLeft" xml:space="preserve">
+    <value>左上</value>
+  </data>
+  <data name="Media.Notification.Position.TopRight" xml:space="preserve">
+    <value>右上</value>
+  </data>
+  <data name="Media.Notification.TargetMode.Description" xml:space="preserve">
+    <value>固定到一块屏幕，或跟随前台窗口所在屏幕。</value>
+  </data>
+  <data name="Media.Notification.TargetMode.Fixed" xml:space="preserve">
+    <value>固定显示器</value>
+  </data>
+  <data name="Media.Notification.TargetMode.ForegroundWindow" xml:space="preserve">
+    <value>跟随前台窗口所在显示器</value>
+  </data>
+  <data name="Media.Performance.Metrics.Description" xml:space="preserve">
+    <value>选择要显示的指标；多选时轮流显示。</value>
+  </data>
+  <data name="Media.Performance.Metrics.Title" xml:space="preserve">
+    <value>显示哪些指标</value>
+  </data>
+  <data name="Media.Performance.OpenTaskManager.Description" xml:space="preserve">
+    <value>点击性能组件时打开任务管理器。</value>
+  </data>
+  <data name="Media.Performance.OpenTaskManager.Title" xml:space="preserve">
+    <value>点击性能组件时打开任务管理器</value>
+  </data>
+  <data name="Media.Performance.RefreshInterval.Description" xml:space="preserve">
+    <value>调整性能指标的采样间隔（0.5–5 秒）。</value>
+  </data>
+  <data name="Media.Performance.RefreshInterval.Title" xml:space="preserve">
+    <value>刷新间隔</value>
+  </data>
+  <data name="Media.Performance.RefreshInterval.Value" xml:space="preserve">
+    <value>{0:0.#} 秒</value>
+  </data>
+  <data name="Media.Performance.Visible.Description" xml:space="preserve">
+    <value>在常驻状态显示所选性能指标。</value>
+  </data>
+  <data name="Media.Performance.Visible.Title" xml:space="preserve">
+    <value>显示性能组件</value>
+  </data>
+  <data name="Media.QuickLaunch.Browse" xml:space="preserve">
+    <value>浏览程序或快捷方式</value>
+  </data>
+  <data name="Media.QuickLaunch.Entries.Description" xml:space="preserve">
+    <value>顺序决定快速启动列表中的启动优先级。</value>
+  </data>
+  <data name="Media.QuickLaunch.Entries.Title" xml:space="preserve">
+    <value>已添加的启动项</value>
+  </data>
+  <data name="Media.QuickLaunch.EntryCount" xml:space="preserve">
+    <value>{0} 项</value>
+  </data>
+  <data name="Media.QuickLaunch.FromNote.Description" xml:space="preserve">
+    <value>点击音符打开列表；滚动预览，停约 1.2 秒后启动选中项。</value>
+  </data>
+  <data name="Media.QuickLaunch.FromNote.Title" xml:space="preserve">
+    <value>无媒体时从音符启动</value>
+  </data>
+  <data name="Media.QuickLaunch.MoveDown" xml:space="preserve">
+    <value>下移一位</value>
+  </data>
+  <data name="Media.QuickLaunch.MoveUp" xml:space="preserve">
+    <value>上移一位</value>
+  </data>
+  <data name="Media.QuickLaunch.Remove" xml:space="preserve">
+    <value>从快速启动中移除</value>
+  </data>
+  <data name="Media.RestComponents.Description" xml:space="preserve">
+    <value>设置常驻状态的频谱和性能组件。</value>
+  </data>
+  <data name="Media.SourceFilter.Description" xml:space="preserve">
+    <value>仅接收允许列表中的媒体来源；关闭后保留列表。</value>
+  </data>
+  <data name="Media.SourceFilter.Title" xml:space="preserve">
+    <value>来源允许列表</value>
+  </data>
+  <data name="Media.SourceList.AddToQuickLaunch" xml:space="preserve">
+    <value>加入快速启动</value>
+  </data>
+  <data name="Media.SourceList.AddToQuickLaunch.ToolTip" xml:space="preserve">
+    <value>只能添加可自动找到启动方式的播放器；其他程序请用“浏览程序或快捷方式”。</value>
+  </data>
+  <data name="Media.SourceList.Allow" xml:space="preserve">
+    <value>允许</value>
+  </data>
+  <data name="Media.SourceList.Description" xml:space="preserve">
+    <value>网易云音乐始终可选；其他播放器被检测到后显示。</value>
+  </data>
+  <data name="Media.SourceList.Title" xml:space="preserve">
+    <value>可用来源</value>
+  </data>
+  <data name="Media.Spectrum.BandCount.Description" xml:space="preserve">
+    <value>调整频谱柱数（9–24）；柱数越多，占用宽度越大。</value>
+  </data>
+  <data name="Media.Spectrum.BandCount.Title" xml:space="preserve">
+    <value>柱数</value>
+  </data>
+  <data name="Media.Spectrum.BandCount.Value" xml:space="preserve">
+    <value>{0} 根</value>
+  </data>
+  <data name="Media.Spectrum.CaptureSource.Title" xml:space="preserve">
+    <value>音频采集范围</value>
+  </data>
+  <data name="Media.Spectrum.CaptureSource.Description" xml:space="preserve">
+    <value>选择当前设备的混音、跨设备的所有程序，或媒体栏当前显示的程序。</value>
+  </data>
+  <data name="Media.Spectrum.CaptureSource.CurrentDevice" xml:space="preserve">
+    <value>当前设备全部音频</value>
+  </data>
+  <data name="Media.Spectrum.CaptureSource.AllApplications" xml:space="preserve">
+    <value>所有程序音频</value>
+  </data>
+  <data name="Media.Spectrum.CaptureSource.CurrentMediaApplication" xml:space="preserve">
+    <value>前台程序音频</value>
+  </data>
+  <data name="Media.Spectrum.CaptureSource.Requirements" xml:space="preserve">
+    <value>程序模式需要 Windows 11 或支持进程回环的系统。前台程序指媒体栏当前显示的来源，无法识别时停止采集；浏览器按程序采集，无法区分标签页。</value>
+  </data>
+  <data name="Media.Spectrum.CaptureSource.Compatibility" xml:space="preserve">
+    <value>所有程序模式排除 AF 及其子进程。当前设备和所有程序模式可能触发 Wallpaper Engine 等软件的自动静音规则。</value>
+  </data>
+  <data name="Media.Spectrum.ContentHeight.Description" xml:space="preserve">
+    <value>调整频谱高度（14–34 DIP），不影响占用宽度。</value>
+  </data>
+  <data name="Media.Spectrum.ContentHeight.Title" xml:space="preserve">
+    <value>频谱高度</value>
+  </data>
+  <data name="Media.Spectrum.ContentHeight.Value" xml:space="preserve">
+    <value>{0:0} DIP</value>
+  </data>
+  <data name="Media.Spectrum.Parameters.Description" xml:space="preserve">
+    <value>调整音频采集范围、样式、柱数、高度、刷新率与灵敏度。</value>
+  </data>
+  <data name="Media.Spectrum.Parameters.Title" xml:space="preserve">
+    <value>频谱参数</value>
+  </data>
+  <data name="Media.Spectrum.RefreshRate.Description" xml:space="preserve">
+    <value>调整频谱刷新频率（5–30 Hz）；数值越高，变化越流畅。</value>
+  </data>
+  <data name="Media.Spectrum.RefreshRate.Title" xml:space="preserve">
+    <value>刷新率</value>
+  </data>
+  <data name="Media.Spectrum.Sensitivity.Description" xml:space="preserve">
+    <value>调整频谱响应幅度（10%–400%）；数值越高，相同音量下的频谱柱越高。</value>
+  </data>
+  <data name="Media.Spectrum.Sensitivity.Title" xml:space="preserve">
+    <value>灵敏度</value>
+  </data>
+  <data name="Media.Spectrum.Style.Bars" xml:space="preserve">
+    <value>柱状图</value>
+  </data>
+  <data name="Media.Spectrum.Style.Description" xml:space="preserve">
+    <value>选择频谱的绘制样式，不改变占用宽度。</value>
+  </data>
+  <data name="Media.Spectrum.Style.MirroredBars" xml:space="preserve">
+    <value>上下对称柱状图</value>
+  </data>
+  <data name="Media.Spectrum.Style.PixelBars" xml:space="preserve">
+    <value>像素柱状图</value>
+  </data>
+  <data name="Media.Spectrum.Style.Title" xml:space="preserve">
+    <value>样式</value>
+  </data>
+  <data name="Media.Spectrum.Style.Waveform" xml:space="preserve">
+    <value>波形图</value>
+  </data>
+  <data name="Media.Spectrum.Visible.Description" xml:space="preserve">
+    <value>显示所选音频范围的实时频谱。</value>
+  </data>
+  <data name="Media.Spectrum.Visible.Title" xml:space="preserve">
+    <value>显示频谱</value>
+  </data>
+  <data name="Media.Status.AddedToQuickLaunch" xml:space="preserve">
+    <value>已添加到快速启动。</value>
+  </data>
+  <data name="Media.Status.AlreadyFirst" xml:space="preserve">
+    <value>已经在列表最前面。</value>
+  </data>
+  <data name="Media.Status.AlreadyInQuickLaunch" xml:space="preserve">
+    <value>该应用已在快速启动列表中。</value>
+  </data>
+  <data name="Media.Status.AlreadyLast" xml:space="preserve">
+    <value>已经在列表最后面。</value>
+  </data>
+  <data name="Media.Status.OnlyExistingFiles" xml:space="preserve">
+    <value>只能添加现有的 EXE 或 LNK 文件。</value>
+  </data>
+  <data name="Media.Status.SourceLaunchUnresolved" xml:space="preserve">
+    <value>无法解析该来源的安全启动方式，请浏览 EXE 或 LNK。</value>
+  </data>
+  <data name="Panel.AudioFlyout.AppVolume" xml:space="preserve">
+    <value>应用音量</value>
+  </data>
+  <data name="Panel.AudioFlyout.Refresh" xml:space="preserve">
+    <value>刷新音频状态</value>
+  </data>
+  <data name="Panel.AudioFlyout.SpatialAudio" xml:space="preserve">
+    <value>空间音效</value>
+  </data>
+  <data name="Panel.CompactMenu.WindowTitle" xml:space="preserve">
+    <value>任务栏快捷菜单</value>
+  </data>
+  <data name="Panel.FullPanel.NoMedia" xml:space="preserve">
+    <value>暂无媒体</value>
+  </data>
+  <data name="Panel.FullPanel.LyricsSource" xml:space="preserve">
+    <value>歌词来源：{0}</value>
+  </data>
+  <data name="Panel.FullPanel.RepeatMode" xml:space="preserve">
+    <value>循环模式</value>
+  </data>
+  <data name="Panel.FullPanel.WindowTitle" xml:space="preserve">
+    <value>媒体完整面板</value>
+  </data>
+  <data name="Panel.Notification.NowPlaying" xml:space="preserve">
+    <value>正在播放</value>
+  </data>
+  <data name="Panel.Notification.WindowTitle" xml:space="preserve">
+    <value>曲目切换通知</value>
+  </data>
+  <data name="Panel.Performance.Memory" xml:space="preserve">
+    <value>内存</value>
+  </data>
+  <data name="Panel.Performance.ProcessMemory" xml:space="preserve">
+    <value>本程序内存</value>
+  </data>
+  <data name="Panel.QuickLaunch.Empty" xml:space="preserve">
+    <value>尚未添加应用</value>
+  </data>
+  <data name="Panel.QuickLaunch.Preview" xml:space="preserve">
+    <value>快速启动：{0}</value>
+  </data>
+  <data name="Panel.QuickLaunch.Title" xml:space="preserve">
+    <value>快速启动</value>
+  </data>
+  <data name="Panel.Repeat.All" xml:space="preserve">
+    <value>列表循环</value>
+  </data>
+  <data name="Panel.Repeat.Off" xml:space="preserve">
+    <value>循环关闭</value>
+  </data>
+  <data name="Panel.Repeat.One" xml:space="preserve">
+    <value>单曲循环</value>
+  </data>
+  <data name="Panel.Repeat.Unavailable" xml:space="preserve">
+    <value>循环不可用</value>
+  </data>
+  <data name="Panel.Volume.CurrentAppVolume" xml:space="preserve">
+    <value>当前应用音量</value>
+  </data>
+  <data name="Panel.Volume.CurrentMedia" xml:space="preserve">
+    <value>当前媒体</value>
+  </data>
+  <data name="Panel.Volume.Tooltip" xml:space="preserve">
+    <value>当前应用音量 / 音量合成器</value>
+  </data>
+  <data name="Panel.Volume.Unavailable" xml:space="preserve">
+    <value>不可用</value>
+  </data>
+  <data name="Search.About.Developers.Description" xml:space="preserve">
+    <value>开发人员名单，取自 GitHub 的贡献者列表</value>
+  </data>
+  <data name="Search.About.Licenses.Description" xml:space="preserve">
+    <value>本程序使用的开源软件包与衍生代码及其许可</value>
+  </data>
+  <data name="Search.About.ProjectInfo.Description" xml:space="preserve">
+    <value>项目仓库与问题反馈入口。</value>
+  </data>
+  <data name="Search.About.Sponsors.Description" xml:space="preserve">
+    <value>赞助者名单，取自仓库里的名单文件</value>
+  </data>
+  <data name="Search.About.Support.Description" xml:space="preserve">
+    <value>微信与支付宝收款码</value>
+  </data>
+  <data name="Search.Application.Application.Description" xml:space="preserve">
+    <value>选择界面语言和开机自动启动。</value>
+  </data>
+  <data name="Search.Application.Diagnostics.Description" xml:space="preserve">
+    <value>打开日志文件夹，或手动释放暂时不用的物理内存。</value>
+  </data>
+  <data name="Search.Application.SettingsFile.Description" xml:space="preserve">
+    <value>打开设置文件夹与重置全部设置</value>
+  </data>
+  <data name="Application.Header.Subtitle" xml:space="preserve">
+    <value>版本与更新、界面语言、开机自启、设置文件与诊断日志</value>
+  </data>
+  <data name="Search.Appearance.Fonts.Description" xml:space="preserve">
+    <value>英文字体、中文字体与字体粗细</value>
+  </data>
+  <data name="Search.Appearance.MediaBarText.Description" xml:space="preserve">
+    <value>媒体栏上文字的颜色与大小</value>
+  </data>
+  <data name="Search.Appearance.MediaBarWidth.Description" xml:space="preserve">
+    <value>设置媒体栏与歌词区域长度、组件间距。</value>
+  </data>
+  <data name="Search.Appearance.RestLayout.Description" xml:space="preserve">
+    <value>调整标题显示方式、标题和歌词对齐，以及内容展开方向。</value>
+  </data>
+  <data name="Search.Appearance.InteractionButtons.Description" xml:space="preserve">
+    <value>常驻状态和快捷控制按钮的大小与间距</value>
+  </data>
+  <data name="Search.Appearance.ThemeAndBackdrop.Description" xml:space="preserve">
+    <value>浅色还是深色，以及窗口背景材质</value>
+  </data>
+  <data name="Search.DisplayModes.ChooseDisplayMode.Description" xml:space="preserve">
+    <value>查看实际运行模式和后续显示模式。</value>
+  </data>
+  <data name="Search.DisplayModes.FullLayer.Description" xml:space="preserve">
+    <value>点击媒体栏展开的面板包含哪些分区</value>
+  </data>
+  <data name="Search.DisplayModes.HoverLayer.Description" xml:space="preserve">
+    <value>鼠标移入媒体栏时出现的快捷控制</value>
+  </data>
+  <data name="Search.DisplayModes.IslandAppearance.Description" xml:space="preserve">
+    <value>灵动岛的背景样式、不透明度与圆角，当前只读</value>
+  </data>
+  <data name="Search.DisplayModes.MediaBarWidth.Description" xml:space="preserve">
+    <value>宽度跟随内容、固定宽度与组件间距</value>
+  </data>
+  <data name="Search.DisplayModes.RestLayer.Description" xml:space="preserve">
+    <value>设置常驻状态的显示内容和完整面板入口。</value>
+  </data>
+  <data name="Search.DisplayModes.ScreenAndPlacement.Description" xml:space="preserve">
+    <value>媒体栏所在的显示器与任务栏位置</value>
+  </data>
+  <data name="Search.Interaction.InAppRestLayer.Description" xml:space="preserve">
+    <value>设置封面和标题或歌词的点击动作。</value>
+  </data>
+  <data name="Search.Interaction.SharedModifier.Description" xml:space="preserve">
+    <value>设置媒体栏普通滚轮、组合滚轮与组合按键。</value>
+  </data>
+  <data name="Search.Interaction.TrayIcon.Description" xml:space="preserve">
+    <value>托盘图标的点击与滚轮行为</value>
+  </data>
+  <data name="Search.Lyrics.Alignment.Description" xml:space="preserve">
+    <value>歌词靠左、居中还是靠右</value>
+  </data>
+  <data name="Search.Lyrics.Display.Description" xml:space="preserve">
+    <value>启用实时歌词，设置单双行和第二行内容优先级。</value>
+  </data>
+  <data name="Search.Lyrics.Sources.Description" xml:space="preserve">
+    <value>选择启用的歌词来源；取词顺序和评分由应用管理</value>
+  </data>
+  <data name="Search.MediaAndNotifications.MediaSource.Description" xml:space="preserve">
+    <value>来源允许列表与已检测来源</value>
+  </data>
+  <data name="Search.MediaAndNotifications.QuickLaunch.Description" xml:space="preserve">
+    <value>无媒体时从音符启动播放器</value>
+  </data>
+  <data name="Search.Components.RestLayerComponents.Description" xml:space="preserve">
+    <value>设置常驻状态的频谱和性能组件。</value>
+  </data>
+  <data name="Search.MediaAndNotifications.TrackChangeNotification.Description" xml:space="preserve">
+    <value>曲目切换并开始播放时显示当前曲目</value>
+  </data>
+  <data name="Service.MediaSource.Kugou" xml:space="preserve">
+    <value>酷狗音乐</value>
+  </data>
+  <data name="Service.MediaSource.NetEaseCloudMusic" xml:space="preserve">
+    <value>网易云音乐</value>
+  </data>
+  <data name="Service.MediaSource.QQMusic" xml:space="preserve">
+    <value>QQ音乐</value>
+  </data>
+  <data name="Service.MediaSource.Unknown" xml:space="preserve">
+    <value>未知来源</value>
+  </data>
+  <data name="Service.Startup.ExecutablePathUnavailable" xml:space="preserve">
+    <value>无法确定程序路径，无法写入启动项</value>
+  </data>
+  <data name="Service.Startup.RegistryKeyUnavailable" xml:space="preserve">
+    <value>无法打开启动项注册表键</value>
+  </data>
+  <data name="Settings.Legacy.About" xml:space="preserve">
+    <value>关于 AFMediaBar</value>
+  </data>
+  <data name="Settings.Legacy.Personalization" xml:space="preserve">
+    <value>个性化</value>
+  </data>
+  <data name="Settings.Legacy.Theme" xml:space="preserve">
+    <value>主题</value>
+  </data>
+  <data name="Settings.Legacy.ThemeDark" xml:space="preserve">
+    <value>深色</value>
+  </data>
+  <data name="Settings.Legacy.ThemeLight" xml:space="preserve">
+    <value>浅色</value>
+  </data>
+  <data name="Settings.Search.Placeholder" xml:space="preserve">
+    <value>搜索设置</value>
+  </data>
+  <data name="Settings.Search.Suggestion.Title" xml:space="preserve">
+    <value>{0} › {1}</value>
+  </data>
+  <data name="Shell.QuickLaunch.Status.Failed" xml:space="preserve">
+    <value>无法启动此应用，请检查应用是否仍可用。</value>
+  </data>
+  <data name="Shell.QuickLaunch.Status.InvalidTarget" xml:space="preserve">
+    <value>启动目标已失效，请在媒体与通知中重新添加。</value>
+  </data>
+  <data name="Startup.SingleInstance.AlreadyRunning" xml:space="preserve">
+    <value>AF Media Bar 已在运行，请查看右下角的托盘图标（或点击小箭头展开隐藏图标）。</value>
+  </data>
+  <data name="Startup.TranslucentTb.Content" xml:space="preserve">
+    <value>检测到 TranslucentTB，已开启任务栏磨砂背景，便于辨认媒体内容。点击通知可前往“媒体栏外观 → 背景层”调整。</value>
+  </data>
+  <data name="Startup.TranslucentTb.Title" xml:space="preserve">
+    <value>已适配透明任务栏</value>
+  </data>
+  <data name="Update.Channel.Accelerated" xml:space="preserve">
+    <value>加速站点 {0}</value>
+  </data>
+  <data name="Update.Channel.Direct" xml:space="preserve">
+    <value>GitHub 直连</value>
+  </data>
+  <data name="Update.Install.Blocked.OtherInstances" xml:space="preserve">
+    <value>程序还有其它实例在运行</value>
+  </data>
+  <data name="Update.Install.Blocked.Portable" xml:space="preserve">
+    <value>当前是便携版，无法自动安装</value>
+  </data>
+  <data name="Update.Navigation.Available" xml:space="preserve">
+    <value>发现新版本 v{0}</value>
+  </data>
+  <data name="Update.Navigation.Downloading" xml:space="preserve">
+    <value>正在下载更新 {0}%</value>
+  </data>
+  <data name="Update.Navigation.Ready" xml:space="preserve">
+    <value>更新已就绪（v{0}）</value>
+  </data>
+  <data name="Update.Navigation.Verifying" xml:space="preserve">
+    <value>正在校验更新</value>
+  </data>
+  <data name="Update.Notification.Body" xml:space="preserve">
+    <value>发现 v{0}（当前 v{1}）。点击打开设置，查看亮点并下载安装。</value>
+  </data>
+  <data name="Update.Notification.Title" xml:space="preserve">
+    <value>AF Media Bar 有新版本</value>
+  </data>
+  <data name="Update.Reason.DownloadFailed" xml:space="preserve">
+    <value>下载失败（网络或磁盘错误）</value>
+  </data>
+  <data name="Update.Reason.DownloadHashMismatch" xml:space="preserve">
+    <value>安装包校验失败（SHA-256 不匹配，收到 {0} 字节）</value>
+  </data>
+  <data name="Update.Reason.DownloadHttp" xml:space="preserve">
+    <value>下载失败（HTTP {0}）</value>
+  </data>
+  <data name="Update.Reason.DownloadTimeout" xml:space="preserve">
+    <value>下载超时</value>
+  </data>
+  <data name="Update.Reason.ManifestEmpty" xml:space="preserve">
+    <value>清单内容为空</value>
+  </data>
+  <data name="Update.Reason.ManifestEndpointInvalid" xml:space="preserve">
+    <value>清单地址无效</value>
+  </data>
+  <data name="Update.Reason.ManifestHttp" xml:space="preserve">
+    <value>无法访问版本清单（HTTP {0}）</value>
+  </data>
+  <data name="Update.Reason.ManifestInvalidJson" xml:space="preserve">
+    <value>清单不是合法 JSON</value>
+  </data>
+  <data name="Update.Reason.ManifestNetwork" xml:space="preserve">
+    <value>无法访问版本清单（网络错误）</value>
+  </data>
+  <data name="Update.Reason.ManifestRootNotObject" xml:space="preserve">
+    <value>清单根节点不是对象</value>
+  </data>
+  <data name="Update.Reason.ManifestSchemaInvalid" xml:space="preserve">
+    <value>清单的 schemaVersion 不是有效版本号</value>
+  </data>
+  <data name="Update.Reason.ManifestSchemaTooNew" xml:space="preserve">
+    <value>清单 schemaVersion {0} 高于当前程序支持的 {1}</value>
+  </data>
+  <data name="Update.Reason.ManifestUnreachable" xml:space="preserve">
+    <value>无法访问版本清单</value>
+  </data>
+  <data name="Update.Reason.ManifestVersionMissing" xml:space="preserve">
+    <value>清单缺少 version</value>
+  </data>
+  <data name="Update.Reason.ManifestVersionUnparsable" xml:space="preserve">
+    <value>清单的 version（{0}）无法解析</value>
+  </data>
+  <data name="Update.Reason.NoUsableSource" xml:space="preserve">
+    <value>所有下载地址都不可用</value>
+  </data>
+  <data name="Update.Reason.PendingRecordMissing" xml:space="preserve">
+    <value>已下载的安装包记录缺失</value>
+  </data>
+  <data name="Update.Reason.Unknown" xml:space="preserve">
+    <value>未知原因</value>
+  </data>
+  <data name="Update.Reason.VerifyHashMismatch" xml:space="preserve">
+    <value>已下载的安装包 SHA-256 与清单不符，已删除</value>
+  </data>
+  <data name="Update.Reason.VerifyUnreadable" xml:space="preserve">
+    <value>已下载的安装包无法读取，已删除</value>
+  </data>
+  <data name="Update.Relative.Days" xml:space="preserve">
+    <value>{0} 天前</value>
+  </data>
+  <data name="Update.Relative.Hours" xml:space="preserve">
+    <value>{0} 小时前</value>
+  </data>
+  <data name="Update.Relative.JustNow" xml:space="preserve">
+    <value>刚刚</value>
+  </data>
+  <data name="Update.Relative.Minutes" xml:space="preserve">
+    <value>{0} 分钟前</value>
+  </data>
+  <data name="Update.Status.Available" xml:space="preserve">
+    <value>发现新版本 v{0}（当前 v{1}）</value>
+  </data>
+  <data name="Update.Status.Checking" xml:space="preserve">
+    <value>正在检查更新…</value>
+  </data>
+  <data name="Update.Status.Downloading" xml:space="preserve">
+    <value>正在下载并校验安装包 {0}%</value>
+  </data>
+  <data name="Update.Status.Failed" xml:space="preserve">
+    <value>更新失败：{0}</value>
+  </data>
+  <data name="Update.Status.Idle" xml:space="preserve">
+    <value>尚未检查更新</value>
+  </data>
+  <data name="Update.Status.ManualOnly" xml:space="preserve">
+    <value>发现新版本 v{0}，但清单未提供可自动安装的安装包</value>
+  </data>
+  <data name="Update.Status.Ready" xml:space="preserve">
+    <value>更新已就绪（v{0}）· 下次启动程序时自动安装，或立即重启并安装</value>
+  </data>
+  <data name="Update.Status.ReadyBlocked" xml:space="preserve">
+    <value>已下载 v{0}，但{1}；可从下载页手动更新</value>
+  </data>
+  <data name="Update.Status.Skipped" xml:space="preserve">
+    <value>已跳过 v{0}（当前 v{1}）· 手动检查仍会显示该版本</value>
+  </data>
+  <data name="Update.Status.UpToDate" xml:space="preserve">
+    <value>已是最新版本（v{0}）</value>
+  </data>
+  <data name="Update.Status.Verifying" xml:space="preserve">
+    <value>正在校验安装包 {0}%</value>
+  </data>
+  <data name="Update.Suffix.Channel" xml:space="preserve">
+    <value> · {0}</value>
+  </data>
+  <data name="Update.Suffix.LastCheck" xml:space="preserve">
+    <value> · 上次检查 {0}</value>
+  </data>
+  <data name="Update.Suffix.Mandatory" xml:space="preserve">
+    <value> · 该版本必须更新</value>
+  </data>
+  <data name="Update.Tray.Available" xml:space="preserve">
+    <value>发现新版本 v{0}（点击查看）</value>
+  </data>
+  <data name="Update.Tray.Check" xml:space="preserve">
+    <value>检查更新</value>
+  </data>
+  <data name="Update.Tray.Checking" xml:space="preserve">
+    <value>正在检查更新…</value>
+  </data>
+  <data name="Update.Tray.Downloading" xml:space="preserve">
+    <value>正在下载更新 {0}%</value>
+  </data>
+  <data name="Update.Tray.Failed" xml:space="preserve">
+    <value>更新失败，点击查看</value>
+  </data>
+  <data name="Update.Tray.Ready" xml:space="preserve">
+    <value>更新已就绪（v{0}），点击查看</value>
+  </data>
+  <data name="Update.Tray.Verifying" xml:space="preserve">
+    <value>正在校验安装包 {0}%</value>
+  </data>
+  <data name="Wheel.Action.CurrentMediaVolume" xml:space="preserve">
+    <value>当前媒体音量</value>
+  </data>
+  <data name="Wheel.Action.MediaSource" xml:space="preserve">
+    <value>播放源</value>
+  </data>
+  <data name="Wheel.Hint.Chord" xml:space="preserve">
+    <value>{0} + 滚轮：{1}</value>
+  </data>
+  <data name="Wheel.Hint.Plain" xml:space="preserve">
+    <value>普通滚轮：{0}</value>
+  </data>
+  <data name="Wheel.Hint.WithValue" xml:space="preserve">
+    <value>{0}（当前：{1}）</value>
+  </data>
+  <data name="Wheel.Line.WithValue" xml:space="preserve">
+    <value>{0}：{1}</value>
+  </data>
+  <data name="Common.Page.ReleaseHighlights" xml:space="preserve"><value>更新亮点</value></data>
+  <data name="Settings.Navigation.Back" xml:space="preserve"><value>返回</value></data>
+  <data name="ReleaseHighlights.Header.Subtitle" xml:space="preserve"><value>了解最新改进，回顾每个正式版本的变化。</value></data>
+  <data name="ReleaseHighlights.Latest" xml:space="preserve"><value>最新版本</value></data>
+  <data name="ReleaseHighlights.History" xml:space="preserve"><value>历史版本</value></data>
+  <data name="ReleaseHighlights.Refresh" xml:space="preserve"><value>刷新亮点</value></data>
+  <data name="ReleaseHighlights.FullNotes" xml:space="preserve"><value>完整发布说明</value></data>
+  <data name="ReleaseHighlights.CurrentVersion" xml:space="preserve"><value>当前版本</value></data>
+  <data name="ReleaseHighlights.OriginalText" xml:space="preserve"><value>此版本尚未提供当前语言的译文，以下显示官方原文。</value></data>
+  <data name="ReleaseHighlights.NoHighlights" xml:space="preserve"><value>此版本暂未提供更新亮点，可查看完整发布说明。</value></data>
+  <data name="ReleaseHighlights.Status.Bundled" xml:space="preserve"><value>正在显示程序内置的版本亮点。</value></data>
+  <data name="ReleaseHighlights.Status.Cached" xml:space="preserve"><value>正在显示缓存内容，最近获取：{0}。</value></data>
+  <data name="ReleaseHighlights.Status.Updated" xml:space="preserve"><value>版本亮点已刷新：{0}。</value></data>
+  <data name="ReleaseHighlights.Status.RefreshFailed" xml:space="preserve"><value>暂时无法刷新，仍可浏览已保存的版本亮点。</value></data>
+  <data name="ReleaseHighlights.Status.CacheWriteFailed" xml:space="preserve"><value>已获取最新亮点，但未能保存离线缓存。</value></data>
+  <data name="ReleaseHighlights.Application.Description" xml:space="preserve"><value>查看最新版本和所有历史正式版本的更新亮点。</value></data>
+  <data name="ReleaseHighlights.Application.Open" xml:space="preserve"><value>查看更新亮点</value></data>
+  <data name="Settings.Expand" xml:space="preserve"><value>点击展开</value></data>
+  <data name="Settings.Collapse" xml:space="preserve"><value>点击收起</value></data>
+  <data name="Common.Group.TextAndFonts" xml:space="preserve">
+    <value>文字与字体</value>
+  </data>
+  <data name="Search.Appearance.TextAndFonts.Description" xml:space="preserve">
+    <value>调整媒体文字大小、颜色，以及界面和媒体栏共用的字体与粗细。</value>
+  </data>
+  <data name="Settings.Advanced.Fonts.Title" xml:space="preserve">
+    <value>字体与字重</value>
+  </data>
+  <data name="Settings.Advanced.Fonts.Description" xml:space="preserve">
+    <value>调整界面、媒体栏和通知共用的字体与文字粗细。</value>
+  </data>
+  <data name="Settings.Advanced.Backdrop.Title" xml:space="preserve">
+    <value>材质细节</value>
+  </data>
+  <data name="Settings.Advanced.Backdrop.Description" xml:space="preserve">
+    <value>调整自绘背景的颜色浓度。</value>
+  </data>
+  <data name="Settings.Advanced.Spacing.Title" xml:space="preserve">
+    <value>组件间距</value>
+  </data>
+  <data name="Settings.Advanced.Spacing.Description" xml:space="preserve">
+    <value>微调媒体栏中各组件之间的距离。</value>
+  </data>
+  <data name="Settings.Advanced.Lyrics.Title" xml:space="preserve">
+    <value>歌词排版细节</value>
+  </data>
+  <data name="Settings.Advanced.Lyrics.Description" xml:space="preserve">
+    <value>调整未唱文字、行距和字距；对齐与长度在内容与布局中设置。</value>
+  </data>
+  <data name="Settings.Advanced.Defaults.Title" xml:space="preserve">
+    <value>自定义默认设置</value>
+  </data>
+  <data name="Settings.Advanced.Defaults.Description" xml:space="preserve">
+    <value>保存或清除恢复默认设置时使用的个人配置。</value>
+  </data>
+  <data name="Settings.Advanced.Diagnostics.Title" xml:space="preserve">
+    <value>诊断工具</value>
+  </data>
+  <data name="Settings.Advanced.Diagnostics.Description" xml:space="preserve">
+    <value>打开日志文件夹，或手动释放工作集内存。</value>
+  </data>
+  <data name="Settings.Numeric.Range" xml:space="preserve">
+    <value>范围：{0}–{1} {2}；步长：{3}。输入后按 Enter 或移开焦点应用，Esc 取消。</value>
+  </data>
+  <data name="Settings.Numeric.Invalid" xml:space="preserve">
+    <value>请输入范围内的有效数值；原设置未改变。</value>
+  </data>
+  <data name="Settings.Numeric.Adjusted" xml:space="preserve">
+    <value>已按允许的步长调整为 {0} {1}。</value>
+  </data>
+  <data name="Settings.Numeric.Percent" xml:space="preserve">
+    <value>%</value>
+  </data>
+  <data name="Settings.Numeric.Dip" xml:space="preserve">
+    <value>DIP</value>
+  </data>
+  <data name="Settings.Numeric.Hertz" xml:space="preserve">
+    <value>Hz</value>
+  </data>
+  <data name="Settings.Numeric.Seconds" xml:space="preserve">
+    <value>秒</value>
+  </data>
+  <data name="Appearance.Specimen.Line1" xml:space="preserve">
+    <value>AF Media Bar · 媒体标题与歌词</value>
+  </data>
+  <data name="Appearance.Specimen.Line2" xml:space="preserve">
+    <value>字母 123 · 汉字 · 日本語</value>
+  </data>
+  <data name="Appearance.Specimen.Line3" xml:space="preserve">
+    <value>字体预览 · 가나다 · Sample text</value>
+  </data>
+  <data name="Common.Page.ScreenAndPlacement" xml:space="preserve">
+    <value>显示与位置</value>
+  </data>
+  <data name="ScreenAndPlacement.Header.Subtitle" xml:space="preserve">
+    <value>选择显示屏幕，调整媒体栏位置；朝向由系统任务栏决定。</value>
+  </data>
+  <data name="Common.Page.ApplicationAppearance" xml:space="preserve">
+    <value>应用外观</value>
+  </data>
+  <data name="Common.Page.TaskbarAppearance" xml:space="preserve">
+    <value>媒体栏外观</value>
+  </data>
+  <data name="ApplicationAppearance.Header.Subtitle" xml:space="preserve">
+    <value>设置应用主题、窗口材质和界面字体。</value>
+  </data>
+  <data name="TaskbarAppearance.Header.Subtitle" xml:space="preserve">
+    <value>调整当前任务栏环境中的文字、尺寸和组件布局。</value>
+  </data>
+  <data name="Settings.Context.EditingMonitor" xml:space="preserve">
+    <value>正在配置的显示器</value>
+  </data>
+  <data name="Settings.Context.Unavailable" xml:space="preserve">
+    <value>暂未读取到任务栏</value>
+  </data>
+  <data name="Settings.Context.Compact" xml:space="preserve">
+    <value> · 系统紧凑任务栏</value>
+  </data>
+  <data name="Settings.Context.Summary" xml:space="preserve">
+    <value>{0}{1}。当前版本中，各显示器及横竖方向共用任务栏设置。</value>
+  </data>
+  <data name="Settings.Context.Horizontal" xml:space="preserve">
+    <value>横向任务栏</value>
+  </data>
+  <data name="Settings.Context.Vertical" xml:space="preserve">
+    <value>竖向任务栏</value>
+  </data>
+  <data name="DisplayModes.Mode.AvailabilityNotice" xml:space="preserve">
+    <value>目前仅支持任务栏模式。其他模式暂不可切换。</value>
+  </data>
+  <data name="Appearance.FontsShortcut.Description" xml:space="preserve">
+    <value>字体统一在外观的通用字体分组中设置。</value>
+  </data>
+  <data name="Appearance.FontsShortcut.Action" xml:space="preserve">
+    <value>调整字体</value>
+  </data>
+  <data name="Lyrics.Row.ArtistSeparators.Title" xml:space="preserve">
+    <value>艺术家分隔符</value>
+  </data>
+  <data name="Lyrics.Row.ArtistSeparators.Description" xml:space="preserve">
+    <value>自定义歌词搜索和匹配使用的艺术家分隔符。点击管理可逐项新增、编辑或删除，确定后重新匹配；不改变艺术家显示。</value>
+  </data>
+  <data name="Lyrics.Row.ArtistSeparators.Manage" xml:space="preserve">
+    <value>管理艺术家分隔符</value>
+  </data>
+  <data name="Lyrics.ArtistSeparators.Dialog.Hint" xml:space="preserve">
+    <value>保留分隔符首尾空格，字母不区分大小写。</value>
+  </data>
+  <data name="Lyrics.ArtistSeparators.Dialog.Add" xml:space="preserve">
+    <value>新增</value>
+  </data>
+  <data name="Lyrics.ArtistSeparators.Dialog.Remove" xml:space="preserve">
+    <value>删除分隔符</value>
+  </data>
+  <data name="Lyrics.ArtistSeparators.Dialog.Confirm" xml:space="preserve">
+    <value>确定</value>
+  </data>
+  <data name="Lyrics.ArtistSeparators.Dialog.Empty" xml:space="preserve">
+    <value>当前没有分隔符，艺术家分割已关闭。可新增分隔符，或恢复默认的 /。</value>
+  </data>
+  <data name="Lyrics.ArtistSeparators.Dialog.Restore" xml:space="preserve">
+    <value>恢复默认分隔符</value>
+  </data>
+  <data name="Appearance.Group.TaskbarBackground" xml:space="preserve">
+    <value>媒体栏背景</value>
+  </data>
+  <data name="Appearance.TaskbarBackground.Details.Title" xml:space="preserve">
+    <value>背景层细节</value>
+  </data>
+  <data name="Appearance.TaskbarBackground.Details.Description" xml:space="preserve">
+    <value>调整背景风格与浓度；启用背景层后生效。</value>
+  </data>
+  <data name="DisplayModes.Placement.Row.Alignment.Title" xml:space="preserve">
+    <value>媒体栏位置</value>
+  </data>
+  <data name="DisplayModes.Placement.Row.Alignment.Description" xml:space="preserve">
+    <value>决定整条媒体栏的位置。切换时清除拖动偏移，并恢复自动内容排布。</value>
+  </data>
+  <data name="DisplayModes.Placement.Alignment.Start" xml:space="preserve">
+    <value>靠左</value>
+  </data>
+  <data name="DisplayModes.Placement.Alignment.Center" xml:space="preserve">
+    <value>居中</value>
+  </data>
+  <data name="DisplayModes.Placement.Alignment.End" xml:space="preserve">
+    <value>靠右</value>
+  </data>
+  <data name="DisplayModes.Placement.Row.Arrangement.Title" xml:space="preserve">
+    <value>内容展开方向</value>
+  </data>
+  <data name="DisplayModes.Placement.Row.Arrangement.Description" xml:space="preserve">
+    <value>决定封面和组件从哪侧展开，不改变媒体栏位置或保存的组件逻辑顺序。</value>
+  </data>
+  <data name="DisplayModes.Placement.Arrangement.Left" xml:space="preserve">
+    <value>从左侧展开</value>
+  </data>
+  <data name="DisplayModes.Placement.Arrangement.Right" xml:space="preserve">
+    <value>从右侧展开</value>
+  </data>
+  <data name="Taskbar.Placement.Notification.Title" xml:space="preserve">
+    <value>任务栏空间不足</value>
+  </data>
+  <data name="Taskbar.Placement.Notification.Hidden" xml:space="preserve">
+    <value>当前任务栏无法容纳最小媒体栏，已暂时隐藏。仍可从托盘控制媒体；空间恢复后会自动显示。</value>
+  </data>
+  <data name="Taskbar.Placement.Notification.Constrained" xml:space="preserve">
+    <value>当前任务栏空间不足，媒体栏已缩窄显示。关闭部分任务栏图标后会自动恢复。</value>
+  </data>
+  <data name="DisplayModes.Width.NoCommonRange" xml:space="preserve">
+    <value>当前任务栏没有共同可用的固定长度范围。已保存的长度会保留，各任务栏按自身空间限宽。</value>
+  </data>
+  <data name="Common.Page.ContentLayout" xml:space="preserve">
+    <value>内容与布局</value>
+  </data>
+  <data name="ContentLayout.Header.Subtitle" xml:space="preserve">
+    <value>配置常驻内容、文字布局、组件参数和控制面板。</value>
+  </data>
+  <data name="Appearance.Unified.Header.Subtitle" xml:space="preserve">
+    <value>设置通用主题与字体，以及媒体栏专属文字和背景。</value>
+  </data>
+  <data name="Appearance.Scope.Global" xml:space="preserve">
+    <value>主题、强调色和材质用于应用窗口；菜单保持纯色。</value>
+  </data>
+  <data name="Appearance.Scope.Fonts" xml:space="preserve">
+    <value>字体与粗细用于设置、媒体栏和通知；媒体栏字号可单独缩放。</value>
+  </data>
+  <data name="Appearance.Scope.Taskbar" xml:space="preserve">
+    <value>仅影响媒体栏，不改变其他窗口的主题或字体。</value>
+  </data>
+  <data name="Appearance.Background.Prerequisite" xml:space="preserve">
+    <value>开启媒体栏磨砂背景后，风格和浓度才会生效。</value>
+  </data>
+  <data name="ContentLayout.Arrangement.Auto" xml:space="preserve">
+    <value>跟随媒体栏位置</value>
+  </data>
+  <data name="ContentLayout.Text.Details.Title" xml:space="preserve">
+    <value>对齐与展开方向</value>
+  </data>
+  <data name="ContentLayout.Text.Details.Description" xml:space="preserve">
+    <value>分别设置标题和歌词对齐；需要时覆盖自动展开方向。</value>
+  </data>
+  <data name="ContentLayout.LengthMode.Title" xml:space="preserve">
+    <value>媒体栏长度方式</value>
+  </data>
+  <data name="ContentLayout.LengthMode.Description" xml:space="preserve">
+    <value>控制整条媒体栏的长度，仍受组件最低需求及任务栏可用空间限制。</value>
+  </data>
+  <data name="ContentLayout.LengthMode.Follow" xml:space="preserve">
+    <value>随内容变化</value>
+  </data>
+  <data name="ContentLayout.LengthMode.Fixed" xml:space="preserve">
+    <value>固定长度</value>
+  </data>
+  <data name="ContentLayout.LyricsLength.Title" xml:space="preserve">
+    <value>歌词区域长度</value>
+  </data>
+  <data name="ContentLayout.LyricsLength.Description" xml:space="preserve">
+    <value>整体随内容变化时，可固定歌词区域以减少换句伸缩。整体固定长度时，不改变媒体栏总长度。</value>
+  </data>
+  <data name="ContentLayout.Text.Shortcut.Title" xml:space="preserve">
+    <value>文字布局与长度</value>
+  </data>
+  <data name="ContentLayout.Text.Shortcut.Description" xml:space="preserve">
+    <value>标题与歌词对齐、媒体栏和歌词区域长度统一在内容与布局中设置。</value>
+  </data>
+  <data name="ContentLayout.Text.Shortcut.Action" xml:space="preserve">
+    <value>前往文字布局</value>
+  </data>
+  <data name="Placement.FutureModes.Title" xml:space="preserve">
+    <value>其他显示模式</value>
+  </data>
+  <data name="Placement.FutureModes.Description" xml:space="preserve">
+    <value>以下模式尚未实现，目前不可切换或配置。</value>
+  </data>
+  <data name="Lyrics.Group.Presentation" xml:space="preserve">
+    <value>擦亮与文本处理</value>
+  </data>
+  <data name="Interaction.Group.Wheel" xml:space="preserve">
+    <value>媒体栏滚轮</value>
+  </data>
+  <data name="Application.Group.Updates" xml:space="preserve">
+    <value>更新</value>
+  </data>
+  <data name="Search.Lyrics.Presentation.Description" xml:space="preserve">
+    <value>设置逐字擦亮、署名过滤、字距及行距。</value>
+  </data>
+  <data name="Search.Application.Updates.Description" xml:space="preserve">
+    <value>检查、下载、安装更新，或跳过指定版本。</value>
+  </data>
+  <data name="ContentLayout.Hover.Prerequisite" xml:space="preserve">
+    <value>开启快捷控制后显示以下内容；关闭时仍可预先配置。</value>
+  </data>
+  <data name="ContentLayout.Full.Prerequisite" xml:space="preserve">
+    <value>开启完整面板后使用以下入口和内容；关闭时仍可预先配置。</value>
+  </data>
+  <data name="Search.ContentLayout.Vertical.Rest" xml:space="preserve">
+    <value>配置常驻与无媒体内容，以及频谱和性能参数。</value>
+  </data>
+  <data name="Search.ContentLayout.Vertical.Text" xml:space="preserve">
+    <value>调整歌词在文字区域内的对齐。</value>
+  </data>
+  <data name="Search.Placement.Vertical" xml:space="preserve">
+    <value>选择显示屏幕，查看系统朝向，设置避让、锁定与偏移。</value>
+  </data>
+  <data name="Restart.Dialog.Title" xml:space="preserve">
+    <value>重启 AF Media Bar</value>
+  </data>
+  <data name="Restart.Dialog.Confirm" xml:space="preserve">
+    <value>重启</value>
+  </data>
+  <data name="Restart.Dialog.Later" xml:space="preserve">
+    <value>稍后</value>
+  </data>
+  <data name="Restart.Failed" xml:space="preserve">
+    <value>无法完成重启，请稍后重试或退出后重新打开 AF Media Bar。</value>
+  </data>
+  <data name="Restart.Busy" xml:space="preserve">
+    <value>更新安装或重启正在进行，请稍后再试。</value>
+  </data>
+  <data name="Lyrics.Recovery.Notification.Title" xml:space="preserve">
+    <value>歌词显示已暂停</value>
+  </data>
+  <data name="Lyrics.Recovery.Notification.Body" xml:space="preserve">
+    <value>歌词显示异常，已改为显示歌曲信息。其他功能仍可使用。点击此通知可确认重启 AF Media Bar，尝试恢复歌词。</value>
+  </data>
+  <data name="Lyrics.Recovery.RestartReason" xml:space="preserve">
+    <value>歌词显示已暂停。重启 AF Media Bar 可尝试恢复歌词，其他功能仍可继续使用。是否现在重启？</value>
+  </data>
+  <data name="Developer.Mode.Title" xml:space="preserve"><value>开发者模式</value></data>
+  <data name="Developer.Mode.Description" xml:space="preserve"><value>手动测试通知和恢复流程。测试操作可能影响当前会话。</value></data>
+  <data name="Developer.Tools.Title" xml:space="preserve"><value>测试工具</value></data>
+  <data name="Developer.Tools.Description" xml:space="preserve"><value>预览通知、测试恢复流程并查看运行状态。</value></data>
+  <data name="Developer.Open" xml:space="preserve"><value>打开测试工具</value></data>
+  <data name="Developer.Window.Title" xml:space="preserve"><value>AF 开发者工具</value></data>
+  <data name="Developer.Window.Description" xml:space="preserve"><value>预览可重复执行。会话操作使用真实恢复预算，可能触发正式故障通知；停用歌词后需重启才能恢复。</value></data>
+  <data name="Developer.Host" xml:space="preserve"><value>歌词宿主</value></data>
+  <data name="Developer.Refresh" xml:space="preserve"><value>刷新宿主</value></data>
+  <data name="Developer.CommandHint" xml:space="preserve"><value>输入指令或选择建议，例如 notify lyrics</value></data>
+  <data name="Developer.Execute" xml:space="preserve"><value>执行</value></data>
+  <data name="Developer.Copy" xml:space="preserve"><value>复制结果与诊断</value></data>
+  <data name="Developer.Impact.Preview" xml:space="preserve"><value>通知与界面预览</value></data>
+  <data name="Developer.Impact.Session" xml:space="preserve"><value>当前会话操作</value></data>
+  <data name="Developer.Impact.Diagnostic" xml:space="preserve"><value>状态与日志</value></data>
+  <data name="Developer.Result.Completed" xml:space="preserve"><value>已完成</value></data>
+  <data name="Developer.Result.Accepted" xml:space="preserve"><value>请求已接受</value></data>
+  <data name="Developer.Result.Queued" xml:space="preserve"><value>已排队</value></data>
+  <data name="Developer.Result.Unavailable" xml:space="preserve"><value>条件不满足</value></data>
+  <data name="Developer.Result.Busy" xml:space="preserve"><value>忙碌</value></data>
+  <data name="Developer.Result.Canceled" xml:space="preserve"><value>已取消</value></data>
+  <data name="Developer.Result.Failed" xml:space="preserve"><value>失败</value></data>
+  <data name="Developer.UnknownCommand" xml:space="preserve"><value>未识别指令，请选择建议或输入 help。</value></data>
+  <data name="Developer.NoRenderer" xml:space="preserve"><value>所选宿主没有可用的歌词渲染器，请播放有歌词的歌曲并刷新宿主。</value></data>
+  <data name="Developer.DeliveryPaused" xml:space="preserve"><value>渲染器已失效或暂停投递，本次信号未注入。</value></data>
+  <data name="Developer.GpuIgnored" xml:space="preserve"><value>已记录 GPU 测试故障，未主动重建视图。</value></data>
+  <data name="Developer.FailureInjected" xml:space="preserve"><value>已注入测试信号，后续结果请查看状态与日志。</value></data>
+  <data name="Developer.PreviewConfirmed" xml:space="preserve"><value>已选择确认；这是预览，未请求重启。</value></data>
+  <data name="Developer.Confirm.Preview" xml:space="preserve"><value>仅预览重启确认界面。点击“确认（仅预览）”不会重启 AF。</value></data>
+  <data name="Developer.Confirm.PreviewButton" xml:space="preserve"><value>确认（仅预览）</value></data>
+  <data name="Developer.Confirm.Disable" xml:space="preserve"><value>此测试会停用本次会话的全部 Web 歌词，并可能发送正式故障通知。其他功能仍可使用；需要重启 AF 才能尝试恢复。</value></data>
+  <data name="Developer.Confirm.DisableButton" xml:space="preserve"><value>停用本次会话歌词</value></data>
+  <data name="Developer.Confirm.Restart" xml:space="preserve"><value>重启 AF Media Bar，尝试恢复歌词。此操作使用普通重启流程，不安装待更新包。</value></data>
+  <data name="Developer.Notification.Prefix" xml:space="preserve"><value>[测试]</value></data>
+  <data name="Developer.Notification.Update" xml:space="preserve"><value>更新通知预览。点击可前往应用设置，不改变更新状态。</value></data>
+  <data name="Developer.Notification.Lyrics" xml:space="preserve"><value>歌词故障通知预览。点击仅预览确认界面，不会重启 AF。</value></data>
+  <data name="Developer.Notification.Submitted" xml:space="preserve"><value>返回值只表示 Windows 是否接受请求，不证明通知已显示。</value></data>
+  <data name="Developer.State.Power" xml:space="preserve"><value>电源：关闭显示器={0}，锁屏={1}，睡眠={2}，显示通知支持={3}，剪枝档位={4}</value></data>
+  <data name="Developer.State.Host" xml:space="preserve"><value>宿主恢复={0}，会话停用={1}，已降级={2}，媒体来源={3}</value></data>
+  <data name="Developer.State.Memory" xml:space="preserve"><value>内存：工作集={0:0.0} MB，私有字节={1:0.0} MB，托管堆={2:0.0} MB，句柄={3}，线程={4}</value></data>
+  <data name="Developer.State.MemoryUnavailable" xml:space="preserve"><value>内存读数不可用</value></data>
+  <data name="Developer.Build" xml:space="preserve"><value>构建</value></data>
+  <data name="Developer.Redacted" xml:space="preserve"><value>已隐藏路径</value></data>
+  <data name="Developer.Sample.Title" xml:space="preserve"><value>[测试] 示例歌曲</value></data>
+  <data name="Developer.Sample.Artist" xml:space="preserve"><value>开发者工具</value></data>
+  <data name="Developer.Action.Update" xml:space="preserve"><value>更新通知</value></data>
+  <data name="Developer.Description.Update" xml:space="preserve"><value>重复预览；点击前往应用设置，不检查或下载更新。</value></data>
+  <data name="Developer.Action.Moved" xml:space="preserve"><value>任务栏移动通知</value></data>
+  <data name="Developer.Description.Moved" xml:space="preserve"><value>仅预览空间不足时的移动提示，不改变位置。</value></data>
+  <data name="Developer.Action.Hidden" xml:space="preserve"><value>任务栏隐藏通知</value></data>
+  <data name="Developer.Description.Hidden" xml:space="preserve"><value>仅预览空间不足时的隐藏提示，不隐藏宿主。</value></data>
+  <data name="Developer.Action.Background" xml:space="preserve"><value>TranslucentTB 通知</value></data>
+  <data name="Developer.Description.Background" xml:space="preserve"><value>点击前往背景设置；不改背景或已提示标记。</value></data>
+  <data name="Developer.Action.Lyrics" xml:space="preserve"><value>歌词故障通知</value></data>
+  <data name="Developer.Description.Lyrics" xml:space="preserve"><value>独立测试点击目标；点击仅预览确认，不重启。</value></data>
+  <data name="Developer.Action.RestartBusy" xml:space="preserve"><value>重启忙碌通知</value></data>
+  <data name="Developer.Description.RestartBusy" xml:space="preserve"><value>仅预览，不取得重启或更新预约。</value></data>
+  <data name="Developer.Action.RestartFailed" xml:space="preserve"><value>重启失败通知</value></data>
+  <data name="Developer.Description.RestartFailed" xml:space="preserve"><value>仅预览，不启动等待进程。</value></data>
+  <data name="Developer.Action.Track" xml:space="preserve"><value>歌曲通知预览</value></data>
+  <data name="Developer.Description.Track" xml:space="preserve"><value>使用独立样例窗口和当前通知布局，不改变真实媒体。</value></data>
+  <data name="Developer.Action.Confirm" xml:space="preserve"><value>重启确认预览</value></data>
+  <data name="Developer.Description.Confirm" xml:space="preserve"><value>只记录选择；即使确认也不调用重启服务。</value></data>
+  <data name="Developer.Action.Restart" xml:space="preserve"><value>重启 AF</value></data>
+  <data name="Developer.Description.Restart" xml:space="preserve"><value>确认后执行真实普通重启，与更新安装互斥。</value></data>
+  <data name="Developer.Action.Rebuild" xml:space="preserve"><value>重建歌词视图</value></data>
+  <data name="Developer.Description.Rebuild" xml:space="preserve"><value>作用于所选宿主，消耗现有三次重建预算；耗尽后降级。</value></data>
+  <data name="Developer.Action.Renderer" xml:space="preserve"><value>注入渲染进程失败</value></data>
+  <data name="Developer.Description.Renderer" xml:space="preserve"><value>测试共同失败流程和两秒后的一次重试，不终止真实进程。</value></data>
+  <data name="Developer.Action.Unresponsive" xml:space="preserve"><value>注入一次不响应</value></data>
+  <data name="Developer.Description.Unresponsive" xml:space="preserve"><value>连续两次进入失败流程；投递暂停时不注入，成功脚本会清零。</value></data>
+  <data name="Developer.Action.Gpu" xml:space="preserve"><value>注入 GPU 退出诊断</value></data>
+  <data name="Developer.Description.Gpu" xml:space="preserve"><value>仅验证诊断分支，不主动重建，不让真实 GPU 进程崩溃。</value></data>
+  <data name="Developer.Action.Disable" xml:space="preserve"><value>停用会话歌词</value></data>
+  <data name="Developer.Description.Disable" xml:space="preserve"><value>确认后对全部宿主生效，跨 Explorer 重启保留；需重启 AF 尝试恢复。</value></data>
+  <data name="Developer.Action.Reload" xml:space="preserve"><value>安全重载任务栏</value></data>
+  <data name="Developer.Description.Reload" xml:space="preserve"><value>复用现有宿主重载，不终止 Explorer。</value></data>
+  <data name="Developer.Action.State" xml:space="preserve"><value>读取状态快照</value></data>
+  <data name="Developer.Description.State" xml:space="preserve"><value>读取版本、显示器、恢复、电源与内存；不默认复制歌曲或路径。</value></data>
+  <data name="Developer.Action.Trim" xml:space="preserve"><value>手动整理内存</value></data>
+  <data name="Developer.Description.Trim" xml:space="preserve"><value>使用现有手动入口；接受请求不表示回收已完成。</value></data>
+  <data name="Developer.Action.Logs" xml:space="preserve"><value>打开日志目录</value></data>
+  <data name="Developer.Description.Logs" xml:space="preserve"><value>打开现有日志文件夹，不额外上传或导出数据。</value></data>
+  <data name="Developer.Action.Help" xml:space="preserve"><value>指令帮助</value></data>
+  <data name="Developer.Description.Help" xml:space="preserve"><value>列出同一动作目录的命令、说明和影响范围。</value></data>
+  <data name="Media.Metric.SystemNetwork.Title" xml:space="preserve">
+    <value>网络速率</value>
+  </data>
+  <data name="Media.Metric.SystemNetwork.Description" xml:space="preserve">
+    <value>显示已连接物理网卡的上传和下载速率。</value>
+  </data>
+  <data name="Media.Performance.DisplayMode.Title" xml:space="preserve">
+    <value>显示方式</value>
+  </data>
+  <data name="Media.Performance.DisplayMode.Description" xml:space="preserve">
+    <value>轮换显示单个指标，或并排显示全部已选指标。</value>
+  </data>
+  <data name="Media.Performance.DisplayMode.Cycle" xml:space="preserve">
+    <value>轮换显示</value>
+  </data>
+  <data name="Media.Performance.DisplayMode.Parallel" xml:space="preserve">
+    <value>并排显示</value>
+  </data>
+  <data name="Media.Performance.Order.Description" xml:space="preserve">
+    <value>使用上下按钮调整已选指标顺序；两种显示方式共用顺序，至少保留一个指标。</value>
+  </data>
+  <data name="Panel.Performance.Upload" xml:space="preserve">
+    <value>上传</value>
+  </data>
+  <data name="Panel.Performance.Download" xml:space="preserve">
+    <value>下载</value>
+  </data>
+  <data name="DisplayModes.Rest.Row.ArtworkProgress.Description" xml:space="preserve">
+    <value>沿封面边缘显示播放进度，随封面尺寸和悬停放大调整。</value>
+  </data>
+  <data name="DisplayModes.Rest.Row.ArtworkProgress.Title" xml:space="preserve">
+    <value>封面边缘进度</value>
+  </data>
+  <data name="Media.ControlUnavailable.Body" xml:space="preserve">
+    <value>请在播放器设置中打开 SMTC（系统播放控件）或类似选项。如果没有此选项，请查询软件是否支持 SMTC；不支持的媒体源无法通过本程序控制。</value>
+  </data>
+  <data name="Media.ControlUnavailable.Title" xml:space="preserve">
+    <value>无法控制当前媒体源</value>
+  </data>
+  <data name="Startup.FailureBody" xml:space="preserve">
+    <value>程序未能完成启动。请根据以下错误检查运行环境；详细信息已记录到日志。</value>
+  </data>
+  <data name="Startup.FailureTitle" xml:space="preserve">
+    <value>AF Media Bar 启动失败</value>
+  </data>
+  <data name="Startup.Service.Disabled" xml:space="preserve">
+    <value>已禁用</value>
+  </data>
+  <data name="Startup.Service.FailureBody" xml:space="preserve">
+    <value>无法使用 Windows 系统服务或组件。检测到的服务异常：
+{0}
+
+是否使用了精简版系统？请尝试恢复相关服务及系统组件，修复后重新启动。</value>
+  </data>
+  <data name="Startup.Service.Missing" xml:space="preserve">
+    <value>缺失</value>
+  </data>
+  <data name="Startup.Service.Stopped" xml:space="preserve">
+    <value>未运行</value>
+  </data>
+  <data name="Startup.Service.Unidentified" xml:space="preserve">
+    <value>未确认具体缺失的服务，请结合下方错误和日志检查系统组件。</value>
+  </data>
+  <data name="Appearance.IdleNote.Custom" xml:space="preserve">
+    <value>自定义音符颜色</value>
+  </data>
+  <data name="Appearance.IdleNote.Description" xml:space="preserve">
+    <value>设置没有封面时小音符的颜色，不影响封面上的播放、暂停图标。</value>
+  </data>
+  <data name="Appearance.IdleNote.FollowAccent" xml:space="preserve">
+    <value>跟随强调色</value>
+  </data>
+  <data name="Appearance.IdleNote.Hint" xml:space="preserve">
+    <value>关闭时跟随强调色。高对比度模式使用系统文字色。</value>
+  </data>
+  <data name="Appearance.IdleNote.Title" xml:space="preserve">
+    <value>小音符颜色</value>
+  </data>
+  <data name="Common.Group.Widgets" xml:space="preserve">
+    <value>小组件</value>
+  </data>
+  <data name="Common.Widgets.Description" xml:space="preserve">
+    <value>调整频谱与性能小组件的显示和参数。</value>
+  </data>
+</root>

@@ -1,0 +1,46 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TaskbarLyrics.App", "TaskbarLyrics.App\TaskbarLyrics.App.csproj", "{E142FBD6-8F6F-4C04-AB37-20D2317A5911}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TaskbarLyrics.Core", "TaskbarLyrics.Core\TaskbarLyrics.Core.csproj", "{6A931667-907B-4D36-A92C-F149EE3E06DE}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TaskbarLyrics.App.Tests", "TaskbarLyrics.App.Tests\TaskbarLyrics.App.Tests.csproj", "{A3F9EBBB-7F37-43B0-AC52-D80E633F0E9E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TaskbarLyrics.Core.Tests", "TaskbarLyrics.Core.Tests\TaskbarLyrics.Core.Tests.csproj", "{D2C1793D-5846-4554-AB44-FEBA0DBEDCA2}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TaskbarLyrics.Diagnostics", "TaskbarLyrics.Diagnostics\TaskbarLyrics.Diagnostics.csproj", "{C58EB97C-72F6-4AC5-BBF0-C320FA651152}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{E142FBD6-8F6F-4C04-AB37-20D2317A5911}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E142FBD6-8F6F-4C04-AB37-20D2317A5911}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E142FBD6-8F6F-4C04-AB37-20D2317A5911}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E142FBD6-8F6F-4C04-AB37-20D2317A5911}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6A931667-907B-4D36-A92C-F149EE3E06DE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6A931667-907B-4D36-A92C-F149EE3E06DE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6A931667-907B-4D36-A92C-F149EE3E06DE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6A931667-907B-4D36-A92C-F149EE3E06DE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A3F9EBBB-7F37-43B0-AC52-D80E633F0E9E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A3F9EBBB-7F37-43B0-AC52-D80E633F0E9E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A3F9EBBB-7F37-43B0-AC52-D80E633F0E9E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A3F9EBBB-7F37-43B0-AC52-D80E633F0E9E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D2C1793D-5846-4554-AB44-FEBA0DBEDCA2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D2C1793D-5846-4554-AB44-FEBA0DBEDCA2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D2C1793D-5846-4554-AB44-FEBA0DBEDCA2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D2C1793D-5846-4554-AB44-FEBA0DBEDCA2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C58EB97C-72F6-4AC5-BBF0-C320FA651152}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C58EB97C-72F6-4AC5-BBF0-C320FA651152}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C58EB97C-72F6-4AC5-BBF0-C320FA651152}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C58EB97C-72F6-4AC5-BBF0-C320FA651152}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

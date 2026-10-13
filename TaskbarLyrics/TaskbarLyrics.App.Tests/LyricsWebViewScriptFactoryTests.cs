@@ -1,0 +1,168 @@
+using Xunit;
+
+namespace TaskbarLyrics.App.Tests;
+
+public sealed class LyricsWebViewScriptFactoryTests
+{
+    [Fact]
+    public void SetLyricsEmitsV1EnvelopeAndClampsProgress()
+    {
+        var script = LyricsWebViewScriptFactory.SetLyrics(
+            "A \"quoted\" line",
+            "next",
+            2,
+            3,
+            "track",
+            isPureMusic: false,
+            isPlaying: true);
+
+        Assert.Contains("window.taskbarLyrics?.receive", script);
+        Assert.Contains("\"version\":1", script);
+        Assert.Contains("\"type\":\"lyrics\"", script);
+        Assert.Contains("A \\u0022quoted\\u0022 line", script);
+        Assert.Contains("\"progress\":1", script);
+        Assert.Contains("\"animateTransition\":true", script);
+    }
+
+    [Fact]
+    public void SetLyricsCanDisableTransitionAnimation()
+    {
+        var script = LyricsWebViewScriptFactory.SetLyrics(
+            "current",
+            "next",
+            0.5,
+            2,
+            "track",
+            isPureMusic: false,
+            isPlaying: false,
+            animateTransition: false);
+
+        Assert.Contains("\"animateTransition\":false", script);
+    }
+
+    [Fact]
+    public void SetLyricsEmitsStablePresentationScene()
+    {
+        var script = LyricsWebViewScriptFactory.SetLyrics(
+            "正在检索歌词...",
+            string.Empty,
+            0,
+            -1,
+            "track",
+            isPureMusic: false,
+            isPlaying: true,
+            presentationScene: LyricsPresentationScene.Searching);
+
+        Assert.Contains("\"scene\":\"searching\"", script);
+    }
+
+    [Fact]
+    public void SetLyricsEmitsNoPlaybackPresentationScene()
+    {
+        var script = LyricsWebViewScriptFactory.SetLyrics(
+            "暂无播放内容，3 秒后自动隐藏",
+            string.Empty,
+            0,
+            -1,
+            string.Empty,
+            isPureMusic: false,
+            isPlaying: false,
+            presentationScene: LyricsPresentationScene.NoPlayback);
+
+        Assert.Contains("\"scene\":\"noPlayback\"", script);
+    }
+
+    [Fact]
+    public void SetLyricsClampsWordScanProgressAndEmitsNullWhenUnavailable()
+    {
+        var clampedHigh = LyricsWebViewScriptFactory.SetLyrics(
+            "current",
+            "next",
+            0,
+            0,
+            "track",
+            isPureMusic: false,
+            isPlaying: true,
+            wordScanProgress: 1.5);
+        var clampedLow = LyricsWebViewScriptFactory.SetLyrics(
+            "current",
+            "next",
+            0,
+            0,
+            "track",
+            isPureMusic: false,
+            isPlaying: true,
+            wordScanProgress: -0.5);
+        var unavailable = LyricsWebViewScriptFactory.SetLyrics(
+            "current",
+            "next",
+            0,
+            0,
+            "track",
+            isPureMusic: false,
+            isPlaying: true);
+
+        Assert.Contains("\"wordScanProgress\":1", clampedHigh);
+        Assert.Contains("\"wordScanProgress\":0", clampedLow);
+        Assert.Contains("\"wordScanProgress\":null", unavailable);
+    }
+
+    [Fact]
+    public void SetLyricsEmitsStructuredTranslationPayloadFields()
+    {
+        var script = LyricsWebViewScriptFactory.SetLyrics(
+            "current",
+            "next",
+            0.5,
+            2,
+            "track",
+            isPureMusic: false,
+            isPlaying: true,
+            currentTranslation: "translated current",
+            nextTranslation: "translated next",
+            translationMode: true);
+
+        Assert.Contains("\"currentTranslation\":\"translated current\"", script);
+        Assert.Contains("\"nextTranslation\":\"translated next\"", script);
+        Assert.Contains("\"translationMode\":true", script);
+    }
+
+    [Fact]
+    public void SetSpectrumClampsEveryBar()
+    {
+        var script = LyricsWebViewScriptFactory.SetSpectrum([-1, 0.5f, 2]);
+
+        Assert.Contains("\"type\":\"spectrum\"", script);
+        Assert.Contains("[0,0.5,1]", script);
+    }
+
+    [Fact]
+    public void SetCoverEmitsAppIconFallbackField()
+    {
+        var script = LyricsWebViewScriptFactory.SetCover(
+            null,
+            "N",
+            "rgba(229, 57, 53, 1)",
+            "data:image/png;base64,AAAA",
+            "track");
+
+        Assert.Contains("window.taskbarLyrics?.receive", script);
+        Assert.Contains("\"type\":\"cover\"", script);
+        Assert.Contains("\"dataUri\":\"\"", script);
+        Assert.Contains("\"fallbackIconDataUri\":\"data:image/png;base64,AAAA\"", script);
+    }
+
+    [Fact]
+    public void SetCoverAlwaysEmitsFallbackIconField()
+    {
+        var script = LyricsWebViewScriptFactory.SetCover(
+            "data:image/jpeg;base64,BBBB",
+            "Q",
+            "rgba(41, 182, 246, 1)",
+            null,
+            "track");
+
+        Assert.Contains("\"dataUri\":\"data:image/jpeg;base64,BBBB\"", script);
+        Assert.Contains("\"fallbackIconDataUri\":\"\"", script);
+    }
+}
