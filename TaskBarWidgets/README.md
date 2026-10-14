@@ -1,0 +1,77 @@
+# TaskBarWidgets
+
+Windows 11 任务栏工具，使用 WinUI 3 设置与快捷卡片，整合硬件与网络监测、同步歌词、媒体控制和输入输出音频设备控制。以 TrafficMonitor 任务栏与布局为基础，复用 TaskbarLyrics 歌词效果及 AF-Media-Bar 音频控制。左键面板从上到下为流量、设备、媒体三个等宽独立卡片。电池、功耗、天气直接编入程序，不扫描外部插件 DLL；选项放在硬件页。开发状态与待验收项目见 [验收记录](ACCEPTANCE.md)。
+
+每次构建默认输出到 `artifacts/builds/yyyyMMdd-HHmmss/`（构建开始时的本地时间）。最近成功的完整构建路径记录在 `artifacts/latest-build.txt`，每个成功构建目录都有包含时间、时区、配置与组件的 `build-info.json`。构建不会启动程序；实际验收前先退出旧 TaskBarWidgets，再启动新目录中的 `TaskBarWidgets.exe`。新包验证、数据备份和迁移成功后，可按用户授权清理紧邻上一版；运行中或锁定的版本保留，不覆盖原日用 TrafficMonitor 安装。
+
+所有产品源码与构建依赖均位于此目录。上一级的三个原项目只是只读参考，构建不读取它们。
+
+## 构建
+
+需要 Windows、Visual Studio 2022 Build Tools（v143、MFC、C++/CLI、Windows SDK、.NET Framework 4.7.2 targeting pack）、.NET 8 SDK。网页测试需要 Node.js 与 npm。缺少 Visual Studio 组件时可导入 [.vsconfig](.vsconfig)，或运行 `scripts/install-build-components.ps1` 并确认 Windows 管理员提示。
+
+从本目录运行：
+
+```powershell
+.\scripts\build.ps1
+.\scripts\verify.ps1
+```
+
+默认构建始终创建新目录，同秒目录冲突会报错，不覆盖已有候选。单独增量更新某个候选的组件时，可明确指定输出目录：
+
+```powershell
+.\scripts\build.ps1 -Component Media -OutputDirectory (Get-Content .\artifacts\latest-build.txt)
+```
+
+构建和单元测试不会自动启动产品。明确要求不启动时，不运行两个 smoke 启动脚本。
+
+允许桌面启动验收时，主程序启动或打包发生变化后可运行 `.\scripts\smoke-native.ps1`。此检查会请求管理员权限，确认主进程持续运行且任务栏窗口已创建，并保留程序运行；它与仅测试辅助程序的 `smoke-media.ps1` 分别覆盖两个入口。
+
+完整构建使用硬件监测版本，不使用 Lite 替代。依赖缓存写入 `.packages/`，日志和最终程序写入 `artifacts/`。启动入口为最新构建目录中的 `TaskBarWidgets.exe`，其 `Media/` 与 `UI/` 子目录必须保留。smoke 与导入脚本默认读取 `artifacts/latest-build.txt`；没有有效记录时需先完整构建，或明确指定目录（smoke 使用 `-OutputDirectory`，导入使用 `-DestinationDirectory`）。只有成功的完整构建更新该指针。
+
+完整监测程序沿用上游的管理员运行要求，以保留温度等硬件访问能力；启动时可能出现 UAC。媒体服务和 WinUI 界面由主程序启动，不要单独双击两个辅助 EXE。运行还需 Microsoft Edge WebView2 Runtime；缺失时媒体视图不可用，监测视图仍可回退。
+
+## 日用迁移
+
+默认使用独立的 TaskBarWidgets 配置与缓存。首次验收应从测试输出目录启动；先退出现有占用同一区域的任务栏工具，再启动新程序。构建不会自动停止现有 TrafficMonitor、替换日用安装或设置自启。
+
+需要导入现有布局时，先退出新程序，再运行以下命令。它只读取旧安装，将配置副本写入测试输出目录；已有新配置会先备份。内置功能沿用 `plugins/` 下三个 INI 文件作为配置兼容目录；该目录中的 DLL 不再加载。
+
+```powershell
+.\scripts\import-monitor-settings.ps1 -SourceDirectory 'C:\Users\nocti\Documents\TrafficMonitor' -IncludeBuiltinSettings
+```
+
+不要让两套应用同时写入相同配置。桌面主窗口与其皮肤系统不属于新产品功能；任务栏字体、颜色和可定制布局仍保留。
+
+历史流量可单独导入到关闭状态的候选目录，本轮已完成此步骤：
+
+```powershell
+.\scripts\import-traffic-history.ps1 -SourceFile 'C:\Users\nocti\Documents\TrafficMonitor\history_traffic.dat'
+```
+
+导入前备份两份历史，同一天保守地保留合计较大的完整记录，不重复累加。日历统计上传与下载之和，只代表程序监测期间记录的流量；空框表示无记录，灰格表示已记录的零流量。点击日期查看当天合计。
+
+“同时设为默认通信设备”位于“设置 → 音频”，默认开启。该偏好仅作用于下一次主动设备切换；设置按钮位于媒体卡片右上角。
+
+代码来源与许可证见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+
+
+## WinUI 界面与布局
+
+设置用模块池和模块组合条定义显示内容；水平单行打开时为一条，关闭时为上／下两条。拖入启用、拖回移除、条内或跨条移动；点击模块在右侧抽屉编辑属性。设备列表采用浮动菜单，不改变卡片尺寸。旧 WPF 卡片已删除，媒体服务继续复用原有核心逻辑。
+
+`dotnet run --project UI.Tests/TaskBarWidgets.UI.Tests.csproj -c Release` 检查前端管道，`scripts/validate-winui.ps1` 使用独立隐藏宿主检查 WinUI 初始化和卡片物理尺寸。隐藏窗口不能证明完整视觉布局、输入或材质已验收。
+
+
+## 发布包检查
+
+```powershell
+# 检查独立发布确实包含本项目的 PRI/XBF，避免验证目录补齐资源掩盖漏包
+.\scripts\test-winui-publish.ps1
+# 对最近完整发布包加载设置与三卡模板：屏幕外、不激活，不启动主程序或媒体服务
+.\scripts\test-ui-templates.ps1
+```
+
+`test-ui-templates.ps1` 要求正式包中的应用 PRI 与 App.xbf 存在；每次发布也会校验其与本次生成资源的哈希。构造成功或无参数启动成功都不能替代模板加载检查。
+
+上一版本的清理使用 `scripts/retire-previous-build.ps1 -PreviousBuild <上一构建目录>` 预览；显式 `-Execute` 才备份、迁移并删除。最新状态见 [ACCEPTANCE.md](ACCEPTANCE.md)。

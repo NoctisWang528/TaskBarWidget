@@ -1,0 +1,304 @@
+﻿#include "pch.h"
+#include "PowerMon.h"
+#include "DataManager.h"
+
+
+
+
+
+
+PowerMon::PowerMon()
+{
+	//Initalizing code
+
+	//g_data.LoadConfig(L"");
+
+	//update_battery_base_info();
+
+
+	//_bih = BatteryInfoHandler();
+
+
+		//std::shared_ptr<ValueUnitStringFormatter> sptr_vusf = std::shared_ptr<ValueUnitStringFormatter>(&_vusf);
+		//std::shared_ptr<BatteryInfoHandler> sptr_bih = std::shared_ptr<BatteryInfoHandler>(&_bih);
+
+	b_power_m_item.SetDataSource(&_vusf, &_bih);
+
+	b_percentage_m_item.SetDataSource(&_vusf, &_bih);
+
+	b_cap_m_item.SetDataSource(&_vusf, &_bih);
+	b_volt_m_item.SetDataSource(&_vusf, &_bih);
+	b_time_m_item.SetDataSource(&_vusf, &_bih);
+
+#if WINRT_USE_FLAG
+	sm_m_item.SetDataSource(&_vusf, &_bih, &_hwpdp);
+
+	cpu_m_item.SetDataSource(&_vusf, &_hwpdp);
+	gpu_m_item.SetDataSource(&_vusf, &_hwpdp);
+#endif
+
+}
+
+PowerMon& PowerMon::Instance()
+{
+	// Construct only after the MFC application has initialized.
+	static PowerMon instance;
+	return instance;
+}
+
+IPluginItem* PowerMon::GetItem(int index)
+{
+	switch (index)
+	{
+		//Battery Status section
+	case 0:
+		return &b_power_m_item;
+	case 1:
+		return &b_cap_m_item;
+	case 2:
+		return &b_volt_m_item;
+	case 3:
+		return &b_time_m_item;
+	case 4:
+		return &b_percentage_m_item;
+#if WINRT_USE_FLAG
+		//Hardware aware section.
+	case 5:
+		return &sm_m_item;
+	case 6:
+		return &cpu_m_item;
+	case 7:
+		return &gpu_m_item;
+#endif
+	default:
+		break;
+	}
+	return nullptr;
+}
+
+const wchar_t* PowerMon::GetTooltipInfo()
+{
+	return m_tooltip_info.c_str();
+}
+
+void PowerMon::DataRequired()
+{
+	//TODO: 在此添加获取监控数据的代码 
+
+	//Battery part started
+	int updatePwrStateResult = _bih.UpdateSystemPowerStatus();
+
+
+	if (updatePwrStateResult && this->is_dbg) {
+		std::wstringstream wss;
+		wss << L"Something went wrong when calling UpdateSystemPowerStatus:" << updatePwrStateResult << std::endl;
+		//		wss << g_data.StringRes(IDS_BATTERY_DRIVER_REBUILDING).GetString() << std::endl;
+		//m_tooltip_info = wss.str();
+
+		MessageBox(NULL, (const wchar_t*)wss.str().c_str(), L"Tip", MB_OK);
+	}
+
+	int updateBatteryInfoResult = _bih.UpdateBatteryInfo();
+
+
+
+
+	if (updateBatteryInfoResult && this->is_dbg) {
+		std::wstringstream wss;
+		wss << L"Something went wrong when calling UpdateBatteryInfo:" << updateBatteryInfoResult << std::endl;
+		//		wss << g_data.StringRes(IDS_BATTERY_DRIVER_REBUILDING).GetString() << std::endl;
+		//m_tooltip_info = wss.str();
+
+		MessageBox(NULL, (const wchar_t*)wss.str().c_str(), L"Tip", MB_OK);
+	}
+
+	std::wstring hw_mon_power_str = L"";
+#if WINRT_USE_FLAG
+	if (g_data.m_setting_data.enable_cpu_monitor || g_data.m_setting_data.enable_gpu_monitor) {
+
+		updateBatteryInfoResult = _hwpdp.CallUpdateInfo();
+		hw_mon_power_str = _hwpdp.GetPowerSummaryStr(_vusf);
+
+	}
+#endif
+	//Battery part ended.
+
+	auto result_str_btr_module = UpdateStringLabel(updatePwrStateResult, updateBatteryInfoResult);
+
+	m_tooltip_info = hw_mon_power_str + result_str_btr_module;
+}
+
+
+std::wstring PowerMon::GetBatteryPowerToolTipString(int updatePwrStateResult, int updateBatteryInfoResult) {
+	std::wstringstream wss;
+
+	{
+
+		switch (updatePwrStateResult) {
+		case 0:
+			break;
+		default:
+
+			wss << L"UpdatePwrStateResultCode: " << updatePwrStateResult << std::endl;
+		}
+		if (!updatePwrStateResult) {
+
+			switch (_bih.GetSystemBatteryFlag()) {
+			case 128:
+			{
+				wss << g_data.StringRes(IDS_BATTERY_NONEXISTS).GetString() << std::endl;
+				return wss.str();
+			}break;
+			case 256:
+			{
+				wss << g_data.StringRes(IDS_BATTERY_INFO_UNKNOWN).GetString() << std::endl;
+				return wss.str();
+			}break;
+
+			default:
+			{}
+
+			}
+		}
+		else {
+			wss << g_data.StringRes(IDS_BATTERY_INFO_UNKNOWN).GetString() << std::endl;
+
+			return wss.str();
+		}
+
+
+
+		switch (updateBatteryInfoResult) {
+		case 0:
+		{
+			//wss << g_data.StringRes(IDS_DISCRIPTIVE_BATERY_PERCENTAGE_HEADER).GetString() << _bih.GetSystemBatteryLifePercent() << " %" << std::endl;
+			//wss << g_data.StringRes(IDS_DISCRIPTIVE_BATERY_POWER_HEADER).GetString() << ((_bih.GetBatteryStatusPowerRate() > 0) ? "+" : "") << _bih.GetBatteryStatusPowerRate() << " mW" << std::endl;
+			//wss << g_data.StringRes(IDS_DISCRIPTIVE_BATERY_CAPACITY_HEADER).GetString() << _bih.GetBatteryCapacity() << " mWh" << std::endl;
+			//wss << g_data.StringRes(IDS_DISCRIPTIVE_BATERY_VOLTAGE_HEADER).GetString() << _bih.GetBatteryStatusVoltage() << " mV" << std::endl;
+			//m_tooltip_info = wss.str();
+
+			wss << g_data.StringRes(IDS_DISCRIPTIVE_BATERY_PERCENTAGE_HEADER).GetString() <<
+				b_percentage_m_item.DetailFormatItemValueText() << std::endl;
+			wss << g_data.StringRes(IDS_DISCRIPTIVE_BATERY_POWER_HEADER).GetString() <<
+				b_power_m_item.DetailFormatItemValueText(
+					nullptr, true, 0, 3
+				) << std::endl;
+			wss << g_data.StringRes(IDS_DISCRIPTIVE_BATERY_CAPACITY_HEADER).GetString() <<
+				b_cap_m_item.DetailFormatItemValueText(
+					nullptr, false, 0, 3
+				) << std::endl;
+			wss << g_data.StringRes(IDS_DISCRIPTIVE_BATERY_VOLTAGE_HEADER).GetString() <<
+				b_volt_m_item.DetailFormatItemValueText(
+					nullptr, false, 0, 3
+				) << std::endl;
+			wss << g_data.StringRes(IDS_DISCRIPTIVE_BATERY_TIME_HEADER).GetString() <<
+				b_time_m_item.DetailFormatItemValueText(
+				) << std::endl;
+
+
+
+		}break;
+		default:
+		{
+			wss << g_data.StringRes(IDS_RELOADING_BATTERY_DRIVER_TIP).GetString() << std::endl;
+			wss << g_data.StringRes(IDS_BATTERY_DRIVER_REBUILDING).GetString() << std::endl;
+			//m_tooltip_info = wss.str();
+		}
+
+		}
+
+
+	}
+	//return false;
+	return wss.str();
+}
+
+std::wstring PowerMon::UpdateStringLabel(int updatePwrStateResult, int updateBatteryInfoResult) {
+
+	std::wstringstream wss;
+
+	wss << GetBatteryPowerToolTipString(updatePwrStateResult, updateBatteryInfoResult);
+
+	return wss.str();
+}
+
+
+ITMPlugin::OptionReturn PowerMon::ShowOptionsDialog(void* hParent)
+{
+    return ITMPlugin::OR_OPTION_UNCHANGED;
+}
+
+const wchar_t* PowerMon::GetInfo(PluginInfoIndex index)
+{
+    switch(index) {
+    case TMI_NAME: return L"电池功耗";
+    case TMI_DESCRIPTION: return L"电池功率、容量、电压与剩余时间";
+    case TMI_AUTHOR: return L"AzulEterno";
+    case TMI_COPYRIGHT: return L"Copyright (C) AzulEterno";
+    case TMI_VERSION: return L"1.0 (built-in)";
+    case TMI_URL: return L"https://github.com/AzulEterno/PowerMonPlugin-For-TrafficMonitor";
+    default:return L"";
+    }
+}
+
+void PowerMon::OnExtenedInfo(ExtendedInfoIndex index, const wchar_t* data)
+{
+	switch (index)
+	{
+	case ITMPlugin::EI_CONFIG_DIR:
+		//从配置文件读取配置
+		g_data.LoadConfig(std::wstring(data));
+        if (GetFileAttributesW((std::wstring(data) + L"PowerMonPlugin.dll.ini").c_str()) == INVALID_FILE_ATTRIBUTES) g_data.SaveConfig();
+
+		SyncSettingsData();
+		break;
+	default:
+		break;
+	}
+}
+
+
+int PowerMon::SyncSettingsData(bool save_config_file)
+{
+	this->is_dbg = g_data.m_setting_data.is_dbg_mode;
+	_bih.is_dbg = this->is_dbg;
+
+	_vusf.LoadFromSettings(g_data.m_setting_data);
+#if WINRT_USE_FLAG
+	_hwpdp.SyncFromSettingData(g_data.m_setting_data);
+#endif
+	// Assuming g_data.m_setting_data.pwr_unit_str is an ATL::CSimpleStringT<wchar_t, true>
+	//const wchar_t* constPwrUnitStr = g_data.m_setting_data.pwr_unit_str.GetString();
+	//size_t length = wcslen(constPwrUnitStr) + 1;
+	//wchar_t* mutablePwrUnitStr = new wchar_t[length];
+	//wcscpy_s(mutablePwrUnitStr, length, constPwrUnitStr);
+
+
+
+	//this->b_power_m_item.SetPowerUnitStr(mutablePwrUnitStr);
+
+	if (save_config_file) {
+
+		g_data.SaveConfig();
+	}
+
+
+	// Don't forget to delete the dynamically allocated memory to avoid memory leaks
+
+	//StrCpy(this->pwr_unit_str, g_data.m_setting_data.pwr_unit_str.GetString());
+
+	return 0;
+}
+
+PowerMon::~PowerMon()
+{
+	//delete& _bih;
+}
+
+ITMPlugin* PowerTMPluginGetInstance()
+{
+	return &PowerMon::Instance();
+}
+
+bool BuiltinCpuPowerEnabled() { return g_data.m_setting_data.enable_cpu_monitor; }
+bool BuiltinGpuPowerEnabled() { return g_data.m_setting_data.enable_gpu_monitor; }

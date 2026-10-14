@@ -1,0 +1,9 @@
+{
+  "version": "1.0",
+  "components": [
+    "Microsoft.VisualStudio.Workload.VCTools",
+    "Microsoft.VisualStudio.Component.VC.ATLMFC",
+    "Microsoft.VisualStudio.Component.VC.CLI.Support",
+    "Microsoft.Net.Component.4.7.2.TargetingPack"
+  ]
+}

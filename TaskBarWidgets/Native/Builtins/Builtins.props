@@ -1,0 +1,121 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="BuiltinHardwarePower.cpp" />
+    <ClCompile Include="..\Builtins\Power\HardwareSensorMon.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader><AdditionalIncludeDirectories>$(ProjectDir)..\Builtins\Power;$(ProjectDir)..\Builtins\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories><ObjectFileName>$(IntDir)Builtins-Power-HardwareSensorMon.obj</ObjectFileName><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions></ClCompile>
+    <ClCompile Include="..\Builtins\Battery\Battery.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Builtins\Battery;$(ProjectDir)..\Builtins;$(ProjectDir)..\Builtins\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ObjectFileName>$(IntDir)Builtins-Battery-Battery.obj</ObjectFileName>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <ClCompile Include="..\Builtins\Battery\BatteryItem.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Builtins\Battery;$(ProjectDir)..\Builtins;$(ProjectDir)..\Builtins\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ObjectFileName>$(IntDir)Builtins-Battery-BatteryItem.obj</ObjectFileName>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <ClCompile Include="..\Builtins\Battery\Common.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Builtins\Battery;$(ProjectDir)..\Builtins;$(ProjectDir)..\Builtins\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ObjectFileName>$(IntDir)Builtins-Battery-Common.obj</ObjectFileName>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <ClCompile Include="..\Builtins\Battery\DataManager.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Builtins\Battery;$(ProjectDir)..\Builtins;$(ProjectDir)..\Builtins\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ObjectFileName>$(IntDir)Builtins-Battery-DataManager.obj</ObjectFileName>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <ClCompile Include="..\Builtins\Battery\DrawCommon.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Builtins\Battery;$(ProjectDir)..\Builtins;$(ProjectDir)..\Builtins\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ObjectFileName>$(IntDir)Builtins-Battery-DrawCommon.obj</ObjectFileName>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <ClCompile Include="..\Builtins\Battery\GdiPlusTool.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Builtins\Battery;$(ProjectDir)..\Builtins;$(ProjectDir)..\Builtins\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ObjectFileName>$(IntDir)Builtins-Battery-GdiPlusTool.obj</ObjectFileName>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <ClCompile Include="..\Builtins\Power\PowerMon.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Builtins\Power;$(ProjectDir)..\Builtins;$(ProjectDir)..\Builtins\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ObjectFileName>$(IntDir)Builtins-Power-PowerMon.obj</ObjectFileName>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <ClCompile Include="..\Builtins\Power\BatteryPowerMonItem.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Builtins\Power;$(ProjectDir)..\Builtins;$(ProjectDir)..\Builtins\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ObjectFileName>$(IntDir)Builtins-Power-BatteryPowerMonItem.obj</ObjectFileName>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <ClCompile Include="..\Builtins\Power\BatteryInfoHandler.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Builtins\Power;$(ProjectDir)..\Builtins;$(ProjectDir)..\Builtins\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ObjectFileName>$(IntDir)Builtins-Power-BatteryInfoHandler.obj</ObjectFileName>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <ClCompile Include="..\Builtins\Power\Common.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Builtins\Power;$(ProjectDir)..\Builtins;$(ProjectDir)..\Builtins\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ObjectFileName>$(IntDir)Builtins-Power-Common.obj</ObjectFileName>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <ClCompile Include="..\Builtins\Power\DataManager.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Builtins\Power;$(ProjectDir)..\Builtins;$(ProjectDir)..\Builtins\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ObjectFileName>$(IntDir)Builtins-Power-DataManager.obj</ObjectFileName>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <ClCompile Include="..\Builtins\Power\ValueUnitStringFormatter.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Builtins\Power;$(ProjectDir)..\Builtins;$(ProjectDir)..\Builtins\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ObjectFileName>$(IntDir)Builtins-Power-ValueUnitStringFormatter.obj</ObjectFileName>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <ClCompile Include="..\Builtins\Power\pch.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Builtins\Power;$(ProjectDir)..\Builtins;$(ProjectDir)..\Builtins\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ObjectFileName>$(IntDir)Builtins-Power-pch.obj</ObjectFileName>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <ClCompile Include="..\Builtins\Weather\WeatherPro.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Builtins\Weather;$(ProjectDir)..\Builtins;$(ProjectDir)..\Builtins\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ObjectFileName>$(IntDir)Builtins-Weather-WeatherPro.obj</ObjectFileName>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <ClCompile Include="..\Builtins\Weather\WeatherProItem.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Builtins\Weather;$(ProjectDir)..\Builtins;$(ProjectDir)..\Builtins\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ObjectFileName>$(IntDir)Builtins-Weather-WeatherProItem.obj</ObjectFileName>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <ClCompile Include="..\Builtins\Weather\DataManager.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Builtins\Weather;$(ProjectDir)..\Builtins;$(ProjectDir)..\Builtins\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ObjectFileName>$(IntDir)Builtins-Weather-DataManager.obj</ObjectFileName>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <ClCompile Include="..\Builtins\Weather\Common.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Builtins\Weather;$(ProjectDir)..\Builtins;$(ProjectDir)..\Builtins\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ObjectFileName>$(IntDir)Builtins-Weather-Common.obj</ObjectFileName>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <ClCompile Include="..\Builtins\Weather\DataApiHefengWeather.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Builtins\Weather;$(ProjectDir)..\Builtins;$(ProjectDir)..\Builtins\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ObjectFileName>$(IntDir)Builtins-Weather-DataApiHefengWeather.obj</ObjectFileName>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <ClCompile Include="..\Builtins\Weather\DataApiWeatherComCnSpider.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Builtins\Weather;$(ProjectDir)..\Builtins;$(ProjectDir)..\Builtins\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ObjectFileName>$(IntDir)Builtins-Weather-DataApiWeatherComCnSpider.obj</ObjectFileName>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <ClCompile Include="..\Builtins\utilities\yyjson\yyjson.c"><PrecompiledHeader>NotUsing</PrecompiledHeader><ObjectFileName>$(IntDir)Builtins-yyjson.obj</ObjectFileName></ClCompile>
+  </ItemGroup>
+</Project>

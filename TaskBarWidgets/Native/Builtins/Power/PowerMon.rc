@@ -1,0 +1,87 @@
+#pragma code_page(65001)
+#include "afxres.h"
+#include "..\Builtins\Power\resource.h"
+LANGUAGE LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED
+STRINGTABLE
+BEGIN
+    IDS_PLUGIN_NAME         "帕沃萌"
+    IDS_PLUGIN_DESCRIPTION  "一个简易的功耗监测插件"
+    IDS_PLUGIN_BATTERY_POWER_ITEM_NAME "电池功耗"
+    IDS_POWER_DISPLAY_LABEL "功耗:"
+    IDS_BATTERY_CAPACITY_DISPLAY_LABEL "电量:"
+    IDS_DISCRIPTIVE_BATERY_POWER_HEADER "电池功耗："
+    IDS_DISCRIPTIVE_BATERY_CAPACITY_HEADER "剩余电量："
+    IDS_RELOADING_BATTERY_DRIVER_TIP "正在重新申请电池驱动使用权限。\n无法提供最新数据。"
+    IDS_BATTERY_DRIVER_HANDLER_CLEANING "正在清理电池驱动信息获取器。"
+END
+STRINGTABLE
+BEGIN
+    IDS_DISCRIPTIVE_BATERY_VOLTAGE_HEADER "电池电压："
+    IDS_BATTERY_DRIVER_REBUILDING "正在创建电池驱动信息存取器。"
+    IDS_BATTERY_NONEXISTS   "系统电池不存在。"
+    IDS_BATTERY_INFO_UNKNOWN "系统无法获取电池信息"
+    IDS_DISCRIPTIVE_BATERY_PERCENTAGE_HEADER "电池百分比："
+    IDS_UNKNOWN             "未知"
+    IDS_NO_DATA_SOURCE      "无数据源"
+    IDS_PLUGIN_BATTERY_PERCENTAGE_ITEM_NAME "电池百分比"
+    IDS_BATTERY             "电池"
+    IDS_PLUGIN_BATTERY_CAPACITY_ITEM_NAME "电池电量"
+    IDS_PLUGIN_BATTERY_VOLTAGE_ITEM_NAME "电池电压"
+    IDS_BATTERY_VOLTAGE_DISPLAY_LABEL "电压:"
+    IDS_WARNING             "警告"
+    IDS_REVERT_SETTING_CONFIG "你将要重置所有你更改的内容至初始状态，你确定要这样做吗？"
+    IDS_PLUGIN_BATTERY_TIME_ITEM_NAME "电池时间"
+    IDS_BATTERY_TIME_LABEL  "时间:"
+END
+STRINGTABLE
+BEGIN
+    IDS_PLUGIN_SMART_POWER_METER_ITEM_NAME "智能功耗显示"
+    IDS_PLUGIN_CPU_POWER_METER_ITEM_NAME "CPU功耗"
+    IDS_PLUGIN_GPU_POWER_METER_ITEM_NAME "GPU功耗"
+    IDS_BATTERY_DISPLAY_LABEL "电池:"
+    IDS_DISCRIPTIVE_BATERY_TIME_HEADER "电池剩余时间："
+    IDS_DISCRIPTIVE_BATERY_CHARGE_TIME_HEADER "电池充满剩余时间："
+END
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+STRINGTABLE
+BEGIN
+    IDS_PLUGIN_NAME         "PowerMon"
+    IDS_PLUGIN_DESCRIPTION  "Simple tool built for monitoring power in PC."
+    IDS_PLUGIN_BATTERY_POWER_ITEM_NAME "Battery Power"
+    IDS_POWER_DISPLAY_LABEL "PWR:"
+    IDS_BATTERY_CAPACITY_DISPLAY_LABEL "Cap:"
+    IDS_DISCRIPTIVE_BATERY_POWER_HEADER "Battery Power Input: "
+    IDS_DISCRIPTIVE_BATERY_CAPACITY_HEADER "Remaining Battery Energy: "
+    IDS_RELOADING_BATTERY_DRIVER_TIP 
+                            "Reloading Battery Driver. \nNo latest info provided."
+    IDS_BATTERY_DRIVER_HANDLER_CLEANING "Cleaning battery driver handler..."
+END
+STRINGTABLE
+BEGIN
+    IDS_DISCRIPTIVE_BATERY_VOLTAGE_HEADER "Battery Voltage: "
+    IDS_BATTERY_DRIVER_REBUILDING "Rebuilding battery driver handler..."
+    IDS_BATTERY_NONEXISTS   "This system dose not have any batteries."
+    IDS_BATTERY_INFO_UNKNOWN "Unable to retreive battery info from system."
+    IDS_DISCRIPTIVE_BATERY_PERCENTAGE_HEADER "Battery Percentage: "
+    IDS_UNKNOWN             "Unknown"
+    IDS_NO_DATA_SOURCE      "No Data Src"
+    IDS_PLUGIN_BATTERY_PERCENTAGE_ITEM_NAME "Battery Percentage"
+    IDS_BATTERY             "Battery"
+    IDS_PLUGIN_BATTERY_CAPACITY_ITEM_NAME "Battery Capacity"
+    IDS_PLUGIN_BATTERY_VOLTAGE_ITEM_NAME "Battery Voltage"
+    IDS_BATTERY_VOLTAGE_DISPLAY_LABEL "Volt:"
+    IDS_WARNING             "Warning"
+    IDS_REVERT_SETTING_CONFIG 
+                            "You are about to revert all settings to last state. Click OK to continue."
+    IDS_PLUGIN_BATTERY_TIME_ITEM_NAME "Battery Lifetime"
+    IDS_BATTERY_TIME_LABEL  "Time:"
+END
+STRINGTABLE
+BEGIN
+    IDS_PLUGIN_SMART_POWER_METER_ITEM_NAME "Smart Power Meter"
+    IDS_PLUGIN_CPU_POWER_METER_ITEM_NAME "CPU Power"
+    IDS_PLUGIN_GPU_POWER_METER_ITEM_NAME "GPU Power"
+    IDS_BATTERY_DISPLAY_LABEL "BTR:"
+    IDS_DISCRIPTIVE_BATERY_TIME_HEADER "Battery Life Time Remains:"
+    IDS_DISCRIPTIVE_BATERY_CHARGE_TIME_HEADER "Battery Full Charge Remains: "
+END

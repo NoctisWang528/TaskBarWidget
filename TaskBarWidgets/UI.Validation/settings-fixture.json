@@ -1,0 +1,369 @@
+{
+  "native": {
+    "groups": [
+      {
+        "id": "placement",
+        "label": "任务栏位置与布局",
+        "page": "taskbar"
+      },
+      {
+        "id": "appearance",
+        "label": "共用任务栏外观",
+        "page": "taskbar"
+      },
+      {
+        "id": "items",
+        "label": "显示模块",
+        "page": "taskbar"
+      }
+    ],
+    "fields": [
+      {
+        "key": "taskbar.horizontal_arrange",
+        "label": "水平单行排列",
+        "type": "boolean",
+        "value": false,
+        "group": "placement"
+      },
+      {
+        "key": "taskbar.fontName",
+        "label": "字体",
+        "type": "text",
+        "value": "Segoe UI",
+        "group": "appearance"
+      },
+      {
+        "key": "taskbar.fontSize",
+        "label": "字号",
+        "type": "number",
+        "value": 10,
+        "group": "appearance",
+        "min": 5,
+        "max": 72
+      },
+      {
+        "key": "taskbar.back_color",
+        "label": "背景颜色",
+        "type": "color",
+        "value": "#202020",
+        "group": "appearance"
+      },
+      {
+        "key": "taskbar.backgroundOpacity",
+        "label": "背景不透明度（%）",
+        "type": "number",
+        "value": 60,
+        "group": "appearance",
+        "min": 0,
+        "max": 100
+      },
+      {
+        "key": "items.native_0.show",
+        "label": "上行速度 · show",
+        "type": "boolean",
+        "value": true,
+        "group": "items",
+        "itemId": "native_0",
+        "itemName": "上行速度",
+        "sampleValue": "2.4 MB/s"
+      },
+      {
+        "key": "items.native_0.order",
+        "label": "上行速度 · order",
+        "type": "number",
+        "value": 1,
+        "group": "items",
+        "itemId": "native_0",
+        "itemName": "上行速度",
+        "sampleValue": "2.4 MB/s"
+      },
+      {
+        "key": "items.native_0.row",
+        "label": "上行速度 · row",
+        "type": "number",
+        "value": 0,
+        "group": "items",
+        "itemId": "native_0",
+        "itemName": "上行速度",
+        "sampleValue": "2.4 MB/s"
+      },
+      {
+        "key": "items.native_0.label",
+        "label": "上行速度 · label",
+        "type": "text",
+        "value": "↑ ",
+        "group": "items",
+        "itemId": "native_0",
+        "itemName": "上行速度",
+        "sampleValue": "2.4 MB/s"
+      },
+      {
+        "key": "items.native_0.labelColor",
+        "label": "上行速度 · labelColor",
+        "type": "color",
+        "value": "#ffffff",
+        "group": "items",
+        "itemId": "native_0",
+        "itemName": "上行速度",
+        "sampleValue": "2.4 MB/s"
+      },
+      {
+        "key": "items.native_0.valueColor",
+        "label": "上行速度 · valueColor",
+        "type": "color",
+        "value": "#ffffff",
+        "group": "items",
+        "itemId": "native_0",
+        "itemName": "上行速度",
+        "sampleValue": "2.4 MB/s"
+      },
+      {
+        "key": "items.native_1.show",
+        "label": "下行速度 · show",
+        "type": "boolean",
+        "value": true,
+        "group": "items",
+        "itemId": "native_1",
+        "itemName": "下行速度",
+        "sampleValue": "18.2 MB/s"
+      },
+      {
+        "key": "items.native_1.order",
+        "label": "下行速度 · order",
+        "type": "number",
+        "value": 2,
+        "group": "items",
+        "itemId": "native_1",
+        "itemName": "下行速度",
+        "sampleValue": "18.2 MB/s"
+      },
+      {
+        "key": "items.native_1.row",
+        "label": "下行速度 · row",
+        "type": "number",
+        "value": 0,
+        "group": "items",
+        "itemId": "native_1",
+        "itemName": "下行速度",
+        "sampleValue": "18.2 MB/s"
+      },
+      {
+        "key": "items.native_1.label",
+        "label": "下行速度 · label",
+        "type": "text",
+        "value": "↓ ",
+        "group": "items",
+        "itemId": "native_1",
+        "itemName": "下行速度",
+        "sampleValue": "18.2 MB/s"
+      },
+      {
+        "key": "items.native_1.labelColor",
+        "label": "下行速度 · labelColor",
+        "type": "color",
+        "value": "#ffffff",
+        "group": "items",
+        "itemId": "native_1",
+        "itemName": "下行速度",
+        "sampleValue": "18.2 MB/s"
+      },
+      {
+        "key": "items.native_1.valueColor",
+        "label": "下行速度 · valueColor",
+        "type": "color",
+        "value": "#ffffff",
+        "group": "items",
+        "itemId": "native_1",
+        "itemName": "下行速度",
+        "sampleValue": "18.2 MB/s"
+      },
+      {
+        "key": "items.native_2.show",
+        "label": "CPU 使用率 · show",
+        "type": "boolean",
+        "value": true,
+        "group": "items",
+        "itemId": "native_2",
+        "itemName": "CPU 使用率",
+        "sampleValue": "28%"
+      },
+      {
+        "key": "items.native_2.order",
+        "label": "CPU 使用率 · order",
+        "type": "number",
+        "value": 3,
+        "group": "items",
+        "itemId": "native_2",
+        "itemName": "CPU 使用率",
+        "sampleValue": "28%"
+      },
+      {
+        "key": "items.native_2.row",
+        "label": "CPU 使用率 · row",
+        "type": "number",
+        "value": 1,
+        "group": "items",
+        "itemId": "native_2",
+        "itemName": "CPU 使用率",
+        "sampleValue": "28%"
+      },
+      {
+        "key": "items.native_2.label",
+        "label": "CPU 使用率 · label",
+        "type": "text",
+        "value": "CPU ",
+        "group": "items",
+        "itemId": "native_2",
+        "itemName": "CPU 使用率",
+        "sampleValue": "28%"
+      },
+      {
+        "key": "items.native_2.labelColor",
+        "label": "CPU 使用率 · labelColor",
+        "type": "color",
+        "value": "#ffffff",
+        "group": "items",
+        "itemId": "native_2",
+        "itemName": "CPU 使用率",
+        "sampleValue": "28%"
+      },
+      {
+        "key": "items.native_2.valueColor",
+        "label": "CPU 使用率 · valueColor",
+        "type": "color",
+        "value": "#ffffff",
+        "group": "items",
+        "itemId": "native_2",
+        "itemName": "CPU 使用率",
+        "sampleValue": "28%"
+      },
+      {
+        "key": "items.native_3.show",
+        "label": "内存使用率 · show",
+        "type": "boolean",
+        "value": false,
+        "group": "items",
+        "itemId": "native_3",
+        "itemName": "内存使用率",
+        "sampleValue": "62%"
+      },
+      {
+        "key": "items.native_3.order",
+        "label": "内存使用率 · order",
+        "type": "number",
+        "value": 4,
+        "group": "items",
+        "itemId": "native_3",
+        "itemName": "内存使用率",
+        "sampleValue": "62%"
+      },
+      {
+        "key": "items.native_3.row",
+        "label": "内存使用率 · row",
+        "type": "number",
+        "value": 1,
+        "group": "items",
+        "itemId": "native_3",
+        "itemName": "内存使用率",
+        "sampleValue": "62%"
+      },
+      {
+        "key": "items.native_3.label",
+        "label": "内存使用率 · label",
+        "type": "text",
+        "value": "RAM ",
+        "group": "items",
+        "itemId": "native_3",
+        "itemName": "内存使用率",
+        "sampleValue": "62%"
+      },
+      {
+        "key": "items.native_3.labelColor",
+        "label": "内存使用率 · labelColor",
+        "type": "color",
+        "value": "#ffffff",
+        "group": "items",
+        "itemId": "native_3",
+        "itemName": "内存使用率",
+        "sampleValue": "62%"
+      },
+      {
+        "key": "items.native_3.valueColor",
+        "label": "内存使用率 · valueColor",
+        "type": "color",
+        "value": "#ffffff",
+        "group": "items",
+        "itemId": "native_3",
+        "itemName": "内存使用率",
+        "sampleValue": "62%"
+      },
+      {
+        "key": "items.builtin_FxOP34Lm.show",
+        "label": "天气 · show",
+        "type": "boolean",
+        "value": false,
+        "group": "items",
+        "itemId": "builtin_FxOP34Lm",
+        "itemName": "天气",
+        "sampleValue": "晴 24℃"
+      },
+      {
+        "key": "items.builtin_FxOP34Lm.order",
+        "label": "天气 · order",
+        "type": "number",
+        "value": 5,
+        "group": "items",
+        "itemId": "builtin_FxOP34Lm",
+        "itemName": "天气",
+        "sampleValue": "晴 24℃"
+      },
+      {
+        "key": "items.builtin_FxOP34Lm.row",
+        "label": "天气 · row",
+        "type": "number",
+        "value": 0,
+        "group": "items",
+        "itemId": "builtin_FxOP34Lm",
+        "itemName": "天气",
+        "sampleValue": "晴 24℃"
+      },
+      {
+        "key": "items.builtin_FxOP34Lm.label",
+        "label": "天气 · label",
+        "type": "text",
+        "value": "天气 ",
+        "group": "items",
+        "itemId": "builtin_FxOP34Lm",
+        "itemName": "天气",
+        "sampleValue": "晴 24℃"
+      },
+      {
+        "key": "items.builtin_FxOP34Lm.labelColor",
+        "label": "天气 · labelColor",
+        "type": "color",
+        "value": "#ffffff",
+        "group": "items",
+        "itemId": "builtin_FxOP34Lm",
+        "itemName": "天气",
+        "sampleValue": "晴 24℃"
+      },
+      {
+        "key": "items.builtin_FxOP34Lm.valueColor",
+        "label": "天气 · valueColor",
+        "type": "color",
+        "value": "#ffffff",
+        "group": "items",
+        "itemId": "builtin_FxOP34Lm",
+        "itemName": "天气",
+        "sampleValue": "晴 24℃"
+      }
+    ]
+  },
+  "media": {
+    "toolWindowTheme": "System",
+    "enableWordScanning": true,
+    "showLyricTranslation": true,
+    "showCover": true,
+    "spectrumDisplayMode": "Disabled"
+  }
+}

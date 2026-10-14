@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.22621.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.22000.0</TargetPlatformMinVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PlatformTarget>x64</PlatformTarget>
+    <ApplicationManifest>..\UI\app.manifest</ApplicationManifest>
+    <AssemblyName>TaskBarWidgets.UI.Validation</AssemblyName>
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+    <!-- Bootstrap through the referenced product assembly, avoiding duplicate SDK initializers. -->
+    <WindowsAppSdkAutoInitialize>false</WindowsAppSdkAutoInitialize>
+    <WindowsAppSdkUndockedRegFreeWinRTInitialize>false</WindowsAppSdkUndockedRegFreeWinRTInitialize>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Update="settings-fixture.json" CopyToOutputDirectory="PreserveNewest" />
+    <ProjectReference Include="..\UI\TaskBarWidgets.UI.csproj" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
+  </ItemGroup>
+</Project>

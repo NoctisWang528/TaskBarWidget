@@ -1,0 +1,106 @@
+[CmdletBinding()]
+param(
+    [ValidateSet('Debug', 'Release')][string]$Configuration = 'Release',
+    [ValidateSet('All', 'Native', 'Media')][string]$Component = 'All',
+    [string]$OutputDirectory
+)
+$ErrorActionPreference = 'Stop'
+$productRoot = Split-Path -Parent $PSScriptRoot
+$buildStartedAt = [DateTimeOffset]::Now
+$appDirectory = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) } else { Join-Path $productRoot ("artifacts\builds\" + $buildStartedAt.ToString('yyyyMMdd-HHmmss')) }
+$artifactPrefix = [IO.Path]::GetFullPath((Join-Path $productRoot 'artifacts')).TrimEnd('\') + '\'
+if (-not $appDirectory.StartsWith($artifactPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'Output directory must be inside product artifacts.' }
+$logDirectory = Join-Path $productRoot 'artifacts\logs'
+$installation = $null
+if ($OutputDirectory) {
+    New-Item -ItemType Directory -Path $appDirectory -Force | Out-Null
+} else {
+    # No -Force: even builds started in the same second must not overwrite each other.
+    New-Item -ItemType Directory -Path $appDirectory | Out-Null
+}
+New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
+function Invoke-BuildCommand([string]$Name, [string]$Program, [string[]]$Arguments) {
+    $logPath = Join-Path $logDirectory "$Name.log"
+    Write-Host "$Name ..."
+    & $Program @Arguments *> $logPath
+    if ($LASTEXITCODE -ne 0) {
+        Get-Content -LiteralPath $logPath -Tail 35 | Write-Host
+        throw "$Name failed (exit $LASTEXITCODE). Full log: $logPath"
+    }
+    Write-Host "$Name passed. Log: $logPath"
+}
+Push-Location $productRoot
+try {
+    & (Join-Path $PSScriptRoot 'check-boundaries.ps1')
+    if ($Component -in @('All', 'Native')) {
+        $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+        if (-not (Test-Path -LiteralPath $vswhere)) { throw 'Visual Studio 2022 Build Tools is required. See .vsconfig.' }
+        $installation = & $vswhere -latest -products '*' -version '[17.0,18.0)' -requires Microsoft.VisualStudio.Component.VC.ATLMFC -property installationPath
+        if (-not $installation) { throw 'Missing VS 2022 MFC. Run scripts/install-build-components.ps1.' }
+        $msbuild = Join-Path $installation 'MSBuild\Current\Bin\MSBuild.exe'
+        Invoke-BuildCommand 'restore-native' 'dotnet' @('restore', 'scripts/NativePackages.csproj', '--verbosity', 'minimal')
+        Invoke-BuildCommand 'build-native' $msbuild @('Native/TaskBarWidgets.sln', '/m:1', "/p:Configuration=$Configuration", '/p:Platform=x64', '/v:minimal', '/nologo')
+        $nativeOutput = Join-Path $productRoot "Native\Bin\x64\$Configuration"
+        foreach ($file in @('TaskBarWidgets.exe', 'OpenHardwareMonitorApi.dll')) {
+            Copy-Item -LiteralPath (Join-Path $nativeOutput $file) -Destination $appDirectory -Force
+        }
+        Copy-Item -LiteralPath 'Native/OpenHardwareMonitorApi/LibreHardwareMonitorLib.dll' -Destination $appDirectory -Force
+        if (Test-Path -LiteralPath 'Native/TrafficMonitor/language') {
+            Copy-Item -LiteralPath 'Native/TrafficMonitor/language' -Destination $appDirectory -Recurse -Force
+        }
+        # App-local release runtime avoids an installer requirement on the acceptance machine.
+        $redistRoot = Join-Path $installation 'VC\Redist\MSVC'
+        $redistVersion = Get-ChildItem -LiteralPath $redistRoot -Directory | Where-Object Name -Match '^\d' | Sort-Object Name -Descending | Select-Object -First 1
+        if ($Configuration -eq 'Release' -and $redistVersion) {
+            foreach ($runtime in @('Microsoft.VC143.CRT', 'Microsoft.VC143.MFC')) {
+                $runtimePath = Join-Path $redistVersion.FullName "x64\$runtime"
+                if (Test-Path -LiteralPath $runtimePath) { Get-ChildItem -LiteralPath $runtimePath -Filter '*.dll' | Copy-Item -Destination $appDirectory -Force }
+            }
+        }
+    }
+    if ($Component -in @('All', 'Media')) {
+        Invoke-BuildCommand 'publish-media' 'dotnet' @('publish', 'Media/TaskBarWidgets.Media.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', 'true', '-o', (Join-Path $appDirectory 'Media'), '-p:BuildInParallel=false', '--verbosity', 'minimal')
+        Invoke-BuildCommand 'publish-ui' 'dotnet' @('publish', 'UI/TaskBarWidgets.UI.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', 'true', '-o', (Join-Path $appDirectory 'UI'), '-p:BuildInParallel=false', '--verbosity', 'minimal')
+        # WinUI loads native DLLs from its own process directory, not the native owner's directory.
+        $uiInstallation = $installation
+        if (-not $uiInstallation) {
+            $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+            if (-not (Test-Path -LiteralPath $vswhere)) { throw 'Visual Studio C++ redistributable files are required for WinUI packaging.' }
+            $uiInstallation = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+        }
+        if (-not $uiInstallation) { throw 'Visual Studio C++ redistributable files are required for WinUI packaging.' }
+        $uiRedist = Get-ChildItem -LiteralPath (Join-Path $uiInstallation 'VC\Redist\MSVC') -Directory | Where-Object Name -Match '^\d' | Sort-Object Name -Descending | Select-Object -First 1
+        if (-not $uiRedist) { throw 'Missing Visual C++ redistributable directory for WinUI.' }
+        $uiCrt = Join-Path $uiRedist.FullName 'x64\Microsoft.VC143.CRT'
+        if (-not (Test-Path -LiteralPath $uiCrt)) { throw "Missing WinUI C++ runtime: $uiCrt" }
+        Get-ChildItem -LiteralPath $uiCrt -Filter '*.dll' | Copy-Item -Destination (Join-Path $appDirectory 'UI') -Force
+        foreach ($uiFile in @('TaskBarWidgets.UI.exe', 'TaskBarWidgets.UI.pri', 'App.xbf')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $appDirectory "UI\$uiFile") -PathType Leaf)) { throw "Missing packaged WinUI file: $uiFile" }
+        }
+        $uiGenerated = Join-Path $productRoot "UI\bin\$Configuration\net8.0-windows10.0.22621.0\win-x64"
+        foreach ($resource in @('TaskBarWidgets.UI.pri', 'App.xbf')) {
+            $sourceHash = (Get-FileHash -LiteralPath (Join-Path $uiGenerated $resource) -Algorithm SHA256).Hash
+            $packageHash = (Get-FileHash -LiteralPath (Join-Path $appDirectory "UI\$resource") -Algorithm SHA256).Hash
+            if ($sourceHash -ne $packageHash) { throw "Packaged WinUI resource differs from the current product build: $resource" }
+        }
+    }
+    Copy-Item -LiteralPath 'licenses' -Destination $appDirectory -Recurse -Force
+    Copy-Item -LiteralPath 'THIRD-PARTY-NOTICES.md', 'ACCEPTANCE.md' -Destination $appDirectory -Force
+    if ($Component -eq 'All') {
+        foreach ($required in @('TaskBarWidgets.exe', 'OpenHardwareMonitorApi.dll', 'LibreHardwareMonitorLib.dll', 'Media\TaskBarWidgets.Media.exe', 'UI\TaskBarWidgets.UI.exe', 'UI\TaskBarWidgets.UI.pri', 'UI\App.xbf')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $appDirectory $required))) { throw "Missing packaged file: $required" }
+        }
+    }
+    [ordered]@{
+        buildStartedAt = $buildStartedAt.ToString('o')
+        buildCompletedAt = [DateTimeOffset]::Now.ToString('o')
+        timeZone = [TimeZoneInfo]::Local.Id
+        configuration = $Configuration
+        component = $Component
+    } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $appDirectory 'build-info.json') -Encoding UTF8
+    if ($Component -eq 'All') {
+        Set-Content -LiteralPath (Join-Path $productRoot 'artifacts\latest-build.txt') -Value $appDirectory -Encoding UTF8
+    }
+    Write-Host "Build complete: $appDirectory. Desktop acceptance is pending; application was not launched."
+}
+finally { Pop-Location }

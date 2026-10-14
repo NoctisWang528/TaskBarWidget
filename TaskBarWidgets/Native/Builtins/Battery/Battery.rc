@@ -1,0 +1,50 @@
+#pragma code_page(65001)
+#include "afxres.h"
+#include "..\Builtins\Battery\resource.h"
+LANGUAGE LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED
+IDI_BATTERY_DARK        ICON                    "..\\Builtins\\Battery\\res\\battery_dark.ico"
+IDI_BATTERY_LIGHT       ICON                    "..\\Builtins\\Battery\\res\\battery_light.ico"
+IDI_BATTERY_DARK_CHARGE ICON                    "..\\Builtins\\Battery\\res\\battery_dark_charge.ico"
+IDI_BATTERY_LIGHT_CHARGE ICON                    "..\\Builtins\\Battery\\res\\battery_light_charge.ico"
+IDI_FILL_HIGH           ICON                    "..\\Builtins\\Battery\\res\\fill_high.ico"
+IDI_FILL_LOW            ICON                    "..\\Builtins\\Battery\\res\\fill_low.ico"
+IDI_FILL_CRITICAL       ICON                    "..\\Builtins\\Battery\\res\\fill_critical.ico"
+STRINGTABLE
+BEGIN
+    IDS_PLUGIN_NAME         "电池电量插件"
+    IDS_PLUGIN_DESCRIPTION  "用于TrafficMonitor的电池电量插件。"
+    IDS_BATTERY             "电池电量"
+    IDS_BATTYER_TYPE_NUMBER "仅数字"
+    IDS_BATTYER_TYPE_ICON   "仅图标"
+    IDS_BATTYER_TYPE_NUMBER_IN_ICON "数字显示在图标内"
+    IDS_BATTYER_TYPE_NUMBER_BESIDE_ICON "数字显示在图标旁边"
+    IDS_CHARGING            "电源已接通"
+    IDS_BATTERY_LIFE_TIME   "电池可用"
+END
+STRINGTABLE
+BEGIN
+    IDS_BATTERY_FULL_LIFE_TIME "充满时可用"
+    IDS_HOUR                "小时"
+    IDS_MINUTE              "分钟"
+    IDS_SECOND              "秒"
+END
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+STRINGTABLE
+BEGIN
+    IDS_PLUGIN_NAME         "Battery plug-in"
+    IDS_PLUGIN_DESCRIPTION  "Battery plug-in for TrafficMonitor."
+    IDS_BATTERY             "Battery"
+    IDS_BATTYER_TYPE_NUMBER "Number only"
+    IDS_BATTYER_TYPE_ICON   "Icon only"
+    IDS_BATTYER_TYPE_NUMBER_IN_ICON "Number in the icon"
+    IDS_BATTYER_TYPE_NUMBER_BESIDE_ICON "Number beside the icon"
+    IDS_CHARGING            "AC power in online"
+    IDS_BATTERY_LIFE_TIME   "Battery life time"
+END
+STRINGTABLE
+BEGIN
+    IDS_BATTERY_FULL_LIFE_TIME "Battery life time at full charge"
+    IDS_HOUR                "hour"
+    IDS_MINUTE              "minute"
+    IDS_SECOND              "second"
+END

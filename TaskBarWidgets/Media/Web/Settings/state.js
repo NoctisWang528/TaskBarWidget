@@ -1,0 +1,22 @@
+(() => {
+  const textAlignments = new Set(["Left", "Center", "Right"]);
+
+  function normalizeLyricsTextAlignment(value) {
+    return textAlignments.has(value) ? value : "Left";
+  }
+
+  window.taskbarLyricsSettingsState = {
+    create(nextState, previousState, foregroundColor) {
+      return {
+        ...nextState,
+        syncDefaultCommunicationsDevice: nextState?.syncDefaultCommunicationsDevice !== false,
+        lyricsTextAlignment: normalizeLyricsTextAlignment(nextState?.lyricsTextAlignment),
+        coverPosition: nextState?.coverPosition === "Right" ? "Right" : "Left",
+        page: previousState?.page ?? "sources",
+        foregroundColor,
+        trackOffsetSourceFilter: previousState?.trackOffsetSourceFilter ?? "All",
+        trackOffsetSort: previousState?.trackOffsetSort ?? "updated"
+      };
+    }
+  };
+})();
