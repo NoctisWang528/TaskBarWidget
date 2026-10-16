@@ -12,6 +12,7 @@
 #include "DrawCommonFactory.h"
 #include "WindowsWebExperienceDetector.h"
 #include "TaskbarHelper.h"
+#include "TaskbarRowLayout.h"
 
 #ifdef DEBUG
 // DX调试信息捕获
@@ -794,6 +795,7 @@ void CTaskBarDlg::CalculateWindowSize()
         theApp.m_taskbar_data.display_item.Add(TDI_UP);        //至少显示一项
 
     m_item_widths.clear();
+    m_item_rects.clear();
     //显示项目的宽度
     std::map<CommonDisplayItem, ItemWidth> item_widths;
 
@@ -877,21 +879,23 @@ void CTaskBarDlg::CalculateWindowSize()
         }
         else if (theApp.m_taskbar_data.explicit_item_rows)
         {
-            const int gap=DPI(theApp.m_taskbar_data.item_space);
-            const int row_height=m_window_height/2;
-            const int margin=DPI(theApp.m_taskbar_data.vertical_margin);
-            int positions[2]{gap,gap};
-            for(auto& item:m_item_widths)
+            std::vector<TaskbarRowLayout::Item> rows;
+            for (const auto& item : m_item_widths)
             {
-                const auto found=theApp.m_taskbar_data.item_rows.find(item.StableId());
-                const int row=found==theApp.m_taskbar_data.item_rows.end()?0:std::clamp(found->second,0,1);
-                const int width=item.item_width.TotalWidth();
-                const int y=row*(row_height+margin)-margin/2;
-                m_item_rects[item].SetRect(positions[row],y,positions[row]+width,y+row_height);
-                item.is_double_line=false;
-                positions[row]+=width+gap;
+                const auto found = theApp.m_taskbar_data.item_rows.find(item.StableId());
+                const int row = found == theApp.m_taskbar_data.item_rows.end() ? 0 : found->second;
+                rows.push_back({row, item.item_width.label_width, item.item_width.value_width, item.IsDoubleLineExclusive()});
             }
-            m_window_width=(std::max)(positions[0],positions[1]);
+            const auto layout = TaskbarRowLayout::Calculate(rows, DPI(theApp.m_taskbar_data.item_space),
+                m_window_height, DPI(theApp.m_taskbar_data.vertical_margin));
+            for (size_t index = 0; index < m_item_widths.size(); ++index)
+            {
+                auto& item = m_item_widths[index];
+                const auto& placement = layout.items[index];
+                m_item_rects[item].SetRect(placement.left, placement.top, placement.right, placement.bottom);
+                item.is_double_line = placement.double_line;
+            }
+            m_window_width = layout.width;
         }
         else        // Legacy imported layouts retain their original paired/full-height arrangement.
         {

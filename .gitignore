@@ -7,3 +7,8 @@
 /.env.*
 
 # Each application maintains its own build and runtime exclusions.
+
+# Upstream snapshots remain local read-only references, never product inputs.
+/TrafficMonitor/
+/TaskbarLyrics/
+/AF-Media-Bar/

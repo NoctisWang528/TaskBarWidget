@@ -2,9 +2,9 @@
 
 ## Scope and authorization
 
-Implement the current [requirements](../docs/需求与架构.md) and [UI specification](docs/界面统一方案.md). All product source, dependencies, scripts, tests and generated output belong under this directory. `../TrafficMonitor`, `../TaskbarLyrics` and `../AF-Media-Bar` are read-only references; never restore/build/write there or depend on them during product builds. No child Git repositories.
+Implement the current [requirements](../docs/需求与架构.md) and [UI specification](docs/界面统一方案.md). All product source, dependencies, scripts, tests and generated output belong under this directory. `../TrafficMonitor`, `../TaskbarLyrics` and `../AF-Media-Bar` are optional local, untracked and ignored read-only references, absent from GitHub and release packages; never restore/build/write there or depend on them during product builds. A fresh product checkout must build without those directories. No child Git repositories.
 
-Local implementation/builds/tests are authorized. The user explicitly requested the current documentation cleanup, commit and push on 2026-10-14; later pushes/releases require their own authorization. Never replace or stop the daily TrafficMonitor installation, register startup, or publish elsewhere without applicable authorization.
+Local implementation/builds/tests are authorized. On 2026-10-16 the user authorized the current documentation/repository cleanup, commit, push and first GitHub Release ZIP. This is not standing authorization for future publication or changes to repository visibility. Never replace or stop the daily TrafficMonitor installation, register startup, or publish elsewhere without applicable authorization.
 
 ## Product behavior
 
@@ -14,7 +14,10 @@ Local implementation/builds/tests are authorized. The user explicitly requested 
 - Wheel temporarily selects monitoring/media until the next effective playback-state or source change. Track/position changes alone do not reset it. Left click opens cards; right click opens the application menu; no taskbar hover details.
 - WinUI3 owns all visible settings and cards. Three independent equal-width cards: traffic, devices, media from top to bottom. Heatmap is twelve weeks of upload+download, square cells, subtle glow, no scrolling. Device selection uses flyouts without resizing or dismissing the group. Settings gear belongs on the media card.
 - Module pool and one/two composition lanes define taskbar contents. Click opens the right property drawer; remove retains labels/colors. Stable IDs and explicit rows persist. Shared font/background/opacity live in one group; secondary checkboxes are compact.
+- Explicit two-row layouts share column widths (maximum of the upper/lower item requirements) and column spacing. Preserve lane order; exclusive double-line items span their own column. Preview and native geometry must use the same pairing rule. Heatmap colors are relative to the visible twelve-week daily peak; unknown, zero and future dates remain distinct.
 - Default communication endpoint synchronization is an Audio preference, enabled by default, affecting only the next explicit device switch.
+- Cards dismiss on an actual outside click, Escape, entry toggle or opening settings; foreground/focus changes alone must never dismiss them. A scoped mouse listener must never swallow global input and must be removed on hide/shutdown. The native entry HWND is verified against the native host PID before forwarding.
+- Audio mutations return readback directly to the cards; mute never writes volume. Serialize audio commands separately from slow settings/history requests, bound queues, and do not let older snapshots overwrite newer operations.
 - Preserve user configuration/history; about links to https://github.com/NoctisWang528/TaskBarWidget. Respect system theme, high contrast and reduced motion.
 
 ## Architecture and code
@@ -31,7 +34,7 @@ Detach D2D targets before resizing swap chains even when caches retain the conte
 
 ## Builds and validation
 
-Use `scripts/build.ps1` for complete hardware Release builds, not Lite-only validation. Run independent .NET builds serially to avoid generated-output races. Default output is `artifacts/builds/yyyyMMdd-HHmmss/`; refuse default-directory collisions. Successful packages include build-info.json; only complete successful builds update artifacts/latest-build.txt.
+Use `scripts/build.ps1` for complete hardware Release builds, not Lite-only validation. Run independent .NET builds serially to avoid generated-output races. Default output is `artifacts/builds/yyyyMMdd-HHmmss/`; refuse default-directory collisions. Release versions use the build time as `yymmdd-hhmm`; do not hardcode a past candidate version. Successful packages include build-info.json; only complete successful builds update artifacts/latest-build.txt.
 
 Publish Media/ and UI/ beside the main executable. WinUI is self-contained with app-local VC143 CRT. Its own generated PRI/XBF must be explicit publish inputs, present in the final package and hash-identical to the current generated resources. Do not copy resource files from a validation host to repair packaging.
 
@@ -41,7 +44,9 @@ The standing user instruction is not to auto-start the normal product. Do not ru
 
 ## Git, user data and cleanup
 
-Keep builds, dependencies, caches, crash dumps, logs and personal runtime data ignored; source assets, language INIs, pinned binary dependencies and license notices are intentional inputs. Preserve upstream attribution in THIRD-PARTY-NOTICES.md.
+Keep builds, dependencies, caches, crash dumps, logs and personal runtime data ignored; source assets, language INIs, pinned binary dependencies and license notices are intentional inputs. Public instructions must not contain a contributor's personal absolute paths. Publish a clean package without user configuration, weather credentials, history, local backups or probe logs/images.
+
+The product and new integration code inherit the root Anti 996 license. Preserve original authorship and the separate MIT/MPL/OFL and other third-party terms in THIRD-PARTY-NOTICES.md and licenses/. Include these notices in release packages; do not describe the whole product as GPL or relicense third-party code.
 
 The user permits deleting only the immediate previous build after a successful new package and verified user-data backup/migration. Use the retirement script; refuse live processes, locked drivers, links, unsafe paths or data conflicts. Never unload a driver or kill user applications to force cleanup. NVIDIA/other overlays are external; do not change global gaming settings or undocumented driver profiles.
 

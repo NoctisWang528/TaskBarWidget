@@ -2,9 +2,9 @@
 
 Windows 11 任务栏工具，使用 WinUI 3 设置与快捷卡片，整合硬件与网络监测、同步歌词、媒体控制和输入输出音频设备控制。以 TrafficMonitor 任务栏与布局为基础，复用 TaskbarLyrics 歌词效果及 AF-Media-Bar 音频控制。左键面板从上到下为流量、设备、媒体三个等宽独立卡片。电池、功耗、天气直接编入程序，不扫描外部插件 DLL；选项放在硬件页。开发状态与待验收项目见 [验收记录](ACCEPTANCE.md)。
 
-每次构建默认输出到 `artifacts/builds/yyyyMMdd-HHmmss/`（构建开始时的本地时间）。最近成功的完整构建路径记录在 `artifacts/latest-build.txt`，每个成功构建目录都有包含时间、时区、配置与组件的 `build-info.json`。构建不会启动程序；实际验收前先退出旧 TaskBarWidgets，再启动新目录中的 `TaskBarWidgets.exe`。新包验证、数据备份和迁移成功后，可按用户授权清理紧邻上一版；运行中或锁定的版本保留，不覆盖原日用 TrafficMonitor 安装。
+发布 ZIP 从仓库的 [Releases](https://github.com/NoctisWang528/TaskBarWidget/releases) 下载；版本使用构建时刻的 `yymmdd-hhmm`。完整解压到可写目录，保留 `Media/`、`UI/`、`licenses/` 等子目录，再启动根目录的 `TaskBarWidgets.exe`。更新时先退出旧 TaskBarWidgets，备份并迁移配置和历史，再启动新目录中的程序。不要覆盖正在运行的目录。当前桌面验证范围与已知限制见 [ACCEPTANCE.md](ACCEPTANCE.md)。
 
-所有产品源码与构建依赖均位于此目录。上一级的三个原项目只是只读参考，构建不读取它们。
+所有产品源码与构建依赖均位于此目录。开发工作区可保留 `TrafficMonitor/`、`TaskbarLyrics/`、`AF-Media-Bar/` 三个只读参考目录；它们不跟踪、不随 GitHub 仓库或发布包分发，构建也不读取它们。
 
 ## 构建
 
@@ -31,34 +31,37 @@ Windows 11 任务栏工具，使用 WinUI 3 设置与快捷卡片，整合硬件
 
 完整监测程序沿用上游的管理员运行要求，以保留温度等硬件访问能力；启动时可能出现 UAC。媒体服务和 WinUI 界面由主程序启动，不要单独双击两个辅助 EXE。运行还需 Microsoft Edge WebView2 Runtime；缺失时媒体视图不可用，监测视图仍可回退。
 
+构建默认输出到 `artifacts/builds/yyyyMMdd-HHmmss/`（构建开始时的本地时间）。`artifacts/latest-build.txt` 记录最近成功的完整构建，包内 `build-info.json` 记录构建信息。构建和测试不会自动启动正常产品，也不会替换日用安装或设置自启。
+
 ## 日用迁移
 
-默认使用独立的 TaskBarWidgets 配置与缓存。首次验收应从测试输出目录启动；先退出现有占用同一区域的任务栏工具，再启动新程序。构建不会自动停止现有 TrafficMonitor、替换日用安装或设置自启。
+默认使用独立的 TaskBarWidgets 配置与缓存。先退出现有占用同一区域的任务栏工具，再启动新程序。保留旧安装作为回退；不要让两套应用同时写入相同配置。
 
-需要导入现有布局时，先退出新程序，再运行以下命令。它只读取旧安装，将配置副本写入测试输出目录；已有新配置会先备份。内置功能沿用 `plugins/` 下三个 INI 文件作为配置兼容目录；该目录中的 DLL 不再加载。
-
-```powershell
-.\scripts\import-monitor-settings.ps1 -SourceDirectory 'C:\Users\nocti\Documents\TrafficMonitor' -IncludeBuiltinSettings
-```
-
-不要让两套应用同时写入相同配置。桌面主窗口与其皮肤系统不属于新产品功能；任务栏字体、颜色和可定制布局仍保留。
-
-历史流量可单独导入到关闭状态的候选目录，本轮已完成此步骤：
+从源码工作区导入现有布局时，先退出新程序，再从本目录运行以下命令并输入旧安装目录。脚本只读取旧安装，将配置副本写入最近完整构建目录。导入目标必须位于本工作区的 `artifacts/` 下；需要导入发布 ZIP 时，先解压到该目录，再用 `-DestinationDirectory` 指定目标。已有新配置会先备份。内置功能沿用 `plugins/` 下三个 INI 文件作为配置兼容目录；该目录中的 DLL 不再加载。
 
 ```powershell
-.\scripts\import-traffic-history.ps1 -SourceFile 'C:\Users\nocti\Documents\TrafficMonitor\history_traffic.dat'
+$oldInstallation = Read-Host '旧 TrafficMonitor 安装目录'
+.\scripts\import-monitor-settings.ps1 -SourceDirectory $oldInstallation -IncludeBuiltinSettings
 ```
 
-导入前备份两份历史，同一天保守地保留合计较大的完整记录，不重复累加。日历统计上传与下载之和，只代表程序监测期间记录的流量；空框表示无记录，灰格表示已记录的零流量。点击日期查看当天合计。
+桌面主窗口与其皮肤系统不属于新产品功能；任务栏字体、颜色和可定制布局仍保留。
+
+历史流量可单独导入到关闭状态的目标目录；以下命令沿用上面的旧安装目录变量：
+
+```powershell
+.\scripts\import-traffic-history.ps1 -SourceFile (Join-Path $oldInstallation 'history_traffic.dat')
+```
+
+导入前备份两份历史，同一天保守地保留合计较大的完整记录，不重复累加。日历统计上传与下载之和，只代表程序监测期间记录的流量；空框表示无记录，灰格表示已记录的零流量。蓝色色阶依据最近12周的日峰值分级，图例显示当前峰值；不同窗口的颜色不能直接比较绝对用量。点击日期查看当天合计。
 
 “同时设为默认通信设备”位于“设置 → 音频”，默认开启。该偏好仅作用于下一次主动设备切换；设置按钮位于媒体卡片右上角。
 
-代码来源与许可证见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+产品及新增整合代码沿用 [Anti 996 许可](licenses/TrafficMonitor-LICENSE)。第三方代码保留各自的 MIT、MPL、OFL 等许可；来源和完整声明见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) 及 `licenses/`。
 
 
 ## WinUI 界面与布局
 
-设置用模块池和模块组合条定义显示内容；水平单行打开时为一条，关闭时为上／下两条。拖入启用、拖回移除、条内或跨条移动；点击模块在右侧抽屉编辑属性。设备列表采用浮动菜单，不改变卡片尺寸。旧 WPF 卡片已删除，媒体服务继续复用原有核心逻辑。
+设置用模块池和模块组合条定义显示内容；水平单行打开时为一条，关闭时为上／下两条。双行的上下项目共用列宽，各列按较宽项目预留空间，间距在列之间统一计算。拖入启用、拖回移除、条内或跨条移动；点击模块在右侧抽屉编辑属性。顶部预览用示例读数展示布局，透明背景使用对比底板。共用外观使用字体／字号与 B、I、U、删除线工具条；位置和监测选项随内容宽度分成一或两列。播放源通过左侧六点柄拖动排序，也支持 Alt + 上下方向键和右侧菜单。设备列表采用浮动菜单，不改变卡片尺寸。旧 WPF 卡片已删除，媒体服务继续复用原有核心逻辑。
 
 `dotnet run --project UI.Tests/TaskBarWidgets.UI.Tests.csproj -c Release` 检查前端管道，`scripts/validate-winui.ps1` 使用独立隐藏宿主检查 WinUI 初始化和卡片物理尺寸。隐藏窗口不能证明完整视觉布局、输入或材质已验收。
 
@@ -72,6 +75,6 @@ Windows 11 任务栏工具，使用 WinUI 3 设置与快捷卡片，整合硬件
 .\scripts\test-ui-templates.ps1
 ```
 
-`test-ui-templates.ps1` 要求正式包中的应用 PRI 与 App.xbf 存在；每次发布也会校验其与本次生成资源的哈希。构造成功或无参数启动成功都不能替代模板加载检查。
+`test-ui-templates.ps1` 要求正式包中的应用 PRI 与 App.xbf 存在；每次发布也会校验其与本次生成资源的哈希。它使用模拟配置检查宽窄布局、预览和复选框间距，将不含系统 Mica 的控件图写入包内 `ui-layout-check/`，并验证卡片隐藏／重开／销毁竞态。构造成功或无参数启动成功都不能替代模板加载检查。
 
 上一版本的清理使用 `scripts/retire-previous-build.ps1 -PreviousBuild <上一构建目录>` 预览；显式 `-Execute` 才备份、迁移并删除。最新状态见 [ACCEPTANCE.md](ACCEPTANCE.md)。

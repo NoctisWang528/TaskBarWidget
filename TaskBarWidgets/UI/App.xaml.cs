@@ -81,7 +81,9 @@ public partial class App : Application
                     payload.TryGetProperty("y", out var y) && y.TryGetDouble(out var py) && double.IsFinite(py))
                 {
                     _cards ??= new CardGroup(_connection, () => OpenSettings(null));
-                    _cards.ToggleAtPhysicalPoint(px, py);
+                    var entryWindow = payload.TryGetProperty("entryWindow", out var entry) && entry.ValueKind == JsonValueKind.Number &&
+                        entry.TryGetInt64(out var entryValue) && entryValue != 0 ? (nint)entryValue : 0;
+                    _cards.ToggleAtPhysicalPoint(px, py, entryWindow);
                 }
                 break;
             case "openSettings":

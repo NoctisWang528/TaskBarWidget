@@ -65,7 +65,8 @@
         "group": "items",
         "itemId": "native_0",
         "itemName": "上行速度",
-        "sampleValue": "2.4 MB/s"
+        "sampleValue": "8888.8 MB/s",
+        "doubleLineExclusive": false
       },
       {
         "key": "items.native_0.order",
@@ -75,7 +76,8 @@
         "group": "items",
         "itemId": "native_0",
         "itemName": "上行速度",
-        "sampleValue": "2.4 MB/s"
+        "sampleValue": "8888.8 MB/s",
+        "doubleLineExclusive": false
       },
       {
         "key": "items.native_0.row",
@@ -85,17 +87,19 @@
         "group": "items",
         "itemId": "native_0",
         "itemName": "上行速度",
-        "sampleValue": "2.4 MB/s"
+        "sampleValue": "8888.8 MB/s",
+        "doubleLineExclusive": false
       },
       {
         "key": "items.native_0.label",
         "label": "上行速度 · label",
         "type": "text",
-        "value": "↑ ",
+        "value": "↑ 上行累计 ",
         "group": "items",
         "itemId": "native_0",
         "itemName": "上行速度",
-        "sampleValue": "2.4 MB/s"
+        "sampleValue": "8888.8 MB/s",
+        "doubleLineExclusive": false
       },
       {
         "key": "items.native_0.labelColor",
@@ -105,7 +109,8 @@
         "group": "items",
         "itemId": "native_0",
         "itemName": "上行速度",
-        "sampleValue": "2.4 MB/s"
+        "sampleValue": "8888.8 MB/s",
+        "doubleLineExclusive": false
       },
       {
         "key": "items.native_0.valueColor",
@@ -115,7 +120,8 @@
         "group": "items",
         "itemId": "native_0",
         "itemName": "上行速度",
-        "sampleValue": "2.4 MB/s"
+        "sampleValue": "8888.8 MB/s",
+        "doubleLineExclusive": false
       },
       {
         "key": "items.native_1.show",
@@ -125,17 +131,19 @@
         "group": "items",
         "itemId": "native_1",
         "itemName": "下行速度",
-        "sampleValue": "18.2 MB/s"
+        "sampleValue": "18.2 MB/s",
+        "doubleLineExclusive": false
       },
       {
         "key": "items.native_1.order",
         "label": "下行速度 · order",
         "type": "number",
-        "value": 2,
+        "value": 3,
         "group": "items",
         "itemId": "native_1",
         "itemName": "下行速度",
-        "sampleValue": "18.2 MB/s"
+        "sampleValue": "18.2 MB/s",
+        "doubleLineExclusive": false
       },
       {
         "key": "items.native_1.row",
@@ -145,7 +153,8 @@
         "group": "items",
         "itemId": "native_1",
         "itemName": "下行速度",
-        "sampleValue": "18.2 MB/s"
+        "sampleValue": "18.2 MB/s",
+        "doubleLineExclusive": false
       },
       {
         "key": "items.native_1.label",
@@ -155,7 +164,8 @@
         "group": "items",
         "itemId": "native_1",
         "itemName": "下行速度",
-        "sampleValue": "18.2 MB/s"
+        "sampleValue": "18.2 MB/s",
+        "doubleLineExclusive": false
       },
       {
         "key": "items.native_1.labelColor",
@@ -165,7 +175,8 @@
         "group": "items",
         "itemId": "native_1",
         "itemName": "下行速度",
-        "sampleValue": "18.2 MB/s"
+        "sampleValue": "18.2 MB/s",
+        "doubleLineExclusive": false
       },
       {
         "key": "items.native_1.valueColor",
@@ -175,7 +186,8 @@
         "group": "items",
         "itemId": "native_1",
         "itemName": "下行速度",
-        "sampleValue": "18.2 MB/s"
+        "sampleValue": "18.2 MB/s",
+        "doubleLineExclusive": false
       },
       {
         "key": "items.native_2.show",
@@ -185,17 +197,19 @@
         "group": "items",
         "itemId": "native_2",
         "itemName": "CPU 使用率",
-        "sampleValue": "28%"
+        "sampleValue": "100%",
+        "doubleLineExclusive": false
       },
       {
         "key": "items.native_2.order",
         "label": "CPU 使用率 · order",
         "type": "number",
-        "value": 3,
+        "value": 4,
         "group": "items",
         "itemId": "native_2",
         "itemName": "CPU 使用率",
-        "sampleValue": "28%"
+        "sampleValue": "100%",
+        "doubleLineExclusive": false
       },
       {
         "key": "items.native_2.row",
@@ -205,7 +219,8 @@
         "group": "items",
         "itemId": "native_2",
         "itemName": "CPU 使用率",
-        "sampleValue": "28%"
+        "sampleValue": "100%",
+        "doubleLineExclusive": false
       },
       {
         "key": "items.native_2.label",
@@ -215,7 +230,8 @@
         "group": "items",
         "itemId": "native_2",
         "itemName": "CPU 使用率",
-        "sampleValue": "28%"
+        "sampleValue": "100%",
+        "doubleLineExclusive": false
       },
       {
         "key": "items.native_2.labelColor",
@@ -225,7 +241,8 @@
         "group": "items",
         "itemId": "native_2",
         "itemName": "CPU 使用率",
-        "sampleValue": "28%"
+        "sampleValue": "100%",
+        "doubleLineExclusive": false
       },
       {
         "key": "items.native_2.valueColor",
@@ -235,27 +252,30 @@
         "group": "items",
         "itemId": "native_2",
         "itemName": "CPU 使用率",
-        "sampleValue": "28%"
+        "sampleValue": "100%",
+        "doubleLineExclusive": false
       },
       {
         "key": "items.native_3.show",
         "label": "内存使用率 · show",
         "type": "boolean",
-        "value": false,
+        "value": true,
         "group": "items",
         "itemId": "native_3",
         "itemName": "内存使用率",
-        "sampleValue": "62%"
+        "sampleValue": "62%",
+        "doubleLineExclusive": false
       },
       {
         "key": "items.native_3.order",
         "label": "内存使用率 · order",
         "type": "number",
-        "value": 4,
+        "value": 5,
         "group": "items",
         "itemId": "native_3",
         "itemName": "内存使用率",
-        "sampleValue": "62%"
+        "sampleValue": "62%",
+        "doubleLineExclusive": false
       },
       {
         "key": "items.native_3.row",
@@ -265,7 +285,8 @@
         "group": "items",
         "itemId": "native_3",
         "itemName": "内存使用率",
-        "sampleValue": "62%"
+        "sampleValue": "62%",
+        "doubleLineExclusive": false
       },
       {
         "key": "items.native_3.label",
@@ -275,7 +296,8 @@
         "group": "items",
         "itemId": "native_3",
         "itemName": "内存使用率",
-        "sampleValue": "62%"
+        "sampleValue": "62%",
+        "doubleLineExclusive": false
       },
       {
         "key": "items.native_3.labelColor",
@@ -285,7 +307,8 @@
         "group": "items",
         "itemId": "native_3",
         "itemName": "内存使用率",
-        "sampleValue": "62%"
+        "sampleValue": "62%",
+        "doubleLineExclusive": false
       },
       {
         "key": "items.native_3.valueColor",
@@ -295,27 +318,30 @@
         "group": "items",
         "itemId": "native_3",
         "itemName": "内存使用率",
-        "sampleValue": "62%"
+        "sampleValue": "62%",
+        "doubleLineExclusive": false
       },
       {
         "key": "items.builtin_FxOP34Lm.show",
         "label": "天气 · show",
         "type": "boolean",
-        "value": false,
+        "value": true,
         "group": "items",
         "itemId": "builtin_FxOP34Lm",
         "itemName": "天气",
-        "sampleValue": "晴 24℃"
+        "sampleValue": "晴 24℃",
+        "doubleLineExclusive": true
       },
       {
         "key": "items.builtin_FxOP34Lm.order",
         "label": "天气 · order",
         "type": "number",
-        "value": 5,
+        "value": 2,
         "group": "items",
         "itemId": "builtin_FxOP34Lm",
         "itemName": "天气",
-        "sampleValue": "晴 24℃"
+        "sampleValue": "晴 24℃",
+        "doubleLineExclusive": true
       },
       {
         "key": "items.builtin_FxOP34Lm.row",
@@ -325,17 +351,19 @@
         "group": "items",
         "itemId": "builtin_FxOP34Lm",
         "itemName": "天气",
-        "sampleValue": "晴 24℃"
+        "sampleValue": "晴 24℃",
+        "doubleLineExclusive": true
       },
       {
         "key": "items.builtin_FxOP34Lm.label",
         "label": "天气 · label",
         "type": "text",
-        "value": "天气 ",
+        "value": "天气",
         "group": "items",
         "itemId": "builtin_FxOP34Lm",
         "itemName": "天气",
-        "sampleValue": "晴 24℃"
+        "sampleValue": "晴 24℃",
+        "doubleLineExclusive": true
       },
       {
         "key": "items.builtin_FxOP34Lm.labelColor",
@@ -345,7 +373,8 @@
         "group": "items",
         "itemId": "builtin_FxOP34Lm",
         "itemName": "天气",
-        "sampleValue": "晴 24℃"
+        "sampleValue": "晴 24℃",
+        "doubleLineExclusive": true
       },
       {
         "key": "items.builtin_FxOP34Lm.valueColor",
@@ -355,7 +384,256 @@
         "group": "items",
         "itemId": "builtin_FxOP34Lm",
         "itemName": "天气",
-        "sampleValue": "晴 24℃"
+        "sampleValue": "晴 24℃",
+        "doubleLineExclusive": true
+      },
+      {
+        "key": "taskbar.fontBold",
+        "label": "粗体",
+        "type": "boolean",
+        "value": false,
+        "group": "appearance"
+      },
+      {
+        "key": "taskbar.fontItalic",
+        "label": "斜体",
+        "type": "boolean",
+        "value": false,
+        "group": "appearance"
+      },
+      {
+        "key": "taskbar.fontUnderline",
+        "label": "下划线",
+        "type": "boolean",
+        "value": false,
+        "group": "appearance"
+      },
+      {
+        "key": "taskbar.fontStrikeOut",
+        "label": "删除线",
+        "type": "boolean",
+        "value": false,
+        "group": "appearance"
+      },
+      {
+        "key": "taskbar.transparent",
+        "label": "任务栏背景透明",
+        "type": "boolean",
+        "value": false,
+        "group": "appearance"
+      },
+      {
+        "key": "taskbar.display",
+        "label": "显示器",
+        "type": "select",
+        "value": 0,
+        "group": "placement",
+        "options": [
+          {
+            "value": 0,
+            "label": "主显示器"
+          },
+          {
+            "value": 1,
+            "label": "副显示器 1"
+          }
+        ]
+      },
+      {
+        "key": "taskbar.tbar_wnd_on_left",
+        "label": "靠任务栏左侧",
+        "type": "boolean",
+        "value": false,
+        "group": "placement"
+      },
+      {
+        "key": "taskbar.tbar_wnd_snap",
+        "label": "贴靠居中应用图标",
+        "type": "boolean",
+        "value": true,
+        "group": "placement"
+      },
+      {
+        "key": "taskbar.avoid_overlap_with_widgets",
+        "label": "避开 Windows 小组件",
+        "type": "boolean",
+        "value": true,
+        "group": "placement"
+      },
+      {
+        "key": "taskbar.item_space",
+        "label": "项目间距",
+        "type": "number",
+        "value": 8,
+        "group": "placement",
+        "min": 0,
+        "max": 32
+      },
+      {
+        "key": "taskbar.vertical_margin",
+        "label": "垂直间距",
+        "type": "number",
+        "value": 0,
+        "group": "placement",
+        "min": -10,
+        "max": 10
+      },
+      {
+        "key": "taskbar.window_offset_top",
+        "label": "垂直偏移",
+        "type": "number",
+        "value": 0,
+        "group": "placement",
+        "min": -20,
+        "max": 20
+      },
+      {
+        "key": "taskbar.window_offset_left",
+        "label": "水平偏移",
+        "type": "number",
+        "value": 0,
+        "group": "placement",
+        "min": -800,
+        "max": 800
+      },
+      {
+        "key": "items.native_4.show",
+        "label": "GPU 使用率 · show",
+        "type": "boolean",
+        "group": "items",
+        "value": true,
+        "itemId": "native_4",
+        "itemName": "GPU 使用率",
+        "sampleValue": "9%",
+        "doubleLineExclusive": false
+      },
+      {
+        "key": "items.native_4.order",
+        "label": "GPU 使用率 · order",
+        "type": "number",
+        "group": "items",
+        "value": 6,
+        "itemId": "native_4",
+        "itemName": "GPU 使用率",
+        "sampleValue": "9%",
+        "doubleLineExclusive": false
+      },
+      {
+        "key": "items.native_4.row",
+        "label": "GPU 使用率 · row",
+        "type": "number",
+        "group": "items",
+        "value": 0,
+        "itemId": "native_4",
+        "itemName": "GPU 使用率",
+        "sampleValue": "9%",
+        "doubleLineExclusive": false
+      },
+      {
+        "key": "items.native_4.label",
+        "label": "GPU 使用率 · label",
+        "type": "text",
+        "group": "items",
+        "value": "GPU ",
+        "itemId": "native_4",
+        "itemName": "GPU 使用率",
+        "sampleValue": "9%",
+        "doubleLineExclusive": false
+      },
+      {
+        "key": "items.native_4.labelColor",
+        "label": "GPU 使用率 · labelColor",
+        "type": "color",
+        "group": "items",
+        "value": "#ffffff",
+        "itemId": "native_4",
+        "itemName": "GPU 使用率",
+        "sampleValue": "9%",
+        "doubleLineExclusive": false
+      },
+      {
+        "key": "items.native_4.valueColor",
+        "label": "GPU 使用率 · valueColor",
+        "type": "color",
+        "group": "items",
+        "value": "#ffffff",
+        "itemId": "native_4",
+        "itemName": "GPU 使用率",
+        "sampleValue": "9%",
+        "doubleLineExclusive": false
+      },
+      {
+        "key": "taskbar.value_right_align",
+        "label": "数值右对齐",
+        "type": "boolean",
+        "value": true,
+        "group": "placement"
+      },
+      {
+        "key": "items.native_5.show",
+        "label": "CPU 温度 · show",
+        "type": "boolean",
+        "value": false,
+        "group": "items",
+        "itemId": "native_5",
+        "itemName": "CPU 温度",
+        "sampleValue": "48℃",
+        "doubleLineExclusive": false
+      },
+      {
+        "key": "items.native_5.order",
+        "label": "CPU 温度 · order",
+        "type": "number",
+        "value": 7,
+        "group": "items",
+        "itemId": "native_5",
+        "itemName": "CPU 温度",
+        "sampleValue": "48℃",
+        "doubleLineExclusive": false
+      },
+      {
+        "key": "items.native_5.row",
+        "label": "CPU 温度 · row",
+        "type": "number",
+        "value": 1,
+        "group": "items",
+        "itemId": "native_5",
+        "itemName": "CPU 温度",
+        "sampleValue": "48℃",
+        "doubleLineExclusive": false
+      },
+      {
+        "key": "items.native_5.label",
+        "label": "CPU 温度 · label",
+        "type": "text",
+        "value": "CPU 温度 ",
+        "group": "items",
+        "itemId": "native_5",
+        "itemName": "CPU 温度",
+        "sampleValue": "48℃",
+        "doubleLineExclusive": false
+      },
+      {
+        "key": "items.native_5.labelColor",
+        "label": "CPU 温度 · labelColor",
+        "type": "color",
+        "value": "#ffffff",
+        "group": "items",
+        "itemId": "native_5",
+        "itemName": "CPU 温度",
+        "sampleValue": "48℃",
+        "doubleLineExclusive": false
+      },
+      {
+        "key": "items.native_5.valueColor",
+        "label": "CPU 温度 · valueColor",
+        "type": "color",
+        "value": "#ffffff",
+        "group": "items",
+        "itemId": "native_5",
+        "itemName": "CPU 温度",
+        "sampleValue": "48℃",
+        "doubleLineExclusive": false
       }
     ]
   },
@@ -364,6 +642,20 @@
     "enableWordScanning": true,
     "showLyricTranslation": true,
     "showCover": true,
-    "spectrumDisplayMode": "Disabled"
+    "spectrumDisplayMode": "Disabled",
+    "sourceRecognitionOrder": [
+      "QQMusic",
+      "Netease",
+      "Kugou",
+      "Spotify",
+      "Browser"
+    ],
+    "enableQQMusic": true,
+    "enableNetease": true,
+    "enableKugou": false,
+    "enableSpotify": true,
+    "enableBrowser": true,
+    "enableLocalLyrics": true,
+    "localMusicFolders": []
   }
 }

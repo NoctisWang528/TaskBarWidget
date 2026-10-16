@@ -1,0 +1,134 @@
+{
+  "licenseTextCopies": [
+    {
+      "file": "WinRing0-LICENSE.txt",
+      "source": "https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/blob/b8077435b898d57539956388cddf49f7dacb86f7/WinRing0/COPYRIGHT.txt",
+      "sha256": "89bed827a96edd80b0fe55b876f73f929ad33ae13e920eaf1b78416d7f073a4d"
+    },
+    {
+      "file": "InpOut-LICENSE.txt",
+      "source": "https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/blob/b8077435b898d57539956388cddf49f7dacb86f7/InpOut/license.txt",
+      "sha256": "449d16407d9895e71ecef2d55520c76f488419a2993751c48ce280fe988df8f0"
+    },
+    {
+      "file": "LibreHardwareMonitor-upstream-notices.html",
+      "source": "https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/blob/b8077435b898d57539956388cddf49f7dacb86f7/Licenses/License.html",
+      "sha256": "5f5a994ffbd71c256d35c50cfbaf518f38c1a192d28567b38a0663a0e0e07b8a"
+    },
+    {
+      "file": "yyjson-LICENSE.txt",
+      "source": "https://github.com/ibireme/yyjson/blob/0.4.0/LICENSE",
+      "sha256": "45e384d3d52c73cba3a64d6e6c25d47cd738cd8a55c30629e3201046eda62947"
+    },
+    {
+      "file": "microsoft.netcore.app.runtime.win-x64-8.0.31-LICENSE.TXT",
+      "source": "https://www.nuget.org/packages/microsoft.netcore.app.runtime.win-x64/8.0.31",
+      "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+    },
+    {
+      "file": "microsoft.netcore.app.runtime.win-x64-8.0.31-THIRD-PARTY-NOTICES.TXT",
+      "source": "https://www.nuget.org/packages/microsoft.netcore.app.runtime.win-x64/8.0.31",
+      "sha256": "b60b2912da28eaa6518593c9e2efb5334ee062d3c42e80d8fdfa806b3dc52977"
+    },
+    {
+      "file": "microsoft.windowsdesktop.app.runtime.win-x64-8.0.31-LICENSE",
+      "source": "https://www.nuget.org/packages/microsoft.windowsdesktop.app.runtime.win-x64/8.0.31",
+      "sha256": "a89886665765362eb77e0f8e26602c924520041d1711b2eedc136434fe4d01ab"
+    },
+    {
+      "file": "managed/F23.StringSimilarity-7.0.1-UPSTREAM-LICENSE.txt",
+      "source": "https://github.com/feature23/StringSimilarity.NET/blob/faaecccaaf58415a32af648f424b522dcacd365b/LICENSE",
+      "sha256": "2c8877ed975d204b04824835fa811dc4aaeaa7188b52b89a8227921ba26df2e3"
+    },
+    {
+      "file": "managed/Microsoft.Data.Sqlite.Core-8.0.8-UPSTREAM-LICENSE.txt",
+      "source": "https://github.com/dotnet/efcore/blob/90d079985f33ae91c05b98ecf65e0ce38270ba55/LICENSE.txt",
+      "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b"
+    },
+    {
+      "file": "managed/Microsoft.Extensions.Caching.Abstractions-8.0.0-LICENSE.TXT",
+      "source": "https://www.nuget.org/packages/Microsoft.Extensions.Caching.Abstractions/8.0.0",
+      "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+    },
+    {
+      "file": "managed/Microsoft.Extensions.Caching.Abstractions-8.0.0-THIRD-PARTY-NOTICES.TXT",
+      "source": "https://www.nuget.org/packages/Microsoft.Extensions.Caching.Abstractions/8.0.0",
+      "sha256": "19c19dcac9f3ee6302cfbc6745bb8e79f08efc4c933eb8dc5509bf14b88347ec"
+    },
+    {
+      "file": "managed/Microsoft.Extensions.DependencyModel-8.0.1-THIRD-PARTY-NOTICES.TXT",
+      "source": "https://www.nuget.org/packages/Microsoft.Extensions.DependencyModel/8.0.1",
+      "sha256": "b60b2912da28eaa6518593c9e2efb5334ee062d3c42e80d8fdfa806b3dc52977"
+    },
+    {
+      "file": "managed/Microsoft.Web.WebView2-1.0.2903.40-LICENSE.txt",
+      "source": "https://www.nuget.org/packages/Microsoft.Web.WebView2/1.0.2903.40",
+      "sha256": "0af8f1b807512aae39c2ac1aa4d0cae65cabecb6fd554b8439a5162a0d6eca55"
+    },
+    {
+      "file": "managed/Microsoft.Web.WebView2-1.0.2903.40-NOTICE.txt",
+      "source": "https://www.nuget.org/packages/Microsoft.Web.WebView2/1.0.2903.40",
+      "sha256": "106423785c5b7eba0a8e61d1837f2132e9c828e20ad530f565d981c1df60dd90"
+    },
+    {
+      "file": "managed/Microsoft.Windows.AI.MachineLearning-2.1.74-license.txt",
+      "source": "https://www.nuget.org/packages/Microsoft.Windows.AI.MachineLearning/2.1.74",
+      "sha256": "66395f8cb219087fae2bd025010bd9076b736c14f03b48f20295471c0c376814"
+    },
+    {
+      "file": "managed/Microsoft.Windows.AI.MachineLearning-2.1.74-ThirdPartyNotices.txt",
+      "source": "https://www.nuget.org/packages/Microsoft.Windows.AI.MachineLearning/2.1.74",
+      "sha256": "fb0af774b4d7cffc5b9d046f2aaeade2f37df2f80abf8033c95dfffcc77a8866"
+    },
+    {
+      "file": "managed/Microsoft.WindowsAppSDK.AI-2.5.5-license.txt",
+      "source": "https://www.nuget.org/packages/Microsoft.WindowsAppSDK.AI/2.5.5",
+      "sha256": "5b11e6347756e40fe0274bc08c97f89201b94f0d50181a09a00f1f4740840501"
+    },
+    {
+      "file": "managed/Microsoft.WindowsAppSDK.WinUI-2.3.9-NOTICE.txt",
+      "source": "https://www.nuget.org/packages/Microsoft.WindowsAppSDK.WinUI/2.3.9",
+      "sha256": "e25393c0d340a1821827b093fa4dbbfcccd8feb7bf769e7fa773e3955cd5314b"
+    },
+    {
+      "file": "managed/NAudio.Core-2.2.1-UPSTREAM-LICENSE.txt",
+      "source": "https://github.com/naudio/NAudio/blob/b5d5ff83fd378f046398891fe5cd99426ce44732/license.txt",
+      "sha256": "303e01786b271eb464b3f43d18a375f2f17d37bc708a37c2fdf45b289fb5bfaa"
+    },
+    {
+      "file": "managed/Newtonsoft.Json-13.0.3-LICENSE.md",
+      "source": "https://www.nuget.org/packages/Newtonsoft.Json/13.0.3",
+      "sha256": "b98a397897ff55f76cddc380041507a95a896b2946e0188703bf0496793d6516"
+    },
+    {
+      "file": "managed/OpenCC-0.1.0-UPSTREAM-LICENSE.txt",
+      "source": "https://github.com/doggy8088/OpenCC/blob/aadb7e2e1721acfeaba22f58dae49492cc2c11f7/LICENSE",
+      "sha256": "cc5267c05b929914422cafc82c0c2301a681967b2b765c12f039381620b0d45f"
+    },
+    {
+      "file": "managed/SharpZipLib-1.4.2-UPSTREAM-LICENSE.txt",
+      "source": "https://github.com/icsharpcode/SharpZipLib/blob/33f64eb0f28cdd2b084cb822fcc224c7c5aba553/LICENSE.txt",
+      "sha256": "d7fbbc16f871bf24fa5624c7eaf945054b778985f32676dcacba41fddca61133"
+    },
+    {
+      "file": "managed/SQLitePCLRaw.bundle_e_sqlite3-2.1.6-UPSTREAM-LICENSE.txt",
+      "source": "https://github.com/ericsink/SQLitePCL.raw/blob/9c66b4f618d9d6831e83c16a8036daea83df4ddb/LICENSE.TXT",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "file": "managed/System.Numerics.Tensors-9.0.0-THIRD-PARTY-NOTICES.TXT",
+      "source": "https://www.nuget.org/packages/System.Numerics.Tensors/9.0.0",
+      "sha256": "40686c6447a7d5b5d3693068e4571b5f483d7ed335aeee773ef662440de4c5d5"
+    },
+    {
+      "file": "managed/WPF-UI.Abstractions-4.2.0-LICENSE.md",
+      "source": "https://www.nuget.org/packages/WPF-UI.Abstractions/4.2.0",
+      "sha256": "efb68dbccb1be73cd78729b76f39720132126bacff8194eed934323bab6455b7"
+    },
+    {
+      "file": "managed/WPF-UI.Abstractions-4.2.0-ThirdPartyNotices.txt",
+      "source": "https://www.nuget.org/packages/WPF-UI.Abstractions/4.2.0",
+      "sha256": "871e788e025383423fae377a97229dafcb9254687ce917d63ebbf7b10f34c588"
+    }
+  ]
+}

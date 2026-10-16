@@ -1,0 +1,7 @@
+/*==============================================================================
+ * Created by Yaoyuan on 2019/3/9.
+ * Copyright (C) 2019 Yaoyuan <ibireme@gmail.com>.
+ *
+ * Released under the MIT License:
+ * https://github.com/ibireme/yyjson/blob/master/LICENSE
+ *============================================================================*/

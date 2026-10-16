@@ -12,9 +12,11 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <PlatformTarget>x64</PlatformTarget>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\assets\app-icon.ico</ApplicationIcon>
     <AssemblyName>TaskBarWidgets.UI</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
+    <Content Include="..\assets\app-icon.ico" Link="Assets\TaskBarWidgets.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <InternalsVisibleTo Include="TaskBarWidgets.UI.Validation" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
     <Compile Include="..\Media\Integration\TrafficHeatmap.cs" Link="Models\TrafficHeatmap.cs" />

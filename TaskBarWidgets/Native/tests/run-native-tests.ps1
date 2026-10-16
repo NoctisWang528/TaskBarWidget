@@ -38,3 +38,10 @@ $object = Join-Path $output 'CompositionResizeTests.obj'
 $command = 'call "{0}" >nul && cl /nologo /EHsc /std:c++20 /W4 /Fe:"{1}" /Fo:"{2}" "{3}" && "{1}"' -f $vcvars, $executable, $object, $source
 & $env:ComSpec /d /s /c $command
 if ($LASTEXITCODE -ne 0) { throw "Native composition resize regression failed ($LASTEXITCODE)." }
+
+$source = Join-Path $PSScriptRoot 'TaskbarRowLayoutTests.cpp'
+$executable = Join-Path $output 'TaskbarRowLayoutTests.exe'
+$object = Join-Path $output 'TaskbarRowLayoutTests.obj'
+$command = 'call "{0}" >nul && cl /nologo /EHsc /std:c++20 /W4 /Fe:"{1}" /Fo:"{2}" "{3}" && "{1}"' -f $vcvars, $executable, $object, $source
+& $env:ComSpec /d /s /c $command
+if ($LASTEXITCODE -ne 0) { throw "Native taskbar shared-column geometry regression failed ($LASTEXITCODE)." }

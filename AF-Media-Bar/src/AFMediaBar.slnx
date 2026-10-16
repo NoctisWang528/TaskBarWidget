@@ -1,5 +1,0 @@
-<Solution>
-  <Project Path="AFMediaBar/AFMediaBar.csproj" />
-  <Project Path="..\tests\AFMediaBar.Layout.Tests\AFMediaBar.Layout.Tests.csproj" />
-  <Project Path="..\tests\AFMediaBar.Exit.TestHost\AFMediaBar.Exit.TestHost.csproj" />
-</Solution>

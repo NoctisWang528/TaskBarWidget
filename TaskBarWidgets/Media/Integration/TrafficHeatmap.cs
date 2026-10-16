@@ -5,23 +5,25 @@ namespace TaskBarWidgets.Media.Integration;
 
 internal sealed record TrafficHeatmapDay(DateOnly Date, int Week, int Weekday, double? TotalKiB, bool IsFuture)
 {
-    // Future, missing, known zero, then four fixed usage bands.
-    internal int Level => IsFuture ? -1 : TotalKiB switch
-    {
-        null => 0,
-        0 => 1,
-        < 100 * 1024 => 2,
-        < 1024 * 1024 => 3,
-        < 5 * 1024 * 1024 => 4,
-        _ => 5
-    };
-
     internal string Description => $"{Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} · {(IsFuture ? "未来日期" : TotalKiB is { } total ? TrafficHeatmap.FormatUsage(total) : "没有记录")}";
 }
 
 internal sealed record TrafficHeatmap(DateOnly Today, string ScopeLabel, IReadOnlyList<TrafficHeatmapDay> Days)
 {
     internal double TotalKiB => Days.Sum(day => day.TotalKiB ?? 0);
+    internal double PeakKiB { get; } = Days.Where(day => !day.IsFuture)
+        .Select(day => day.TotalKiB ?? 0).DefaultIfEmpty(0).Max();
+
+    // Relative to this twelve-week window; future, unknown and recorded zero
+    // remain separate from the four positive bands used by token-monitor.
+    internal int LevelFor(TrafficHeatmapDay day)
+    {
+        if (day.IsFuture) return -1;
+        if (day.TotalKiB is not { } total) return 0;
+        if (total <= 0) return 1;
+        var ratio = PeakKiB > 0 ? total / PeakKiB : 0;
+        return ratio >= .75 ? 5 : ratio >= .50 ? 4 : ratio >= .25 ? 3 : 2;
+    }
 
     internal static TrafficHeatmap Parse(JsonElement payload)
     {

@@ -46,29 +46,50 @@ public sealed class TrafficHeatmapTests
         var missing = map.Days.Single(day => day.Date == new DateOnly(2026, 10, 11));
         var future = map.Days.Single(day => day.Date == new DateOnly(2026, 10, 14));
         Assert.Equal(2048, known.TotalKiB);
-        Assert.Equal(1, zero.Level);
+        Assert.Equal(1, map.LevelFor(zero));
         Assert.Contains("0 MB", zero.Description);
-        Assert.Equal(0, missing.Level);
+        Assert.Equal(0, map.LevelFor(missing));
         Assert.Null(missing.TotalKiB);
         Assert.Contains("没有记录", missing.Description);
-        Assert.Equal(-1, future.Level);
+        Assert.Equal(-1, map.LevelFor(future));
         Assert.Null(future.TotalKiB);
         Assert.Contains("未来日期", future.Description);
     }
 
     [Theory]
-    [InlineData(0, 1, "0 MB")]
-    [InlineData(1, 2, "<0.01 MB")]
-    [InlineData(10.24, 2, "0.01 MB")]
-    [InlineData(512, 2, "0.5 MB")]
-    [InlineData(102400, 3, "100 MB")]
-    [InlineData(1048576, 4, "1 GB")]
-    [InlineData(5242880, 5, "5 GB")]
-    public void UsageBandsAndUnitsShareTheSameDailyTotal(double total, int level, string label)
+    [InlineData(0, "0 MB")]
+    [InlineData(1, "<0.01 MB")]
+    [InlineData(10.24, "0.01 MB")]
+    [InlineData(512, "0.5 MB")]
+    [InlineData(102400, "100 MB")]
+    [InlineData(1048576, "1 GB")]
+    [InlineData(5242880, "5 GB")]
+    public void UsageUnitsPreserveDailyTotals(double total, string label)
     {
-        var day = new TrafficHeatmapDay(new DateOnly(2026, 10, 13), 11, 1, total, false);
-        Assert.Equal(level, day.Level);
         Assert.Equal(label, TrafficHeatmap.FormatUsage(total));
+    }
+
+    [Fact]
+    public void RelativeBandsUseWindowPeakAndRecomputeWhenTodayGrows()
+    {
+        var today = new DateOnly(2026, 10, 16);
+        var totals = new Dictionary<DateOnly, double>();
+        var values = new[] { 0d, 1d, 5d, 10d, 15d, 20d };
+        for (var index = 0; index < values.Length; index++) totals[today.AddDays(index - 5)] = values[index] * 1024 * 1024;
+        totals[today.AddDays(1)] = 999d * 1024 * 1024; // Future and out-of-window values cannot set the scale.
+        totals[today.AddDays(-100)] = 999d * 1024 * 1024;
+        var map = TrafficHeatmap.Create(today, totals);
+        Assert.Equal(20d * 1024 * 1024, map.PeakKiB);
+        Assert.Equal(new[] { 1, 2, 3, 4, 5, 5 }, map.Days.Where(day => totals.ContainsKey(day.Date) && !day.IsFuture).Select(map.LevelFor));
+        totals[today] = 40d * 1024 * 1024;
+        var updated = TrafficHeatmap.Create(today, totals);
+        Assert.Equal(3, updated.LevelFor(updated.Days.Single(day => day.Date == today.AddDays(-2))));
+        var empty = TrafficHeatmap.Create(today);
+        Assert.Equal(0, empty.PeakKiB);
+        Assert.All(empty.Days, day => Assert.Equal(day.IsFuture ? -1 : 0, empty.LevelFor(day)));
+        var zero = TrafficHeatmap.Create(today, new Dictionary<DateOnly, double> { [today] = 0 });
+        Assert.Equal(0, zero.PeakKiB);
+        Assert.Equal(1, zero.LevelFor(zero.Days.Single(day => day.Date == today)));
     }
 
     [Theory]

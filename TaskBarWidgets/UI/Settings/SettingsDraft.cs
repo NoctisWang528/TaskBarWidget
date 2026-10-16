@@ -36,7 +36,8 @@ internal sealed class SettingsDraft
     internal sealed record SaveSnapshot(long Revision, Dictionary<string, JsonNode?> Values);
 }
 
-internal sealed record DisplayModule(string Id, string Name, string Sample);
+internal sealed record DisplayModule(string Id, string Name, string Sample, bool DoubleLineExclusive = false);
+internal sealed record DisplayColumn(DisplayModule? Upper, DisplayModule? Lower, DisplayModule? FullHeight = null);
 
 internal sealed class ModuleLayout(SettingsDraft draft, IReadOnlyList<DisplayModule> modules)
 {
@@ -47,6 +48,20 @@ internal sealed class ModuleLayout(SettingsDraft draft, IReadOnlyList<DisplayMod
     public int Row(string id) => SingleRow ? 0 : (int)draft.Number(Key(id, "row"));
     public List<DisplayModule> Ordered() => modules.OrderBy(item => draft.Number(Key(item.Id, "order"))).ToList();
     public List<DisplayModule> InRow(int row) => Ordered().Where(item => Enabled(item.Id) && Row(item.Id) == row).ToList();
+    public IReadOnlyList<DisplayColumn> Columns()
+    {
+        if (SingleRow) return InRow(0).Select(item => new DisplayColumn(item, null)).ToList();
+        var upper = InRow(0); var lower = InRow(1);
+        var columns = new List<DisplayColumn>();
+        var top = 0; var bottom = 0;
+        while (top < upper.Count || bottom < lower.Count)
+        {
+            if (top < upper.Count && upper[top].DoubleLineExclusive) columns.Add(new(null, null, upper[top++]));
+            else if (bottom < lower.Count && lower[bottom].DoubleLineExclusive) columns.Add(new(null, null, lower[bottom++]));
+            else columns.Add(new(top < upper.Count ? upper[top++] : null, bottom < lower.Count ? lower[bottom++] : null));
+        }
+        return columns;
+    }
     public void Remove(string id) => draft.Set(Key(id, "show"), false);
     public void Move(string id, int row, int insertionIndex)
     {

@@ -56,7 +56,7 @@ public partial class App : System.Windows.Application
                 _media.Snapshot, command => Dispatcher.InvokeAsync(() => HandleCommandAsync(command)).Task.Unwrap());
             _media.FrameReady += _pipe.Publish;
             _nativeSettings = new NativeSettingsClient((message, token) => _pipe.SendCommandAsync(message, token));
-            _ui = new UiHostBridge(command => Dispatcher.InvokeAsync(() => HandleUiRequestAsync(command)).Task.Unwrap());
+            _ui = new UiHostBridge((command, token) => Dispatcher.InvokeAsync(() => HandleUiRequestAsync(command, token)).Task.Unwrap());
             _hotkeys = new GlobalMediaHotkeyService(ExecuteHotkeyAsync);
             _hotkeys.Apply(Settings.GlobalMediaHotkeys);
             _pipe.Start();
@@ -90,7 +90,8 @@ public partial class App : System.Windows.Application
                 _ = Dispatcher.BeginInvoke(() => TaskObserver.Observe(ShutdownAsync(), "helper shutdown"));
                 break;
             case "togglePanel":
-                if (TryNumber(command, "x", out var x) && TryNumber(command, "y", out var y) && _ui is not null) await _ui.SendAsync("togglePanel", x, y);
+                if (TryNumber(command, "x", out var x) && TryNumber(command, "y", out var y) && _ui is not null)
+                    await _ui.SendAsync("togglePanel", x, y, entryWindow: ValidatedEntryWindow(command));
                 break;
             case "openSettings":
                 if (_ui is not null) await _ui.SendAsync("openSettings", page: command.TryGetProperty("page", out var page) ? page.GetString() : null);
@@ -105,8 +106,20 @@ public partial class App : System.Windows.Application
         }
     }
 
-    private async Task<object?> HandleUiRequestAsync(JsonElement request)
+    private long ValidatedEntryWindow(JsonElement command)
     {
+        if (!command.TryGetProperty("entryWindow", out var value) || !value.TryGetInt64(out var handle) || handle <= 0) return 0;
+        var window = (nint)handle;
+        if (!IsWindow(window)) return 0;
+        GetWindowThreadProcessId(window, out var process);
+        return process == _host.Id ? handle : 0;
+    }
+    [DllImport("user32.dll")] private static extern bool IsWindow(nint window);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
+
+    private async Task<object?> HandleUiRequestAsync(JsonElement request, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
         if (_media is null) throw new InvalidOperationException("媒体服务尚未准备好。");
         var action = request.GetProperty("action").GetString();
         var payload = request.TryGetProperty("payload", out var body) ? body : default;
@@ -121,8 +134,9 @@ public partial class App : System.Windows.Application
             case "openPanel": OpenAudioPanel(); return new { success = true };
             case "getNativeSettings": return await GetNativeSettingsAsync();
             case "applyNativeSettings": return await ApplyNativeSettingsAsync(payload);
-            case "getTrafficHistory": return await GetTrafficHistoryAsync(_stop.Token);
+            case "getTrafficHistory": return await GetTrafficHistoryAsync(token);
             case "getMediaSettings": return SettingsService().ReadServiceSettings(Settings);
+            case "getFonts": return FontCatalogService.GetOptions();
             case "applyMediaSettings": return SettingsService().ApplyServiceSettings(Settings, payload);
             case "settingsCommand":
                 return await SettingsService().ExecuteServiceCommandAsync(Settings, payload.GetProperty("action").GetString() ?? "",
@@ -133,35 +147,33 @@ public partial class App : System.Windows.Application
                 if (!(command.StartsWith("selectSource:", StringComparison.Ordinal) || command is "playPause" or "previous" or "next" or "seek")) throw new ArgumentException("不支持的媒体操作。");
                 await _media.CommandAsync(command, TryNumber(payload, "positionSeconds", out var position) ? position : null);
                 return new { success = true };
-            case "getAudio": return AudioPayload(await _audio.GetSnapshotAsync());
+            case "getAudio": return AudioPayload(await _audio.GetSnapshotAsync(token));
             case "selectDevice":
             case "setVolume":
             case "setMute":
                 var flow = payload.GetProperty("flow").GetString();
                 if (flow is not ("input" or "output")) throw new ArgumentException("设备类型无效。");
-                var snapshot = await _audio.GetSnapshotAsync();
-                var endpoints = flow == "input" ? snapshot.Inputs : snapshot.Outputs;
-                var deviceId = payload.TryGetProperty("deviceId", out var id) ? id.GetString() : endpoints.FirstOrDefault(endpoint => endpoint.IsDefault)?.Id;
-                var endpoint = endpoints.FirstOrDefault(endpoint => endpoint.Id == deviceId) ?? throw new InvalidOperationException("设备已断开。");
+                var deviceId = payload.TryGetProperty("deviceId", out var id) ? id.GetString() : null;
                 if (action == "selectDevice")
                 {
-                    var result = await _audio.SetDefaultAsync(endpoint.Id, flow == "input", Settings.SyncDefaultCommunicationsDevice);
-                    if (!result.Succeeded) throw new InvalidOperationException(result.Message);
+                    if (string.IsNullOrWhiteSpace(deviceId)) throw new ArgumentException("请选择音频设备。");
+                    var result = await _audio.SetDefaultAsync(deviceId, flow == "input", Settings.SyncDefaultCommunicationsDevice, token);
+                    return AudioPayload(await _audio.GetSnapshotAsync(token), result.Succeeded, result.Message);
                 }
                 else if (action == "setVolume")
                 {
                     if (!TryNumber(payload, "volume", out var volume) || volume < 0 || volume > 1) throw new ArgumentException("音量范围无效。");
-                    await _audio.SetVolumeAsync(endpoint.Id, volume * 100);
+                    await _audio.SetVolumeAsync(deviceId, volume * 100, input: flow == "input", cancellationToken: token);
                 }
-                else await _audio.SetVolumeAsync(endpoint.Id, endpoint.Volume, payload.GetProperty("muted").GetBoolean());
-                return AudioPayload(await _audio.GetSnapshotAsync());
+                else await _audio.SetMuteAsync(deviceId, payload.GetProperty("muted").GetBoolean(), input: flow == "input", cancellationToken: token);
+                return AudioPayload(await _audio.GetSnapshotAsync(token));
             default: throw new ArgumentException("不支持的界面操作。");
         }
     }
-    private static object AudioPayload(AudioSnapshot snapshot)
+    private static object AudioPayload(AudioSnapshot snapshot, bool operationSucceeded = true, string? message = null)
     {
-        static object Endpoint(AudioEndpoint item) => new { item.Id, item.Name, item.IsDefault, item.IsCommunications, volume = item.Volume / 100.0, item.IsMuted };
-        return new { outputs = snapshot.Outputs.Select(Endpoint), inputs = snapshot.Inputs.Select(Endpoint) };
+        static object Endpoint(AudioEndpoint item) => new { item.Id, item.Name, item.IsDefault, item.IsCommunications, volume = item.Volume / 100.0, item.IsMuted, item.CanControl };
+        return new { outputs = snapshot.Outputs.Select(Endpoint), inputs = snapshot.Inputs.Select(Endpoint), operationSucceeded, message };
     }
 
     private static bool TryNumber(JsonElement value, string name, out double number)

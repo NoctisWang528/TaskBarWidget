@@ -530,6 +530,7 @@ struct NativeMediaHost::Impl : std::enable_shared_from_this<NativeMediaHost::Imp
         auto message=Command(L"togglePanel");
         message.SetNamedValue(L"x",JsonValue::CreateNumberValue((bounds.left+bounds.right)/2));
         message.SetNamedValue(L"y",JsonValue::CreateNumberValue(bounds.top));
+        message.SetNamedValue(L"entryWindow",JsonValue::CreateNumberValue(static_cast<double>(reinterpret_cast<INT_PTR>(owner))));
         Send(message);
     }
     void ShowMenu()

@@ -1,0 +1,35 @@
+Lyricify Lyrics Helper
+Copyright 2023 XY Wang, WXRIW
+Licensed under Apache License 2.0; see LICENSE.
+
+Source: https://github.com/WXRIW/Lyricify-Lyrics-Helper
+Pinned commit: a139e385b032b9abfca4c060627776cf9c3147ad
+Archive: https://codeload.github.com/WXRIW/Lyricify-Lyrics-Helper/zip/a139e385b032b9abfca4c060627776cf9c3147ad
+Archive SHA-256: 4E5CA2ECAE20BC2026C30CA402ED088D2F0A72C831AA8D9BE7225B2AC047B188
+
+This is the source commit declared by the Lyricify.Lyrics.Helper 0.2.0 NuGet
+package. The source project's own version properties at this commit say 0.1.4;
+they are preserved rather than representing this source fork as an unmodified
+NuGet binary. Only the library directory is included, with the original LICENSE
+and README.upstream.md. No demo application or song-lyric demo data is included.
+
+TaskBarWidgets modifications, 2026-10-16:
+- Target net8.0, matching the product and its existing OpenCC dependency.
+- Replace CHTCHSConv 1.0.0 with OpenCC 0.1.0. In ChineseHelper.cs only S2T/T2S
+  conversion calls use lazy generic-script OpenCC converters (cn/t); public
+  methods, null/ref handling, default dictionary conversion and forced cleanup
+  remain available. Regional vocabulary localization is not requested.
+- Build from a project reference instead of shipping the NuGet helper binary
+  and its unsigned ChineseConverter.dll dependency of unestablished provenance.
+
+All other library source files are unchanged from the pinned commit. Parser,
+decrypter, provider and search APIs are retained. Conversion dictionaries differ
+from the old backend, so ambiguous phrases can resolve differently.
+
+Upstream README acknowledgments (also preserved in README.upstream.md):
+- LyricParser, MIT: https://github.com/HyPlayer/LyricParser
+- 163MusicLyrics, Apache-2.0: https://github.com/jitwxs/163MusicLyrics
+- Thanks to cnbluefire and Raspberry Kan.
+
+The product's Anti 996 license does not replace this library's Apache 2.0 terms
+or the separate terms of its dependencies and incorporated third-party code.

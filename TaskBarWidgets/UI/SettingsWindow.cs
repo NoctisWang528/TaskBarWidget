@@ -19,9 +19,9 @@ public sealed partial class SettingsWindow : Window
     private readonly SettingsDraft _native = new();
     private readonly SettingsDraft _media = new();
     private JsonObject _schema = new();
-    private readonly NavigationView _navigation = new() { IsSettingsVisible = false, IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed, PaneDisplayMode = NavigationViewPaneDisplayMode.Left, OpenPaneLength = 200, PaneTitle = "TaskBarWidgets" };
+    private readonly NavigationView _navigation = new() { IsSettingsVisible = false, IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed, PaneDisplayMode = NavigationViewPaneDisplayMode.Auto, OpenPaneLength = 224, PaneTitle = "TaskBarWidgets" };
     private readonly SplitView _split = new() { PanePlacement = SplitViewPanePlacement.Right, DisplayMode = SplitViewDisplayMode.Overlay, OpenPaneLength = 352 };
-    private readonly StackPanel _page = new() { Spacing = 16, Margin = new Thickness(24, 16, 24, 28) };
+    private readonly StackPanel _page = new() { Spacing = 16, Margin = new Thickness(24, 16, 24, 28), Tag = "settings-content" };
     private readonly StackPanel _properties = new() { Spacing = 12, Margin = new Thickness(20) };
     private readonly TextBlock _heading = new() { FontSize = 26, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
     private readonly InfoBar _notice = new() { IsOpen = true, IsClosable = false, Message = "正在读取设置…" };
@@ -41,6 +41,7 @@ public sealed partial class SettingsWindow : Window
     {
         _connection = connection;
         Title = "TaskBarWidgets — 设置";
+        WindowIcon.Apply(this);
         SystemBackdrop = new MicaBackdrop();
         if (new Windows.UI.ViewManagement.UISettings().AnimationsEnabled)
             _page.ChildrenTransitions = new Microsoft.UI.Xaml.Media.Animation.TransitionCollection { new Microsoft.UI.Xaml.Media.Animation.EntranceThemeTransition { IsStaggeringEnabled = false } };
@@ -51,7 +52,6 @@ public sealed partial class SettingsWindow : Window
             ("audio", "音频", "\uE767"), ("general", "常规", "\uE713"), ("shortcuts", "快捷键", "\uE765"),
             ("trackOffsets", "单曲偏移", "\uE823"), ("lyricDiagnostics", "歌词匹配", "\uE721"), ("advanced", "诊断与维护", "\uE90F"), ("about", "关于", "\uE946") };
         foreach (var page in pages) _navigation.MenuItems.Add(new NavigationViewItem { Content = page.Label, Tag = page.Id, Icon = new FontIcon { Glyph = page.Glyph } });
-        _navigation.Header = _heading;
         _navigation.SelectionChanged += (_, args) => {
             if (args.SelectedItem is NavigationViewItem item && item.Tag is string id) { _currentPage = id; RenderPage(); }
         };
@@ -63,15 +63,20 @@ public sealed partial class SettingsWindow : Window
         ToolTipService.SetToolTip(reload, "重新读取会放弃尚未应用的草稿");
         toolbar.Children.Add(_saveStatus); Grid.SetColumn(reload, 1); toolbar.Children.Add(reload);
         Grid.SetColumn(_apply, 2); toolbar.Children.Add(_apply); _apply.Click += async (_, _) => await GuardAsync(SaveAsync);
-        var body = new Grid();
+        var body = new Grid { MaxWidth = 1088, HorizontalAlignment = HorizontalAlignment.Stretch };
+        void UpdateNavigationInset(NavigationViewDisplayMode mode) => body.Margin = new Thickness(0, mode == NavigationViewDisplayMode.Minimal ? 40 : 0, 0, 0);
+        _navigation.DisplayModeChanged += (_, args) => UpdateNavigationInset(args.DisplayMode);
+        UpdateNavigationInset(_navigation.DisplayMode);
+        body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        _notice.Margin = new Thickness(24, 0, 24, 0); body.Children.Add(_notice);
-        Grid.SetRow(toolbar, 1); body.Children.Add(toolbar);
+        _heading.Margin = new Thickness(24, 20, 24, 12); body.Children.Add(_heading);
+        _notice.Margin = new Thickness(24, 0, 24, 0); Grid.SetRow(_notice, 1); body.Children.Add(_notice);
+        Grid.SetRow(toolbar, 2); body.Children.Add(toolbar);
         var scroll = new ScrollViewer { Content = _page, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
         _pageScroll = scroll;
-        Grid.SetRow(scroll, 2); body.Children.Add(scroll);
+        Grid.SetRow(scroll, 3); body.Children.Add(scroll);
         _split.Content = body;
         _split.Pane = new ScrollViewer { Content = _properties, Background = ResourceBrush("LayerFillColorDefaultBrush"), HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
         _navigation.Content = _split; Content = _navigation;
@@ -128,6 +133,7 @@ public sealed partial class SettingsWindow : Window
         try {
             var native = await RequestAsync("getNativeSettings");
             var media = await RequestAsync("getMediaSettings");
+            await LoadFontsAsync();
             SetNativeReadback(native, nativeRevision); _media.Readback(MediaValues(media), mediaRevision);
             _loaded = true; ApplyTheme(); RenderPage();
             _notice.IsOpen = false;
@@ -140,7 +146,7 @@ public sealed partial class SettingsWindow : Window
         _schema = schema;
         _native.Readback(fields.OfType<JsonObject>().Select(field => new KeyValuePair<string, JsonNode?>(Text(field["key"]), field["value"])), saved);
         var modules = fields.OfType<JsonObject>().Where(field => Text(field["key"]).StartsWith("items.") && Text(field["key"]).EndsWith(".label"))
-            .Select(field => new DisplayModule(Text(field["itemId"], Text(field["key"]).Split('.')[1]), Text(field["itemName"], Text(field["label"])), Text(field["sampleValue"], "42"))).ToList();
+            .Select(field => new DisplayModule(Text(field["itemId"], Text(field["key"]).Split('.')[1]), Text(field["itemName"], Text(field["label"])), Text(field["sampleValue"], "42"), field["doubleLineExclusive"]?.ToString() == "true")).ToList();
         _layout = new ModuleLayout(_native, modules);
     }
     private async Task SaveAsync()
@@ -187,12 +193,12 @@ public sealed partial class SettingsWindow : Window
         foreach (var group in groups) {
             var fields = NativeFields().Where(field => Text(field["group"]) == Text(group["id"]) && Text(field["key"]) != "taskbar.horizontal_arrange").ToList();
             if (fields.Count == 0) continue;
+            if (Text(group["id"]) == "appearance") { RenderAppearanceGroup(fields); continue; }
             var content = Section(Text(group["label"]));
-            foreach (var field in fields.Where(field => field["advanced"]?.ToString() != "true")) content.Children.Add(FieldEditor(field, _native));
+            content.Children.Add(ResponsiveFields(fields.Where(field => field["advanced"]?.ToString() != "true").Select(field => FieldEditor(field, _native))));
             var advanced = fields.Where(field => field["advanced"]?.ToString() == "true").ToList();
             if (advanced.Count > 0) {
-                var stack = new StackPanel { Spacing = 4 }; foreach (var field in advanced) stack.Children.Add(FieldEditor(field, _native));
-                content.Children.Add(new Expander { Header = "高级选项", Content = stack, HorizontalAlignment = HorizontalAlignment.Stretch });
+                content.Children.Add(new Expander { Header = "高级选项", Content = ResponsiveFields(advanced.Select(field => FieldEditor(field, _native))), HorizontalAlignment = HorizontalAlignment.Stretch });
             }
         }
     }
@@ -202,19 +208,19 @@ public sealed partial class SettingsWindow : Window
         var key = Text(field["key"]); var label = Text(field["label"]); var type = Text(field["type"]);
         void Change(object? value) { draft.Set(key, value); Changed(); after?.Invoke(); if (key == "taskbar.horizontal_arrange") RenderPage(); }
         if (type == "boolean") {
-            var check = new CheckBox { Content = label, IsChecked = draft.Bool(key), MinHeight = 30, Padding = new Thickness(0), Margin = new Thickness(0) };
+            // The native template's padding aligns text with the glyph and supplies its 8 DIP gap.
+            var check = new CheckBox { Content = label, IsChecked = draft.Bool(key), MinHeight = 32, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Stretch, Margin = new Thickness(0, 2, 0, 2) };
+            AutomationProperties.SetAutomationId(check, "setting-" + key);
             check.Checked += (_, _) => Change(true); check.Unchecked += (_, _) => Change(false);
             var description = Text(field["description"]); if (field["restartRequired"]?.ToString() == "true") description += " 重启后生效";
             if (description.Length > 0) ToolTipService.SetToolTip(check, description);
             return check;
         }
-        var row = new Grid { ColumnSpacing = 12, MinHeight = 38, Margin = new Thickness(0, 2, 0, 2) };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(220) });
+        var row = new Grid { ColumnSpacing = 16, RowSpacing = 6, MinHeight = 40, Margin = new Thickness(0, 2, 0, 2) };
         var labels = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        labels.Children.Add(new TextBlock { Text = label, FontSize = 13, TextWrapping = TextWrapping.Wrap });
+        labels.Children.Add(new TextBlock { Text = label, FontSize = 14, TextWrapping = TextWrapping.Wrap });
         var hint = Text(field["description"]); if (field["restartRequired"]?.ToString() == "true") hint += " 重启后生效";
-        if (hint.Length > 0) labels.Children.Add(Copy(hint, 11)); row.Children.Add(labels);
+        if (hint.Length > 0) labels.Children.Add(Copy(hint));
         FrameworkElement control;
         if (type == "number") {
             var number = new NumberBox { Value = draft.Number(key), Minimum = Number(field["min"], -1000000), Maximum = Number(field["max"], 1000000), SmallChange = Number(field["step"], 1), SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact, MinHeight = 32 };
@@ -250,16 +256,21 @@ public sealed partial class SettingsWindow : Window
                 colors.Children.Add(colorButton); Grid.SetColumn(text, 1); colors.Children.Add(text); control = colors;
             }
         }
-        AutomationProperties.SetName(control, label); Grid.SetColumn(control, 1); row.Children.Add(control);
+        AutomationProperties.SetName(control, label); AutomationProperties.SetAutomationId(control, "setting-" + key);
+        ArrangeField(row, labels, control);
         return row;
     }
     private static bool SameChoice(JsonNode? first, JsonNode? second) => JsonNode.DeepEquals(first, second) || Text(first) == Text(second);
     private StackPanel Section(string title, string? description = null)
     {
-        var stack = new StackPanel { Spacing = 6 };
-        stack.Children.Add(new TextBlock { Text = title, FontSize = 17, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 6) });
-        if (!string.IsNullOrWhiteSpace(description)) stack.Children.Add(Copy(description));
-        _page.Children.Add(new Border { Child = stack, Padding = new Thickness(16), CornerRadius = new CornerRadius(8), Background = ResourceBrush("CardBackgroundFillColorDefaultBrush"), BorderBrush = ResourceBrush("CardStrokeColorDefaultBrush"), BorderThickness = new Thickness(1) });
+        var stack = new StackPanel { Spacing = 10, Margin = new Thickness(16) };
+        var header = new StackPanel { Spacing = 4, Margin = new Thickness(16, 12, 16, 12) };
+        header.Children.Add(new TextBlock { Text = title, FontSize = 17, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
+        if (!string.IsNullOrWhiteSpace(description)) header.Children.Add(Copy(description));
+        var card = new Grid(); card.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); card.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        card.Children.Add(new Border { Child = header, BorderBrush = ResourceBrush("CardStrokeColorDefaultBrush"), BorderThickness = new Thickness(0, 0, 0, 1) });
+        Grid.SetRow(stack, 1); card.Children.Add(stack);
+        _page.Children.Add(new Border { Child = card, CornerRadius = new CornerRadius(8), Background = ResourceBrush("CardBackgroundFillColorDefaultBrush"), BorderBrush = ResourceBrush("CardStrokeColorDefaultBrush"), BorderThickness = new Thickness(1) });
         return stack;
     }
     private static TextBlock Copy(string text, double size = 12) => new() { Text = text, FontSize = size, Opacity = .72, TextWrapping = TextWrapping.Wrap };

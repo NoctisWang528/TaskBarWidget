@@ -7,7 +7,7 @@ namespace TaskbarLyrics.App;
 
 internal static class AppIconProvider
 {
-    private static string IconPath => Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon", "TaskbarLyrics.ico");
+    private static string IconPath => Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon", "TaskBarWidgets.ico");
 
     public static Icon LoadTrayIcon()
     {

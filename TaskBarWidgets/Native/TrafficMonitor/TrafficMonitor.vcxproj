@@ -1032,6 +1032,16 @@
     <Link><AdditionalDependencies>$(WebView2Package)\x64\WebView2LoaderStatic.lib;windowsapp.lib;version.lib;%(AdditionalDependencies)</AdditionalDependencies><UACExecutionLevel>RequireAdministrator</UACExecutionLevel></Link>
   </ItemDefinitionGroup>
   <ItemGroup><ClCompile Include="NativeMediaHost.cpp" /><ClInclude Include="NativeMediaHost.h" /><ClInclude Include="MediaDisplayState.h" /></ItemGroup>
+  <ItemDefinitionGroup Condition="'$(TaskBarWidgetsBuildVersion)' != ''">
+    <ClCompile>
+      <PreprocessorDefinitions>TBW_USE_GENERATED_VERSION;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Obj\ProductVersion;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>TBW_USE_GENERATED_VERSION;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Obj\ProductVersion;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+  </ItemDefinitionGroup>
   <Import Project="..\Builtins\Builtins.props" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

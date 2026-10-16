@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -11,7 +12,7 @@ namespace TaskBarWidgets.UI.Cards;
 internal sealed class CardWindow
 {
     private int _motionGeneration;
-    private bool _initialized;
+    private bool _closed;
     internal Window Window { get; }
     internal Grid Root { get; }
     internal nint Handle { get; }
@@ -25,6 +26,7 @@ internal sealed class CardWindow
         surface.Children.Add(content);
         Root.Children.Add(new Viewbox { Child = surface, Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly });
         Window = new Window { Title = "TaskBarWidgets · " + title, Content = Root, SystemBackdrop = new MicaBackdrop() };
+        Window.Closed += (_, _) => { _closed = true; _motionGeneration++; };
         Handle = WinRT.Interop.WindowNative.GetWindowHandle(Window);
         Window.AppWindow.IsShownInSwitchers = false;
         if (Window.AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter)
@@ -39,11 +41,11 @@ internal sealed class CardWindow
 
     internal void Show()
     {
+        if (_closed) return;
         ++_motionGeneration;
-        // First activation initializes the WinUI XAML tree. This only runs for the
-        // user's explicit panel-open request; hidden construction never activates.
-        if (!_initialized) { _initialized = true; Window.Activate(); }
-        else Window.AppWindow.Show(false);
+        // The shipped template probe exercises this non-activating initialization.
+        // The group activates only its final media card after all three are shown.
+        Window.AppWindow.Show(false);
         var visual = ElementCompositionPreview.GetElementVisual(Root);
         visual.StopAnimation(nameof(Visual.Opacity));
         visual.StopAnimation(nameof(Visual.Offset));
@@ -52,21 +54,35 @@ internal sealed class CardWindow
         if (new UISettings().AnimationsEnabled) Animate(visual, true);
     }
 
-    internal async void Hide()
+    internal async Task HideAsync(bool? animate = null)
     {
+        if (_closed) return;
         var generation = ++_motionGeneration;
-        var visual = ElementCompositionPreview.GetElementVisual(Root);
-        if (new UISettings().AnimationsEnabled)
+        try
         {
-            Animate(visual, false);
-            await Task.Delay(150);
+            var visual = ElementCompositionPreview.GetElementVisual(Root);
+            // The offscreen probe can force this branch without changing the OS
+            // animation preference. Production callers always use the system value.
+            if (animate ?? new UISettings().AnimationsEnabled)
+            {
+                Animate(visual, false);
+                await Task.Delay(150);
+            }
+            if (_closed || generation != _motionGeneration) return;
+            Window.AppWindow.Hide();
+            visual.StopAnimation(nameof(Visual.Opacity));
+            visual.StopAnimation(nameof(Visual.Offset));
+            visual.Opacity = 1;
+            visual.Offset = Vector3.Zero;
         }
-        if (generation != _motionGeneration) return;
-        Window.AppWindow.Hide();
-        visual.StopAnimation(nameof(Visual.Opacity));
-        visual.StopAnimation(nameof(Visual.Offset));
-        visual.Opacity = 1;
-        visual.Offset = Vector3.Zero;
+        catch (Exception exception) when (exception is COMException or ObjectDisposedException)
+        {
+            CardLifecycleLog.Write($"hide-error hwnd=0x{Handle:X} closed={_closed} hr=0x{exception.HResult:X8}");
+            if (_closed || generation != _motionGeneration) return;
+            try { Window.AppWindow.Hide(); }
+            catch (Exception fallback) when (fallback is COMException or ObjectDisposedException)
+            { CardLifecycleLog.Write($"hide-fallback-error hwnd=0x{Handle:X} hr=0x{fallback.HResult:X8}"); }
+        }
     }
 
     private static void Animate(Visual visual, bool opening)
@@ -85,6 +101,8 @@ internal sealed class CardWindow
 
     internal void Close()
     {
+        if (_closed) return;
+        _closed = true;
         _motionGeneration++;
         Window.Close();
     }

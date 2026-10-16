@@ -6,7 +6,12 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $productRoot = Split-Path -Parent $PSScriptRoot
-$buildStartedAt = [DateTimeOffset]::Now
+$buildZone = [TimeZoneInfo]::FindSystemTimeZoneById('Taipei Standard Time')
+$buildStartedAt = [TimeZoneInfo]::ConvertTime([DateTimeOffset]::UtcNow, $buildZone)
+$buildVersion = $buildStartedAt.ToString('yyMMdd-HHmm', [Globalization.CultureInfo]::InvariantCulture)
+$versionNumbers = @([int]$buildStartedAt.ToString('yy', [Globalization.CultureInfo]::InvariantCulture), [int]$buildStartedAt.ToString('MMdd', [Globalization.CultureInfo]::InvariantCulture), [int]$buildStartedAt.ToString('HHmm', [Globalization.CultureInfo]::InvariantCulture), 0)
+$fileVersion = $versionNumbers -join '.'
+$assemblyVersion = $versionNumbers[0..2] -join '.'
 $appDirectory = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) } else { Join-Path $productRoot ("artifacts\builds\" + $buildStartedAt.ToString('yyyyMMdd-HHmmss')) }
 $artifactPrefix = [IO.Path]::GetFullPath((Join-Path $productRoot 'artifacts')).TrimEnd('\') + '\'
 if (-not $appDirectory.StartsWith($artifactPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'Output directory must be inside product artifacts.' }
@@ -33,13 +38,22 @@ Push-Location $productRoot
 try {
     & (Join-Path $PSScriptRoot 'check-boundaries.ps1')
     if ($Component -in @('All', 'Native')) {
+        $versionDirectory = Join-Path $productRoot 'Native\Obj\ProductVersion'
+        New-Item -ItemType Directory -Path $versionDirectory -Force | Out-Null
+        $versionHeader = @(
+            '#pragma once',
+            ('#define TBW_PRODUCT_VERSION_W L"' + $buildVersion + '"'),
+            ('#define TBW_PRODUCT_VERSION_A "' + $buildVersion + '"'),
+            ('#define TBW_PRODUCT_VERSION_NUMERIC ' + ($versionNumbers -join ','))
+        ) -join "`r`n"
+        [IO.File]::WriteAllText((Join-Path $versionDirectory 'ProductVersion.generated.h'), $versionHeader + "`r`n", [Text.Encoding]::ASCII)
         $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
         if (-not (Test-Path -LiteralPath $vswhere)) { throw 'Visual Studio 2022 Build Tools is required. See .vsconfig.' }
         $installation = & $vswhere -latest -products '*' -version '[17.0,18.0)' -requires Microsoft.VisualStudio.Component.VC.ATLMFC -property installationPath
         if (-not $installation) { throw 'Missing VS 2022 MFC. Run scripts/install-build-components.ps1.' }
         $msbuild = Join-Path $installation 'MSBuild\Current\Bin\MSBuild.exe'
         Invoke-BuildCommand 'restore-native' 'dotnet' @('restore', 'scripts/NativePackages.csproj', '--verbosity', 'minimal')
-        Invoke-BuildCommand 'build-native' $msbuild @('Native/TaskBarWidgets.sln', '/m:1', "/p:Configuration=$Configuration", '/p:Platform=x64', '/v:minimal', '/nologo')
+        Invoke-BuildCommand 'build-native' $msbuild @('Native/TaskBarWidgets.sln', '/m:1', "/p:Configuration=$Configuration", '/p:Platform=x64', "/p:TaskBarWidgetsBuildVersion=$buildVersion", '/v:minimal', '/nologo')
         $nativeOutput = Join-Path $productRoot "Native\Bin\x64\$Configuration"
         foreach ($file in @('TaskBarWidgets.exe', 'OpenHardwareMonitorApi.dll')) {
             Copy-Item -LiteralPath (Join-Path $nativeOutput $file) -Destination $appDirectory -Force
@@ -59,8 +73,9 @@ try {
         }
     }
     if ($Component -in @('All', 'Media')) {
-        Invoke-BuildCommand 'publish-media' 'dotnet' @('publish', 'Media/TaskBarWidgets.Media.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', 'true', '-o', (Join-Path $appDirectory 'Media'), '-p:BuildInParallel=false', '--verbosity', 'minimal')
-        Invoke-BuildCommand 'publish-ui' 'dotnet' @('publish', 'UI/TaskBarWidgets.UI.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', 'true', '-o', (Join-Path $appDirectory 'UI'), '-p:BuildInParallel=false', '--verbosity', 'minimal')
+        $managedVersion = @("-p:Version=$assemblyVersion", "-p:FileVersion=$fileVersion", "-p:InformationalVersion=$buildVersion", '-p:IncludeSourceRevisionInInformationalVersion=false')
+        Invoke-BuildCommand 'publish-media' 'dotnet' (@('publish', 'Media/TaskBarWidgets.Media.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', 'true', '-o', (Join-Path $appDirectory 'Media'), '-p:BuildInParallel=false', '--verbosity', 'minimal') + $managedVersion)
+        Invoke-BuildCommand 'publish-ui' 'dotnet' (@('publish', 'UI/TaskBarWidgets.UI.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', 'true', '-o', (Join-Path $appDirectory 'UI'), '-p:BuildInParallel=false', '--verbosity', 'minimal') + $managedVersion)
         # WinUI loads native DLLs from its own process directory, not the native owner's directory.
         $uiInstallation = $installation
         if (-not $uiInstallation) {
@@ -74,7 +89,7 @@ try {
         $uiCrt = Join-Path $uiRedist.FullName 'x64\Microsoft.VC143.CRT'
         if (-not (Test-Path -LiteralPath $uiCrt)) { throw "Missing WinUI C++ runtime: $uiCrt" }
         Get-ChildItem -LiteralPath $uiCrt -Filter '*.dll' | Copy-Item -Destination (Join-Path $appDirectory 'UI') -Force
-        foreach ($uiFile in @('TaskBarWidgets.UI.exe', 'TaskBarWidgets.UI.pri', 'App.xbf')) {
+        foreach ($uiFile in @('TaskBarWidgets.UI.exe', 'TaskBarWidgets.UI.pri', 'App.xbf', 'Assets\TaskBarWidgets.ico')) {
             if (-not (Test-Path -LiteralPath (Join-Path $appDirectory "UI\$uiFile") -PathType Leaf)) { throw "Missing packaged WinUI file: $uiFile" }
         }
         $uiGenerated = Join-Path $productRoot "UI\bin\$Configuration\net8.0-windows10.0.22621.0\win-x64"
@@ -86,6 +101,7 @@ try {
     }
     Copy-Item -LiteralPath 'licenses' -Destination $appDirectory -Recurse -Force
     Copy-Item -LiteralPath 'THIRD-PARTY-NOTICES.md', 'ACCEPTANCE.md' -Destination $appDirectory -Force
+    Copy-Item -LiteralPath 'LICENSE', 'NOTICE' -Destination $appDirectory -Force
     if ($Component -eq 'All') {
         foreach ($required in @('TaskBarWidgets.exe', 'OpenHardwareMonitorApi.dll', 'LibreHardwareMonitorLib.dll', 'Media\TaskBarWidgets.Media.exe', 'UI\TaskBarWidgets.UI.exe', 'UI\TaskBarWidgets.UI.pri', 'UI\App.xbf')) {
             if (-not (Test-Path -LiteralPath (Join-Path $appDirectory $required))) { throw "Missing packaged file: $required" }
@@ -93,8 +109,10 @@ try {
     }
     [ordered]@{
         buildStartedAt = $buildStartedAt.ToString('o')
-        buildCompletedAt = [DateTimeOffset]::Now.ToString('o')
-        timeZone = [TimeZoneInfo]::Local.Id
+        version = $buildVersion
+        fileVersion = $fileVersion
+        buildCompletedAt = [TimeZoneInfo]::ConvertTime([DateTimeOffset]::UtcNow, $buildZone).ToString('o')
+        timeZone = 'Asia/Taipei'
         configuration = $Configuration
         component = $Component
     } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $appDirectory 'build-info.json') -Encoding UTF8

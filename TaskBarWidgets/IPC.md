@@ -10,7 +10,7 @@ Helper to native:
 
 Native to helper:
 
-- `{ "version":1, "type":"command", "action":"togglePanel", "x":100, "y":100 }`: physical screen anchor at taskbar top edge; helper converts using target monitor DPI.
+- `{ "version":1, "type":"command", "action":"togglePanel", "x":100, "y":100, "entryWindow":1234 }`: physical screen anchor at taskbar top edge and native entry HWND. The media helper verifies the HWND belongs to its native host PID before forwarding; missing/invalid handles become zero. UI uses this only to let the original left-click toggle handle entry clicks once, rather than also dismissing them as outside clicks.
 - Actions `openSettings`, `playPause`, `previous`, `next`, `shutdown` without extra fields.
 - Action `seek`, `positionSeconds`: seek selected session if supported.
 - Action `mediaVisible`, `visible`: whether native media renderer is visible; used to avoid hidden spectrum/render work.
@@ -40,6 +40,10 @@ Display-item field keys use stable IDs: `items.native_0.order` / `items.builtin_
 
 The media helper launches sibling `UI/TaskBarWidgets.UI.exe --host-pid <media PID> --pipe-name TaskBarWidgets.UI.<media PID>`. It owns a second current-user-only newline UTF-8 pipe; WinUI is the client. Both ends cap messages at4MiB. Requests use `{version:1,type:"command",action,requestId,payload}` and responses `{version:1,type:"command",action:"uiResult",requestId,success,payload,error}`. UI events are `togglePanel` with top-level physical `x,y`, `openSettings` with optional page, and `shutdown`. Foreground permission is delegated from native to media and then to UI for explicit user interaction. The UI watches its host PID.
 
-Actions: getState (media snapshot including source choices and local data-URL cover), getAudio (outputs/inputs, volumes0..1), mediaCommand, selectDevice, setVolume, setMute, getTrafficHistory, getNativeSettings/applyNativeSettings, getMediaSettings/applyMediaSettings and settingsCommand. Media settings retain existing names/validation and provider/hotkey/lyric rules; advanced service commands return `{settings,events:[{type,payload}]}`. No old settings window is shown.
+Actions: getState (media snapshot including source choices and local data-URL cover), getAudio (outputs/inputs, volumes0..1), mediaCommand, selectDevice, setVolume, setMute, getTrafficHistory, getNativeSettings/applyNativeSettings, getMediaSettings/applyMediaSettings, getFonts and settingsCommand. getFonts returns installed font choices as `[{value,label}]`; the native font-name length limit still applies. Media settings retain existing names/validation and provider/hotkey/lyric rules; advanced service commands return `{settings,events:[{type,payload}]}`. No old settings window is shown.
 
 Native module fields additionally expose `items.<stableId>.row` (0 or1). A changed module layout submits show/order/row for every module; horizontal_arrange switches one/two lanes without requiring different IDs. `item_rows` persists explicit lanes; numeric ordering remains only a migration compatibility field.
+
+The UI bridge admits requests into two bounded FIFO lanes (16 waiting entries each): audio (`getAudio`, `selectDevice`, `setVolume`, `setMute`) and other requests. Reading the pipe does not await request execution. Audio operations and replies retain their order; shutdown cancels queued work. A full lane returns a correlated error instead of allocating unbounded jobs.
+
+Audio operations return `{outputs,inputs,operationSucceeded,message}` directly. Endpoint entries retain existing fields and add optional `canControl` (default true for older snapshots); false means volume/mute could not be read, so selectors remain usable but volume/mute controls are disabled. Partial default-role changes return actual readback with `operationSucceeded:false`. Mute changes only the mute property. UI request sequence and mutation generation prevent stale polls/replies from replacing new state. `togglePanel` also forwards the validated numeric `entryWindow` described above; focus changes alone never dismiss cards.

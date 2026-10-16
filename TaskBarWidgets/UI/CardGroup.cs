@@ -18,7 +18,7 @@ using Windows.UI;
 
 namespace TaskBarWidgets.UI;
 
-public sealed class CardGroup : IDisposable
+public sealed partial class CardGroup : IDisposable
 {
     internal const double CardWidth = 384;
     private readonly UiConnection _connection;
@@ -28,14 +28,10 @@ public sealed class CardGroup : IDisposable
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(400) };
     private readonly DispatcherTimer _volumeTimer = new() { Interval = TimeSpan.FromMilliseconds(120) };
     private readonly DispatcherTimer _seekTimer = new() { Interval = TimeSpan.FromMilliseconds(180) };
+    private readonly OutsideClickMonitor _outsideClicks;
     private readonly List<MenuFlyout> _flyouts = [];
-    private readonly Dictionary<string, (string Id, double Volume)> _pendingVolumes = [];
-    private readonly TextBlock _trafficTotal = Text("—", 18), _trafficScope = Text("" , 10), _trafficDetail = Text("", 11), _trafficStatus = Text("", 10);
-    private readonly Grid _months = new();
-    private readonly Button[] _days = new Button[84];
-    private readonly Grid[] _dayGlows = new Grid[84];
-    private readonly Dictionary<Button, (SpriteVisual Visual, DropShadow Shadow)> _glows = [];
-    private readonly Border[] _legend = new Border[5];
+    private readonly Dictionary<string, (string Id, double Volume, int EndpointRevision)> _pendingVolumes = [];
+    private readonly Dictionary<string, int> _endpointRevisions = new() { ["input"] = 0, ["output"] = 0 };
     private readonly TextBlock _title = Text("暂无媒体", 15), _artist = Text("", 12), _sourceLabel = Text("暂无来源", 11);
     private readonly Image _cover = new() { Width = 64, Height = 64, Stretch = Stretch.UniformToFill };
     private readonly TextBlock _position = Text("0:00", 10), _duration = Text("0:00", 10), _status = Text("", 10);
@@ -50,16 +46,14 @@ public sealed class CardGroup : IDisposable
     private readonly Slider _outputVolume = new() { Minimum = 0, Maximum = 100 }, _inputVolume = new() { Minimum = 0, Maximum = 100 };
     private AudioChoice[] _outputs = [], _inputs = [];
     private SourceChoice[] _sources = [];
-    private TrafficHeatmap _traffic = TrafficHeatmap.Create(DateOnly.FromDateTime(DateTime.Today));
-    private DateOnly? _selectedDate;
     private CancellationTokenSource? _visibleLifetime;
-    private bool _visible, _disposed, _refreshing, _rendering, _switching, _seekPending, _writingVolumes;
+    private bool _visible, _disposed, _refreshing, _rendering, _seekPending, _writingVolumes, _audioRefreshing;
     private bool _refreshAgain, _audioAgain, _trafficAgain;
     private readonly HashSet<string> _writingFlows = [];
+    private readonly HashSet<string> _busyAudioFlows = [];
+    private long _audioRequestSequence, _audioAppliedSequence;
     private int _audioGeneration;
     private int _generation, _ticks, _flyoutsOpen;
-    private double _anchorX, _anchorY;
-    private DateTime _deactivatedAt;
     private string? _outputId, _inputId, _lastCover, _selectedSourceId;
     private bool _outputMuted, _inputMuted;
 
@@ -69,22 +63,17 @@ public sealed class CardGroup : IDisposable
         _openSettings = openSettings;
         _cards = [new CardWindow("流量消耗", BuildTraffic(), 284), new CardWindow("音频设备", BuildAudio(), 244),
             new CardWindow("媒体", BuildMedia(), 248)];
+        _outsideClicks = new OutsideClickMonitor(_cards[0].Root.DispatcherQueue, () => _flyoutsOpen > 0);
         foreach (var card in _cards)
         {
-            card.Window.Activated += (_, args) =>
-            {
-                if (args.WindowActivationState == WindowActivationState.Deactivated)
-                    card.Root.DispatcherQueue.TryEnqueue(CheckForeground);
-            };
-            card.Window.AppWindow.Closing += (_, args) => { if (!_disposed) { args.Cancel = true; Hide(); } };
-            card.Root.KeyDown += (_, args) => { if (args.Key == VirtualKey.Escape) { Hide(); args.Handled = true; } };
+            card.Window.AppWindow.Closing += (_, args) => { if (!_disposed) { args.Cancel = true; Hide("native-close"); } };
+            card.Root.KeyDown += (_, args) => { if (args.Key == VirtualKey.Escape) { Hide("escape"); args.Handled = true; } };
         }
         _cards[0].Root.ActualThemeChanged += (_, _) => RenderTraffic(_traffic);
         _output.IsEnabled = _input.IsEnabled = _outputMute.IsEnabled = _inputMute.IsEnabled = _outputVolume.IsEnabled = _inputVolume.IsEnabled = false;
         _previous.IsEnabled = _play.IsEnabled = _next.IsEnabled = _seek.IsEnabled = _source.IsEnabled = false;
         _timer.Tick += async (_, _) =>
         {
-            CheckForeground();
             if (_visible) await RefreshAsync(++_ticks % 8 == 0, _ticks % 25 == 0);
         };
         _volumeTimer.Tick += async (_, _) => await FlushVolumesAsync();
@@ -97,14 +86,13 @@ public sealed class CardGroup : IDisposable
         RenderTraffic(_traffic);
         _trafficTotal.Text = "—";
         _trafficStatus.Text = "打开后读取流量历史";
+        CardLifecycleLog.Write("created cards=3");
     }
 
-    public void ToggleAtPhysicalPoint(double x, double y)
+    public void ToggleAtPhysicalPoint(double x, double y, nint entryWindow = 0)
     {
         if (_disposed) return;
-        if (_visible) { Hide(); return; }
-        if ((DateTime.UtcNow - _deactivatedAt).TotalMilliseconds < 350 && Math.Abs(x - _anchorX) < 120 && Math.Abs(y - _anchorY) < 60) return;
-        _anchorX = x; _anchorY = y;
+        if (_visible) { Hide("toggle"); return; }
         Position(x, y);
         _visible = true;
         _generation++;
@@ -112,75 +100,47 @@ public sealed class CardGroup : IDisposable
         _visibleLifetime = new CancellationTokenSource();
         foreach (var card in _cards) card.Show();
         _cards[2].Window.Activate();
+        var generation = _generation;
+        _outsideClicks.Start(entryWindow, click =>
+        {
+            if (_disposed || !_visible || generation != _generation || !ShouldDismissClick(click)) return;
+            CardLifecycleLog.Write($"outside-click button={click.MouseButton} point={click.X},{click.Y} target=0x{click.Target:X} root=0x{click.Root:X} owner=0x{click.RootOwner:X} pid={click.ProcessId} popup={click.IsPopup} flyoutAtClick={click.FlyoutWasOpen}");
+            Hide("outside-click");
+        });
+        CardLifecycleLog.Write($"shown generation={_generation} entry=0x{entryWindow:X}");
         _timer.Start();
         _ = RefreshAsync(true, true);
     }
 
-    public void Hide()
+    public void Hide() => Hide("explicit");
+
+    private void Hide(string reason)
     {
         if (!_visible) return;
+        CardLifecycleLog.Write($"hide reason={reason} generation={_generation} flyouts={_flyoutsOpen}");
         _visible = false;
         _generation++;
         _timer.Stop();
+        _outsideClicks.Stop();
         _seekTimer.Stop();
         _seekPending = false;
         _visibleLifetime?.Cancel();
         _visibleLifetime?.Dispose();
         _visibleLifetime = null;
         foreach (var flyout in _flyouts) flyout.Hide();
-        foreach (var card in _cards) card.Hide();
+        foreach (var card in _cards) HideCard(card);
     }
 
-    private FrameworkElement BuildTraffic()
+    // Hide is a UI callback boundary: unexpected task faults must still reach
+    // WinUI's unhandled-exception handler instead of becoming unobserved tasks.
+    private static async void HideCard(CardWindow card)
     {
-        var content = new StackPanel { Spacing = 6 };
-        var header = Columns(new GridLength(1, GridUnitType.Star), GridLength.Auto);
-        Add(header, Text("流量消耗 · 最近 12 周", 14), 0);
-        Add(header, _trafficTotal, 1);
-        content.Children.Add(header);
-        content.Children.Add(_trafficScope);
-        var calendar = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center };
-        _months.Margin = new Thickness(18, 0, 0, 3);
-        for (var week = 0; week < 12; week++) _months.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });
-        calendar.Children.Add(_months);
-        var grid = new Grid();
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });
-        for (var week = 0; week < 12; week++) grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });
-        for (var day = 0; day < 7; day++) grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(18) });
-        for (var weekday = 0; weekday < 7; weekday += 2)
+        try { await card.HideAsync(); }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            var label = Text(new[] { "一", "三", "五", "日" }[weekday / 2], 10);
-            label.VerticalAlignment = VerticalAlignment.Center;
-            Add(grid, label, 0, weekday);
+            CardLifecycleLog.Write($"hide-unexpected hwnd=0x{card.Handle:X} type={exception.GetType().Name} hr=0x{exception.HResult:X8}");
+            throw;
         }
-        for (var index = 0; index < _days.Length; index++)
-        {
-            var slot = new Grid { Width = 18, Height = 18 };
-            var glow = _dayGlows[index] = new Grid { Width = 14, Height = 14 };
-            var button = _days[index] = new Button { Width = 14, Height = 14, MinWidth = 0, MinHeight = 0,
-                Padding = new Thickness(0), CornerRadius = new CornerRadius(3) };
-            slot.Children.Add(glow); slot.Children.Add(button);
-            button.Click += (_, _) => { if (button.Tag is TrafficHeatmapDay day) { _selectedDate = day.Date; RenderTraffic(_traffic); } };
-            button.Loaded += (_, _) => UpdateGlow(button, glow);
-            button.GotFocus += (_, _) => UpdateGlow(button, glow);
-            button.LostFocus += (_, _) => UpdateGlow(button, glow);
-            button.KeyDown += OnDayKeyDown;
-            Add(grid, slot, index / 7 + 1, index % 7);
-        }
-        calendar.Children.Add(grid);
-        content.Children.Add(calendar);
-        var legend = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 3 };
-        legend.Children.Add(Text("低", 10));
-        for (var index = 0; index < _legend.Length; index++)
-        {
-            _legend[index] = new Border { Width = 9, Height = 9, CornerRadius = new CornerRadius(2), VerticalAlignment = VerticalAlignment.Center };
-            legend.Children.Add(_legend[index]);
-        }
-        legend.Children.Add(Text("高 ≥5 GB · 灰格 0 · 空框 无记录", 10));
-        content.Children.Add(legend);
-        content.Children.Add(_trafficDetail);
-        content.Children.Add(_trafficStatus);
-        return content;
     }
 
     private FrameworkElement BuildAudio()
@@ -225,11 +185,10 @@ public sealed class CardGroup : IDisposable
             percent.Text = $"{args.NewValue:0}";
             var id = flow == "input" ? _inputId : _outputId;
             if (_disposed || _rendering || id is null) return;
-            _pendingVolumes[flow] = (id, args.NewValue / 100);
+            _pendingVolumes[flow] = (id, args.NewValue / 100, _endpointRevisions[flow]);
             _volumeTimer.Stop(); _volumeTimer.Start();
         };
-        mute.Click += async (_, _) => await CommandAsync("setMute", new { flow,
-            deviceId = flow == "input" ? _inputId : _outputId, muted = !(flow == "input" ? _inputMuted : _outputMuted) }, true);
+        mute.Click += async (_, _) => await MuteAsync(flow);
         AutomationProperties.SetName(volume, title + "音量");
         parent.Children.Add(section);
     }
@@ -267,7 +226,7 @@ public sealed class CardGroup : IDisposable
         Add(summary, metadata, 1);
         var settings = Icon("\uE713", "打开设置");
         settings.VerticalAlignment = VerticalAlignment.Top;
-        settings.Click += (_, _) => { Hide(); _openSettings(); };
+        settings.Click += (_, _) => { Hide("settings"); _openSettings(); };
         Add(summary, settings, 2);
         content.Children.Add(summary);
         var controls = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 18, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 10) };
@@ -295,11 +254,11 @@ public sealed class CardGroup : IDisposable
     private MenuFlyout NewFlyout()
     {
         var flyout = new MenuFlyout();
-        flyout.Opening += (_, _) => _flyoutsOpen++;
+        flyout.Opening += (_, _) => { _flyoutsOpen++; CardLifecycleLog.Write($"flyout-opening count={_flyoutsOpen}"); };
         flyout.Closed += (_, _) =>
         {
             _flyoutsOpen = Math.Max(0, _flyoutsOpen - 1);
-            if (_cards.Length > 0) _cards[0].Root.DispatcherQueue.TryEnqueue(CheckForeground);
+            CardLifecycleLog.Write($"flyout-closed count={_flyoutsOpen}");
         };
         _flyouts.Add(flyout);
         return flyout;
@@ -308,6 +267,8 @@ public sealed class CardGroup : IDisposable
     private async Task RefreshAsync(bool audio, bool traffic)
     {
         if (!_visible || _visibleLifetime is null) return;
+        // Audio must not wait for media metadata or native traffic-history requests.
+        if (audio) _ = RefreshAudioAsync(_visibleLifetime.Token);
         if (_refreshing) { _refreshAgain = true; _audioAgain |= audio; _trafficAgain |= traffic; return; }
         _refreshing = true;
         var generation = _generation;
@@ -317,13 +278,6 @@ public sealed class CardGroup : IDisposable
             var state = await _connection.RequestAsync("getState", cancellationToken: token);
             if (!_visible || generation != _generation) return;
             RenderMedia(state);
-            if (audio && !_switching)
-            {
-                var audioGeneration = _audioGeneration;
-                var devices = await _connection.RequestAsync("getAudio", cancellationToken: token);
-                if (!_visible || generation != _generation || audioGeneration != _audioGeneration) return;
-                RenderAudio(devices);
-            }
             if (traffic)
             {
                 var history = await _connection.RequestAsync("getTrafficHistory", cancellationToken: token);
@@ -400,13 +354,41 @@ public sealed class CardGroup : IDisposable
         { System.Diagnostics.Trace.WriteLine("Cover image ignored: " + exception.Message); }
     }
 
-    private void RenderAudio(JsonElement snapshot)
+    private async Task RefreshAudioAsync(CancellationToken token)
+    {
+        if (_disposed || _audioRefreshing || _busyAudioFlows.Count > 0) return;
+        _audioRefreshing = true;
+        var generation = _audioGeneration;
+        var sequence = ++_audioRequestSequence;
+        try
+        {
+            var snapshot = await _connection.RequestAsync("getAudio", cancellationToken: token);
+            if (!_disposed && !token.IsCancellationRequested && generation == _audioGeneration)
+                ApplyAudioReply(snapshot, sequence);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        { if (!_disposed && !token.IsCancellationRequested) _status.Text = "读取音频设备失败：" + error.Message; }
+        finally { _audioRefreshing = false; }
+    }
+
+    private void ApplyAudioReply(JsonElement snapshot, long sequence, string? completedFlow = null)
+    {
+        if (sequence < _audioAppliedSequence) return;
+        if (!snapshot.TryGetProperty("outputs", out _) || !snapshot.TryGetProperty("inputs", out _))
+            throw new InvalidDataException("音频服务没有返回设备状态。");
+        _audioAppliedSequence = sequence;
+        RenderAudio(snapshot, completedFlow);
+    }
+
+    private void RenderAudio(JsonElement snapshot, string? completedFlow = null)
     {
         _outputs = AudioChoices(snapshot, "outputs"); _inputs = AudioChoices(snapshot, "inputs");
         _rendering = true;
         try
         {
-            RenderEndpoint(_outputs, false); RenderEndpoint(_inputs, true);
+            if (!_busyAudioFlows.Contains("output") || completedFlow == "output") RenderEndpoint(_outputs, false);
+            if (!_busyAudioFlows.Contains("input") || completedFlow == "input") RenderEndpoint(_inputs, true);
         }
         finally { _rendering = false; }
     }
@@ -418,26 +400,73 @@ public sealed class CardGroup : IDisposable
         (input ? _inputName : _outputName).Text = current?.Name ?? "没有可用设备";
         var slider = input ? _inputVolume : _outputVolume;
         var mute = input ? _inputMute : _outputMute;
-        slider.IsEnabled = mute.IsEnabled = current is not null && !_switching;
-        (input ? _input : _output).IsEnabled = devices.Length > 0 && !_switching;
+        slider.IsEnabled = mute.IsEnabled = current is { CanControl: true } && !_busyAudioFlows.Contains(flow);
+        (input ? _input : _output).IsEnabled = devices.Length > 0 && !_busyAudioFlows.Contains(flow);
         if (!_pendingVolumes.ContainsKey(flow) && !_writingFlows.Contains(flow)) slider.Value = Math.Clamp((current?.Volume ?? 0) * 100, 0, 100);
+        if (current is { CanControl: false }) {
+            (input ? _inputPercent : _outputPercent).Text = "—";
+            _status.Text = (input ? "输入" : "输出") + "设备音量暂不可用，仍可选择其他设备。";
+        }
         ((FontIcon)mute.Content).Glyph = current?.IsMuted == true ? "\uE74F" : input ? "\uE720" : "\uE767";
+        AutomationProperties.SetName(mute, (input ? "输入" : "输出") + (current?.IsMuted == true ? "取消静音" : "静音"));
+        ToolTipService.SetToolTip(mute, current?.IsMuted == true ? "取消静音" : "静音");
         if (input) { _inputId = current?.Id; _inputMuted = current?.IsMuted ?? false; }
         else { _outputId = current?.Id; _outputMuted = current?.IsMuted ?? false; }
     }
 
     private async Task SelectDeviceAsync(string flow, string id)
     {
-        if (_disposed || _switching) return;
-        _switching = true;
-        _audioGeneration++;
+        if (_disposed || _busyAudioFlows.Contains(flow)) return;
+        ++_endpointRevisions[flow];
         _pendingVolumes.Remove(flow);
-        _output.IsEnabled = _input.IsEnabled = _outputMute.IsEnabled = _inputMute.IsEnabled = _outputVolume.IsEnabled = _inputVolume.IsEnabled = false;
-        try { await CommandAsync("selectDevice", new { flow, deviceId = id }); }
+        await AudioCommandAsync("selectDevice", flow, new { flow, deviceId = id }, "正在切换设备…");
+    }
+
+    private void RenderAudioControls(string flow)
+    {
+        var rendering = _rendering;
+        _rendering = true;
+        try { RenderEndpoint(flow == "input" ? _inputs : _outputs, flow == "input"); }
+        finally { _rendering = rendering; }
+    }
+
+    private async Task MuteAsync(string flow)
+    {
+        var id = flow == "input" ? _inputId : _outputId;
+        if (_disposed || id is null || _busyAudioFlows.Contains(flow)) return;
+        var muted = !(flow == "input" ? _inputMuted : _outputMuted);
+        await AudioCommandAsync("setMute", flow, new { flow, deviceId = id, muted }, muted ? "正在静音…" : "正在取消静音…");
+    }
+
+    private async Task AudioCommandAsync(string action, string flow, object payload, string message, bool lockControls = true)
+    {
+        if (_disposed) return;
+        if (lockControls && !_busyAudioFlows.Add(flow)) return;
+        ++_audioGeneration;
+        var sequence = ++_audioRequestSequence;
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        _status.Text = message;
+        if (lockControls) RenderAudioControls(flow);
+        CardLifecycleLog.Write($"audio-request action={action} flow={flow} sequence={sequence}");
+        try
+        {
+            var reply = await _connection.RequestAsync(action, payload);
+            if (_disposed) return;
+            ApplyAudioReply(reply, sequence, flow);
+            if (reply.TryGetProperty("operationSucceeded", out var succeeded) && succeeded.ValueKind == JsonValueKind.False)
+                throw new InvalidOperationException(String(reply, "message", "音频设备仅部分切换，请检查默认设备。"));
+            if (sequence == _audioRequestSequence) _status.Text = "";
+            CardLifecycleLog.Write($"audio-applied action={action} flow={flow} sequence={sequence} elapsedMs={System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}");
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            if (!_disposed) _status.Text = "音频操作失败：" + error.Message;
+            CardLifecycleLog.Write($"audio-error action={action} flow={flow} sequence={sequence} hr=0x{error.HResult:X8}");
+        }
         finally
         {
-            _switching = false;
-            if (_visible) await RefreshAsync(true, false);
+            if (lockControls) _busyAudioFlows.Remove(flow);
+            if (!_disposed) RenderAudioControls(flow);
         }
     }
 
@@ -452,8 +481,9 @@ public sealed class CardGroup : IDisposable
         {
             foreach (var (flow, value) in pending)
             {
+                if (value.EndpointRevision != _endpointRevisions[flow]) continue;
                 _writingFlows.Add(flow);
-                try { await CommandAsync("setVolume", new { flow, deviceId = value.Id, volume = value.Volume }); }
+                try { await AudioCommandAsync("setVolume", flow, new { flow, deviceId = value.Id, volume = value.Volume }, "正在调整音量…", lockControls: false); }
                 finally { _writingFlows.Remove(flow); }
             }
         }
@@ -477,102 +507,22 @@ public sealed class CardGroup : IDisposable
         { if (!_disposed) _status.Text = exception.Message; }
     }
 
-    private void RenderTraffic(TrafficHeatmap traffic)
+    internal bool ShouldDismissClick(OutsideClickMonitor.Click click)
     {
-        if (_disposed) return;
-        _traffic = traffic;
-        if (_selectedDate is null || !traffic.Days.Any(day => day.Date == _selectedDate && !day.IsFuture)) _selectedDate = traffic.Today;
-        _trafficTotal.Text = TrafficHeatmap.FormatUsage(traffic.TotalKiB);
-        _trafficScope.Text = traffic.ScopeLabel;
-        _trafficDetail.Text = traffic.Days.First(day => day.Date == _selectedDate).Description;
-        for (var index = 0; index < _legend.Length; index++) _legend[index].Background = new SolidColorBrush(ColorForLevel(index + 1));
-        _months.Children.Clear();
-        for (var week = 0; week < 12; week++)
+        // A left click on the validated native entry HWND belongs to its normal
+        // toggle command. Other buttons must still dismiss before opening menus.
+        if (click.MouseButton == OutsideClickMonitor.Button.Left && click.IsEntryTarget) return false;
+        foreach (var card in _cards)
         {
-            var day = traffic.Days[week * 7];
-            if (week > 0 && day.Date.Month == traffic.Days[(week - 1) * 7].Date.Month) continue;
-            Add(_months, Text(day.Date.Month + "月", 9), week);
+            if (IsWindowVisible(card.Handle) && GetWindowRect(card.Handle, out var bounds) &&
+                click.X >= bounds.Left && click.X < bounds.Right && click.Y >= bounds.Top && click.Y < bounds.Bottom)
+                return false;
         }
-        for (var index = 0; index < _days.Length; index++)
-        {
-            var button = _days[index]; var day = traffic.Days[index];
-            button.Tag = day; button.IsEnabled = !day.IsFuture;
-            button.Background = new SolidColorBrush(DayColor(day));
-            button.BorderThickness = new Thickness(day.Date == _selectedDate ? 2 : day.Level == 0 ? 1 : 0);
-            button.BorderBrush = new SolidColorBrush(IsDark ? Color.FromArgb(160, 230, 230, 230) : Color.FromArgb(160, 40, 40, 40));
-            // Keep native button focus behavior while preserving semantic usage
-            // colors through Fluent pointer/disabled visual states.
-            button.Resources["ButtonBackgroundPointerOver"] = button.Background;
-            button.Resources["ButtonBackgroundPressed"] = button.Background;
-            button.Resources["ButtonBackgroundDisabled"] = button.Background;
-            button.Resources["ButtonBorderBrushPointerOver"] = button.BorderBrush;
-            button.Resources["ButtonBorderBrushPressed"] = button.BorderBrush;
-            button.Resources["ButtonBorderBrushDisabled"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-            AutomationProperties.SetName(button, day.Description);
-            if (button.IsLoaded) UpdateGlow(button, _dayGlows[index]);
-        }
-    }
-
-    private bool IsDark => _cards.Length > 0 && _cards[0].Root.ActualTheme == ElementTheme.Dark;
-    private Color DayColor(TrafficHeatmapDay day)
-    {
-        if (day.IsFuture) return Microsoft.UI.Colors.Transparent;
-        return ColorForLevel(day.Level);
-    }
-
-    private Color ColorForLevel(int level)
-    {
-        var light = new[] { 0x00FFFFFFu, 0xFFE5E8ECu, 0xFFB4D8C0u, 0xFF6DB889u, 0xFF338557u, 0xFF175736u };
-        var dark = new[] { 0x0026272Bu, 0xFF44484Eu, 0xFF294B3Bu, 0xFF347654u, 0xFF42A56Bu, 0xFF76D99Au };
-        var value = (IsDark ? dark : light)[level];
-        return Color.FromArgb((byte)(value >> 24), (byte)(value >> 16), (byte)(value >> 8), (byte)value);
-    }
-
-    private void UpdateGlow(Button button, Grid host)
-    {
-        if (_disposed) return;
-        if (button.Tag is not TrafficHeatmapDay day) return;
-        var emphasized = day.Date == _selectedDate || button.FocusState != FocusState.Unfocused;
-        if (day.IsFuture || day.Level < 2) { host.Visibility = Visibility.Collapsed; return; }
-        host.Visibility = Visibility.Visible;
-        if (!_glows.TryGetValue(button, out var glow))
-        {
-            var compositor = ElementCompositionPreview.GetElementVisual(host).Compositor;
-            var sprite = compositor.CreateSpriteVisual(); sprite.Size = new Vector2(14, 14);
-            var shadow = compositor.CreateDropShadow(); shadow.Offset = Vector3.Zero; sprite.Shadow = shadow;
-            ElementCompositionPreview.SetElementChildVisual(host, sprite);
-            glow = (sprite, shadow); _glows.Add(button, glow);
-        }
-        var color = DayColor(day);
-        glow.Visual.Brush = glow.Visual.Compositor.CreateColorBrush(color);
-        glow.Shadow.Color = color;
-        glow.Shadow.BlurRadius = emphasized ? 8 : 4;
-        glow.Shadow.Opacity = emphasized ? 0.65f : IsDark ? 0.3f : 0.18f;
-    }
-
-    private void OnDayKeyDown(object sender, KeyRoutedEventArgs args)
-    {
-        var index = System.Array.IndexOf(_days, (Button)sender);
-        if (args.Key is not (VirtualKey.Left or VirtualKey.Right or VirtualKey.Up or VirtualKey.Down)) return;
-        args.Handled = true;
-        var next = args.Key switch { VirtualKey.Left => index - 7, VirtualKey.Right => index + 7,
-            VirtualKey.Up when index % 7 > 0 => index - 1, VirtualKey.Down when index % 7 < 6 => index + 1, _ => -1 };
-        if (next < 0 || next >= _days.Length || !_days[next].IsEnabled) return;
-        _days[next].Focus(FocusState.Keyboard);
-    }
-
-    private void CheckForeground()
-    {
-        if (!_visible || _disposed) return;
-        var foreground = GetForegroundWindow();
-        // WinUI flyouts can own a separate native popup HWND; follow its native
-        // owner chain as well as tracking Opening/Closed focus transitions.
-        var rootOwner = GetAncestor(foreground, 3);
-        if (foreground == 0 || _cards.Any(card => card.Handle == foreground || card.Handle == rootOwner)) return;
-        GetWindowThreadProcessId(foreground, out var process);
-        if (_flyoutsOpen > 0 && process == Environment.ProcessId) return;
-        _deactivatedAt = DateTime.UtcNow;
-        Hide();
+        // The click snapshot survives MenuFlyout.Closed and native popup teardown
+        // before the queued classifier runs. Same-process unrelated windows do not qualify.
+        if (click.ProcessId == (uint)Environment.ProcessId &&
+            (_cards.Any(card => card.Handle == click.RootOwner) || click.FlyoutWasOpen && click.IsPopup)) return false;
+        return true;
     }
 
     internal void Position(double x, double y)
@@ -602,18 +552,22 @@ public sealed class CardGroup : IDisposable
     public void Dispose()
     {
         if (_disposed) return;
-        Hide(); _disposed = true;
-        _volumeTimer.Stop(); _seekTimer.Stop(); _timer.Stop();
+        CardLifecycleLog.Write($"dispose visible={_visible}");
+        _disposed = true; _visible = false; _generation++;
+        _visibleLifetime?.Cancel(); _visibleLifetime?.Dispose(); _visibleLifetime = null;
+        _volumeTimer.Stop(); _seekTimer.Stop(); _timer.Stop(); _outsideClicks.Dispose();
+        foreach (var flyout in _flyouts) flyout.Hide();
         _pendingVolumes.Clear();
         foreach (var card in _cards) card.Close();
         foreach (var glow in _glows.Values) { glow.Visual.Dispose(); glow.Shadow.Dispose(); }
         _glows.Clear();
     }
 
-    private sealed record AudioChoice(string Id, string Name, bool IsDefault, bool IsCommunications, double Volume, bool IsMuted);
+    private sealed record AudioChoice(string Id, string Name, bool IsDefault, bool IsCommunications, double Volume, bool IsMuted, bool CanControl);
     private sealed record SourceChoice(string Id, string Label);
     private static AudioChoice[] AudioChoices(JsonElement value, string name) => Array(value, name).Select(item => new AudioChoice(
-        String(item, "id"), String(item, "name"), Bool(item, "isDefault"), Bool(item, "isCommunications"), Number(item, "volume"), Bool(item, "isMuted"))).ToArray();
+        String(item, "id"), String(item, "name"), Bool(item, "isDefault"), Bool(item, "isCommunications"), Number(item, "volume"), Bool(item, "isMuted"),
+        !item.TryGetProperty("canControl", out var control) || control.ValueKind != JsonValueKind.False)).ToArray();
     private static IEnumerable<JsonElement> Array(JsonElement value, string name) => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var items) && items.ValueKind == JsonValueKind.Array ? items.EnumerateArray() : [];
     private static string String(JsonElement value, string name, string fallback = "") => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var item) && item.ValueKind == JsonValueKind.String ? item.GetString() ?? fallback : fallback;
     private static bool Bool(JsonElement value, string name) => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var item) && item.ValueKind == JsonValueKind.True;
@@ -633,11 +587,28 @@ public sealed class CardGroup : IDisposable
     [StructLayout(LayoutKind.Sequential)] private struct NativePoint { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] private struct NativeRect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] private struct MonitorInfo { public int Size; public NativeRect Monitor, Work; public uint Flags; }
-    [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
-    [DllImport("user32.dll")] private static extern nint GetAncestor(nint window, uint flags);
-    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetWindowRect(nint window, out NativeRect bounds);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")] private static extern nint MonitorFromPoint(NativePoint point, uint flags);
     [DllImport("user32.dll")] private static extern nint MonitorFromWindow(nint window, uint flags);
     [DllImport("user32.dll")] private static extern uint GetDpiForWindow(nint window);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern bool GetMonitorInfo(nint monitor, ref MonitorInfo info);
+}
+
+internal static class CardLifecycleLog
+{
+    private static readonly object Gate = new();
+    internal static void Write(string message)
+    {
+        try
+        {
+            lock (Gate)
+            {
+                var path = Path.Combine(AppContext.BaseDirectory, "card-lifecycle.log");
+                if (File.Exists(path) && new FileInfo(path).Length >= 128 * 1024) File.Move(path, path + ".1", true);
+                File.AppendAllText(path, $"{DateTimeOffset.Now:o} pid={Environment.ProcessId} {message[..Math.Min(message.Length, 512)]}\n");
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+    }
 }

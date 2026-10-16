@@ -47,7 +47,9 @@ function Get-SafeTree([string]$Directory) {
 
 function Assert-NoBuildProcesses([string[]]$Directories) {
     foreach ($process in Get-CimInstance Win32_Process) {
-        if ($process.Name -in @('TaskBarWidgets.exe', 'TaskBarWidgets.Media.exe') -and -not $process.ExecutablePath) {
+        # This script's own arguments name both builds; they do not mean either app is running.
+        if ($process.ProcessId -eq $PID) { continue }
+        if ($process.Name -in @('TaskBarWidgets.exe', 'TaskBarWidgets.Media.exe', 'TaskBarWidgets.UI.exe') -and -not $process.ExecutablePath) {
             throw 'A product process cannot be inspected; cleanup is refused.'
         }
         foreach ($directory in $Directories) {
