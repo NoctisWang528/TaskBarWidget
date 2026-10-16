@@ -73,22 +73,9 @@ namespace wccs  // WeatherComCnSpider
         return results;
     }
 
-    bool _IsSpot(const std::wstring &sNO)
+    bool _IsSpot(const std::wstring &code)
     {
-        static const std::wregex pattern{ L"\\D+" };
-        static std::wsmatch matches;
-
-        bool result = true;
-        try
-        {
-            result = std::regex_search(sNO, matches, pattern);
-        }
-        catch (const std::exception &)
-        {
-            result = true;
-        }
-
-        return result;
+        return code.empty() || code.find_first_not_of(L"0123456789") != std::wstring::npos;
     }
 
     SCityInfo _ExtractCityInfo(const std::wstring &s)
@@ -96,7 +83,7 @@ namespace wccs  // WeatherComCnSpider
         SCityInfo result;
 
         wslist infoFields = _StringSplit(s, L'~');
-        if (infoFields.empty()) return result;
+        if (infoFields.size() < 10 || infoFields[0].empty() || infoFields[2].empty()) return result;
 
         if (!_IsSpot(infoFields[0]))
         {
@@ -126,16 +113,17 @@ namespace wccs  // WeatherComCnSpider
         auto timeStamp = std::time(0);
 
         CString q_url;
-        q_url.Format(L"http://toy1.weather.com.cn/search?cityname=%s&callback=success_jsonpCallback&_=%I64d",
+        q_url.Format(L"https://toy1.weather.com.cn/search?cityname=%s&callback=success_jsonpCallback&_=%I64d",
             qNameEncoded.c_str(), timeStamp);
 
-        CString qHeaders = L"Host: toy1.weather.com.cn\r\nReferer: http://www.weather.com.cn/";
+        CString qHeaders = L"Host: toy1.weather.com.cn\r\nReferer: https://www.weather.com.cn/";
 
         std::wstring content;
         bool succeed = _CallInternet(q_url, qHeaders, content);
 
         if (succeed && !content.empty())
         {
+            if (content.find(L'[') == std::wstring::npos || content.find(L']') == std::wstring::npos) return false;
             // parse string
             auto infoList = _ExtractCityInfoList(content);
 
@@ -159,9 +147,9 @@ namespace wccs  // WeatherComCnSpider
         auto timeStamp = std::time(0);
 
         CString q_url;
-        q_url.Format(L"http://d1.weather.com.cn/sk_2d/%s.html?_=%I64d", city_code.c_str(), timeStamp);
+        q_url.Format(L"https://d1.weather.com.cn/sk_2d/%s.html?_=%I64d", city_code.c_str(), timeStamp);
 
-        CString qHeaders = L"Host: d1.weather.com.cn\r\nReferer: http://www.weather.com.cn/";
+        CString qHeaders = L"Host: d1.weather.com.cn\r\nReferer: https://www.weather.com.cn/";
 
         std::wstring content;
         auto succeed = _CallInternet(q_url, qHeaders, content);
@@ -176,7 +164,7 @@ namespace wccs  // WeatherComCnSpider
             {
                 auto data_utf8 = WeatherCCommon::UnicodeToStr(data.c_str(), true);
 
-                yyjson_doc *doc = yyjson_read(data_utf8.c_str(), data_utf8.size(), 0);
+                yyjson_doc *doc = yyjson_read(data_utf8.c_str(), data_utf8.size(), YYJSON_READ_STOP_WHEN_DONE);
                 if (doc != nullptr)
                 {
                     auto *root = yyjson_doc_get_root(doc);
@@ -195,9 +183,11 @@ namespace wccs  // WeatherComCnSpider
                     rt_weather.WindStrength = get_value("WS");
 
                     // correct weather code to 'night' if time during 20:00 to 06:00
-                    auto h = std::stoi(rt_weather.UpdateTime.substr(0, 2));
-                    if (h >= 20 || h < 6)
-                        rt_weather.WeatherCode[0] = L'n';
+                    if (rt_weather.Temperature.empty() || rt_weather.Weather.empty() || rt_weather.WeatherCode.empty()) succeed = false;
+                    if (rt_weather.UpdateTime.size() >= 2 && iswdigit(rt_weather.UpdateTime[0]) && iswdigit(rt_weather.UpdateTime[1])) {
+                        const auto h = (rt_weather.UpdateTime[0] - L'0') * 10 + rt_weather.UpdateTime[1] - L'0';
+                        if ((h >= 20 || h < 6) && !rt_weather.WeatherCode.empty()) rt_weather.WeatherCode[0] = L'n';
+                    }
                 }
                 else
                     succeed = false;
@@ -271,9 +261,9 @@ namespace wccs  // WeatherComCnSpider
         rt_weather = SRealTimeWeather();
 
         CString q_url;
-        q_url.Format(L"http://forecast.weather.com.cn/town/weather1dn/%s.shtml", code.c_str());
+        q_url.Format(L"https://forecast.weather.com.cn/town/weather1dn/%s.shtml", code.c_str());
 
-        CString qHeaders = L"Host: forecast.weather.com.cn\r\nReferer: http://www.weather.com.cn/";
+        CString qHeaders = L"Host: forecast.weather.com.cn\r\nReferer: https://www.weather.com.cn/";
 
         std::wstring content;
         auto succeed = _CallInternet(q_url, qHeaders, content);
@@ -292,7 +282,7 @@ namespace wccs  // WeatherComCnSpider
 
                     auto data_utf8 = WeatherCCommon::UnicodeToStr(data.c_str(), true);
 
-                    yyjson_doc *doc = yyjson_read(data_utf8.c_str(), data_utf8.size(), 0);
+                    yyjson_doc *doc = yyjson_read(data_utf8.c_str(), data_utf8.size(), YYJSON_READ_STOP_WHEN_DONE);
                     if (doc != nullptr)
                     {
                         auto *root = yyjson_doc_get_root(doc);
@@ -313,9 +303,11 @@ namespace wccs  // WeatherComCnSpider
 
                         rt_weather.WeatherCode = _convertWeatherNameToCode(rt_weather.Weather);
                         // correct weather code to 'night' if time during 20:00 to 06:00
-                        auto h = std::stoi(rt_weather.UpdateTime.substr(0, 2));
-                        if (h >= 20 || h < 6)
-                            rt_weather.WeatherCode[0] = L'n';
+                        if (!yyjson_is_num(yyjson_obj_get(root, "temp")) || rt_weather.Weather.empty()) succeed = false;
+                        if (rt_weather.UpdateTime.size() >= 2 && iswdigit(rt_weather.UpdateTime[0]) && iswdigit(rt_weather.UpdateTime[1])) {
+                            const auto h = (rt_weather.UpdateTime[0] - L'0') * 10 + rt_weather.UpdateTime[1] - L'0';
+                            if (h >= 20 || h < 6) rt_weather.WeatherCode[0] = L'n';
+                        }
 
                         rt_weather.AqiPM25 = L"--";
 
@@ -329,7 +321,8 @@ namespace wccs  // WeatherComCnSpider
                         else
                             rt_weather.WindDirection = wind_ds;
                     }
-                    else
+                    yyjson_doc_free(doc);
+                    if (!doc)
                         succeed = false;
                 }
                 else
@@ -364,9 +357,9 @@ namespace wccs  // WeatherComCnSpider
         auto timeStamp = std::time(0);
 
         CString q_url;
-        q_url.Format(L"http://d1.weather.com.cn/dingzhi/%s.html?_=%I64d", target_code.c_str(), timeStamp);
+        q_url.Format(L"https://d1.weather.com.cn/dingzhi/%s.html?_=%I64d", target_code.c_str(), timeStamp);
 
-        CString qHeaders = L"Host: d1.weather.com.cn\r\nReferer: http://www.weather.com.cn/";
+        CString qHeaders = L"Host: d1.weather.com.cn\r\nReferer: https://www.weather.com.cn/";
 
         std::wstring content;
         auto succeed = _CallInternet(q_url, qHeaders, content);
@@ -387,7 +380,7 @@ namespace wccs  // WeatherComCnSpider
 
             auto data_utf8 = WeatherCCommon::UnicodeToStr(data.c_str(), true);
 
-            auto *jdoc = yyjson_read(data_utf8.c_str(), data_utf8.size(), 0);
+            auto *jdoc = yyjson_read(data_utf8.c_str(), data_utf8.size(), YYJSON_READ_STOP_WHEN_DONE);
             if (jdoc != nullptr)
             {
                 auto *jroot = yyjson_doc_get_root(jdoc);
@@ -427,23 +420,69 @@ namespace wccs  // WeatherComCnSpider
 
     using SWeatherInfo = DataApiWeatherComCnSpider::SWeatherInfo;
 
-    bool QueryForecastWeather(const std::wstring &code, SWeatherInfo &weather_td, SWeatherInfo &weather_tm)
+    bool QueryForecastWeather(const std::wstring &code, SWeatherInfo &weather_td, SWeatherInfo &weather_tm, SWeatherInfo &weather_datm)
     {
         weather_td = SWeatherInfo();
         weather_tm = SWeatherInfo();
+        weather_datm = SWeatherInfo();
+        if (code.size() == 9) {
+            CString url; url.Format(L"https://www.weather.com.cn/weather/%s.shtml", code.c_str());
+            std::wstring html;
+            if (!_CallInternet(url, L"Referer: https://www.weather.com.cn/", html)) return false;
+            const auto begin = html.find(L"<ul class=\"t clearfix\"");
+            const auto end = begin == std::wstring::npos ? begin : html.find(L"</ul>", begin);
+            if (end == std::wstring::npos) return false;
+            const auto list = html.substr(begin, end - begin);
+            wslist items;
+            for (size_t cursor = 0; items.size() < 3;) {
+                const auto start = list.find(L"<li", cursor);
+                const auto finish = start == std::wstring::npos ? start : list.find(L"</li>", start);
+                if (finish == std::wstring::npos) break;
+                items.push_back(list.substr(start, finish - start)); cursor = finish + 5;
+            }
+            if (items.size() < 3) return false;
+            SWeatherInfo* days[] = {&weather_td, &weather_tm, &weather_datm};
+            auto extract = [](const std::wstring& value, const wchar_t* pattern) {
+                std::wsmatch match; return std::regex_search(value, match, std::wregex(pattern)) ? match[1].str() : L"";
+            };
+            for (size_t i = 0; i < 3; ++i) {
+                auto& day = *days[i]; const auto& item = items[i];
+                auto element = [&item](const wchar_t* marker) {
+                    auto start = item.find(marker); if (start == std::wstring::npos) return std::wstring{};
+                    start = item.find(L'>', start); if (start == std::wstring::npos) return std::wstring{};
+                    const auto end = item.find(L"</p>", start);
+                    return end == std::wstring::npos ? std::wstring{} : item.substr(start + 1, end - start - 1);
+                };
+                const auto temperature = element(L"class=\"tem\"");
+                day.TemperatureDay = extract(temperature, LR"(<span>(-?\d+))");
+                day.TemperatureNight = extract(temperature, LR"(<i>(-?\d+))");
+                if (day.TemperatureDay.empty()) day.TemperatureDay = day.TemperatureNight; // Today's daytime may already be over.
+                const auto weather = element(L"class=\"wea\"");
+                const auto split = weather.find(L'转');
+                day.WeatherDay = weather.substr(0, split);
+                day.WeatherNight = split == std::wstring::npos ? weather : weather.substr(split + 1);
+                const auto icons = _RegexExtractAll(item, std::wregex(LR"icon(class="png40 ([dn]\d+)")icon"));
+                day.WeatherCodeDay = _convertWeatherNameToCode(day.WeatherDay);
+                day.WeatherCodeNight = _convertWeatherNameToCode(day.WeatherNight);
+                if (!icons.empty()) day.WeatherCodeDay = icons.front()[1];
+                if (icons.size() > 1) day.WeatherCodeNight = icons.back()[1];
+                if (day.TemperatureNight.empty() || weather.empty()) return false;
+            }
+            return true;
+        }
 
         CString q_url;
         CString qHeaders;
 
         if (code.size() == 9)
         {
-            q_url.Format(L"http://www.weather.com.cn/weathern/%s.shtml", code.c_str());
-            qHeaders.Format(L"Host: www.weather.com.cn\r\nReferer: http://www.weather.com.cn/weather1dn/%s.shtml", code.c_str());
+            q_url.Format(L"https://www.weather.com.cn/weathern/%s.shtml", code.c_str());
+            qHeaders.Format(L"Host: www.weather.com.cn\r\nReferer: https://www.weather.com.cn/weather1dn/%s.shtml", code.c_str());
         }
         else
         {
-            q_url.Format(L"http://forecast.weather.com.cn/town/weathern/%s.shtml", code.c_str());
-            qHeaders.Format(L"Host: forecast.weather.com.cn\r\nReferer: http://forecast.weather.com.cn/town/weather1dn/%s.shtml", code.c_str());
+            q_url.Format(L"https://forecast.weather.com.cn/town/weathern/%s.shtml", code.c_str());
+            qHeaders.Format(L"Host: forecast.weather.com.cn\r\nReferer: https://forecast.weather.com.cn/town/weather1dn/%s.shtml", code.c_str());
         }
 
         std::wstring content;
@@ -466,6 +505,7 @@ namespace wccs  // WeatherComCnSpider
                     {
                         weather_td.TemperatureDay = temp_values[1][1];
                         weather_tm.TemperatureDay = temp_values[2][1];
+                        if (temp_values.size() > 3) weather_datm.TemperatureDay = temp_values[3][1];
                     }
                     else
                         succeed = false;
@@ -485,6 +525,7 @@ namespace wccs  // WeatherComCnSpider
                     {
                         weather_td.TemperatureNight = temp_values[1][1];
                         weather_tm.TemperatureNight = temp_values[2][1];
+                        if (temp_values.size() > 3) weather_datm.TemperatureNight = temp_values[3][1];
                     }
                     else
                         succeed = false;
@@ -512,6 +553,7 @@ namespace wccs  // WeatherComCnSpider
 
                     weather_tm.WeatherCodeNight = match_results[3][1];
                     weather_tm.WeatherNight = match_results[3][2];
+                    if (match_results.size() >= 6) { weather_datm.WeatherCodeDay = match_results[4][1]; weather_datm.WeatherDay = match_results[4][2]; weather_datm.WeatherCodeNight = match_results[5][1]; weather_datm.WeatherNight = match_results[5][2]; }
                 }
                 else
                     succeed = false;
@@ -579,7 +621,8 @@ std::wstring DataApiWeatherComCnSpider::GetTemprature(EWeatherInfoType type)
         break;
 
     case EWeatherInfoType::WEATHER_TODAY:
-        oss << _weatherTD.TemperatureNight << L"℃~" << _weatherTD.TemperatureDay << L"℃";
+        oss << _weatherTD.TemperatureNight << L"℃";
+        if (_weatherTD.TemperatureDay != _weatherTD.TemperatureNight) oss << L"~" << _weatherTD.TemperatureDay << L"℃";
         break;
 
     case EWeatherInfoType::WEATHER_TOMMROW:
@@ -587,6 +630,8 @@ std::wstring DataApiWeatherComCnSpider::GetTemprature(EWeatherInfoType type)
         break;
 
     case EWeatherInfoType::WEATHER_DAY_AFTER_TOMMROW:
+        if (!_weatherDATM.TemperatureNight.empty() && !_weatherDATM.TemperatureDay.empty()) oss << _weatherDATM.TemperatureNight << L"℃~" << _weatherDATM.TemperatureDay << L"℃";
+        break;
     default:
         break;
     }
@@ -619,6 +664,9 @@ std::wstring DataApiWeatherComCnSpider::GetWeatherText(EWeatherInfoType type)
         break;
 
     case EWeatherInfoType::WEATHER_DAY_AFTER_TOMMROW:
+        if (_weatherDATM.WeatherDay == _weatherDATM.WeatherNight) oss << _weatherDATM.WeatherDay;
+        else oss << _weatherDATM.WeatherDay << L"转" << _weatherDATM.WeatherNight;
+        break;
     default:
         break;
     }
@@ -637,6 +685,7 @@ std::wstring DataApiWeatherComCnSpider::GetWeatherCode(EWeatherInfoType type)
     case EWeatherInfoType::WEATHER_TOMMROW:
         return _weatherTM.WeatherCodeDay;
     case EWeatherInfoType::WEATHER_DAY_AFTER_TOMMROW:
+        return _weatherDATM.WeatherCodeDay;
     default:
         return L"";
     }
@@ -644,32 +693,36 @@ std::wstring DataApiWeatherComCnSpider::GetWeatherCode(EWeatherInfoType type)
 
 bool DataApiWeatherComCnSpider::UpdateWeather()
 {
-    const auto &currunt_city = WeatherCDataManager::Instance().GetCurrentCityInfo();
-
-    bool succeed = true;
-    succeed &= QueryRealtimeWeather(currunt_city.CityNO);
-    succeed &= QueryWeatherAlerts(currunt_city.CityNO);
-    succeed &= QueryForecastWeather(currunt_city.CityNO);
-
-    return succeed;
+    const auto city = WeatherCDataManager::Instance().GetCurrentCityInfo();
+    const auto type = WeatherCDataManager::Instance().GetConfig().m_wit;
+    if (_dataCity != city.CityNO) { _realtimeWeather = {}; _weatherTD = {}; _weatherTM = {}; _weatherDATM = {}; _weatherAlerts.clear(); _dataCity = city.CityNO; }
+    const bool realtime = QueryRealtimeWeather(city.CityNO);
+    const bool forecast = QueryForecastWeather(city.CityNO);
+    if (WeatherCDataManager::Instance().GetConfig().m_show_weather_alerts) QueryWeatherAlerts(city.CityNO);
+    const bool success = type == EWeatherInfoType::WEATHER_REALTIME ? realtime : forecast;
+    _lastError = success ? L"" : L"中国天气网未返回完整的天气数据。";
+    return success;
 }
 
-std::wstring DataApiWeatherComCnSpider::GetLastError()
-{
-    return L"";
-}
+std::wstring DataApiWeatherComCnSpider::GetLastError() { return _lastError; }
 
 bool DataApiWeatherComCnSpider::QueryRealtimeWeather(const std::wstring &query)
 {
-    return wccs::QueryRealTimeWeather(query, _realtimeWeather);
+    SRealTimeWeather data;
+    if (!wccs::QueryRealTimeWeather(query, data)) return false;
+    _realtimeWeather = std::move(data); return true;
 }
 
 bool DataApiWeatherComCnSpider::QueryForecastWeather(const std::wstring &query)
 {
-    return wccs::QueryForecastWeather(query, _weatherTD, _weatherTM);
+    SWeatherInfo td, tm, datm;
+    if (!wccs::QueryForecastWeather(query, td, tm, datm)) return false;
+    _weatherTD = std::move(td); _weatherTM = std::move(tm); _weatherDATM = std::move(datm); return true;
 }
 
 bool DataApiWeatherComCnSpider::QueryWeatherAlerts(const std::wstring &query)
 {
-    return wccs::QueryWeatherAlerts(query, _weatherAlerts);
+    WeatherAlertList alerts;
+    if (!wccs::QueryWeatherAlerts(query, alerts)) return false;
+    _weatherAlerts = std::move(alerts); return true;
 }

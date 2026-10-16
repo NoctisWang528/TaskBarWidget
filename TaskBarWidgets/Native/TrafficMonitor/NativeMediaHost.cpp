@@ -4,6 +4,7 @@
 #include "MediaNavigationPolicy.h"
 #include "TrafficMonitor.h"
 #include "NativeSettingsBridge.h"
+#include "NativeWeatherBridge.h"
 #include "PluginSettingsBridge.h"
 #include <WebView2.h>
 #include <dcomp.h>
@@ -120,6 +121,26 @@ struct NativeMediaHost::Impl : std::enable_shared_from_this<NativeMediaHost::Imp
         { reply.SetNamedValue(L"success",JsonValue::CreateBooleanValue(false)); reply.SetNamedValue(L"error",JsonValue::CreateStringValue(error.message())); Log(L"Native settings failed.",error.code()); }
         if(!reply.GetNamedBoolean(L"success",false))
         {try {reply.SetNamedValue(L"payload",NativeSettingsBridge().Describe());} catch(...) {Log(L"Could not read native settings after failure.",E_FAIL);}}
+        Send(reply);
+    }
+    void WeatherCommand(const JsonObject& request)
+    {
+        auto reply = Command(L"weatherResult");
+        reply.SetNamedValue(L"requestId", JsonValue::CreateStringValue(request.GetNamedString(L"requestId", L"")));
+        try {
+            const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+            if (!NativeSettingsValidation::Unexpired(request.GetNamedNumber(L"expiresAt", 0), now)) throw std::invalid_argument("Weather request expired; retry.");
+            reply.SetNamedValue(L"payload", NativeWeatherBridge::Handle(request.GetNamedObject(L"payload")));
+            reply.SetNamedValue(L"success", JsonValue::CreateBooleanValue(true));
+        }
+        catch (const std::exception& error) {
+            reply.SetNamedValue(L"success", JsonValue::CreateBooleanValue(false));
+            reply.SetNamedValue(L"error", JsonValue::CreateStringValue(winrt::to_hstring(error.what())));
+        }
+        catch (...) {
+            reply.SetNamedValue(L"success", JsonValue::CreateBooleanValue(false));
+            reply.SetNamedValue(L"error", JsonValue::CreateStringValue(L"Weather request could not be processed."));
+        }
         Send(reply);
     }
     void TrafficHistory(const JsonObject& request)
@@ -601,6 +622,7 @@ struct NativeMediaHost::Impl : std::enable_shared_from_this<NativeMediaHost::Imp
                 else if(type==L"error") Failure(message.GetNamedString(L"message",L"").c_str(),E_FAIL);
                 else if(type==L"command" && (message.GetNamedString(L"action",L"")==L"getNativeSettings" || message.GetNamedString(L"action",L"")==L"applyNativeSettings")) NativeSettings(message);
                 else if(type==L"command" && message.GetNamedString(L"action",L"")==L"getTrafficHistory") TrafficHistory(message);
+                else if(type==L"command" && message.GetNamedString(L"action",L"")==L"weatherCommand") WeatherCommand(message);
                 else if(type==L"command" && message.GetNamedString(L"action",L"")==L"openMonitorSettings")
                     Send(Command(L"openSettings"));
                 else if(type==L"command" && message.GetNamedString(L"action",L"")==L"showMedia") state.manual=2;

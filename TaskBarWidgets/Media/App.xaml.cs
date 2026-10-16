@@ -86,6 +86,7 @@ public partial class App : System.Windows.Application
         {
             case "nativeSettings": _nativeSettings?.Receive(command); break;
             case "trafficHistory": _nativeSettings?.Receive(command); break;
+            case "weatherResult": _nativeSettings?.Receive(command); break;
             case "shutdown":
                 _ = Dispatcher.BeginInvoke(() => TaskObserver.Observe(ShutdownAsync(), "helper shutdown"));
                 break;
@@ -135,6 +136,9 @@ public partial class App : System.Windows.Application
             case "getNativeSettings": return await GetNativeSettingsAsync();
             case "applyNativeSettings": return await ApplyNativeSettingsAsync(payload);
             case "getTrafficHistory": return await GetTrafficHistoryAsync(token);
+            case "weatherCommand":
+                if (_nativeSettings is null) throw new InvalidOperationException("天气服务尚未连接主程序。");
+                return await _nativeSettings.RequestAsync("weatherCommand", payload.Clone(), token);
             case "getMediaSettings": return SettingsService().ReadServiceSettings(Settings);
             case "getFonts": return FontCatalogService.GetOptions();
             case "applyMediaSettings": return SettingsService().ApplyServiceSettings(Settings, payload);

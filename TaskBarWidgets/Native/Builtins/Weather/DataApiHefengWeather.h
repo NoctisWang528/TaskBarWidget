@@ -7,6 +7,7 @@ public:
     struct Config
     {
         std::wstring AppKey;
+        std::wstring ApiHost;
 
         bool ShowRealtimeTemperatureFeelsLike{ false };
         bool ShowRealtimeWind{ true };
@@ -95,5 +96,5 @@ protected:
     bool _airQualityDataOutdated{ true };
     bool _alertsDataOutdated{ true };
 
-    std::wstring _lastError;
+    std::wstring _lastError, _dataCity;
 };

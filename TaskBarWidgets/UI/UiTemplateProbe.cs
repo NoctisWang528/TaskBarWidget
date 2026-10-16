@@ -25,6 +25,7 @@ internal static class UiTemplateProbe
         object? layoutChecks = null;
         object? audioControls = null;
         object? heatmapChecks = null;
+        object? weatherControls = null;
         string? error = null;
         try
         {
@@ -78,6 +79,7 @@ internal static class UiTemplateProbe
             cardLifecycle["disposeDuringHide"] = true;
             cards = null;
             audioControls = await CardGroup.ProbeAudioControlsAsync();
+            weatherControls = await SettingsWindow.ProbeWeatherControlsAsync();
             GetWindowThreadProcessId(GetForegroundWindow(), out var foregroundProcess);
             if (activated || foregroundProcess == Environment.ProcessId) throw new InvalidOperationException("Probe unexpectedly activated one of its windows.");
         }
@@ -87,7 +89,7 @@ internal static class UiTemplateProbe
             cards?.Dispose(); settings?.Shutdown();
             var resultIndex = Array.IndexOf(args, "--result");
             var result = resultIndex >= 0 && resultIndex + 1 < args.Length ? args[resultIndex + 1] : Path.Combine(AppContext.BaseDirectory, "template-probe.json");
-            File.WriteAllText(result, JsonSerializer.Serialize(new { success = error is null, error, checks, cardLifecycle, audioControls, heatmapChecks, layoutChecks, probeActivated = activated, externalForegroundChanged = GetForegroundWindow() != before }, new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(result, JsonSerializer.Serialize(new { success = error is null, error, checks, cardLifecycle, audioControls, weatherControls, heatmapChecks, layoutChecks, probeActivated = activated, externalForegroundChanged = GetForegroundWindow() != before }, new JsonSerializerOptions { WriteIndented = true }));
             Environment.ExitCode = error is null ? 0 : 1;
             app.Exit();
         }

@@ -15,6 +15,7 @@ if (& git -C $repoRoot status --porcelain --untracked-files=normal) { throw 'Com
 $releaseRoot = Join-Path $productRoot "artifacts\releases\$version"
 if (Test-Path -LiteralPath $releaseRoot) { throw 'Release staging already exists; inspect it before packaging again.' }
 $packageName = "TaskBarWidgets-$version-win-x64"
+$privateIni = @('WeatherPro.ini', 'Battery.dll.ini', 'PowerMonPlugin.dll.ini')
 $stage = Join-Path $releaseRoot $packageName
 New-Item -ItemType Directory -Path $stage | Out-Null
 # Only runtime roots are selected. Diagnostics and acceptance screenshots remain local.
@@ -27,7 +28,7 @@ foreach ($directory in @('Media','UI','language','licenses')) {
     foreach ($file in Get-ChildItem -LiteralPath $from -File -Recurse) {
         if ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Linked package inputs are not allowed.' }
         $relative = [IO.Path]::GetRelativePath($source, $file.FullName)
-        if ($file.Extension -in @('.log','.pdb','.dmp','.mdmp','.etl','.bak') -or $file.Name -match '\.log($|\.)' -or
+        if ($file.Name -in $privateIni -or $file.Extension -in @('.log','.pdb','.dmp','.mdmp','.etl','.bak') -or $file.Name -match '\.log($|\.)' -or
             $file.Name -match '^(config\.ini|global_cfg\.ini|history_traffic\.|media-settings\.json|ui-.*check\.json|template-probe\.json)' -or
             $relative -match '(^|\\)(WebView2|User Data|Cache|logs|backups|ui-layout-check|ui-heatmap-check)(\\|$)') { continue }
         $destination = Join-Path $stage $relative
@@ -51,7 +52,7 @@ TaskBarWidgets $version — Windows 11 x64
 $manifest = [ordered]@{ version = $version; sourceCommit = $commit; sourceUrl = "https://github.com/NoctisWang528/TaskBarWidget/tree/$version"; architecture = 'win-x64' }
 $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $stage 'release-manifest.json') -Encoding utf8
 $forbidden = @(Get-ChildItem -LiteralPath $stage -File -Recurse | Where-Object {
-    $_.Name -match '^(config\.ini|global_cfg\.ini|history_traffic\..*|media-settings\.json|ChineseConverter\.dll)$' -or $_.Name -match '\.log($|\.)' -or $_.Extension -in @('.log','.pdb','.dmp','.mdmp','.db','.sqlite')
+    $_.Name -in $privateIni -or $_.Name -match '^(config\.ini|global_cfg\.ini|history_traffic\..*|media-settings\.json|ChineseConverter\.dll)$' -or $_.Name -match '\.log($|\.)' -or $_.Extension -in @('.log','.pdb','.dmp','.mdmp','.db','.sqlite')
 })
 if ($forbidden.Count) { throw 'Personal data, diagnostics or a removed dependency was found in the release package.' }
 $zip = Join-Path $releaseRoot ($packageName + '.zip')

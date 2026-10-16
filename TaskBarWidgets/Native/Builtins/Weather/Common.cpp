@@ -51,7 +51,7 @@ std::wstring WeatherCCommon::URLEncode(const std::wstring& wstr)
             result.push_back(static_cast<wchar_t>(ch));
         else
         {
-            swprintf_s(buff, L"%%%x", static_cast<unsigned char>(ch));
+            swprintf_s(buff, L"%%%02X", static_cast<unsigned char>(ch));
             result += buff;
         }
     }
@@ -61,15 +61,25 @@ std::wstring WeatherCCommon::URLEncode(const std::wstring& wstr)
 static std::atomic<bool> weather_stopping{false};
 void WeatherCCommon::StopRequests() { weather_stopping = true; }
 
-bool WeatherCCommon::GetUrl(const wchar_t* url, const wchar_t* headers, std::wstring& content)
+static thread_local DWORD weather_http_status{}, weather_transport_error{};
+unsigned long WeatherCCommon::LastHttpStatus() { return weather_http_status; }
+unsigned long WeatherCCommon::LastTransportError() { return weather_transport_error; }
+#ifdef TBW_WEATHER_TESTS
+static WeatherCCommon::TestTransport test_transport{};
+void WeatherCCommon::SetTestTransport(TestTransport transport) { test_transport = transport; }
+#endif
+bool WeatherCCommon::GetUrl(const wchar_t* url, const wchar_t* headers, std::wstring& content, bool allow_redirects)
 {
-    content.clear();
+    content.clear(); weather_http_status = weather_transport_error = 0;
+#ifdef TBW_WEATHER_TESTS
+    if (test_transport) return test_transport(url, headers, content, allow_redirects);
+#endif
     if (weather_stopping) return false;
     URL_COMPONENTS parts{sizeof(parts)};
     parts.dwHostNameLength = parts.dwUrlPathLength = parts.dwExtraInfoLength = static_cast<DWORD>(-1);
-    if (!WinHttpCrackUrl(url, 0, 0, &parts)) return false;
+    if (!WinHttpCrackUrl(url, 0, 0, &parts)) { weather_transport_error = GetLastError(); return false; }
     HINTERNET session = WinHttpOpen(L"TaskBarWidgets/1", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, nullptr, nullptr, 0);
-    if (!session) return false;
+    if (!session) { weather_transport_error = GetLastError(); return false; }
     WinHttpSetTimeouts(session, 3000, 3000, 3000, 3000);
     std::wstring host(parts.lpszHostName, parts.dwHostNameLength);
     std::wstring path(parts.lpszUrlPath, parts.dwUrlPathLength);
@@ -78,19 +88,24 @@ bool WeatherCCommon::GetUrl(const wchar_t* url, const wchar_t* headers, std::wst
     HINTERNET request = connection ? WinHttpOpenRequest(connection, L"GET", path.c_str(), nullptr,
         WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, parts.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0) : nullptr;
     bool good = false;
+    const auto started = GetTickCount64();
     std::string bytes;
     if (request)
     {
+        bool options_valid = true;
+        if (!allow_redirects) { DWORD disabled = WINHTTP_DISABLE_REDIRECTS; options_valid = WinHttpSetOption(request, WINHTTP_OPTION_DISABLE_FEATURE, &disabled, sizeof(disabled)) != FALSE; }
         DWORD decompression = WINHTTP_DECOMPRESSION_FLAG_GZIP | WINHTTP_DECOMPRESSION_FLAG_DEFLATE;
         WinHttpSetOption(request, WINHTTP_OPTION_DECOMPRESSION, &decompression, sizeof(decompression));
-        if (WinHttpSendRequest(request, headers, headers && *headers ? static_cast<DWORD>(-1) : 0, nullptr, 0, 0, 0)
+        if (options_valid && WinHttpSendRequest(request, headers, headers && *headers ? static_cast<DWORD>(-1) : 0, nullptr, 0, 0, 0)
             && WinHttpReceiveResponse(request, nullptr))
         {
             DWORD status{}, size = sizeof(status);
             good = WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
                 WINHTTP_HEADER_NAME_BY_INDEX, &status, &size, nullptr) && status == 200;
+            weather_http_status = status;
             while (good && !weather_stopping)
             {
+                if (GetTickCount64() - started > 10000) { SetLastError(ERROR_TIMEOUT); good = false; break; }
                 char buffer[8192]; DWORD received{};
                 if (!WinHttpReadData(request, buffer, sizeof(buffer), &received)) { good = false; break; }
                 if (!received) break;
@@ -100,6 +115,7 @@ bool WeatherCCommon::GetUrl(const wchar_t* url, const wchar_t* headers, std::wst
         }
         WinHttpCloseHandle(request);
     }
+    if (!good && !weather_http_status) weather_transport_error = GetLastError();
     if (connection) WinHttpCloseHandle(connection);
     WinHttpCloseHandle(session);
     good = good && !weather_stopping;

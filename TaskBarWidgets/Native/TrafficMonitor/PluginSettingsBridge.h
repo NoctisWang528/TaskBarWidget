@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "PluginIniOptions.h"
+#include "../Builtins/Weather/WeatherService.h"
 #include "TrafficMonitor.h"
 #include <winrt/Windows.Data.Json.h>
 #include <winrt/Windows.Foundation.Collections.h>
@@ -68,6 +69,8 @@ class PluginSettingsBridge
     }
     static void Replace(const std::wstring& path, const std::string& expected, const std::string& bytes)
     {
+        std::unique_lock<std::mutex> weatherLock(WeatherService::ConfigurationMutex(), std::defer_lock);
+        if (_wcsicmp(std::filesystem::path(path).filename().c_str(), L"WeatherPro.ini") == 0) weatherLock.lock();
         if (Read(path) != expected) throw std::runtime_error("Plugin options changed outside this page. Reload settings and try again.");
         static unsigned sequence{};
         const std::wstring temporary = path + L".TaskBarWidgets-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(++sequence) + L".tmp";
@@ -91,7 +94,7 @@ class PluginSettingsBridge
         descriptor.SetNamedValue(L"key", Text(field)); descriptor.SetNamedValue(L"label", Text(label));
         descriptor.SetNamedValue(L"group", Text(id == L"battery.dll" ? L"builtins.battery" : id == L"powermonplugin.dll" ? L"builtins.power" : L"builtins.weather")); descriptor.SetNamedValue(L"type", Text(L"boolean"));
         descriptor.SetNamedValue(L"value", JsonValue::CreateBooleanValue(token.value));
-        descriptor.SetNamedValue(L"restartRequired", JsonValue::CreateBooleanValue(true));
+        descriptor.SetNamedValue(L"restartRequired", JsonValue::CreateBooleanValue(id != L"weatherpro.dll"));
         list.Append(descriptor); descriptors.Append(descriptor); options.push_back({field, file, section, key});
     }
     void Number(JsonArray& list, size_t file, const std::wstring& id, const char* section, const char* key, const wchar_t* label, int minimum, int maximum)
@@ -107,7 +110,7 @@ class PluginSettingsBridge
         descriptor.SetNamedValue(L"group", Text(id == L"battery.dll" ? L"builtins.battery" : id == L"powermonplugin.dll" ? L"builtins.power" : L"builtins.weather"));
         descriptor.SetNamedValue(L"type", Text(L"number")); descriptor.SetNamedValue(L"value", JsonValue::CreateNumberValue(number));
         descriptor.SetNamedValue(L"min", JsonValue::CreateNumberValue(minimum)); descriptor.SetNamedValue(L"max", JsonValue::CreateNumberValue(maximum));
-        descriptor.SetNamedValue(L"restartRequired", JsonValue::CreateBooleanValue(true));
+        descriptor.SetNamedValue(L"restartRequired", JsonValue::CreateBooleanValue(id != L"weatherpro.dll"));
         list.Append(descriptor); descriptors.Append(descriptor); options.push_back({field, file, section, key, minimum, maximum, true});
     }
     void String(JsonArray& list, size_t file, const std::wstring& id, const char* section, const char* key, const wchar_t* label, int limit)
@@ -119,7 +122,7 @@ class PluginSettingsBridge
         descriptor.SetNamedValue(L"key", Text(field)); descriptor.SetNamedValue(L"label", Text(label));
         descriptor.SetNamedValue(L"group", Text(id == L"powermonplugin.dll" ? L"builtins.power" : L"builtins.weather"));
         descriptor.SetNamedValue(L"type", Text(L"text")); descriptor.SetNamedValue(L"value", Text(winrt::to_hstring(token.value).c_str()));
-        descriptor.SetNamedValue(L"restartRequired", JsonValue::CreateBooleanValue(true));
+        descriptor.SetNamedValue(L"restartRequired", JsonValue::CreateBooleanValue(id != L"weatherpro.dll"));
         list.Append(descriptor); descriptors.Append(descriptor); options.push_back({field, file, section, key, 0, limit, false, true});
     }
 public:
@@ -251,7 +254,7 @@ public:
                         Boolean(optionFields, file, id, "hfw", "show_rt_air_quality_pm10", L"显示 PM10");
                         Boolean(optionFields, file, id, "hfw", "show_weather_alert", L"显示和风天气预警");
                     }
-                    note = optionFields.Size() ? L"保存后重启应用生效。天气服务凭据保留在本地 WeatherPro.ini，不会传入设置网页。" : L"当前配置没有已知选项。";
+                    note = optionFields.Size() ? (id == L"weatherpro.dll" ? L"保存后自动刷新。城市与和风连接在天气专用设置中配置，已有密钥不会返回界面。" : L"保存后重启应用生效。") : L"当前配置没有已知选项。";
                 }
                 catch (...) { note = L"当前配置缺失或格式不支持编辑。"; }
             }

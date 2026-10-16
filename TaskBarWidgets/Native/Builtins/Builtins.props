@@ -92,6 +92,12 @@
       <ObjectFileName>$(IntDir)Builtins-Weather-WeatherProItem.obj</ObjectFileName>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
+    <ClCompile Include="..\Builtins\Weather\WeatherService.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Builtins\Weather;$(ProjectDir)..\Builtins;$(ProjectDir)..\Builtins\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ObjectFileName>$(IntDir)Builtins-Weather-WeatherService.obj</ObjectFileName>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
     <ClCompile Include="..\Builtins\Weather\DataManager.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories>$(ProjectDir)..\Builtins\Weather;$(ProjectDir)..\Builtins;$(ProjectDir)..\Builtins\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>

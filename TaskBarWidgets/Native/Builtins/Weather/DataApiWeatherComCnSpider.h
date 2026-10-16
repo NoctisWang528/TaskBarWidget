@@ -61,6 +61,7 @@ public:
 
 protected:
     SRealTimeWeather _realtimeWeather;
-    SWeatherInfo _weatherTD, _weatherTM;
+    SWeatherInfo _weatherTD, _weatherTM, _weatherDATM;
+    std::wstring _lastError, _dataCity;
     WeatherAlertList _weatherAlerts;
 };

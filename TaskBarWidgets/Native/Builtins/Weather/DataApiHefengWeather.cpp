@@ -2,6 +2,7 @@
 #include "DataApiHefengWeather.h"
 
 #include "Common.h"
+#include "WeatherService.h"
 #include <afxinet.h>
 #include <utilities/yyjson/yyjson.h>
 #include <unordered_map>
@@ -10,16 +11,19 @@
 
 #include "DataManager.h"
 
-#define CHECK_KEY if (config.AppKey.empty()) {\
-    _lastError = L"no application key";\
+#define CHECK_KEY const auto normalized_host = WeatherService::NormalizeApiHost(config.ApiHost);\
+if (config.AppKey.empty() || !normalized_host || config.AppKey.find_first_of(L"\r\n \t") != std::wstring::npos) {\
+    _lastError = L"和风天气 API Host 或 API Key 配置无效。";\
     return false;\
-}
+}\
+config.ApiHost = *normalized_host
 
 namespace hf
 {
-    bool call_internet(const CString &url, std::wstring &content)
+    std::wstring short_time(const std::wstring& value) { return value.size() >= 16 ? value.substr(11, 5) : L""; }
+    bool call_internet(const CString &url, const std::wstring& key, std::wstring &content)
     {
-        return WeatherCCommon::GetUrl(url, nullptr, content);
+        return WeatherCCommon::GetUrl(url, (L"X-QW-Api-Key: " + key + L"\r\n").c_str(), content, false);
 }
 
     std::wstring get_json_str_value(yyjson_val *j_val, const char *key)
@@ -29,14 +33,14 @@ namespace hf
         else return WeatherCCommon::StrToUnicode(yyjson_get_str(obj), true);
     }
 
-    std::wstring query_func_frame(const CString &url, std::function<void(yyjson_val*)> func)
+    std::wstring query_func_frame(const CString &url, const std::wstring& key, std::function<void(yyjson_val*)> func)
     {
         const auto &dm = WeatherCDataManager::Instance();
 
         std::wstring error;
 
         std::wstring content;
-        auto succeed = call_internet(url, content);
+        auto succeed = call_internet(url, key, content);
 
         if (succeed && !content.empty())
         {
@@ -47,13 +51,15 @@ namespace hf
                 auto *root = yyjson_doc_get_root(doc);
 
                 auto code = get_json_str_value(root, "code");
-                if (std::stoi(code) == 200)
+                if (code == L"200")
                 {
                     func(root);
                 }
-                else
-                    //error = L"Error code: " + code;
-                    error = dm.StringRes(IDS_HFW_ERROR_CODE) + code.c_str();
+                else {
+                    if (code.size() == 3 && code.find_first_not_of(L"0123456789") == std::wstring::npos)
+                        error = L"和风天气服务返回代码 " + code + L"。";
+                    else error = L"和风天气响应格式无效。";
+                }
             }
             else
                 //error = L"Invalid json contents.";
@@ -63,7 +69,7 @@ namespace hf
         }
         else
             //error = L"Failed to access the Internet.";
-            error = dm.StringRes(IDS_HFW_NO_INTERNET);
+            error = WeatherCCommon::LastHttpStatus() ? L"和风天气返回 HTTP " + std::to_wstring(WeatherCCommon::LastHttpStatus()) + L"。" : L"和风天气连接失败或超时。";
 
         return error;
     }
@@ -80,8 +86,8 @@ bool DataApiHefengWeather::QueryCity(const std::wstring &query, CityInfoList &in
     auto queryEncoded = WeatherCCommon::URLEncode(query);
 
     CString url;
-    url.Format(L"https://geoapi.qweather.com/v2/city/lookup?key=%s&location=%s&lang=%s",
-               config.AppKey.c_str(),
+    url.Format(L"https://%s/geo/v2/city/lookup?location=%s&lang=%s",
+               config.ApiHost.c_str(),
                queryEncoded.c_str(),
                dm.StringRes(IDS_HFW_LANG).GetString());
 
@@ -103,12 +109,10 @@ bool DataApiHefengWeather::QueryCity(const std::wstring &query, CityInfoList &in
             cities.push_back(get_city_info(yyjson_arr_get(loc_arr, i)));
     };
 
-    auto err = hf::query_func_frame(url, func);
+    auto err = hf::query_func_frame(url, config.AppKey, func);
     if (err.empty())
         info = cities;
-    else
-        _lastError = err;
-
+    _lastError = err;
     return err.empty();
 }
 
@@ -116,21 +120,6 @@ std::wstring DataApiHefengWeather::GetWeatherInfoSummary()
 {
     const auto &app_config = WeatherCDataManager::Instance().GetConfig();
     const auto &city_info = WeatherCDataManager::Instance().GetCurrentCityInfo();
-
-    std::wostringstream oss_err;
-
-    if (config.ShowAirQuality && _airQualityDataOutdated)
-    {
-        if (!QueryRealtimeAirQuality(city_info.CityNO))
-            oss_err << _lastError;
-    }
-    if (config.ShowWeatherAlert && _alertsDataOutdated)
-    {
-        if (!QueryWeatherAlerts(city_info.CityNO))
-            oss_err << std::endl << _lastError;
-    }
-
-    _lastError = oss_err.str();
 
     const auto &dm = WeatherCDataManager::Instance();
     CString tmp_str;
@@ -301,9 +290,12 @@ bool DataApiHefengWeather::UpdateWeather()
 
     const auto &currunt_city = WeatherCDataManager::Instance().GetCurrentCityInfo();
 
-    if (!QueryRealtimeWeather(currunt_city.CityNO))
+    if (_dataCity != currunt_city.CityNO) { _realtimeWeather = {}; _forcastWeatherTD = {}; _forcastWeatherTM = {}; _forcastWeatherDATM = {}; _realtimeAirQuality = {}; _weatherAlerts.clear(); _dataCity = currunt_city.CityNO; }
+    const bool realtime = QueryRealtimeWeather(currunt_city.CityNO);
+    if (!realtime)
         oss << L"[RealtimeWeather]" << _lastError << std::endl;
-    if (!QueryForecastWeather(currunt_city.CityNO))
+    const bool forecast = QueryForecastWeather(currunt_city.CityNO);
+    if (!forecast)
         oss << L"[ForcastWeather]" << _lastError << std::endl;
     if (config.ShowAirQuality && !QueryRealtimeAirQuality(currunt_city.CityNO))
         oss << L"[RealtimeAirQuality]" << _lastError << std::endl;
@@ -312,7 +304,7 @@ bool DataApiHefengWeather::UpdateWeather()
 
     _lastError = oss.str();
 
-    return _lastError.empty();
+    return WeatherCDataManager::Instance().GetConfig().m_wit == EWeatherInfoType::WEATHER_REALTIME ? realtime : forecast;
 }
 
 std::wstring DataApiHefengWeather::GetLastError()
@@ -327,8 +319,8 @@ bool DataApiHefengWeather::QueryRealtimeWeather(const std::wstring &query)
     const auto &dm = WeatherCDataManager::Instance();
 
     CString url;
-    url.Format(L"https://devapi.qweather.com/v7/weather/now?key=%s&location=%s&lang=%s",
-               config.AppKey.c_str(),
+    url.Format(L"https://%s/v7/weather/now?location=%s&lang=%s",
+               config.ApiHost.c_str(),
                query.c_str(),
                dm.StringRes(IDS_HFW_LANG).GetString());
 
@@ -338,7 +330,7 @@ bool DataApiHefengWeather::QueryRealtimeWeather(const std::wstring &query)
 
         data.Temperature = hf::get_json_str_value(now_obj, "temp");
         data.TemperatureFeelsLike = hf::get_json_str_value(now_obj, "feelsLike");
-        data.UpdateTime = hf::get_json_str_value(now_obj, "obsTime").substr(11, 5);
+        data.UpdateTime = hf::short_time(hf::get_json_str_value(now_obj, "obsTime"));
         data.WeatherText = hf::get_json_str_value(now_obj, "text");
         data.WeatherCode = hf::get_json_str_value(now_obj, "icon");
         data.WindDirection = hf::get_json_str_value(now_obj, "windDir");
@@ -347,12 +339,11 @@ bool DataApiHefengWeather::QueryRealtimeWeather(const std::wstring &query)
         data.Humidity = hf::get_json_str_value(now_obj, "humidity");
     };
 
-    auto err = hf::query_func_frame(url, func);
+    auto err = hf::query_func_frame(url, config.AppKey, func);
+    if (err.empty() && (data.Temperature.empty() || data.WeatherCode.empty())) err = L"和风天气实时数据不完整。";
     if (err.empty())
         _realtimeWeather = data;
-    else
-        _lastError = err;
-
+    _lastError = err;
     return err.empty();
 }
 
@@ -363,8 +354,8 @@ bool DataApiHefengWeather::QueryRealtimeAirQuality(const std::wstring &query)
     const auto &dm = WeatherCDataManager::Instance();
 
     CString url;
-    url.Format(L"https://devapi.qweather.com/v7/air/now?key=%s&location=%s&lang=%s",
-               config.AppKey.c_str(),
+    url.Format(L"https://%s/v7/air/now?location=%s&lang=%s",
+               config.ApiHost.c_str(),
                query.c_str(),
                dm.StringRes(IDS_HFW_LANG).GetString());
 
@@ -372,7 +363,7 @@ bool DataApiHefengWeather::QueryRealtimeAirQuality(const std::wstring &query)
     auto func = [&data](yyjson_val *j_val) {
         auto *now_obj = yyjson_obj_get(j_val, "now");
 
-        data.PublishTime = hf::get_json_str_value(now_obj, "pubTime").substr(11, 5);
+        data.PublishTime = hf::short_time(hf::get_json_str_value(now_obj, "pubTime"));
         data.AQI = hf::get_json_str_value(now_obj, "aqi");
         data.Level = hf::get_json_str_value(now_obj, "level");
         data.Category = hf::get_json_str_value(now_obj, "category");
@@ -380,15 +371,13 @@ bool DataApiHefengWeather::QueryRealtimeAirQuality(const std::wstring &query)
         data.PM10 = hf::get_json_str_value(now_obj, "pm10");
     };
 
-    auto err = hf::query_func_frame(url, func);
+    auto err = hf::query_func_frame(url, config.AppKey, func);
     if (err.empty())
     {
         _realtimeAirQuality = data;
         _airQualityDataOutdated = false;
     }
-    else
-        _lastError = err;
-
+    _lastError = err;
     return err.empty();
 }
 
@@ -399,8 +388,8 @@ bool DataApiHefengWeather::QueryForecastWeather(const std::wstring &query)
     const auto &dm = WeatherCDataManager::Instance();
 
     CString url;
-    url.Format(L"https://devapi.qweather.com/v7/weather/3d?key=%s&location=%s&lang=%s",
-               config.AppKey.c_str(),
+    url.Format(L"https://%s/v7/weather/3d?location=%s&lang=%s",
+               config.ApiHost.c_str(),
                query.c_str(),
                dm.StringRes(IDS_HFW_LANG).GetString());
 
@@ -424,16 +413,15 @@ bool DataApiHefengWeather::QueryForecastWeather(const std::wstring &query)
         get_daily_info(yyjson_arr_get(daily_arr, 2), datm);
     };
 
-    auto err = hf::query_func_frame(url, func);
+    auto err = hf::query_func_frame(url, config.AppKey, func);
+    if (err.empty() && (td.TemperatureMin.empty() || td.TemperatureMax.empty() || tm.TemperatureMin.empty() || tm.TemperatureMax.empty() || datm.TemperatureMin.empty() || datm.TemperatureMax.empty())) err = L"和风天气三日预报不完整。";
     if (err.empty())
     {
         _forcastWeatherTD = td;
         _forcastWeatherTM = tm;
         _forcastWeatherDATM = datm;
     }
-    else
-        _lastError = err;
-
+    _lastError = err;
     return err.empty();
 }
 
@@ -444,8 +432,8 @@ bool DataApiHefengWeather::QueryWeatherAlerts(const std::wstring &query)
     const auto &dm = WeatherCDataManager::Instance();
 
     CString url;
-    url.Format(L"https://devapi.qweather.com/v7/warning/now?key=%s&location=%s&lang=%s",
-               config.AppKey.c_str(),
+    url.Format(L"https://%s/v7/warning/now?location=%s&lang=%s",
+               config.ApiHost.c_str(),
                query.c_str(),
                dm.StringRes(IDS_HFW_LANG).GetString());
 
@@ -463,7 +451,8 @@ bool DataApiHefengWeather::QueryWeatherAlerts(const std::wstring &query)
             alert.Text = hf::get_json_str_value(j_val, "text");
             alert.Severity = hf::get_json_str_value(j_val, "severity");
             alert.SeverityColor = hf::get_json_str_value(j_val, "severityColor");
-            alert.PublishTime = hf::get_json_str_value(j_val, "pubTime").substr(0, 16).replace(10, 1, L" ");
+            alert.PublishTime = hf::get_json_str_value(j_val, "pubTime");
+            if (alert.PublishTime.size() >= 16) alert.PublishTime = alert.PublishTime.substr(0, 16).replace(10, 1, L" ");
             return alert;
         };
 
@@ -471,14 +460,12 @@ bool DataApiHefengWeather::QueryWeatherAlerts(const std::wstring &query)
             data.push_back(get_alert_info(yyjson_arr_get(alert_arr, i)));
     };
 
-    auto err = hf::query_func_frame(url, func);
+    auto err = hf::query_func_frame(url, config.AppKey, func);
     if (err.empty())
     {
         _weatherAlerts = data;
         _alertsDataOutdated = false;
     }
-    else
-        _lastError = err;
-
+    _lastError = err;
     return err.empty();
 }

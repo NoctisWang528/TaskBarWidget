@@ -67,15 +67,17 @@ public:
     int RDPI(int pixel) const;
 
     void SetCurrentCityInfo(SCityInfo info);
-    const SCityInfo& GetCurrentCityInfo() const;
+    SCityInfo GetCurrentCityInfo() const;
 
     void UpdateWeather(WeatherInfoUpdatedCallback callback = nullptr);
 
     std::wstring GetWeatherTemperature() const;
     std::wstring GetTooptipInfo() const;
 
-    SConfiguration& GetConfig();
-    const SConfiguration& GetConfig() const;
+    SConfiguration GetConfig() const;
+    std::wstring ConfigPath() const;
+    void ReloadConfigs();
+    bool RefreshWeather();
 
     void LoadConfigs(const std::wstring &cfg_dir);
     void SaveConfigs() const;
@@ -89,7 +91,6 @@ public:
     std::shared_ptr<DataApiWeatherComCnSpider> m_api_wccs;
     std::shared_ptr<DataApiHefengWeather> m_api_hfw;
 private:
-    void _updateWeather(WeatherInfoUpdatedCallback callback = nullptr);
     HICON _getIcon();
 
     std::wstring _getWeatherTemperature() const;
@@ -97,8 +98,7 @@ private:
 
     void _setLangID(const std::wstring &cfg_dir);
 
-    std::thread m_worker;
-    std::atomic<bool> m_updating{false}, m_stopping{false};
+    mutable std::mutex m_state_mutex;
     mutable std::recursive_mutex m_cache_mutex;
     int m_dpi;
     mutable std::map<UINT, CString> m_string_resources;
@@ -119,5 +119,5 @@ private:
 
     SWeatherInfoCache m_weather_info_cache;
 
-    unsigned short m_lang_id;
+    std::atomic<unsigned short> m_lang_id;
 };

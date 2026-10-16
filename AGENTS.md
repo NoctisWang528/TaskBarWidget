@@ -14,6 +14,6 @@ Never replace the user's daily installation, change startup registration, or sta
 
 ## Git and releases
 
-The authorized remote is `NoctisWang528/TaskBarWidget`. On 2026-10-16 the user authorized updating documentation, untracking the three original reference trees while keeping local copies, committing/pushing accumulated product changes, generating a product icon, and publishing the first ZIP Release. This is not standing authorization for later pushes/releases or changes to repository visibility.
+The authorized remote is `NoctisWang528/TaskBarWidget`. On 2026-10-16 the user authorized updating documentation, untracking the three original reference trees while keeping local copies, committing/pushing accumulated product changes, generating a product icon, and publishing the first ZIP Release. The user subsequently authorized committing/pushing the weather configuration fix and publishing its new ZIP Release using the build-time version. These requests are not standing authorization for later pushes/releases or changes to repository visibility.
 
 Release versions use build time `yymmdd-hhmm` in Asia/Taipei. Build clean distributable packages without developer settings, logs, caches or secrets. Retain third-party licenses. Do not initialize child repositories or rewrite published history as part of routine cleanup.

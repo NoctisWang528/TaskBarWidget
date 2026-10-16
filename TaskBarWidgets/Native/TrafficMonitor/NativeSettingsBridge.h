@@ -3,6 +3,7 @@
 #include "NativeSettingsValidation.h"
 #include "PluginSettingsBridge.h"
 #include "TaskbarHelper.h"
+#include "../Builtins/Weather/WeatherService.h"
 #include <winrt/Windows.Data.Json.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <functional>
@@ -253,6 +254,12 @@ public:
             if(!applied) theApp.m_cfg_data=previous;
             pluginSettings.Rollback();
             throw;
+        }
+        for (const auto& pair : values) {
+            if (std::wstring_view(pair.Key()).starts_with(L"builtins.weatherpro.dll.")) {
+                WeatherService::Instance().StartRefresh();
+                break;
+            }
         }
     }
 };

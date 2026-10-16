@@ -14,5 +14,11 @@ public:
 
     // 解码gzip压缩的字节数据
     static void StopRequests();
-    static bool GetUrl(const wchar_t* url, const wchar_t* headers, std::wstring& content);
+    static bool GetUrl(const wchar_t* url, const wchar_t* headers, std::wstring& content, bool allow_redirects = true);
+    static unsigned long LastHttpStatus();
+    static unsigned long LastTransportError();
+#ifdef TBW_WEATHER_TESTS
+    using TestTransport = bool (*)(const wchar_t*, const wchar_t*, std::wstring&, bool);
+    static void SetTestTransport(TestTransport transport);
+#endif
 };

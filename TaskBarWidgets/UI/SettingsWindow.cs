@@ -86,8 +86,8 @@ public sealed partial class SettingsWindow : Window
             if (!_loaded && _connection.IsConnected) await GuardAsync(() => ReloadAsync());
         };
         _connection.ConnectionChanged += OnConnectionChanged;
-        AppWindow.Closing += (_, args) => { CancelModulePointerDrag(); if (!_shutdown) { args.Cancel = true; AppWindow.Hide(); Dismissed?.Invoke(); } };
-        Closed += (_, _) => { _closed = true; _lifetime.Cancel(); _connection.ConnectionChanged -= OnConnectionChanged; _lifetime.Dispose(); };
+        AppWindow.Closing += (_, args) => { CancelModulePointerDrag(); CancelWeatherPage(); if (!_shutdown) { args.Cancel = true; AppWindow.Hide(); Dismissed?.Invoke(); } };
+        Closed += (_, _) => { _closed = true; CancelWeatherPage(); _lifetime.Cancel(); _connection.ConnectionChanged -= OnConnectionChanged; _lifetime.Dispose(); };
         ShowPage("taskbar");
     }
 
@@ -97,7 +97,7 @@ public sealed partial class SettingsWindow : Window
         var item = _navigation.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(item => (string)item.Tag == page)
             ?? (NavigationViewItem)_navigation.MenuItems[0];
         _currentPage = (string)item.Tag;
-        if (_navigation.IsLoaded) _navigation.SelectedItem = item;
+        if (_navigation.IsLoaded) { _navigation.SelectedItem = item; if (_currentPage == "hardware" && _weatherPage is null) RenderPage(); }
         else RenderPage();
         _split.IsPaneOpen = false;
     }
@@ -126,7 +126,7 @@ public sealed partial class SettingsWindow : Window
     }
     private async Task ReloadAsync()
     {
-        if (_busy) return;
+        if (_busy || _weatherPage?.Committing == true) return;
         CancelModulePointerDrag();
         _busy = true; UpdateSaveStatus();
         var nativeRevision = _native.Capture(); var mediaRevision = _media.Capture();
@@ -151,7 +151,7 @@ public sealed partial class SettingsWindow : Window
     }
     private async Task SaveAsync()
     {
-        if (_busy || !_loaded) return;
+        if (_busy || !_loaded || _weatherPage?.Committing == true) return;
         if (_layout is not null && !_layout.Modules.Any(module => _layout.Enabled(module.Id))) { ShowError("请至少添加一个显示模块再应用。"); return; }
         CancelModulePointerDrag();
         _busy = true; UpdateSaveStatus();
@@ -173,13 +173,16 @@ public sealed partial class SettingsWindow : Window
     {
         var count = _native.Pending.Count + _media.Pending.Count;
         var empty = _loaded && _layout is not null && !_layout.Modules.Any(module => _layout.Enabled(module.Id));
-        _apply.IsEnabled = !_busy && count > 0 && !empty;
-        _saveStatus.Text = _busy ? "正在保存或读取；新的编辑会保留在草稿中…" : empty ? "请至少添加一个显示模块再应用。" : count > 0 ? $"{count} 项更改待应用" : "配置已同步";
+        var weatherSaving = _weatherPage?.Committing == true;
+        _apply.IsEnabled = !_busy && !weatherSaving && count > 0 && !empty;
+        _saveStatus.Text = _busy ? "正在保存或读取；新的编辑会保留在草稿中…" : weatherSaving ? "正在保存或刷新天气…" : empty ? "请至少添加一个显示模块再应用。" : count > 0 ? $"{count} 项更改待应用" : "配置已同步";
+        if (_weatherPage is not null) UpdateWeatherButtons(_weatherPage);
     }
     private void Changed() { if (_notice.Severity == InfoBarSeverity.Success) _notice.IsOpen = false; UpdateSaveStatus(); RenderPreview(); }
     private void RenderPage()
     {
         CancelModulePointerDrag();
+        CancelWeatherPage();
         _page.Children.Clear(); _preview = null; _split.IsPaneOpen = false;
         _heading.Text = _navigation.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(item => (string)item.Tag == _currentPage)?.Content?.ToString() ?? "设置";
         if (!_loaded) { _page.Children.Add(Copy("连接主程序后即可读取设置。")); return; }
@@ -192,8 +195,9 @@ public sealed partial class SettingsWindow : Window
         var groups = ((_schema["groups"] as JsonArray)?.OfType<JsonObject>() ?? []).Where(group => Text(group["page"]) == page && Text(group["id"]) != "items").OrderBy(group => Text(group["id"]) == "appearance" ? 0 : 1);
         foreach (var group in groups) {
             var fields = NativeFields().Where(field => Text(field["group"]) == Text(group["id"]) && Text(field["key"]) != "taskbar.horizontal_arrange").ToList();
-            if (fields.Count == 0) continue;
+            if (fields.Count == 0 && Text(group["id"]) != "builtins.weather") continue;
             if (Text(group["id"]) == "appearance") { RenderAppearanceGroup(fields); continue; }
+            if (Text(group["id"]) == "builtins.weather") { RenderWeatherSettings(fields); continue; }
             var content = Section(Text(group["label"]));
             content.Children.Add(ResponsiveFields(fields.Where(field => field["advanced"]?.ToString() != "true").Select(field => FieldEditor(field, _native))));
             var advanced = fields.Where(field => field["advanced"]?.ToString() == "true").ToList();

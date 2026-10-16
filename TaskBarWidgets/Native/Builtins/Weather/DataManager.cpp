@@ -3,6 +3,9 @@
 #include "resource.h"
 #include "SimpleIni.h"
 #include "Common.h"
+#include "WeatherService.h"
+#include <filesystem>
+#include <stdexcept>
 
 #include <sstream>
 #include <chrono>
@@ -605,10 +608,10 @@ namespace icon
     }
 }
 
-std::mutex g_weather_update_nutex;
+
 
 SConfiguration::SConfiguration() :
-    m_api_type(DataApiType::API_HefengWeather),
+    m_api_type(DataApiType::API_WeatherComCnSpider),
     m_wit(EWeatherInfoType::WEATHER_REALTIME),
     m_update_frequency(UpdateFrequency::UF_2T1H),
     m_icon_type(IconType::IT_WCC_BULE),
@@ -617,7 +620,8 @@ SConfiguration::SConfiguration() :
     m_show_brief_rt_weather_info(false),
     m_show_weather_alerts(true),
     m_show_brief_weather_alert_info(true),
-    m_show_error_info(false)
+    m_show_error_info(false),
+    m_double_click_action(0)
 {}
 
 
@@ -635,9 +639,6 @@ WeatherCDataManager::WeatherCDataManager()
 
 WeatherCDataManager::~WeatherCDataManager()
 {
-    m_stopping = true;
-    WeatherCCommon::StopRequests();
-    if (m_worker.joinable()) m_worker.join();
     for (const auto& entry : icon::icons) DestroyIcon(entry.second);
 }
 
@@ -683,56 +684,40 @@ int WeatherCDataManager::RDPI(int pixel) const
 
 void WeatherCDataManager::SetCurrentCityInfo(SCityInfo info)
 {
+    std::lock_guard<std::mutex> state_lock(m_state_mutex);
     m_currentCityInfo = info;
 }
 
-const SCityInfo& WeatherCDataManager::GetCurrentCityInfo() const
+SCityInfo WeatherCDataManager::GetCurrentCityInfo() const
 {
+    std::lock_guard<std::mutex> state_lock(m_state_mutex);
     return m_currentCityInfo;
 }
 
 DataApiPtr WeatherCDataManager::GetCurrentApi() const
 {
-    if (m_config.m_api_type == DataApiType::API_WeatherComCnSpider)
+    const auto config = GetConfig();
+    if (config.m_api_type == DataApiType::API_WeatherComCnSpider)
         return m_api_wccs;
-    else if (m_config.m_api_type == DataApiType::API_HefengWeather)
+    else if (config.m_api_type == DataApiType::API_HefengWeather)
         return m_api_hfw;
     else
         return nullptr;
 }
 
-void WeatherCDataManager::_updateWeather(WeatherInfoUpdatedCallback callback)
+bool WeatherCDataManager::RefreshWeather()
 {
-    std::lock_guard<std::mutex> guard(g_weather_update_nutex);
-
-    std::shared_ptr<DataAPI> current_api{ GetCurrentApi() };
-    if (current_api != nullptr)
-    {
-        for (int i = 0; i < 2 && !m_stopping; ++i)
-        {
-            if (current_api->UpdateWeather())
-                break;
-
-            for (int wait = 0; wait < 30 && !m_stopping; ++wait) std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-
-        RefreshWeatherInfoCache();
-
-        if (callback != nullptr)
-        {
-            callback(GetTooptipInfo());
-        }
-    }
+    auto api = GetCurrentApi();
+    if (!api || !api->UpdateWeather()) return false;
+    const auto text = _getWeatherTemperature();
+    if (text.empty() || text == L"℃" || text == L" ℃") return false;
+    RefreshWeatherInfoCache();
+    return true;
 }
 
-void WeatherCDataManager::UpdateWeather(WeatherInfoUpdatedCallback callback /* = nullptr */)
+void WeatherCDataManager::UpdateWeather(WeatherInfoUpdatedCallback)
 {
-    if (m_stopping || m_updating.exchange(true)) return;
-    if (m_worker.joinable()) m_worker.join();
-    m_worker = std::thread([this, callback] {
-        try { _updateWeather(callback); } catch (...) { /* Keep the last successful weather snapshot. */ }
-        m_updating = false;
-    });
+    WeatherService::Instance().StartRefresh();
 }
 
 std::wstring WeatherCDataManager::GetWeatherTemperature() const
@@ -747,14 +732,23 @@ std::wstring WeatherCDataManager::GetTooptipInfo() const
     return m_weather_info_cache.TooltipInfo;
 }
 
-SConfiguration& WeatherCDataManager::GetConfig()
+SConfiguration WeatherCDataManager::GetConfig() const
 {
+    std::lock_guard<std::mutex> state_lock(m_state_mutex);
     return m_config;
 }
 
-const SConfiguration& WeatherCDataManager::GetConfig() const
+std::wstring WeatherCDataManager::ConfigPath() const
 {
-    return m_config;
+    std::lock_guard<std::mutex> state_lock(m_state_mutex);
+    return m_config_file_path;
+}
+
+void WeatherCDataManager::ReloadConfigs()
+{
+    std::lock_guard<std::mutex> configuration_lock(WeatherService::ConfigurationMutex());
+    const auto path = ConfigPath();
+    if (!path.empty()) LoadConfigs(std::filesystem::path(path).parent_path().wstring());
 }
 
 void WeatherCDataManager::_setLangID(const std::wstring &cfg_dir)
@@ -794,32 +788,38 @@ void WeatherCDataManager::LoadConfigs(const std::wstring &cfg_dir)
 {
     _setLangID(cfg_dir);
 
+    if (cfg_dir.empty()) throw std::invalid_argument("Missing weather configuration directory.");
+    std::wstring path;
+    SCityInfo city; SConfiguration config;
     const auto &ch = cfg_dir.back();
     if (ch == L'\\' || ch == L'/')
-        m_config_file_path = cfg_dir + L"WeatherPro.ini";
+        path = cfg_dir + L"WeatherPro.ini";
     else
-        m_config_file_path = cfg_dir + L"\\WeatherPro.ini";
+        path = cfg_dir + L"\\WeatherPro.ini";
 
     CSimpleIni ini;
     ini.SetUnicode();
-    ini.LoadFile(m_config_file_path.c_str());
+    const bool existing = ini.LoadFile(path.c_str()) == SI_OK;
 
-    m_currentCityInfo.CityNO = ini.GetValue(L"config", L"city_no", L"101010100");
-    m_currentCityInfo.CityName = ini.GetValue(L"config", L"city_name", L"北京");
+    city.CityNO = ini.GetValue(L"config", L"city_no", L"101010100");
+    city.CityName = ini.GetValue(L"config", L"city_name", L"北京");
 
-    m_config.m_api_type = static_cast<DataApiType>(ini.GetLongValue(L"config", L"api_type", 1));
-    m_config.m_wit = static_cast<EWeatherInfoType>(ini.GetLongValue(L"config", L"wit", 0));
-    m_config.m_update_frequency = static_cast<UpdateFrequency>(ini.GetLongValue(L"config", L"update_freq", 1));
-    m_config.m_icon_type = static_cast<IconType>(ini.GetLongValue(L"config", L"icon_type", 0));
-    m_config.m_show_weather_icon = ini.GetBoolValue(L"config", L"show_weather_icon", 1);
-    m_config.m_show_weather_in_tooltips = ini.GetBoolValue(L"config", L"show_weather_in_tooltips", 1);
-    m_config.m_show_brief_rt_weather_info = ini.GetBoolValue(L"config", L"show_brief_rt_weather_info", 0);
-    m_config.m_show_weather_alerts = ini.GetBoolValue(L"config", L"show_weather_alerts", 1);
-    m_config.m_show_brief_weather_alert_info = ini.GetBoolValue(L"config", L"show_brief_weather_alert_info", 1);
-    m_config.m_show_error_info = ini.GetBoolValue(L"config", L"show_error_info", 0);
-    m_config.m_double_click_action = ini.GetLongValue(L"config", L"double_click_action", 0);
+    city.CityAdministrativeOwnership = ini.GetValue(L"config", L"city_region", L"");
 
-    auto &hf_cfg = m_api_hfw->config;
+    config.m_api_type = static_cast<DataApiType>(ini.GetLongValue(L"config", L"api_type", existing ? 1 : 0));
+    config.m_wit = static_cast<EWeatherInfoType>(ini.GetLongValue(L"config", L"wit", 0));
+    config.m_update_frequency = static_cast<UpdateFrequency>(ini.GetLongValue(L"config", L"update_freq", 1));
+    config.m_icon_type = static_cast<IconType>(ini.GetLongValue(L"config", L"icon_type", 0));
+    config.m_show_weather_icon = ini.GetBoolValue(L"config", L"show_weather_icon", 1);
+    config.m_show_weather_in_tooltips = ini.GetBoolValue(L"config", L"show_weather_in_tooltips", 1);
+    config.m_show_brief_rt_weather_info = ini.GetBoolValue(L"config", L"show_brief_rt_weather_info", 0);
+    config.m_show_weather_alerts = ini.GetBoolValue(L"config", L"show_weather_alerts", 1);
+    config.m_show_brief_weather_alert_info = ini.GetBoolValue(L"config", L"show_brief_weather_alert_info", 1);
+    config.m_show_error_info = ini.GetBoolValue(L"config", L"show_error_info", 0);
+    config.m_double_click_action = ini.GetLongValue(L"config", L"double_click_action", 0);
+
+    DataApiHefengWeather::Config hf_cfg;
+    hf_cfg.ApiHost = WeatherService::NormalizeApiHost(ini.GetValue(L"hfw", L"ApiHost", L"")).value_or(L"");
     hf_cfg.AppKey = ini.GetValue(L"hfw", L"AppKey", L"");
     hf_cfg.ShowRealtimeTemperatureFeelsLike = ini.GetBoolValue(L"hfw", L"show_rt_temp_feels_like", 0);
     hf_cfg.ShowRealtimeWind = ini.GetBoolValue(L"hfw", L"show_rt_wind", 1);
@@ -832,6 +832,9 @@ void WeatherCDataManager::LoadConfigs(const std::wstring &cfg_dir)
     hf_cfg.ShowAirQualityPM2p5 = ini.GetBoolValue(L"hfw", L"show_rt_air_quality_pm2p5", 1);
     hf_cfg.ShowAirQualityPM10 = ini.GetBoolValue(L"hfw", L"show_rt_air_quality_pm10", 0);
     hf_cfg.ShowWeatherAlert = ini.GetBoolValue(L"hfw", L"show_weather_alert", 1);
+    std::lock_guard<std::mutex> state_lock(m_state_mutex);
+    m_currentCityInfo = std::move(city); m_config = config;
+    m_api_hfw->config = std::move(hf_cfg); m_config_file_path = std::move(path);
 }
 
 void WeatherCDataManager::SaveConfigs() const
@@ -842,6 +845,7 @@ void WeatherCDataManager::SaveConfigs() const
 
     ini.SetValue(L"config", L"city_no", m_currentCityInfo.CityNO.c_str());
     ini.SetValue(L"config", L"city_name", m_currentCityInfo.CityName.c_str());
+    ini.SetValue(L"config", L"city_region", m_currentCityInfo.CityAdministrativeOwnership.c_str());
 
     ini.SetLongValue(L"config", L"api_type", static_cast<int>(m_config.m_api_type));
     ini.SetLongValue(L"config", L"wit", static_cast<int>(m_config.m_wit));
@@ -858,6 +862,7 @@ void WeatherCDataManager::SaveConfigs() const
 
     auto &hf_cfg = m_api_hfw->config;
     ini.SetValue(L"hfw", L"AppKey", hf_cfg.AppKey.c_str());
+    ini.SetValue(L"hfw", L"ApiHost", hf_cfg.ApiHost.c_str());
     ini.SetBoolValue(L"hfw", L"show_rt_temp_feels_like", hf_cfg.ShowRealtimeTemperatureFeelsLike);
     ini.SetBoolValue(L"hfw", L"show_rt_wind", hf_cfg.ShowRealtimeWind);
     ini.SetBoolValue(L"hfw", L"show_rt_wind_scale", hf_cfg.ShowRealtimeWindScale);
@@ -929,8 +934,12 @@ std::wstring WeatherCDataManager::_getTooptipInfo() const
 
 void WeatherCDataManager::RefreshWeatherInfoCache()
 {
+    // Backend formatting/HTTP is never performed while taskbar readers hold this lock.
+    const auto temperature = _getWeatherTemperature();
+    const auto tooltip = _getTooptipInfo();
+    const auto icon = _getIcon();
     std::lock_guard<std::recursive_mutex> cache_lock(m_cache_mutex);
-    m_weather_info_cache.WeatherTemperature = _getWeatherTemperature();
-    m_weather_info_cache.TooltipInfo = _getTooptipInfo();
-    m_weather_info_cache.Icon = _getIcon();
+    m_weather_info_cache.WeatherTemperature = temperature;
+    m_weather_info_cache.TooltipInfo = tooltip;
+    m_weather_info_cache.Icon = icon;
 }
