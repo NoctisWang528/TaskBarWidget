@@ -82,7 +82,7 @@ public sealed partial class SettingsWindow
         }
         var section = Section("应用界面");
         section.Children.Add(MediaEditor("toolWindowTheme", "界面主题", "select", choices: ["System", "Light", "Dark"], labels: ["跟随系统", "浅色", "深色"]));
-        section.Children.Add(Copy("主题立即在设置窗口预览，应用后同步到快捷面板。开机启动由上方主程序设置管理。"));
+        section.Children.Add(Copy("主题立即在设置窗口和三张卡片中同步预览，点击“应用更改”后保存；重新读取可撤销未保存的修改。开机启动由上方主程序设置管理。"));
     }
     private void RenderLyrics()
     {

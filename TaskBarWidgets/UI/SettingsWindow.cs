@@ -40,6 +40,8 @@ public sealed partial class SettingsWindow : Window
     private bool _shutdown;
     private bool _closed;
     public event Action? Dismissed;
+    internal event Action<ElementTheme>? ThemePreviewChanged;
+    internal ElementTheme? ThemePreview => _loaded ? _root.RequestedTheme : null;
 
     public SettingsWindow(UiConnection connection)
     {
@@ -193,7 +195,8 @@ public sealed partial class SettingsWindow : Window
     private void ApplyTheme()
     {
         // Mica, popup targets and the sibling drag overlay share one theme root.
-        _root.RequestedTheme = _media.Text("toolWindowTheme") switch { "Light" or "1" => ElementTheme.Light, "Dark" or "2" => ElementTheme.Dark, _ => ElementTheme.Default };
+        _root.RequestedTheme = UiThemeStyles.ParseTheme(_media.Text("toolWindowTheme"));
+        if (_loaded) ThemePreviewChanged?.Invoke(_root.RequestedTheme);
         UpdateTitleBarTheme();
     }
     private void UpdateTitleBarTheme()

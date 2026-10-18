@@ -82,6 +82,8 @@ public partial class App : Application
                     payload.TryGetProperty("y", out var y) && y.TryGetDouble(out var py) && double.IsFinite(py))
                 {
                     _cards ??= new CardGroup(_connection, () => OpenSettings(null));
+                    if (_settings?.ThemePreview is { } preview) _cards.SetThemePreview(preview);
+                    _cards.ApplyBackendTheme(payload);
                     var entryWindow = payload.TryGetProperty("entryWindow", out var entry) && entry.ValueKind == JsonValueKind.Number &&
                         entry.TryGetInt64(out var entryValue) && entryValue != 0 ? (nint)entryValue : 0;
                     _cards.ToggleAtPhysicalPoint(px, py, entryWindow);
@@ -107,6 +109,7 @@ public partial class App : Application
         if (_settings is null)
         {
             _settings = new SettingsWindow(_connection);
+            _settings.ThemePreviewChanged += theme => _cards?.SetThemePreview(theme);
             _settings.Closed += (_, args) => { if (!args.Handled) _settings = null; };
         }
         _settings.ShowPage(page);

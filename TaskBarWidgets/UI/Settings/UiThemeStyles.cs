@@ -4,6 +4,9 @@ namespace TaskBarWidgets.UI.Settings;
 
 internal static class UiThemeStyles
 {
+    internal static ElementTheme ParseTheme(string? value) => value?.ToLowerInvariant() switch
+    { "light" or "1" => ElementTheme.Light, "dark" or "2" => ElementTheme.Dark, _ => ElementTheme.Default };
+
     private static readonly ResourceDictionary Styles = new() { Source = new Uri("ms-appx:///Settings/SettingsThemeResources.xaml") };
 
     internal static T Apply<T>(T element, string key) where T : FrameworkElement

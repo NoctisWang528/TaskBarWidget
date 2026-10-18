@@ -3,6 +3,13 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <!-- Keep ThemeResource expressions on the actual styled property, so changing
          the root theme updates existing editors without rebuilding their drafts. -->
+    <Style x:Key="CardTextPrimary" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+    </Style>
+    <Style x:Key="CardTextSecondary" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+        <Setter Property="Opacity" Value="1" />
+    </Style>
     <Style x:Key="SettingsSurface" TargetType="Border">
         <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
         <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />

@@ -61,3 +61,5 @@ Routine retirement covers the immediate previous build; the 2026-10-18 cleanup a
 Subagents are permitted, all using gpt-6.1-sol. Assign disjoint ownership, coordinate protocol contracts and build slots, and integrate/review results before reporting completion.
 
 On 2026-10-18 the user accepted lightweight build 261018-1408 and authorized documenting, committing/pushing all accumulated slimming/shared-runtime changes, publishing its clean ZIP, and cleaning historical local builds and temporary files after verified personal-data backups. Preserve the running installation, current delivery and build, source dependencies and backups. This does not authorize later releases, remote release deletion or visibility changes.
+
+On 2026-10-18 the user authorized fixing settings/card theme synchronization and readability, producing personal build and clean release packages, and committing/pushing this change. No normal-product launch, installation replacement or GitHub Release publication is authorized by this request.

@@ -94,7 +94,7 @@ public partial class App : System.Windows.Application
             case "togglePanel":
                 if (TryNumber(command, "x", out var x) && TryNumber(command, "y", out var y) && _ui is not null)
                     await _ui.SendAsync("togglePanel", x, y, entryWindow: ValidatedEntryWindow(command),
-                        gestureId: command.TryGetProperty("gestureId", out var gesture) && gesture.TryGetInt64(out var gestureId) ? gestureId : 0);
+                        gestureId: command.TryGetProperty("gestureId", out var gesture) && gesture.TryGetInt64(out var gestureId) ? gestureId : 0, toolWindowTheme: (int)Settings.ToolWindowTheme);
                 break;
             case "openSettings":
                 if (_ui is not null) await _ui.SendAsync("openSettings", page: command.TryGetProperty("page", out var page) ? page.GetString() : null);
@@ -233,7 +233,7 @@ public partial class App : System.Windows.Application
     {
         var screen = System.Windows.Forms.Screen.FromPoint(System.Windows.Forms.Cursor.Position);
         var area = screen.WorkingArea;
-        if (_ui is not null) TaskObserver.Observe(_ui.SendAsync("togglePanel", area.Left + area.Width / 2.0, area.Bottom), "WinUI cards");
+        if (_ui is not null) TaskObserver.Observe(_ui.SendAsync("togglePanel", area.Left + area.Width / 2.0, area.Bottom, toolWindowTheme: (int)Settings.ToolWindowTheme), "WinUI cards");
     }
     internal void ShowLyricsWindow() => SendNativeCommand("showMedia");
     private void SendNativeCommand(string action)

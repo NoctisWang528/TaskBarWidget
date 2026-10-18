@@ -35,7 +35,7 @@ foreach ($directory in @('Media','UI','language','licenses')) {
         $relative = [IO.Path]::GetRelativePath($source, $file.FullName)
         if ($file.Name -in $privateIni -or $file.Extension -in @('.log','.pdb','.dmp','.mdmp','.etl','.bak') -or $file.Name -match '\.log($|\.)' -or
             $file.Name -match '^(config\.ini|global_cfg\.ini|history_traffic\.|media-settings\.json|ui-.*check\.json|template-probe\.json)' -or
-            $relative -match '(^|\\)(Data|database|.*\.WebView2|WebView2|EBWebView|User Data|Cache|logs|backups|ui-layout-check|ui-heatmap-check)(\\|$)' -or
+            $relative -match '(^|\\)(Data|database|.*\.WebView2|WebView2|EBWebView|User Data|Cache|logs|backups|ui-layout-check|ui-heatmap-check|ui-theme-check)(\\|$)' -or
             $file.Extension -in @('.db','.sqlite','.sqlite3') -or $file.Name -match '(-wal|-shm)$') { continue }
         $destination = Join-Path $stage $relative
         New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null

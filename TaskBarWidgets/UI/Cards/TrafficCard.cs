@@ -39,11 +39,11 @@ public sealed partial class CardGroup
         var heading = new StackPanel();
         var titleRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         var title = Text("流量消耗", 13); title.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
-        var period = Text("近 12 周", 10); period.Opacity = 0.55; period.VerticalAlignment = VerticalAlignment.Center;
+        var period = Text("近 12 周", 10); Secondary(period); period.VerticalAlignment = VerticalAlignment.Center;
         titleRow.Children.Add(title); titleRow.Children.Add(period);
         heading.Children.Add(titleRow);
         var subtitle = new Grid();
-        _trafficScope.Opacity = _trafficStatus.Opacity = 0.6;
+        Secondary(_trafficScope); Secondary(_trafficStatus);
         subtitle.Children.Add(_trafficScope); subtitle.Children.Add(_trafficStatus);
         heading.Children.Add(subtitle);
         _trafficStatus.RegisterPropertyChangedCallback(TextBlock.TextProperty, (_, _) =>
@@ -70,7 +70,7 @@ public sealed partial class CardGroup
         for (var weekday = 0; weekday < 7; weekday += 2)
         {
             var label = Text(new[] { "一", "三", "五", "日" }[weekday / 2], 9);
-            label.Opacity = 0.5; label.VerticalAlignment = VerticalAlignment.Center;
+            Secondary(label); label.VerticalAlignment = VerticalAlignment.Center;
             Add(grid, label, 0, weekday);
         }
         for (var index = 0; index < _days.Length; index++)
@@ -105,16 +105,16 @@ public sealed partial class CardGroup
         calendar.Children.Add(grid);
         Add(_trafficContent, calendar, 0, 1);
         var footer = Columns(new GridLength(1, GridUnitType.Star), GridLength.Auto);
-        _trafficDetail.Opacity = 0.75; _trafficDetail.VerticalAlignment = VerticalAlignment.Center;
+        Secondary(_trafficDetail); _trafficDetail.VerticalAlignment = VerticalAlignment.Center;
         Add(footer, _trafficDetail, 0);
-        var zero = Text("0", 9); zero.Opacity = 0.55;
+        var zero = Text("0", 9); Secondary(zero);
         _trafficLegend.Children.Add(zero);
         for (var index = 0; index < _legend.Length; index++)
         {
             _legend[index] = new Border { Width = 7, Height = 7, CornerRadius = new CornerRadius(2), VerticalAlignment = VerticalAlignment.Center };
             _trafficLegend.Children.Add(_legend[index]);
         }
-        _trafficPeakLegend.Opacity = 0.55;
+        Secondary(_trafficPeakLegend);
         _trafficLegend.Children.Add(_trafficPeakLegend);
         Add(footer, _trafficLegend, 1);
         Add(_trafficContent, footer, 0, 2);
@@ -139,7 +139,7 @@ public sealed partial class CardGroup
         {
             var day = traffic.Days[week * 7];
             if (week > 0 && day.Date.Month == traffic.Days[(week - 1) * 7].Date.Month) continue;
-            var label = Text(day.Date.Month + "月", 9); label.Opacity = 0.55; label.Margin = new Thickness(2, 0, 0, 0);
+            var label = Text(day.Date.Month + "月", 9); Secondary(label); label.Margin = new Thickness(2, 0, 0, 0);
             Add(_months, label, week);
         }
         for (var index = 0; index < _days.Length; index++)

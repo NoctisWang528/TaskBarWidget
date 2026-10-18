@@ -44,9 +44,11 @@ internal static class UiTemplateProbe
             var fixtureIndex = Array.IndexOf(args, "--fixture");
             if (fixtureIndex >= 0 && fixtureIndex + 1 < args.Length)
                 layoutChecks = await UiLayoutProbe.RunAsync(settings, args[fixtureIndex + 1], Path.Combine(AppContext.BaseDirectory, "..", "ui-layout-check"));
-            themeControls = await SettingsWindow.ProbeThemeControlsAsync(settings);
             cardLyricsControls = await CardLyricsProbe.RunAsync();
             cards = new CardGroup(connection, () => throw new InvalidOperationException("Probe must not invoke settings."));
+            cards.ApplyBackendTheme(JsonSerializer.SerializeToElement(new { toolWindowTheme = 2 }));
+            if (cards.CardWindows.Any(card => card.Root.RequestedTheme != ElementTheme.Dark)) throw new InvalidOperationException("Initial panel theme did not apply before Show.");
+            cardLifecycle["initialThemeBeforeShow"] = true;
             foreach (var point in new[] { (100d, 100d), (1200d, 900d), (100d, 100d) })
             {
                 cards.Position(point.Item1, point.Item2);
@@ -88,6 +90,7 @@ internal static class UiTemplateProbe
                 AssertOffscreen(card.Window);
                 checks.Add(new { surface = card.Window.Title, width = card.Root.ActualWidth, loaded = card.Root.IsLoaded, hideShowRacePassed = true });
             }
+            themeControls = await SettingsWindow.ProbeThemeControlsAsync(settings, cards);
             cardLifecycle["firstShowWithoutActivation"] = true;
             sourceSelector = await CardGroup.ProbeSourceSelectorAsync(cards);
             cardLifecycle["hideThenImmediateShow"] = true;

@@ -10,7 +10,7 @@ public sealed partial class SettingsWindow
 {
     // Use the caller's already-offscreen window. No system-theme change, saved
     // settings, backend requests, activation or additional HWND is required.
-    internal static async Task<object> ProbeThemeControlsAsync(SettingsWindow window)
+    internal static async Task<object> ProbeThemeControlsAsync(SettingsWindow window, CardGroup cards)
     {
         var top = window._navigation.MenuItems.OfType<NavigationViewItem>().ToArray();
         var lyricsGroup = top.Single(item => Equals(item.Tag, "lyricsGroup"));
@@ -24,6 +24,9 @@ public sealed partial class SettingsWindow
         }
         window.NavigateTo("general");
         var theme = window._media.Get("toolWindowTheme");
+        window.ThemePreviewChanged += cards.SetThemePreview;
+        window.ApplyTheme();
+        var selector = WalkTheme(window._page).OfType<ComboBox>().Single(box => box.Items.OfType<ComboBoxItem>().Any(item => (item.Tag as JsonNode)?.ToString() == "Dark"));
         var checks = new List<object>();
         var section = window.Section("主题切换验证");
         var sectionCard = (Border)window._page.Children.Last();
@@ -37,10 +40,9 @@ public sealed partial class SettingsWindow
         var lightColor = Microsoft.UI.Colors.Transparent;
         try
         {
-            foreach (var requested in new[] { "Light", "Dark", "System" })
+            foreach (var requested in new[] { "Light", "Dark", "Light", "System" })
             {
-                window._media.Set("toolWindowTheme", requested);
-                window.ApplyTheme();
+                selector.SelectedItem = selector.Items.OfType<ComboBoxItem>().Single(item => (item.Tag as JsonNode)?.ToString() == requested);
                 await Task.Delay(80);
                 window._root.UpdateLayout();
                 if (input.Text != "#12" || !section.Children.Contains(colorEditor) || !window._split.IsPaneOpen)
@@ -55,13 +57,15 @@ public sealed partial class SettingsWindow
                     throw new InvalidOperationException("Existing section ThemeResource did not refresh for the new theme.");
                 if (surface != drawer)
                     throw new InvalidOperationException("Drawer and settings surface resolved different theme backgrounds.");
-                checks.Add(new { requested, actual = window._root.ActualTheme.ToString(), surface = surface.ToString(), drawer = drawer.ToString(), unfinishedText = input.Text, retainedDrawer = true });
+                var cardCheck = await CardGroup.ProbeThemeAsync(cards, expected);
+                checks.Add(new { cardCheck, requested, actual = window._root.ActualTheme.ToString(), surface = surface.ToString(), drawer = drawer.ToString(), unfinishedText = input.Text, retainedDrawer = true });
             }
         }
         finally
         {
             window._media.SetNode("toolWindowTheme", theme);
             window.ApplyTheme();
+            window.ThemePreviewChanged -= cards.SetThemePreview;
             window._page.Children.Remove(sectionCard);
             window._properties.Children.Remove(pane);
             window._split.IsPaneOpen = false;

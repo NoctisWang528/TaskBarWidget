@@ -11,6 +11,7 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using TaskBarWidgets.Media.Integration;
 using TaskBarWidgets.UI.Cards;
+using TaskBarWidgets.UI.Settings;
 using Windows.Graphics;
 using Windows.Storage.Streams;
 using Windows.System;
@@ -63,6 +64,9 @@ public sealed partial class CardGroup : IDisposable
     private int _generation, _ticks, _flyoutsOpen;
     private string? _outputId, _inputId, _lastCover, _selectedSourceId;
     private bool _outputMuted, _inputMuted;
+    private ElementTheme? _themePreview;
+    private ElementTheme _requestedTheme;
+    private bool _themeApplied;
 
     public CardGroup(UiConnection connection, Action openSettings)
     {
@@ -279,10 +283,41 @@ public sealed partial class CardGroup : IDisposable
         return content;
     }
 
+    // A settings draft owns the live preview until it is saved or reloaded. Poll replies
+    // may have been queued before that edit and must not overwrite it.
+    internal void SetThemePreview(ElementTheme theme)
+    {
+        _themePreview = theme;
+        ApplyTheme(theme);
+    }
+    internal void ApplyBackendTheme(JsonElement state)
+    {
+        if (state.ValueKind != JsonValueKind.Object || !state.TryGetProperty("toolWindowTheme", out var value) || value.ValueKind == JsonValueKind.Null) return;
+        ApplyTheme(_themePreview ?? UiThemeStyles.ParseTheme(value.ToString()));
+    }
+    private void ApplyTheme(ElementTheme theme)
+    {
+        if (_disposed || (_themeApplied && _requestedTheme == theme)) return;
+        _themeApplied = true;
+        _requestedTheme = theme;
+        foreach (var card in _cards) card.Root.RequestedTheme = theme;
+        foreach (var flyout in _flyouts) ThemeFlyout(flyout);
+        foreach (var card in _cards)
+            if (card.Root.XamlRoot is { } root)
+                foreach (var popup in VisualTreeHelper.GetOpenPopupsForXamlRoot(root))
+                    if (popup.Child is FrameworkElement child) child.RequestedTheme = theme;
+    }
+    private void ThemeFlyout(MenuFlyout flyout)
+    {
+        var style = new Style(typeof(MenuFlyoutPresenter));
+        style.Setters.Add(new Setter(FrameworkElement.RequestedThemeProperty, _requestedTheme));
+        flyout.MenuFlyoutPresenterStyle = style;
+    }
+
     private MenuFlyout NewFlyout()
     {
         var flyout = new MenuFlyout();
-        flyout.Opening += (_, _) => { _flyoutsOpen++; CardLifecycleLog.Write($"flyout-opening count={_flyoutsOpen}"); };
+        flyout.Opening += (_, _) => { ThemeFlyout(flyout); _flyoutsOpen++; CardLifecycleLog.Write($"flyout-opening count={_flyoutsOpen}"); };
         flyout.Closed += (_, _) =>
         {
             _flyoutsOpen = Math.Max(0, _flyoutsOpen - 1);
@@ -357,8 +392,7 @@ public sealed partial class CardGroup : IDisposable
             _seek.IsEnabled = Bool(state, "canSeek") && duration > 0;
             if (!_seekPending) { _seek.Maximum = Math.Max(1, duration); _seek.Value = Math.Clamp(Number(state, "positionSeconds"), 0, _seek.Maximum); }
             _position.Text = Time(Number(state, "positionSeconds")); _duration.Text = Time(duration);
-            var theme = (int)Number(state, "toolWindowTheme");
-            foreach (var card in _cards) card.Root.RequestedTheme = theme == 1 ? ElementTheme.Light : theme == 2 ? ElementTheme.Dark : ElementTheme.Default;
+            ApplyBackendTheme(state);
             var cover = String(state, "coverDataUrl");
             if (_lastCover != cover) { _lastCover = cover; _ = RenderCoverAsync(cover); }
         }
@@ -667,7 +701,8 @@ public sealed partial class CardGroup : IDisposable
     private static bool Bool(JsonElement value, string name) => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var item) && item.ValueKind == JsonValueKind.True;
     private static double Number(JsonElement value, string name) => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var item) && item.ValueKind == JsonValueKind.Number && item.TryGetDouble(out var number) && double.IsFinite(number) ? number : 0;
     private static string Time(double seconds) => TimeSpan.FromSeconds(Math.Clamp(seconds, 0, 359999)).ToString(seconds >= 3600 ? @"h\:mm\:ss" : @"m\:ss");
-    private static TextBlock Text(string value, double size = 12) => new() { Text = value, FontSize = size, TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1 };
+    private static TextBlock Text(string value, double size = 12) => UiThemeStyles.Apply(new TextBlock { Text = value, FontSize = size, TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1 }, "CardTextPrimary");
+    private static void Secondary(TextBlock text) => UiThemeStyles.Apply(text, "CardTextSecondary");
     private static Button Icon(string glyph, string name, double size = 32)
     {
         var button = new Button { Width = size, Height = size, MinWidth = 0, Padding = new Thickness(4), CornerRadius = new CornerRadius(size / 2), Content = new FontIcon { Glyph = glyph, FontSize = size > 32 ? 20 : 16 } };
