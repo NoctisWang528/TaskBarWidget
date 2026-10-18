@@ -3,6 +3,14 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <!-- Keep ThemeResource expressions on the actual styled property, so changing
          the root theme updates existing editors without rebuilding their drafts. -->
+    <!-- The default menu has a transparent fill over a separate Acrylic backdrop.
+         Use an opaque themed surface so popup text and its background cannot diverge. -->
+    <Style x:Key="CardMenuPresenter" TargetType="MenuFlyoutPresenter" BasedOn="{StaticResource DefaultMenuFlyoutPresenterStyle}">
+        <Setter Property="SystemBackdrop" Value="{x:Null}" />
+        <Setter Property="Background" Value="{ThemeResource SolidBackgroundFillColorBaseBrush}" />
+        <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource SurfaceStrokeColorFlyoutBrush}" />
+    </Style>
     <Style x:Key="CardTextPrimary" TargetType="TextBlock">
         <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
     </Style>

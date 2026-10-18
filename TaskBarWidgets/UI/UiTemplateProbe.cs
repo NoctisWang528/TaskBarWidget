@@ -182,6 +182,25 @@ internal static class UiTemplateProbe
             throw new InvalidOperationException("Probe window did not stay offscreen.");
         }
     }
+    internal static void AssertOwnedWindowsOffscreen()
+    {
+        string? error = null;
+        EnumWindows((handle, _) => {
+            GetWindowThreadProcessId(handle, out var process);
+            if (process == Environment.ProcessId && IsWindowVisible(handle) && GetWindowRect(handle, out var bounds) &&
+                (bounds.Right >= -20000 || bounds.Bottom >= -20000))
+            {
+                error = $"Probe popup escaped offscreen bounds: {bounds.Left},{bounds.Top},{bounds.Right},{bounds.Bottom}.";
+                return false;
+            }
+            return true;
+        }, 0);
+        if (error is not null) throw new InvalidOperationException(error);
+    }
+    private delegate bool EnumWindowCallback(nint window, nint data);
+    [StructLayout(LayoutKind.Sequential)] private struct WindowBounds { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowCallback callback, nint data);
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(nint window, out WindowBounds bounds);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtr(nint window, int index);

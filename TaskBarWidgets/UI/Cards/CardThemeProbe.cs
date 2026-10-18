@@ -3,6 +3,7 @@ using Microsoft.UI.Composition;
 using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using Windows.UI;
 using WinRT;
@@ -44,10 +45,72 @@ public sealed partial class CardGroup
             await UiLayoutProbe.CaptureAsync(card.Root, path);
             result.Add(new { card = card.Window.Title, actual = card.Root.ActualTheme.ToString(), backdrop = backdrop?.Theme.ToString() ?? "unavailable-offscreen", minimumTextContrast = textChecks.Count > 0 ? textChecks.Min() : 0, path });
         }
-        foreach (var flyout in cards._flyouts)
-            if (!flyout.MenuFlyoutPresenterStyle.Setters.OfType<Setter>().Any(setter => setter.Property == FrameworkElement.RequestedThemeProperty && Equals(setter.Value, expected)))
-                throw new InvalidOperationException("A device/source menu kept an old theme.");
-        return new { cards = result, stalePollIgnored = true, menuThemeUpdated = true };
+        var menus = await ProbeOpenMenusAsync(cards, expected, output);
+        return new { cards = result, stalePollIgnored = true, menuThemeUpdated = true, menus };
+    }
+
+    private static async Task<object> ProbeOpenMenusAsync(CardGroup cards, ElementTheme theme, string output)
+    {
+        var oldOutputs = cards._outputs; var oldInputs = cards._inputs; var oldSources = cards._sources;
+        var oldSelection = cards._selectedSourceId;
+        var targets = new[] { cards._output, cards._input, cards._source };
+        var enabled = targets.Select(target => target.IsEnabled).ToArray();
+        cards._outputs = [new("speaker", "Test speakers", true, true, .5, false, true), new("headset", "Test headset", false, false, .5, false, true)];
+        cards._inputs = [new("microphone", "Test microphone", true, true, .5, false, true), new("headset-mic", "Test headset microphone", false, false, .5, false, true)];
+        cards._sources = [new("player", "Test music player", ""), new("browser", "Test browser", "")];
+        cards._selectedSourceId = "player";
+        var result = new List<object>();
+        try
+        {
+            for (var index = 0; index < targets.Length; index++)
+            {
+                var target = targets[index]; target.IsEnabled = true;
+                var flyout = (MenuFlyout)target.Flyout;
+                try
+                {
+                    // Keep the real popup inside the existing offscreen no-activate test HWND.
+                    if (!flyout.ShouldConstrainToRootBounds) flyout.ShouldConstrainToRootBounds = true;
+                    flyout.AreOpenCloseAnimationsEnabled = false;
+                    flyout.ShowAt(target, new FlyoutShowOptions { ShowMode = FlyoutShowMode.Transient, Placement = FlyoutPlacementMode.Full });
+                    await Task.Delay(80);
+                    var presenters = VisualTreeHelper.GetOpenPopupsForXamlRoot(target.XamlRoot)
+                        .SelectMany(popup => WalkCardTheme(popup.Child).Prepend(popup.Child)).OfType<MenuFlyoutPresenter>().ToArray();
+                    var presenter = presenters.Single(); presenter.UpdateLayout();
+                    UiTemplateProbe.AssertOwnedWindowsOffscreen();
+                    if (!flyout.IsOpen || !presenter.IsLoaded || presenter.ActualWidth <= 0)
+                        throw new InvalidOperationException($"Menu popup state: open={flyout.IsOpen}, constrained={flyout.IsConstrainedToRootBounds}, requestedConstrain={flyout.ShouldConstrainToRootBounds}, loaded={presenter.IsLoaded}, size={presenter.ActualWidth}x{presenter.ActualHeight}.");
+                    if (presenter.ActualTheme != target.ActualTheme || presenter.SystemBackdrop is not null ||
+                        presenter.Background is not SolidColorBrush { Color.A: 255 } fill)
+                        throw new InvalidOperationException("The menu kept an independently themed Acrylic or transparent background.");
+                    var contrasts = new List<double>();
+                    foreach (var state in new[] { "Normal", "PointerOver", "Pressed" })
+                    {
+                        foreach (var item in flyout.Items.OfType<MenuFlyoutItem>()) VisualStateManager.GoToState(item, state, false);
+                        presenter.UpdateLayout();
+                        foreach (var element in flyout.Items.OfType<MenuFlyoutItem>().SelectMany(WalkCardTheme))
+                        {
+                            if (element is not FrameworkElement { ActualWidth: > 0, ActualHeight: > 0, Visibility: Visibility.Visible } visible || DisabledParent(visible)) continue;
+                            var brush = element switch { TextBlock text when text.Text.Length > 0 => text.Foreground, FontIcon icon => icon.Foreground, _ => null };
+                            if (brush is not SolidColorBrush ink) continue;
+                            var ratio = Contrast(ink.Color, fill.Color, element is FrameworkElement textElement ? textElement.Opacity : 1);
+                            if (ratio < (element is FontIcon ? 3 : 4.5)) throw new InvalidOperationException($"Unreadable popup {index}/{theme}/{state}, {element.GetType().Name}: contrast {ratio:0.00}.");
+                            contrasts.Add(ratio);
+                        }
+                    }
+                    if (contrasts.Count == 0) throw new InvalidOperationException("Menu text and checkmark were not measured.");
+                    var path = Path.Combine(output, $"menu-{index}-{theme}.png");
+                    await UiLayoutProbe.CaptureAsync(presenter, path);
+                    result.Add(new { menu = index, actualTheme = presenter.ActualTheme.ToString(), background = fill.Color.ToString(), minimumContrast = contrasts.Min(), path });
+                }
+                finally { flyout.Hide(); }
+            }
+        }
+        finally
+        {
+            cards._outputs = oldOutputs; cards._inputs = oldInputs; cards._sources = oldSources; cards._selectedSourceId = oldSelection;
+            for (var index = 0; index < targets.Length; index++) targets[index].IsEnabled = enabled[index];
+        }
+        return result;
     }
     private static bool DisabledParent(FrameworkElement element)
     {

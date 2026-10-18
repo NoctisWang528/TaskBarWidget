@@ -9,6 +9,13 @@ internal static class UiThemeStyles
 
     private static readonly ResourceDictionary Styles = new() { Source = new Uri("ms-appx:///Settings/SettingsThemeResources.xaml") };
 
+    internal static Style CardMenu(ElementTheme theme)
+    {
+        var style = new Style(typeof(Microsoft.UI.Xaml.Controls.MenuFlyoutPresenter)) { BasedOn = (Style)Styles["CardMenuPresenter"] };
+        style.Setters.Add(new Setter(FrameworkElement.RequestedThemeProperty, theme));
+        return style;
+    }
+
     internal static T Apply<T>(T element, string key) where T : FrameworkElement
     {
         element.Style = (Style)Styles[key];

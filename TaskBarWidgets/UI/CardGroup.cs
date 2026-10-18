@@ -309,9 +309,7 @@ public sealed partial class CardGroup : IDisposable
     }
     private void ThemeFlyout(MenuFlyout flyout)
     {
-        var style = new Style(typeof(MenuFlyoutPresenter));
-        style.Setters.Add(new Setter(FrameworkElement.RequestedThemeProperty, _requestedTheme));
-        flyout.MenuFlyoutPresenterStyle = style;
+        flyout.MenuFlyoutPresenterStyle = UiThemeStyles.CardMenu(_requestedTheme);
     }
 
     private MenuFlyout NewFlyout()
