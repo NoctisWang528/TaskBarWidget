@@ -1,0 +1,14 @@
+<Project>
+  <PropertyGroup>
+    <RollForward>LatestPatch</RollForward>
+    <SelfContained>false</SelfContained>
+    <SatelliteResourceLanguages>en;en-US;en-GB;zh;zh-Hans;zh-CN;zh-SG</SatelliteResourceLanguages>
+  </PropertyGroup>
+  <Target Name="FilterUnusedMuiLanguages" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <!-- Native MUI resources are not managed satellite assemblies. Leave neutral files intact. -->
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+        Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(ResolvedFileToPublish.RelativePath)', '(?i)^(?!(?:en(?:-[^\\/]+)?|zh|zh-Hans|zh-CN|zh-SG)[\\/])[^\\/]+[\\/].*\.mui$'))" />
+    </ItemGroup>
+  </Target>
+</Project>

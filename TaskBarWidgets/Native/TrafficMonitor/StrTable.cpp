@@ -48,6 +48,7 @@ static BOOL CALLBACK EnumResLangProc(HMODULE hModule, LPCTSTR lpType, LPCTSTR lp
                 ini.FromDirectString(resData);
                 LanguageInfo lanugage_info;
                 LanguageInfoFromIni(lanugage_info, ini);
+                if (lanugage_info.bcp_47 != L"zh-CN" && lanugage_info.bcp_47 != L"en-US") return TRUE;
                 lanugage_info.language_id = wIDLanguage;
                 pLanguages->push_back(lanugage_info);
             }
@@ -94,6 +95,7 @@ void CStrTable::Init()
         CIniHelper ini_file(file_path, true);
         LanguageInfo language_info;
         LanguageInfoFromIni(language_info, ini_file);
+        if (language_info.bcp_47 != L"zh-CN" && language_info.bcp_47 != L"en-US") continue;
         language_info.language_id = LocaleNameToLCID(language_info.bcp_47.c_str(), 0);  //根据语言bcp-47代码获取语言id
         //从外部语言文件读取到当前语言，先从外部语言文件加载
         bool is_current_language = false;

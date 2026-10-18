@@ -9,7 +9,7 @@ using TaskbarLyrics.Core.Utilities;
 
 namespace TaskbarLyrics.App;
 
-public partial class SmtcTimelineMonitorWindow : Wpf.Ui.Controls.FluentWindow
+public partial class SmtcTimelineMonitorWindow : System.Windows.Window
 {
     private readonly SmtcMusicSessionProvider _provider;
     private readonly LyricSyncService _lyricSyncService;

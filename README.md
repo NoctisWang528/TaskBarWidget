@@ -39,9 +39,21 @@
 2. 完整解压到一个可写目录，保留 `Media/`、`UI/`、`language/` 和 `licenses/` 等子目录。
 3. 先退出旧版或其他占用同一任务栏区域的监测工具，再运行根目录的 `TaskBarWidgets.exe`。完整硬件监测会请求管理员权限。
 
-系统要求：**Windows 11 x64**，以及 Microsoft Edge WebView2 Runtime。ZIP 自带 .NET、WinUI 和所需 VC 运行文件；不要单独运行两个辅助程序，也不要直接从压缩包里启动。
+系统要求：**Windows 11 x64**，并安装以下运行环境：
 
-升级到 `261018-1213` 时，请按[数据迁移说明](TaskBarWidgets/README.md#日用迁移)保留配置、流量历史和媒体数据。程序移到新目录后，可在“设置 → 常规”点击“修复并启用登录启动”，更新计划任务的启动路径。
+| 运行环境 | 版本与官方下载 |
+| --- | --- |
+| .NET Desktop Runtime | **8.0 x64**，建议安装最新安全补丁；[微软下载页](https://dotnet.microsoft.com/zh-cn/download/dotnet/8.0)中选择 **.NET Desktop Runtime → Windows → x64**。普通 .NET Runtime 不包含桌面框架，无需安装开发 SDK。 |
+| Windows App Runtime（WinUI 3） | **2.5.1 x64 或兼容的更新 2.x**；[微软下载页](https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads)中选择稳定版 **Installer (x64)**。安装器通常名为 WindowsAppRuntimeInstall-x64.exe。1.x 或旧 2.x 不能代替当前版本。 |
+| Microsoft Edge WebView2 Runtime | 通常随 Windows 11 安装；缺失时从[微软下载页](https://developer.microsoft.com/microsoft-edge/webview2/#download)安装 Evergreen Runtime x64。 |
+
+**261018-1408 轻量版 ZIP 约 28.8 MiB**，相对 261018-1213 的约 208.2 MiB 减少约 86.2%。界面语言资源仅保留简体中文和英文。
+
+轻量包使用系统安装的共享 .NET 和 Windows App Runtime，不包含 `Runtime/`。Windows 自带的 .NET Framework 4.x 不能代替 .NET 8 Desktop Runtime。运行库按兼容版本共享，不必每次更新程序都重新安装。
+
+启动前会实际检查 .NET 框架解析和 WinUI 引导；缺失、版本不匹配或加载失败时显示原因、错误代码和下载入口。只在用户点击时打开官方页面，不自动安装或改变系统设置。安装 Windows App Runtime 时请使用运行本程序的同一 Windows 账户，安装完成后重试。仍保留所需 VC/MFC 文件。不要单独运行辅助程序，也不要直接从压缩包启动。
+
+升级到轻量版时，请按[数据迁移说明](TaskBarWidgets/README.md#日用迁移)保留配置、流量历史和媒体数据。程序移到新目录后，可在“设置 → 常规”点击“修复并启用登录启动”，更新计划任务的启动路径。
 
 版本号采用构建时间 **`yymmdd-hhmm`**，时区为 Asia/Taipei。例如 `261016-1705` 表示 2026 年 10 月 16 日 17:05 的构建。Release 提供 ZIP 和 SHA-256 校验文件；不包含开发者配置、流量历史、日志或凭据。
 

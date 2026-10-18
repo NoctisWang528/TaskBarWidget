@@ -45,6 +45,12 @@ internal sealed class UiHostBridge : IAsyncDisposable
         var executable = Path.Combine(root, "UI", "TaskBarWidgets.UI.exe");
         if (!File.Exists(executable)) throw new FileNotFoundException("WinUI 界面文件缺失，请使用完整构建目录。", executable);
         var start = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(executable)! };
+        // Use the same shared runtime installation that is already running this process.
+        var runtime = Path.GetFullPath(Path.Combine(RuntimeEnvironment.GetRuntimeDirectory(), "..", "..", ".."));
+        start.Environment["DOTNET_ROOT"] = start.Environment["DOTNET_ROOT_X64"] = runtime;
+        start.Environment["DOTNET_MULTILEVEL_LOOKUP"] = "0";
+        foreach (var key in start.Environment.Keys.Where(key => key.StartsWith("DOTNET_ROLL_FORWARD", StringComparison.OrdinalIgnoreCase)).ToArray())
+            start.Environment.Remove(key);
         start.ArgumentList.Add("--host-pid"); start.ArgumentList.Add(Environment.ProcessId.ToString());
         start.ArgumentList.Add("--pipe-name"); start.ArgumentList.Add(_name);
         _process = Process.Start(start) ?? throw new IOException("WinUI 界面未能启动。");

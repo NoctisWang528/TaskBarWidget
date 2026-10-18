@@ -7,7 +7,7 @@ using Microsoft.Web.WebView2.Core;
 
 namespace TaskbarLyrics.App;
 
-public partial class SpectrumTuningWindow : Wpf.Ui.Controls.FluentWindow
+public partial class SpectrumTuningWindow : System.Windows.Window
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {

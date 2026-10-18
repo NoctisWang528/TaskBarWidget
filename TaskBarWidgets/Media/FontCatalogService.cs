@@ -23,18 +23,6 @@ internal static class FontCatalogService
             .OrderBy(option => option.Label, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
 
-        if (!fonts.Any(option => string.Equals(
-                option.Value,
-                AppSettings.BundledFontFamily,
-                StringComparison.OrdinalIgnoreCase)))
-        {
-            fonts.Insert(0, new FontCatalogOption
-            {
-                Value = AppSettings.BundledFontFamily,
-                Label = $"{AppSettings.BundledFontFamily} (内置)"
-            });
-        }
-
         return fonts;
     }
 
@@ -59,11 +47,6 @@ internal static class FontCatalogService
 
         foreach (var candidate in fontFamily.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            if (string.Equals(candidate, AppSettings.BundledFontFamily, StringComparison.OrdinalIgnoreCase))
-            {
-                return AppSettings.BundledFontFamily;
-            }
-
             if (byValue.TryGetValue(candidate, out var value) ||
                 byLabel.TryGetValue(candidate, out value))
             {

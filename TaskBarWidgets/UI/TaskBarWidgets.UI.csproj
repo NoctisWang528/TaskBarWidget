@@ -7,8 +7,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWinUI>true</UseWinUI>
     <WindowsPackageType>None</WindowsPackageType>
-    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
-    <SelfContained>true</SelfContained>
+    <WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>
+    <WindowsAppSDKBootstrapAutoInitializeOptions_OnNoMatch_ShowUI>true</WindowsAppSDKBootstrapAutoInitializeOptions_OnNoMatch_ShowUI>
+    <WindowsAppSdkDeploymentManagerInitialize>false</WindowsAppSdkDeploymentManagerInitialize>
+    <SelfContained>false</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <PlatformTarget>x64</PlatformTarget>
     <ApplicationManifest>app.manifest</ApplicationManifest>
@@ -17,8 +19,9 @@
   </PropertyGroup>
   <ItemGroup>
     <Content Include="..\assets\app-icon.ico" Link="Assets\TaskBarWidgets.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <InternalsVisibleTo Include="TaskBarWidgets.UI.Validation" />
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" Version="2.5.1" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.3.9" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="2.1.9" />
     <Compile Include="..\Media\Integration\TrafficHeatmap.cs" Link="Models\TrafficHeatmap.cs" />
   </ItemGroup>
   <Target Name="IncludeWinUiResourcesInPublish" AfterTargets="ComputeFilesToPublish" DependsOnTargets="AddProcessedXamlFilesToCopyLocal">
@@ -30,4 +33,5 @@
                              RelativePath="%(_ProcessedXamlFilesToCopyLocalWithTargetPath.TargetPath)" CopyToPublishDirectory="PreserveNewest" />
     </ItemGroup>
   </Target>
+  <Import Project="..\scripts\SharedRuntime.targets" />
 </Project>

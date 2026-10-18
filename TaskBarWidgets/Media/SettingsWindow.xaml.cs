@@ -16,7 +16,7 @@ using Forms = System.Windows.Forms;
 
 namespace TaskbarLyrics.App;
 
-public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
+public partial class SettingsWindow : System.Windows.Window
 {
     private const string ProductRepositoryUrl = "https://github.com/NoctisWang528/TaskBarWidget";
     private static readonly string[] BuiltInPlayerSources = ["QQMusic", "Netease", "Kugou", "Spotify", "Browser"];

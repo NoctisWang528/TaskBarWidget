@@ -2,6 +2,7 @@
 #include "NativeMediaHost.h"
 #include "MediaDisplayState.h"
 #include "MediaNavigationPolicy.h"
+#include "ManagedRuntimeEnvironment.h"
 #include "TrafficMonitor.h"
 #include "NativeSettingsBridge.h"
 #include "NativeWeatherBridge.h"
@@ -40,6 +41,7 @@ namespace
         result.SetNamedValue(L"action", JsonValue::CreateStringValue(action));
         return result;
     }
+
 }
 
 struct NativeMediaHost::Impl : std::enable_shared_from_this<NativeMediaHost::Impl>
@@ -245,8 +247,12 @@ struct NativeMediaHost::Impl : std::enable_shared_from_this<NativeMediaHost::Imp
         startup.dwFlags = STARTF_USESHOWWINDOW;
         startup.wShowWindow = SW_HIDE;
         PROCESS_INFORMATION process{};
-        if (CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
-            nullptr, appDirectory.c_str(), &startup, &process))
+        const auto runtime = SystemDotnetRoot();
+        if (runtime.empty()) { Log(L"System .NET Desktop Runtime x64 is missing.", HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)); return; }
+        auto environment = ManagedEnvironment(runtime);
+        if (environment.empty()) { Log(L"Cannot prepare the managed process environment.", E_FAIL); return; }
+        if (CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
+            environment.data(), appDirectory.c_str(), &startup, &process))
         {
             helper = process.hProcess;
             helperPid = process.dwProcessId;

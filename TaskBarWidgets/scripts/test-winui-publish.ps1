@@ -4,7 +4,7 @@ $ErrorActionPreference = 'Stop'
 $productRoot = Split-Path -Parent $PSScriptRoot
 # A new output directory prevents a previous validation host's PRI from masking an incomplete product publish.
 $output = Join-Path $productRoot ('artifacts\validation\publish-resources-' + [Guid]::NewGuid().ToString('N'))
-& dotnet publish (Join-Path $productRoot 'UI\TaskBarWidgets.UI.csproj') -c $Configuration -r win-x64 --self-contained true -o $output -p:BuildInParallel=false --verbosity minimal
+& dotnet publish (Join-Path $productRoot 'UI\TaskBarWidgets.UI.csproj') -c $Configuration -r win-x64 --self-contained false -o $output -p:BuildInParallel=false --verbosity minimal
 if ($LASTEXITCODE -ne 0) { throw 'Fresh WinUI publish failed.' }
 $generated = Join-Path $productRoot "UI\bin\$Configuration\net8.0-windows10.0.22621.0\win-x64"
 foreach ($resource in @('TaskBarWidgets.UI.pri', 'App.xbf')) {

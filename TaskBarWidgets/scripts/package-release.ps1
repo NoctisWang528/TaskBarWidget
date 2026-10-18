@@ -4,6 +4,7 @@ $ErrorActionPreference = 'Stop'
 $productRoot = Split-Path -Parent $PSScriptRoot
 $repoRoot = Split-Path -Parent $productRoot
 $source = & (Join-Path $PSScriptRoot 'resolve-app-directory.ps1') -Directory $OutputDirectory
+& (Join-Path $PSScriptRoot 'check-runtime-layout.ps1') -Directory $source
 $info = Get-Content -LiteralPath (Join-Path $source 'build-info.json') -Raw | ConvertFrom-Json
 if ($info.component -ne 'All' -or $info.configuration -ne 'Release' -or $info.version -notmatch '^\d{6}-\d{4}$') {
     throw 'A complete versioned Release build is required.'
@@ -43,10 +44,15 @@ foreach ($directory in @('Media','UI','language','licenses')) {
 }
 Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE') -Destination (Join-Path $stage 'LICENSE')
 Copy-Item -LiteralPath (Join-Path $repoRoot 'NOTICE') -Destination (Join-Path $stage 'NOTICE')
+& (Join-Path $PSScriptRoot 'check-runtime-layout.ps1') -Directory $stage
 @"
 TaskBarWidgets $version — Windows 11 x64
 
 完整解压后运行 TaskBarWidgets.exe。不要单独运行 Media/UI 内的辅助程序。
+本包使用系统共享运行库，需安装：
+- .NET 8 Desktop Runtime x64（安装最新 8.0 补丁；无需 SDK）：https://dotnet.microsoft.com/zh-cn/download/dotnet/8.0
+- Windows App Runtime 2.5.1 x64 或兼容的更新 2.x：https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads
+启动时检查依赖，缺失或无法加载时显示下载入口，不会自动安装。环境就绪后重新启动程序。
 需要管理员权限和 Microsoft Edge WebView2 Runtime；请先退出旧版或其他任务栏监测工具。
 此包不包含个人配置，首次启动使用默认设置。升级前请自行备份配置与流量历史。
 

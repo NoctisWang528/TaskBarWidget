@@ -1026,9 +1026,10 @@
     <WebView2Package>$(ProjectDir)..\..\.packages\microsoft.web.webview2\1.0.2903.40\build\native</WebView2Package>
   </PropertyGroup>
   <ItemDefinitionGroup>
+    <Manifest><AdditionalManifestFiles>$(ProjectDir)SharedRuntime.compat.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles></Manifest>
     <ResourceCompile><AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ResourceCompile>
     <PreBuildEvent><Command>powershell.exe -NoProfile -Command "[IO.File]::WriteAllText('$(IntDir)TaskBarWidgets-build-time.txt', (Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz'), [Text.Encoding]::ASCII)"</Command></PreBuildEvent>
-    <ClCompile><AdditionalIncludeDirectories>$(WebView2Package)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ClCompile>
+    <ClCompile><AdditionalIncludeDirectories>$(ProjectDir)..\..\.packages\microsoft.windowsappsdk.runtime\2.5.1\include;$(WebView2Package)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ClCompile>
     <Link><AdditionalDependencies>$(WebView2Package)\x64\WebView2LoaderStatic.lib;windowsapp.lib;version.lib;%(AdditionalDependencies)</AdditionalDependencies><UACExecutionLevel>RequireAdministrator</UACExecutionLevel></Link>
   </ItemDefinitionGroup>
   <ItemGroup><ClCompile Include="NativeMediaHost.cpp" /><ClInclude Include="NativeMediaHost.h" /><ClInclude Include="MediaDisplayState.h" /></ItemGroup>

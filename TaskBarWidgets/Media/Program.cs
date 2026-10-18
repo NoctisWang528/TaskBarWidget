@@ -8,13 +8,13 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Length == 2 && args[0] == "--validate-package") return PackageProbe.Run(args[1]);
         if (!TryGetHostArguments(args, out var hostPid, out var pipeName, out var portableData)) return 2;
         try
         {
             using var host = Process.GetProcessById(hostPid);
             if (host.HasExited || host.SessionId != Process.GetCurrentProcess().SessionId) return 2;
             var app = new App(host, pipeName, portableData);
-            app.InitializeComponent();
             return app.Run();
         }
         catch (ArgumentException) { return 2; }

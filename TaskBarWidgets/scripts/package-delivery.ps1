@@ -79,6 +79,10 @@ foreach ($mediaSource in $mediaSources) {
 TaskBarWidgets $($info.version) — 个人便携版本
 
 完整移动 build 文件夹后运行 TaskBarWidgets.exe。媒体设置和歌词数据库位于 Data/。
+此轻量包需要系统安装 .NET 8 Desktop Runtime x64（最新 8.0 补丁）及 Windows App Runtime 2.5.1 x64 或兼容的更新 2.x：
+https://dotnet.microsoft.com/download/dotnet/8.0
+https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads
+只需运行库，无需开发 SDK。启动时检查缺失依赖并提供下载入口，不会自动安装。
 本目录含个人设置、历史和插件凭据，请勿作为公开 Release 上传或分享。
 Data/ 未包含 WebView 登录信息、Cookie 或运行日志。源安装目录与共享 AppData 未被覆盖。
 公开分发请使用相邻 release/ 内的干净 ZIP；源码状态见 release-manifest.json。

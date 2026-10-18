@@ -82,7 +82,7 @@ public sealed class AppSettings
 
     public const string BundledFontFamily = "Source Han Sans SC";
 
-    public const string DefaultFontFamily = BundledFontFamily;
+    public const string DefaultFontFamily = "Microsoft YaHei UI";
 
     private const string LegacyDefaultFontFamily = "Source Han Sans SC, Source Han Sans CN, 思源黑体 CN, Microsoft YaHei UI, Microsoft YaHei";
 
@@ -210,14 +210,14 @@ public sealed class AppSettings
         var trimmed = fontFamily.Trim();
         if (string.Equals(trimmed, LegacyDefaultFontFamily, StringComparison.OrdinalIgnoreCase))
         {
-            return BundledFontFamily;
+            return FontCatalogService.ResolveInstalledFamily(BundledFontFamily) ?? DefaultFontFamily;
         }
 
         var firstFamily = trimmed
             .Split(',', 2, StringSplitOptions.TrimEntries)[0]
             .Trim('"', '\'');
         return string.Equals(firstFamily, BundledFontFamily, StringComparison.OrdinalIgnoreCase)
-            ? BundledFontFamily
+            ? FontCatalogService.ResolveInstalledFamily(BundledFontFamily) ?? DefaultFontFamily
             : trimmed;
     }
 

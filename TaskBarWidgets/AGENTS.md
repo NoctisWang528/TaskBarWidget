@@ -38,9 +38,13 @@ Detach D2D targets before resizing swap chains even when caches retain the conte
 
 Use `scripts/build.ps1` for complete hardware Release builds, not Lite-only validation. Run independent .NET builds serially to avoid generated-output races. Default output is `artifacts/builds/yyyyMMdd-HHmmss/`; refuse default-directory collisions. Release versions use the build time as `yymmdd-hhmm`; do not hardcode a past candidate version. Successful packages include build-info.json; only complete successful builds update artifacts/latest-build.txt.
 
-Publish Media/ and UI/ beside the main executable. WinUI is self-contained with app-local VC143 CRT. Its own generated PRI/XBF must be explicit publish inputs, present in the final package and hash-identical to the current generated resources. Do not copy resource files from a validation host to repair packaging.
+Publish Media/ and UI/ beside the main executable. Media/UI use system-installed x64 .NET 8 Desktop/Core with LatestPatch roll-forward, and shared Windows App Runtime 2.5.1 or compatible later 2.x. Do not bundle Runtime/ or WinUI native framework DLLs. Keep the small bootstrapper, managed projections and VC143 CRT app-local. Native preflight must validate hostfxr framework resolution and actual WinUI bootstrap before normal startup, showing actionable download links without auto-installation. Never modify global environment variables. Product PRI/XBF remain explicit publish inputs, present and hash-identical to generated resources. Validate the actual published product probe rather than a separate resource host.
 
 Keep targeted scenario regressions, not wholesale upstream suites or markup trivia. Never use test counts as desktop acceptance. For provider initialization changes run Native/tests/run-builtin-startup-test.ps1 after a fresh native build. UI component checks use scripts/validate-winui.ps1; zero-sized hidden content is not a visual pass. For UI startup/resource changes also run scripts/test-ui-templates.ps1 against the final package: actual templates load offscreen without activation or native/media host startup. A project-reference validation host or no-arguments bootstrap can mask missing resources.
+
+For runtime/package changes run scripts/test-shared-runtime.ps1 and Native/tests/run-managed-runtime-test.ps1. They use isolated diagnostic entry points, never the normal product, and assert system-shared Core/Desktop/WinUI paths. Cover missing .NET, wrong major version, missing bootstrapper and unavailable WinUI version without uninstalling or changing real system runtimes. Package checks verify shared framework declarations and absence of bundled frameworks. Do not enable unsafe trimming; preserve functionality. Fonts are system-provided.
+
+Distribute only Simplified Chinese and English language files, managed satellite assemblies and native MUI resources. Preserve neutral/framework PRI and globalization data. Keep all required third-party notices; licensing files are not unused runtime dependencies.
 
 The standing user instruction is not to auto-start the normal product. Do not run smoke-native.ps1/smoke-media.ps1 without desktop-launch authorization. Report actual player, audio, Explorer, multi-monitor, DPI and visual acceptance as pending where untested.
 
@@ -50,8 +54,10 @@ Keep builds, dependencies, caches, crash dumps, logs and personal runtime data i
 
 The product and new integration code inherit the root Anti 996 license. Preserve original authorship and the separate MIT/MPL/OFL and other third-party terms in THIRD-PARTY-NOTICES.md and licenses/. Include these notices in release packages; do not describe the whole product as GPL or relicense third-party code.
 
-The user permits deleting only the immediate previous build after a successful new package and verified user-data backup/migration. Use the retirement script; refuse live processes, locked drivers, links, unsafe paths or data conflicts. Never unload a driver or kill user applications to force cleanup. NVIDIA/other overlays are external; do not change global gaming settings or undocumented driver profiles.
+Routine retirement covers the immediate previous build; the 2026-10-18 cleanup additionally authorizes historical local artifacts. Verify absolute paths and personal-data backups first; refuse live processes, locked drivers, links, unsafe paths or data conflicts. Never unload a driver or kill user applications to force cleanup. NVIDIA/other overlays are external; do not change global gaming settings or undocumented driver profiles.
 
 ## Delegation
 
 Subagents are permitted, all using gpt-6.1-sol. Assign disjoint ownership, coordinate protocol contracts and build slots, and integrate/review results before reporting completion.
+
+On 2026-10-18 the user accepted lightweight build 261018-1408 and authorized documenting, committing/pushing all accumulated slimming/shared-runtime changes, publishing its clean ZIP, and cleaning historical local builds and temporary files after verified personal-data backups. Preserve the running installation, current delivery and build, source dependencies and backups. This does not authorize later releases, remote release deletion or visibility changes.

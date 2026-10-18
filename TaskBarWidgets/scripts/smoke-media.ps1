@@ -17,7 +17,9 @@ function Read-ProtocolMessage {
     return ($pending.Result | ConvertFrom-Json)
 }
 try {
-    $process = Start-Process -FilePath $executable -ArgumentList @('--host-pid', $PID, '--pipe-name', $pipeName) -WorkingDirectory (Split-Path $executable) -WindowStyle Hidden -PassThru
+    . (Join-Path $PSScriptRoot 'shared-runtime-process.ps1')
+    $start = New-SharedRuntimeProcess $appDirectory 'Media/TaskBarWidgets.Media.exe' @('--host-pid', "$PID", '--pipe-name', $pipeName)
+    $process = [Diagnostics.Process]::Start($start)
     $pipe = [IO.Pipes.NamedPipeClientStream]::new('.', $pipeName, [IO.Pipes.PipeDirection]::InOut, [IO.Pipes.PipeOptions]::Asynchronous)
     $pipe.Connect(20000)
     $reader = [IO.StreamReader]::new($pipe, [Text.UTF8Encoding]::new($false), $false, 8192, $true)

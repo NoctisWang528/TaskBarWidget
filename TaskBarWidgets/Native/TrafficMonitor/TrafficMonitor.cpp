@@ -3,6 +3,7 @@
 //
 
 #include "stdafx.h"
+#include "SharedDependencies.h"
 #include <roapi.h>
 #include "TrafficMonitor.h"
 #include "../Builtins/BuiltinFeatures.h"
@@ -54,6 +55,12 @@ void CTrafficMonitorApp::LoadLanguageConfig()
 {
     CIniHelper ini{ m_config_path };
     m_general_data.language.fromConfigString(ini.GetString(_T("general"), _T("language"), L""));
+    if (!m_general_data.language.isEmpty() && m_general_data.language.bcp_47 != L"zh-CN" && m_general_data.language.bcp_47 != L"en-US")
+    {
+        const bool chinese = PRIMARYLANGID(m_general_data.language.language_id) == LANG_CHINESE;
+        m_general_data.language = {};
+        m_general_data.language.fromConfigString(chinese ? L"zh-CN" : L"en-US");
+    }
 }
 
 void CTrafficMonitorApp::LoadConfig()
@@ -797,6 +804,8 @@ BOOL CTrafficMonitorApp::InitInstance()
         return FALSE;
     }
     m_runtime_initialized = true;
+    // Validate before loading user settings, hardware or spawning managed helpers.
+    if (!EnsureSharedDependencies(CCommon::GetModuleDir())) return FALSE;
     //替换掉对话框程序的默认类名
     WNDCLASS wc;
     ::GetClassInfo(AfxGetInstanceHandle(), _T("#32770"), &wc);       //MFC默认的所有对话框的类名为#32770
@@ -847,7 +856,9 @@ BOOL CTrafficMonitorApp::InitInstance()
     LoadLanguageConfig();
 
     //初始化界面语言
-    CCommon::SetThreadLanguage(m_general_data.language.language_id);
+    const WORD requestedLanguage = m_general_data.language.isEmpty() ? GetUserDefaultUILanguage() : m_general_data.language.language_id;
+    CCommon::SetThreadLanguage(PRIMARYLANGID(requestedLanguage) == LANG_CHINESE
+        ? MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED) : MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US));
 
     //初始化字符串资源
     m_str_table.Init();

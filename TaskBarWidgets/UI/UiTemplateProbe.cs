@@ -47,6 +47,24 @@ internal static class UiTemplateProbe
             themeControls = await SettingsWindow.ProbeThemeControlsAsync(settings);
             cardLyricsControls = await CardLyricsProbe.RunAsync();
             cards = new CardGroup(connection, () => throw new InvalidOperationException("Probe must not invoke settings."));
+            foreach (var point in new[] { (100d, 100d), (1200d, 900d), (100d, 100d) })
+            {
+                cards.Position(point.Item1, point.Item2);
+                for (var index = 0; index < cards.CardWindows.Count; index++)
+                {
+                    var card = cards.CardWindows[index];
+                    var bounds = card.Window.AppWindow;
+                    if (IsWindowVisible(card.Handle) || bounds.Size.Width <= 0 || bounds.Size.Height <= 0 || bounds.Size.Width != cards.CardWindows[0].Window.AppWindow.Size.Width)
+                        throw new InvalidOperationException("Hidden card geometry is invalid.");
+                    if (index > 0)
+                    {
+                        var previous = cards.CardWindows[index - 1].Window.AppWindow;
+                        if (bounds.Position.X != previous.Position.X || bounds.Position.Y <= previous.Position.Y + previous.Size.Height)
+                            throw new InvalidOperationException("Card placement overlaps or has unequal alignment.");
+                    }
+                }
+            }
+            cardLifecycle["hiddenMeasuredPlacement"] = true;
             foreach (var card in cards.CardWindows)
             {
                 TrackActivation(card.Window);
@@ -76,6 +94,11 @@ internal static class UiTemplateProbe
             ValidateOutsideClickPolicy(cards);
             cardLifecycle["externalClickPolicy"] = true;
             heatmapChecks = await CardGroup.ProbeTrafficCardAsync(cards, Path.Combine(AppContext.BaseDirectory, "..", "ui-heatmap-check"));
+            var settingsHandle = WinRT.Interop.WindowNative.GetWindowHandle(settings);
+            SendMessage(settingsHandle, 0x0010, 0, 0);
+            settings.ShowPage("taskbar");
+            if (!IsWindow(settingsHandle) || IsWindowVisible(settingsHandle)) throw new InvalidOperationException("Closing settings did not retain its reusable hidden window.");
+            cardLifecycle["settingsHiddenReuse"] = true;
             var handles = cards.CardWindows.Select(card => card.Handle).ToArray();
             var closingHides = cards.CardWindows.Select(card => card.HideAsync(animate: true)).ToArray();
             if (closingHides.Any(task => task.IsCompleted)) throw new InvalidOperationException("Dispose race did not start with pending animated hides.");
@@ -95,7 +118,9 @@ internal static class UiTemplateProbe
             cards?.Dispose(); settings?.Shutdown();
             var resultIndex = Array.IndexOf(args, "--result");
             var result = resultIndex >= 0 && resultIndex + 1 < args.Length ? args[resultIndex + 1] : Path.Combine(AppContext.BaseDirectory, "template-probe.json");
-            File.WriteAllText(result, JsonSerializer.Serialize(new { success = error is null, error, checks, cardLifecycle, audioControls, weatherControls, themeControls, cardLyricsControls, sourceSelector, heatmapChecks, layoutChecks, probeActivated = activated, externalForegroundChanged = GetForegroundWindow() != before }, new JsonSerializerOptions { WriteIndented = true }));
+            var winUiModule = System.Diagnostics.Process.GetCurrentProcess().Modules.Cast<System.Diagnostics.ProcessModule>()
+                .FirstOrDefault(module => string.Equals(module.ModuleName, "Microsoft.ui.xaml.dll", StringComparison.OrdinalIgnoreCase))?.FileName;
+            File.WriteAllText(result, JsonSerializer.Serialize(new { success = error is null, error, runtimeDirectory = RuntimeEnvironment.GetRuntimeDirectory(), winUiModule, checks, cardLifecycle, audioControls, weatherControls, themeControls, cardLyricsControls, sourceSelector, heatmapChecks, layoutChecks, probeActivated = activated, externalForegroundChanged = GetForegroundWindow() != before }, new JsonSerializerOptions { WriteIndented = true }));
             Environment.ExitCode = error is null ? 0 : 1;
             app.Exit();
         }
@@ -160,4 +185,5 @@ internal static class UiTemplateProbe
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] private static extern nint SetWindowLongPtr(nint window, int index, nint value);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsWindow(nint window);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsWindowVisible(nint window);
+    [DllImport("user32.dll")] private static extern nint SendMessage(nint window, uint message, nint wParam, nint lParam);
 }

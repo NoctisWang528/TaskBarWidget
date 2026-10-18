@@ -24,6 +24,9 @@ if ($OutputDirectory) {
     New-Item -ItemType Directory -Path $appDirectory | Out-Null
 }
 New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
+if ((Test-Path -LiteralPath (Join-Path $appDirectory 'Runtime')) -or (Test-Path -LiteralPath (Join-Path $appDirectory 'UI/Microsoft.ui.xaml.dll')) -or (Test-Path -LiteralPath (Join-Path $appDirectory 'Media/coreclr.dll')) -or (Test-Path -LiteralPath (Join-Path $appDirectory 'UI/coreclr.dll'))) {
+    throw 'The old runtime layout cannot be updated in place. Build into a new directory.'
+}
 function Invoke-BuildCommand([string]$Name, [string]$Program, [string[]]$Arguments) {
     $logPath = Join-Path $logDirectory "$Name.log"
     Write-Host "$Name ..."
@@ -60,7 +63,11 @@ try {
         }
         Copy-Item -LiteralPath 'Native/OpenHardwareMonitorApi/LibreHardwareMonitorLib.dll' -Destination $appDirectory -Force
         if (Test-Path -LiteralPath 'Native/TrafficMonitor/language') {
-            Copy-Item -LiteralPath 'Native/TrafficMonitor/language' -Destination $appDirectory -Recurse -Force
+            $languageDirectory = Join-Path $appDirectory 'language'
+            New-Item -ItemType Directory -Path $languageDirectory -Force | Out-Null
+            foreach ($name in @('English.ini','Simplified_Chinese.ini')) {
+                Copy-Item -LiteralPath (Join-Path 'Native/TrafficMonitor/language' $name) -Destination $languageDirectory -Force
+            }
         }
         # App-local release runtime avoids an installer requirement on the acceptance machine.
         $redistRoot = Join-Path $installation 'VC\Redist\MSVC'
@@ -68,14 +75,18 @@ try {
         if ($Configuration -eq 'Release' -and $redistVersion) {
             foreach ($runtime in @('Microsoft.VC143.CRT', 'Microsoft.VC143.MFC')) {
                 $runtimePath = Join-Path $redistVersion.FullName "x64\$runtime"
-                if (Test-Path -LiteralPath $runtimePath) { Get-ChildItem -LiteralPath $runtimePath -Filter '*.dll' | Copy-Item -Destination $appDirectory -Force }
+                if (Test-Path -LiteralPath $runtimePath) {
+                    # The Unicode native executable imports mfc140u.dll; the ANSI MFC build is unused.
+                    Get-ChildItem -LiteralPath $runtimePath -Filter '*.dll' | Where-Object { $runtime -ne 'Microsoft.VC143.MFC' -or $_.Name -eq 'mfc140u.dll' } | Copy-Item -Destination $appDirectory -Force
+                }
             }
         }
     }
     if ($Component -in @('All', 'Media')) {
         $managedVersion = @("-p:Version=$assemblyVersion", "-p:FileVersion=$fileVersion", "-p:InformationalVersion=$buildVersion", '-p:IncludeSourceRevisionInInformationalVersion=false')
-        Invoke-BuildCommand 'publish-media' 'dotnet' (@('publish', 'Media/TaskBarWidgets.Media.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', 'true', '-o', (Join-Path $appDirectory 'Media'), '-p:BuildInParallel=false', '--verbosity', 'minimal') + $managedVersion)
-        Invoke-BuildCommand 'publish-ui' 'dotnet' (@('publish', 'UI/TaskBarWidgets.UI.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', 'true', '-o', (Join-Path $appDirectory 'UI'), '-p:BuildInParallel=false', '--verbosity', 'minimal') + $managedVersion)
+        $managedVersion += @('-p:RollForward=LatestPatch')
+        Invoke-BuildCommand 'publish-media' 'dotnet' (@('publish', 'Media/TaskBarWidgets.Media.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', 'false', '-o', (Join-Path $appDirectory 'Media'), '-p:BuildInParallel=false', '--verbosity', 'minimal') + $managedVersion)
+        Invoke-BuildCommand 'publish-ui' 'dotnet' (@('publish', 'UI/TaskBarWidgets.UI.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', 'false', '-o', (Join-Path $appDirectory 'UI'), '-p:BuildInParallel=false', '--verbosity', 'minimal') + $managedVersion)
         # WinUI loads native DLLs from its own process directory, not the native owner's directory.
         $uiInstallation = $installation
         if (-not $uiInstallation) {
@@ -103,6 +114,7 @@ try {
     Copy-Item -LiteralPath 'THIRD-PARTY-NOTICES.md', 'ACCEPTANCE.md' -Destination $appDirectory -Force
     Copy-Item -LiteralPath 'LICENSE', 'NOTICE' -Destination $appDirectory -Force
     if ($Component -eq 'All') {
+        & (Join-Path $PSScriptRoot 'check-runtime-layout.ps1') -Directory $appDirectory
         foreach ($required in @('TaskBarWidgets.exe', 'OpenHardwareMonitorApi.dll', 'LibreHardwareMonitorLib.dll', 'Media\TaskBarWidgets.Media.exe', 'UI\TaskBarWidgets.UI.exe', 'UI\TaskBarWidgets.UI.pri', 'UI\App.xbf')) {
             if (-not (Test-Path -LiteralPath (Join-Path $appDirectory $required))) { throw "Missing packaged file: $required" }
         }
@@ -115,6 +127,9 @@ try {
         timeZone = 'Asia/Taipei'
         configuration = $Configuration
         component = $Component
+        runtimeDeployment = 'system-shared'
+        dotnetFramework = 'Microsoft.WindowsDesktop.App 8.0 (x64), latest installed patch'
+        windowsAppRuntime = '2.5.1 (x64) or compatible later 2.x'
     } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $appDirectory 'build-info.json') -Encoding UTF8
     if ($Component -eq 'All') {
         Set-Content -LiteralPath (Join-Path $productRoot 'artifacts\latest-build.txt') -Value $appDirectory -Encoding UTF8

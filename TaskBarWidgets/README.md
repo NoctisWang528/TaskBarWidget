@@ -29,7 +29,7 @@ Windows 11 任务栏工具，使用 WinUI 3 设置与快捷卡片，整合硬件
 
 完整构建使用硬件监测版本，不使用 Lite 替代。依赖缓存写入 `.packages/`，日志和最终程序写入 `artifacts/`。启动入口为最新构建目录中的 `TaskBarWidgets.exe`，其 `Media/` 与 `UI/` 子目录必须保留。smoke 与导入脚本默认读取 `artifacts/latest-build.txt`；没有有效记录时需先完整构建，或明确指定目录（smoke 使用 `-OutputDirectory`，导入使用 `-DestinationDirectory`）。只有成功的完整构建更新该指针。
 
-完整监测程序沿用上游的管理员运行要求，以保留温度等硬件访问能力；启动时可能出现 UAC。媒体服务和 WinUI 界面由主程序启动，不要单独双击两个辅助 EXE。运行还需 Microsoft Edge WebView2 Runtime；缺失时媒体视图不可用，监测视图仍可回退。
+完整监测程序沿用上游的管理员运行要求，以保留温度等硬件访问能力；启动时可能出现 UAC。媒体服务和 WinUI 界面由主程序启动，不要单独双击两个辅助 EXE。运行前需安装 .NET 8 Desktop Runtime x64、Windows App Runtime 2.5.1 x64 或兼容的更新 2.x，下载链接和安装选择见[运行环境要求](../README.md#下载与运行)。不需要开发 SDK。另需 Microsoft Edge WebView2 Runtime；缺失时媒体视图不可用，监测视图仍可回退。
 
 构建默认输出到 `artifacts/builds/yyyyMMdd-HHmmss/`（构建开始时的本地时间）。`artifacts/latest-build.txt` 记录最近成功的完整构建，包内 `build-info.json` 记录构建信息。构建和测试不会自动启动正常产品，也不会替换日用安装或设置自启。
 
@@ -92,3 +92,11 @@ GitHub 的干净 ZIP 不带任何个人配置或历史。本地个人 build 已�
 `test-ui-templates.ps1` 要求正式包中的应用 PRI 与 App.xbf 存在；每次发布也会校验其与本次生成资源的哈希。它使用模拟配置检查宽窄布局、预览和复选框间距，将不含系统 Mica 的控件图写入包内 `ui-layout-check/`，并验证卡片隐藏／重开／销毁竞态。构造成功或无参数启动成功都不能替代模板加载检查。
 
 上一版本的清理使用 `scripts/retire-previous-build.ps1 -PreviousBuild <上一构建目录>` 预览；显式 `-Execute` 才备份、迁移并删除。最新状态见 [ACCEPTANCE.md](ACCEPTANCE.md)。
+
+## 包体精简与私有运行库
+
+轻量版保留现有功能，Media/UI 使用系统共享 .NET 8，WinUI 使用系统安装的 Windows App Runtime 2.5.1 或兼容更新的 2.x；不再打包 Runtime/ 或 WinUI 原生框架 DLL。原生入口先验证实际依赖，失败显示下载入口；不会自动安装。只携带程序所需托管接口、WebView2/WinUI 引导 DLL 和 VC/MFC 文件，字体使用系统字体。
+
+.NET 使用 LatestPatch 策略，选择已安装的兼容 8.0 补丁，不自动跨到 9/10。原生与媒体启动器仅对子进程指定系统 x64 .NET 路径；不修改用户/系统环境。WinUI 最低版本来自与项目一致的 NuGet 版本常量；构建机仍需 SDK，使用者只需 Runtime。
+
+完整解压到新目录并迁移 Data/ 等个人文件；不要覆盖旧自包含目录。`scripts/check-runtime-layout.ps1` 校验无随包运行库与依赖声明；`scripts/test-shared-runtime.ps1`、`Native/tests/run-managed-runtime-test.ps1` 及实际发布的 WinUI 探针验证共享加载和缺失依赖分支，不启动正常产品或操作音频设备。

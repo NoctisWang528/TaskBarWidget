@@ -19,3 +19,5 @@ The authorized remote is `NoctisWang528/TaskBarWidget`. On 2026-10-16 the user a
 Release versions use build time `yymmdd-hhmm` in Asia/Taipei. Build clean distributable packages without developer settings, logs, caches or secrets. Retain third-party licenses. Do not initialize child repositories or rewrite published history as part of routine cleanup.
 
 On 2026-10-18 the user authorized documenting and committing/pushing the two accumulated UI/interaction/settings changes and publishing their clean ZIP as release 261018-1213. Personal build packages and their data are excluded. This does not authorize future releases or visibility changes.
+
+On 2026-10-18 the user accepted lightweight build 261018-1408 and authorized documenting, committing/pushing all accumulated slimming/shared-runtime changes, publishing its clean ZIP, and cleaning historical local builds and temporary files after verified personal-data backups. Preserve the running installation, current delivery and build, source dependencies and backups. This does not authorize later releases, remote release deletion or visibility changes.
