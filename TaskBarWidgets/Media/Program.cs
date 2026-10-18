@@ -8,12 +8,12 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
-        if (!TryGetHostArguments(args, out var hostPid, out var pipeName)) return 2;
+        if (!TryGetHostArguments(args, out var hostPid, out var pipeName, out var portableData)) return 2;
         try
         {
             using var host = Process.GetProcessById(hostPid);
             if (host.HasExited || host.SessionId != Process.GetCurrentProcess().SessionId) return 2;
-            var app = new App(host, pipeName);
+            var app = new App(host, pipeName, portableData);
             app.InitializeComponent();
             return app.Run();
         }
@@ -21,9 +21,17 @@ internal static class Program
     }
 
     internal static bool TryGetHostArguments(string[] args, out int hostPid, out string pipeName)
+        => TryGetHostArguments(args, out hostPid, out pipeName, out _);
+
+    internal static bool TryGetHostArguments(string[] args, out int hostPid, out string pipeName, out bool? portableData)
     {
-        hostPid = 0; pipeName = "";
-        if (args.Length != 4 || args[0] != "--host-pid" || args[2] != "--pipe-name" ||
+        hostPid = 0; pipeName = ""; portableData = null;
+        if (args.Length == 6)
+        {
+            if (args[4] != "--portable-data" || args[5] is not ("0" or "1")) return false;
+            portableData = args[5] == "1";
+        }
+        if (args.Length is not (4 or 6) || args[0] != "--host-pid" || args[2] != "--pipe-name" ||
             !int.TryParse(args[1], out hostPid) || hostPid <= 0 || hostPid == Environment.ProcessId) return false;
         pipeName = args[3];
         return pipeName == $"TaskBarWidgets.{hostPid}";

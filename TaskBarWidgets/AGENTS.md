@@ -6,6 +6,8 @@ Implement the current [requirements](../docs/需求与架构.md) and [UI specifi
 
 Local implementation/builds/tests are authorized. On 2026-10-16 the user authorized the documentation/repository cleanup, commit, push and first GitHub Release ZIP, then separately authorized committing/pushing the weather configuration fix and publishing its new ZIP Release. This is not standing authorization for future publication or changes to repository visibility. Never replace or stop the daily TrafficMonitor installation, register startup, or publish elsewhere without applicable authorization.
 
+On 2026-10-18 the user additionally authorized documenting, committing and pushing the two accumulated UI/interaction/settings changes and publishing build 261018-1213 as a clean ZIP Release. This authorization is specific to that release; personal build data must remain local.
+
 ## Product behavior
 
 - Keep TrafficMonitor's native taskbar, hardware/network monitoring, configurable display items and layout. No desktop main window, skins, monitoring thresholds/notifications, external plugin loading or plugin page.
@@ -15,7 +17,7 @@ Local implementation/builds/tests are authorized. On 2026-10-16 the user authori
 - WinUI3 owns all visible settings and cards. Three independent equal-width cards: traffic, devices, media from top to bottom. Heatmap is twelve weeks of upload+download, square cells, subtle glow, no scrolling. Device selection uses flyouts without resizing or dismissing the group. Settings gear belongs on the media card.
 - Module pool and one/two composition lanes define taskbar contents. Click opens the right property drawer; remove retains labels/colors. Stable IDs and explicit rows persist. Shared font/background/opacity live in one group; secondary checkboxes are compact.
 - Explicit two-row layouts share column widths (maximum of the upper/lower item requirements) and column spacing. Preserve lane order; exclusive double-line items span their own column. Preview and native geometry must use the same pairing rule. Heatmap colors are relative to the visible twelve-week daily peak; unknown, zero and future dates remain distinct.
-- Default communication endpoint synchronization is an Audio preference, enabled by default, affecting only the next explicit device switch.
+- The media/audio panel and default communication endpoint synchronization are always enabled; the audio preference page and global hotkey feature are removed. Device synchronization occurs only on an explicit switch. Lyrics behavior, appearance, matching, per-track offsets and diagnostics share one navigation category. Source selection shows per-application icons and spacious menu rows.
 - Cards dismiss on an actual outside click, Escape, entry toggle or opening settings; foreground/focus changes alone must never dismiss them. A scoped mouse listener must never swallow global input and must be removed on hide/shutdown. The native entry HWND is verified against the native host PID before forwarding.
 - Audio mutations return readback directly to the cards; mute never writes volume. Serialize audio commands separately from slow settings/history requests, bound queues, and do not let older snapshots overwrite newer operations.
 - Preserve user configuration/history; about links to https://github.com/NoctisWang528/TaskBarWidget. Respect system theme, high contrast and reduced motion.

@@ -78,7 +78,16 @@ public sealed partial class CardGroup
             var slot = new Grid { Width = TrafficPitch, Height = TrafficPitch };
             var glow = _dayGlows[index] = new Grid { Width = TrafficCellSize, Height = TrafficCellSize, IsHitTestVisible = false };
             var button = _days[index] = new Button { Width = TrafficCellSize, Height = TrafficCellSize, MinWidth = 0, MinHeight = 0,
-                Padding = new Thickness(0), CornerRadius = new CornerRadius(4), UseSystemFocusVisuals = false };
+                Padding = new Thickness(0), CornerRadius = new CornerRadius(4), UseSystemFocusVisuals = false,
+                Background = new SolidColorBrush(), BorderBrush = new SolidColorBrush() };
+            // Keep the same brushes in all template states. Updating their colors
+            // also updates an already-active hover/pressed state and glow mask.
+            button.Resources["ButtonBackgroundPointerOver"] = button.Background;
+            button.Resources["ButtonBackgroundPressed"] = button.Background;
+            button.Resources["ButtonBackgroundDisabled"] = button.Background;
+            button.Resources["ButtonBorderBrushPointerOver"] = button.BorderBrush;
+            button.Resources["ButtonBorderBrushPressed"] = button.BorderBrush;
+            button.Resources["ButtonBorderBrushDisabled"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
             slot.Children.Add(glow); slot.Children.Add(button);
             button.Click += (_, _) =>
             {
@@ -153,16 +162,10 @@ public sealed partial class CardGroup
         var accent = IsDark ? Color.FromArgb(255, 141, 216, 255) : Color.FromArgb(255, 37, 104, 177);
         if (_trafficHighContrast) accent = new UISettings().UIElementColor(UIElementType.Highlight);
         var fill = level < 0 ? Microsoft.UI.Colors.Transparent : ColorForLevel(level);
-        button.Background = new SolidColorBrush(fill);
+        ((SolidColorBrush)button.Background).Color = fill;
         button.BorderThickness = new Thickness(level >= 0 && (emphasized || level == 0) ? 1 : 0);
-        button.BorderBrush = new SolidColorBrush(emphasized ? accent : _trafficHighContrast ? new UISettings().UIElementColor(UIElementType.WindowText) :
-            IsDark ? Color.FromArgb(95, 151, 176, 201) : Color.FromArgb(65, 95, 119, 145));
-        button.Resources["ButtonBackgroundPointerOver"] = button.Background;
-        button.Resources["ButtonBackgroundPressed"] = button.Background;
-        button.Resources["ButtonBackgroundDisabled"] = button.Background;
-        button.Resources["ButtonBorderBrushPointerOver"] = button.BorderBrush;
-        button.Resources["ButtonBorderBrushPressed"] = button.BorderBrush;
-        button.Resources["ButtonBorderBrushDisabled"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        ((SolidColorBrush)button.BorderBrush).Color = emphasized ? accent : _trafficHighContrast ? new UISettings().UIElementColor(UIElementType.WindowText) :
+            IsDark ? Color.FromArgb(95, 151, 176, 201) : Color.FromArgb(65, 95, 119, 145);
         if (button.IsLoaded) UpdateGlow(button, glow);
     }
 
@@ -196,16 +199,19 @@ public sealed partial class CardGroup
         if (!_glows.TryGetValue(button, out var glow))
         {
             var compositor = ElementCompositionPreview.GetElementVisual(host).Compositor;
-            // Keep the solid shadow caster inside the button's rounded corners.
+            // A shadow-only sprite uses the actual rounded cell's alpha mask.
+            // A color-brush sprite casts a solid rectangle beneath translucent
+            // template states and visibly fills the four rounded corners.
+            var shape = new Microsoft.UI.Xaml.Shapes.Rectangle { Width = TrafficCellSize, Height = TrafficCellSize,
+                RadiusX = 4, RadiusY = 4, Fill = button.Background };
+            host.Children.Add(shape);
             var sprite = compositor.CreateSpriteVisual();
-            sprite.Size = new Vector2((float)TrafficCellSize - 4, (float)TrafficCellSize - 4);
-            sprite.Offset = new Vector3(2, 2, 0);
-            var shadow = compositor.CreateDropShadow(); shadow.Offset = Vector3.Zero; sprite.Shadow = shadow;
+            sprite.Size = new Vector2((float)TrafficCellSize, (float)TrafficCellSize);
+            var shadow = compositor.CreateDropShadow(); shadow.Mask = shape.GetAlphaMask(); shadow.Offset = Vector3.Zero; sprite.Shadow = shadow;
             ElementCompositionPreview.SetElementChildVisual(host, sprite);
             glow = (sprite, shadow); _glows.Add(button, glow);
         }
         var color = IsDark ? Color.FromArgb(255, 105, 189, 250) : Color.FromArgb(255, 52, 129, 211);
-        glow.Visual.Brush = glow.Visual.Compositor.CreateColorBrush(ColorForLevel(level));
         glow.Shadow.Color = color;
         glow.Shadow.BlurRadius = emphasized ? 8 : 4;
         glow.Shadow.Opacity = emphasized ? 0.6f : IsDark ? 0.2f : 0.1f;

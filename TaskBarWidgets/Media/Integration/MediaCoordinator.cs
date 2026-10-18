@@ -35,6 +35,11 @@ internal sealed class MediaCoordinator : IDisposable
     private string _styleScript = "", _tuningScript = "", _coverScript = "", _spectrumScript = "";
     private object _frame = new { version = 1, type = "frame", sourceId = "", isPlaying = false, hasMedia = false, isBrowser = false, trackId = "", scripts = Array.Empty<string>() };
     internal event Action<object>? FrameReady;
+    internal event Action<object>? CardFrameReady;
+    private long _cardRevision;
+    private object _cardFrame = new { revision = 0L, trackId = "", available = false, scripts = Array.Empty<string>() };
+    internal object CardSnapshot => _cardFrame;
+    internal string NativeAppearanceScript { get; set; } = "";
     internal MediaControlState ControlState { get; private set; } = new("没有媒体", "", "", 0, 0, false, false, false, false, false);
     internal CurrentTrackLyricsContext? CurrentTrackContext => LyricsInput(_playback).Track is not { } track
         ? null : new(track, Lyrics.CurrentLyricSourceApp ?? "");
@@ -54,6 +59,26 @@ internal sealed class MediaCoordinator : IDisposable
     internal void Start() => _timer.Start();
     internal object Snapshot() => Volatile.Read(ref _frame);
     internal string CoverDataUrl => _coverData;
+    private readonly Dictionary<string, Task<string>> _sourceIcons = new(StringComparer.OrdinalIgnoreCase);
+    internal string SourceIcon(MediaSourceChoice source)
+    {
+        if (!_sourceIcons.TryGetValue(source.Id, out var pending))
+        {
+            if (_sourceIcons.Count >= 64) _sourceIcons.Clear();
+            var settings = _settings.Clone();
+            pending = Task.Run(() => {
+                try
+                {
+                    // Never borrow the icon of a different, currently audible application.
+                    var icon = PlayerIconResolver.ResolveDataUrl(source.Id, allowActiveSessionFallback: false);
+                    return icon.Length > 0 ? icon : PlayerSourceBadgeResolver.Resolve(source.Name, settings).IconDataUri;
+                }
+                catch { return ""; }
+            });
+            _sourceIcons[source.Id] = pending;
+        }
+        return pending.IsCompletedSuccessfully ? pending.Result : "";
+    }
     internal static bool IsBrowser(TrackInfo? track) => string.Equals(track?.SourceApp, "Browser", StringComparison.OrdinalIgnoreCase);
     internal static PlaybackSnapshot LyricsInput(PlaybackSnapshot snapshot) => IsBrowser(snapshot.Track) ||
         SmtcMusicSessionProvider.IsBrowserSource(snapshot.SourceAppUserModelId) ? snapshot with { Track = null } : snapshot;
@@ -148,6 +173,14 @@ internal sealed class MediaCoordinator : IDisposable
                 snapshot.IsPlaying, track is not null, browser, trackId, scripts.ToArray());
             Volatile.Write(ref _frame, value);
             FrameReady?.Invoke(value);
+            var available = !browser && frame.CurrentLineIndex >= 0 && !frame.IsPureMusic;
+            _cardFrame = new { revision = ++_cardRevision, trackId, available, scripts = available ? new[] {
+                _styleScript, NativeAppearanceScript,
+                LyricsWebViewScriptFactory.SetLyrics(frame.CurrentLine, frame.NextLine, frame.LineProgress, frame.CurrentLineIndex,
+                    trackId, false, snapshot.IsPlaying, _settings.EnableWordScanning ? frame.WordScanProgress : null,
+                    frame.CurrentTranslation, frame.NextTranslation, _settings.ShowLyricTranslation && frame.HasTrackTranslation,
+                    presentationScene: LyricsPresentationScene.Lyrics) } : Array.Empty<string>() };
+            CardFrameReady?.Invoke(_cardFrame);
         }
         catch (OperationCanceledException) when (_disposed) { }
         catch (Exception exception)
@@ -158,6 +191,8 @@ internal sealed class MediaCoordinator : IDisposable
                 hasMedia = false, isBrowser = false, trackId = "", scripts = Array.Empty<string>() };
             Volatile.Write(ref _frame, value);
             FrameReady?.Invoke(value);
+            _cardFrame = new { revision = ++_cardRevision, trackId = "", available = false, scripts = Array.Empty<string>() };
+            CardFrameReady?.Invoke(_cardFrame);
         }
         finally { _busy = false; }
     }
@@ -258,7 +293,7 @@ internal sealed class MediaCoordinator : IDisposable
         if (action == "seek" && position.HasValue && double.IsFinite(position.Value))
             await Provider.SeekToAsync(TimeSpan.FromSeconds(Math.Max(0, position.Value)), _stop.Token);
         else if (action is "playPause" or "previous" or "next")
-            await Provider.ExecuteAsync(action switch { "previous" => MediaHotkeyAction.PreviousTrack, "next" => MediaHotkeyAction.NextTrack, _ => MediaHotkeyAction.TogglePlayPause }, _stop.Token);
+            await Provider.ExecuteAsync(action switch { "previous" => MediaControlAction.PreviousTrack, "next" => MediaControlAction.NextTrack, _ => MediaControlAction.TogglePlayPause }, _stop.Token);
     }
 
     internal bool TryApplyResolvedLyrics(TrackInfo track, ResolvedLyrics resolved) => !IsBrowser(_playback.Track) &&

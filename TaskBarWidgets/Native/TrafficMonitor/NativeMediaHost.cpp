@@ -70,6 +70,12 @@ struct NativeMediaHost::Impl : std::enable_shared_from_this<NativeMediaHost::Imp
     bool documentReady{};
     ULONGLONG navigationStarted{};
     bool visible{};
+    bool browserFrame{}, pointerDown{}, pointerBrowser{};
+    POINT pointerOrigin{};
+    unsigned long long gestureSerial{}, pendingBrowserGesture{};
+    ULONGLONG browserGestureStarted{};
+    std::wstring pointerSource;
+    unsigned clickLogs{};
     bool lastAnnounced{};
     bool announcePending{};
     bool creating{};
@@ -220,6 +226,7 @@ struct NativeMediaHost::Impl : std::enable_shared_from_this<NativeMediaHost::Imp
         }
         std::lock_guard lock(mutex);
         if (outgoing.size() < 64) outgoing.push_back(Utf8(message.Stringify().c_str()) + "\n");
+        else Log(L"Command queue full: " + std::wstring(action));
     }
     void LaunchHelper()
     {
@@ -232,7 +239,8 @@ struct NativeMediaHost::Impl : std::enable_shared_from_this<NativeMediaHost::Imp
         }
         std::wstring executable = (appDirectory / L"Media" / L"TaskBarWidgets.Media.exe").wstring();
         std::wstring command = L"\"" + executable + L"\" --host-pid " + std::to_wstring(GetCurrentProcessId())
-            + L" --pipe-name TaskBarWidgets." + std::to_wstring(GetCurrentProcessId());
+            + L" --pipe-name TaskBarWidgets." + std::to_wstring(GetCurrentProcessId())
+            + L" --portable-data " + (theApp.m_general_data.portable_mode ? L"1" : L"0");
         STARTUPINFOW startup{ sizeof(startup) };
         startup.dwFlags = STARTF_USESHOWWINDOW;
         startup.wShowWindow = SW_HIDE;
@@ -398,6 +406,9 @@ struct NativeMediaHost::Impl : std::enable_shared_from_this<NativeMediaHost::Imp
         const std::wstring value = payload.Stringify().c_str();
         if (lastAppearance == value) return;
         lastAppearance = value;
+        auto appearance = Command(L"taskbarAppearance");
+        appearance.SetNamedValue(L"payload",payload);
+        Send(appearance);
         const auto script = L"window.taskbarLyrics?.receive({version:1,type:'nativeAppearance',payload:" + value + L"});";
         web->ExecuteScript(script.c_str(), nullptr);
     }
@@ -508,10 +519,9 @@ struct NativeMediaHost::Impl : std::enable_shared_from_this<NativeMediaHost::Imp
                                     else self->Failure(L"Media renderer JavaScript API is unavailable.",E_FAIL);
                                 }
                                 else if(action==L"rendererError") self->Failure(L"Media renderer JavaScript error: "+std::wstring(message.GetNamedString(L"message",L"unknown")),E_FAIL);
-                                else if(message.GetNamedString(L"type",L"")==L"coverClick") self->Panel();
+                                // Native pointer gestures own panel toggles, including the cover.
                                 else if(action==L"wheel") self->state.Wheel(static_cast<int>(message.GetNamedNumber(L"delta",0)));
                                 else if(action==L"menu") self->ShowMenu();
-                                else if(action==L"togglePanel") self->Panel();
                                 else if(action==L"playPause" || action==L"previous" || action==L"next") self->Send(Command(action.c_str()));
                             }
                             catch (...) {self->Log(L"Invalid WebView message ignored.",E_INVALIDARG);}
@@ -530,7 +540,6 @@ struct NativeMediaHost::Impl : std::enable_shared_from_this<NativeMediaHost::Imp
                                 if(delta)chrome.webview.postMessage({action:'wheel',delta});
                               }, {passive:false});
                               document.addEventListener('contextmenu', e => {e.preventDefault();chrome.webview.postMessage({action:'menu'});});
-                              document.addEventListener('click', e => {if(!e.target.closest('button,input,a,[data-media-action]'))chrome.webview.postMessage({action:'togglePanel'});});
                             })();
                         )JS", nullptr);
                         self->navigationStarted=GetTickCount64();
@@ -545,13 +554,49 @@ struct NativeMediaHost::Impl : std::enable_shared_from_this<NativeMediaHost::Imp
             }).Get());
         if (FAILED(result)) { creating = false; Failure(L"WebView2 initialization failed; retrying.",result); }
     }
-    void Panel()
+    void ClickLog(const std::wstring& stage, unsigned long long id)
     {
+        if (clickLogs++ < 192) Log(L"Panel gesture=" + std::to_wstring(id) + L" " + stage);
+    }
+    void FinishBrowserGesture(unsigned long long id, const std::wstring& action)
+    {
+        if (pendingBrowserGesture != id) return;
+        pendingBrowserGesture = 0;
+        ClickLog(L"browser-result " + action, id);
+        if (action == L"disabled") return;
+        if (pointerSource == state.source && (action == L"playPause" || action == L"previous" || action == L"next")) Send(Command(action.c_str()));
+        else Panel(id);
+    }
+    void ActivatePointer(POINT point, unsigned long long id)
+    {
+        if (!pointerBrowser || !visible || !documentReady || !web || pointerSource != state.source) { Panel(id); return; }
+        pendingBrowserGesture = id;
+        browserGestureStarted = GetTickCount64();
+        // Native coordinates are physical pixels; DOM hit testing uses CSS pixels.
+        RECT bounds{}; GetClientRect(owner, &bounds);
+        auto script = L"(()=>{const e=document.elementFromPoint(" + std::to_wstring(point.x) + L"*innerWidth/" + std::to_wstring((std::max)(1L,bounds.right)) +
+            L"," + std::to_wstring(point.y) + L"*innerHeight/" + std::to_wstring((std::max)(1L,bounds.bottom)) +
+            L");const b=e?.closest('[data-media-action]');return b?(b.disabled?'disabled':b.dataset.mediaAction):'panel';})()";
+        auto weak = weak_from_this();
+        const HRESULT result = web->ExecuteScript(script.c_str(), Callback<ICoreWebView2ExecuteScriptCompletedHandler>([weak,id](HRESULT result,LPCWSTR json)->HRESULT {
+            if (auto self=weak.lock(); self && !self->stop) {
+                std::wstring action=L"panel";
+                if (SUCCEEDED(result) && json) try { action=JsonValue::Parse(json).GetString(); } catch (...) {}
+                self->FinishBrowserGesture(id,action);
+            }
+            return S_OK;
+        }).Get());
+        if (FAILED(result)) FinishBrowserGesture(id,L"panel");
+    }
+    void Panel(unsigned long long gesture = 0)
+    {
+        ClickLog(L"send-toggle", gesture);
         RECT bounds{}; GetWindowRect(owner, &bounds);
         auto message=Command(L"togglePanel");
         message.SetNamedValue(L"x",JsonValue::CreateNumberValue((bounds.left+bounds.right)/2));
         message.SetNamedValue(L"y",JsonValue::CreateNumberValue(bounds.top));
         message.SetNamedValue(L"entryWindow",JsonValue::CreateNumberValue(static_cast<double>(reinterpret_cast<INT_PTR>(owner))));
+        message.SetNamedValue(L"gestureId",JsonValue::CreateNumberValue(static_cast<double>(gesture)));
         Send(message);
     }
     void ShowMenu()
@@ -609,6 +654,7 @@ struct NativeMediaHost::Impl : std::enable_shared_from_this<NativeMediaHost::Imp
                     bool playing=message.GetNamedBoolean(L"isPlaying",false),hasMedia=message.GetNamedBoolean(L"hasMedia",false);
                     bool changed=source!=state.source || playing!=state.playing || hasMedia!=state.hasMedia;
                     state.Frame(source,playing,hasMedia);
+                    browserFrame=message.GetNamedBoolean(L"isBrowser",false);
                     if(changed) Log(L"Media state: source="+source+L" playing="+std::to_wstring(playing)+L" hasMedia="+std::to_wstring(hasMedia)+L" wantsMedia="+std::to_wstring(state.MediaVisible()));
                     auto scripts=message.GetNamedArray(L"scripts",JsonArray());
                     for(const auto& script:scripts)
@@ -636,12 +682,13 @@ struct NativeMediaHost::Impl : std::enable_shared_from_this<NativeMediaHost::Imp
             if(controller) controller->Close();controller.Reset();web.Reset();nextWebRetry=0;reconnect=true;
         }
         CreateWebView();
+        if (pendingBrowserGesture && GetTickCount64()-browserGestureStarted>750) FinishBrowserGesture(pendingBrowserGesture,L"panel");
         ExecutePending();
         ApplyAppearance();
         bool nextVisible=state.MediaVisible() && controller && documentReady;
         if(visible!=nextVisible)
         {
-            if (!nextVisible && ::GetCapture() == owner) ::ReleaseCapture();
+            // A mode transition must not cancel an in-progress native click.
             if(auto* taskbar=dynamic_cast<CTaskBarDlg*>(CWnd::FromHandlePermanent(owner))) if (!taskbar->SetMediaPresentation(nextVisible)) nextVisible=false;
             Log(L"Media visibility="+std::to_wstring(nextVisible)+L" connected="+std::to_wstring(state.connected)+L" documentReady="+std::to_wstring(documentReady)+L" manual="+std::to_wstring(state.manual));
         }
@@ -732,18 +779,52 @@ bool NativeMediaHost::IsVisible() const { return m_impl->visible; }
 
 bool NativeMediaHost::MouseInput(UINT message, WPARAM keys, LPARAM position)
 {
-    if (!m_impl->visible || !m_impl->compositionController) return false;
-    if (message != WM_MOUSEMOVE && message != WM_LBUTTONDOWN && message != WM_LBUTTONUP && message != WM_LBUTTONDBLCLK && message != WM_MOUSELEAVE) return false;
     POINT point{ static_cast<short>(LOWORD(position)), static_cast<short>(HIWORD(position)) };
+    if (message == WM_CANCELMODE || message == WM_CAPTURECHANGED)
+    {
+        m_impl->pointerDown = false;
+        if (message == WM_CANCELMODE)
+        {
+            m_impl->pendingBrowserGesture = 0;
+            if (::GetCapture() == m_impl->owner) ::ReleaseCapture();
+        }
+        return false;
+    }
+    if (message == WM_LBUTTONDOWN || message == WM_LBUTTONDBLCLK)
+    {
+        // Finish a prior unresponsive browser query before accepting the next gesture.
+        if (m_impl->pendingBrowserGesture) m_impl->FinishBrowserGesture(m_impl->pendingBrowserGesture,L"panel");
+        m_impl->pointerDown = true;
+        m_impl->pointerOrigin = point;
+        m_impl->pointerBrowser = m_impl->visible && m_impl->browserFrame;
+        m_impl->pointerSource = m_impl->state.source;
+        ++m_impl->gestureSerial;
+        m_impl->ClickLog(L"down",m_impl->gestureSerial);
+        ::SetCapture(m_impl->owner);
+        return true;
+    }
+    if (message == WM_LBUTTONUP)
+    {
+        bool activate = m_impl->pointerDown && ::GetCapture() == m_impl->owner;
+        m_impl->pointerDown = false;
+        if (::GetCapture() == m_impl->owner) ::ReleaseCapture();
+        RECT bounds{}; GetClientRect(m_impl->owner,&bounds);
+        activate = activate && PtInRect(&bounds,point) &&
+            abs(point.x-m_impl->pointerOrigin.x) <= GetSystemMetrics(SM_CXDRAG) && abs(point.y-m_impl->pointerOrigin.y) <= GetSystemMetrics(SM_CYDRAG);
+        m_impl->ClickLog(activate ? L"release" : L"cancel",m_impl->gestureSerial);
+        if (activate) m_impl->ActivatePointer(point,m_impl->gestureSerial);
+        return true;
+    }
+    if (!m_impl->visible || !m_impl->compositionController) return false;
+    if (message != WM_MOUSEMOVE && message != WM_MOUSELEAVE) return false;
     if (message == WM_MOUSEMOVE)
     {
         TRACKMOUSEEVENT tracking{ sizeof(tracking), TME_LEAVE, m_impl->owner, 0 };
         ::TrackMouseEvent(&tracking);
     }
     if (message == WM_MOUSELEAVE) point = {};
-    if (message == WM_LBUTTONDOWN) ::SetCapture(m_impl->owner);
-    if (message == WM_LBUTTONUP && ::GetCapture() == m_impl->owner) ::ReleaseCapture();
-    m_impl->compositionController->SendMouseInput(static_cast<COREWEBVIEW2_MOUSE_EVENT_KIND>(message),
+    const HRESULT result=m_impl->compositionController->SendMouseInput(static_cast<COREWEBVIEW2_MOUSE_EVENT_KIND>(message),
         static_cast<COREWEBVIEW2_MOUSE_EVENT_VIRTUAL_KEYS>(keys), 0, point);
+    if (FAILED(result) && m_impl->clickLogs < 192) m_impl->ClickLog(L"hover-input-failed",m_impl->gestureSerial);
     return true;
 }

@@ -76,6 +76,7 @@ public partial class App : Application
         switch (action.GetString())
         {
             case "togglePanel":
+                CardLifecycleLog.Write($"toggle-received gesture={(message.TryGetProperty("gestureId", out var gesture) ? gesture.ToString() : "0")}");
                 if (payload.ValueKind == JsonValueKind.Object &&
                     payload.TryGetProperty("x", out var x) && x.TryGetDouble(out var px) && double.IsFinite(px) &&
                     payload.TryGetProperty("y", out var y) && y.TryGetDouble(out var py) && double.IsFinite(py))
@@ -89,6 +90,9 @@ public partial class App : Application
             case "openSettings":
                 OpenSettings(payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("page", out var page)
                     && page.ValueKind == JsonValueKind.String ? page.GetString() : null);
+                break;
+            case "cardLyricsFrame":
+                _cards?.ReceiveLyrics(message);
                 break;
             case "shutdown":
                 Stop();

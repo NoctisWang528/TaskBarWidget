@@ -63,6 +63,7 @@ public:
 
     bool m_cannot_save_config_warning{ true };  //指示是否会在无法保存设置时弹出提示框
     bool m_silent_settings_errors{};
+    DWORD m_startup_error{};
     bool m_cannot_save_global_config_warning{ true };   //指示是否会在无法保存设置时弹出提示框
 
     bool m_module_dir_writable{ true };         //指示程序所在目录是否可写
@@ -132,8 +133,8 @@ public:
     bool SetAutoRun(bool auto_run, bool task_scheduler);
     bool GetAutoRun(wstring* auto_run_path, bool task_scheduler);        //判断是否开机自动进行，如果是，将开机自动运行的路径写入auto_run_path
 
-    bool SetAutoRunByRegistry(bool auto_run);       //通过注册表实现开机自启动
-    bool SetAutoRunByTaskScheduler(bool auto_run);  //通过任务计划实现开机自启动
+    bool SetAutoRunByRegistry(bool auto_run);       //兼容旧调用，统一使用当前用户的交互式最高权限计划任务
+    bool SetAutoRunByTaskScheduler(bool auto_run);  //启用更新并验证计划任务；禁用清理计划任务与旧 Run
 
     //获取系统信息文本
     CString GetSystemInfoString();

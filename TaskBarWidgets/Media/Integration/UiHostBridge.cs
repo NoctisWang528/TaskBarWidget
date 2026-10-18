@@ -14,6 +14,18 @@ internal sealed class UiHostBridge : IAsyncDisposable
     private volatile bool _disposed;
     private int _timingLogs;
     private int _pollLogs;
+    private bool _cardLyricsVisible;
+    private long _cardLyricsSession;
+    internal void SetCardLyricsVisible(bool visible, long session)
+    {
+        if (session < _cardLyricsSession) return;
+        _cardLyricsSession = session; _cardLyricsVisible = visible;
+    }
+    internal void PublishCardLyrics(object frame)
+    {
+        if (!_disposed && _cardLyricsVisible)
+            _server.Publish(new { version = 1, type = "command", action = "cardLyricsFrame", session = _cardLyricsSession, payload = frame });
+    }
     private readonly string _name = $"TaskBarWidgets.UI.{Environment.ProcessId}";
     internal UiHostBridge(Func<JsonElement, CancellationToken, Task<object?>> request)
     {
@@ -28,6 +40,7 @@ internal sealed class UiHostBridge : IAsyncDisposable
     {
         if (_disposed || _process is { HasExited: false }) return;
         _process?.Dispose();
+        _cardLyricsSession = 0; _cardLyricsVisible = false;
         var root = Directory.GetParent(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar))!.FullName;
         var executable = Path.Combine(root, "UI", "TaskBarWidgets.UI.exe");
         if (!File.Exists(executable)) throw new FileNotFoundException("WinUI 界面文件缺失，请使用完整构建目录。", executable);
@@ -44,11 +57,11 @@ internal sealed class UiHostBridge : IAsyncDisposable
             catch (InvalidOperationException) { }
         };
     }
-    internal Task SendAsync(string action, double x = 0, double y = 0, string? page = null, long entryWindow = 0)
+    internal Task SendAsync(string action, double x = 0, double y = 0, string? page = null, long entryWindow = 0, long gestureId = 0)
     {
         EnsureProcess();
         if (_process is { HasExited: false }) AllowSetForegroundWindow(_process.Id);
-        return _server.SendCommandAsync(new { version = 1, type = "command", action, x, y, page, entryWindow });
+        return _server.SendCommandAsync(new { version = 1, type = "command", action, x, y, page, entryWindow, gestureId });
     }
     private Task HandleRequestAsync(JsonElement message)
     {

@@ -87,6 +87,14 @@ public sealed partial class CardGroup
         cards.ApplyAudioReply(older, 99);
         if (!cards._outputMuted) throw new InvalidOperationException("An old audio reply overwrote the latest mute state.");
         if (activated) throw new InvalidOperationException("Audio probe unexpectedly activated a window.");
-        return new { switchReadback = true, independentFlowControls = true, muteButtonRoundTrip = true, volumePreserved = true, staleReplyIgnored = true, realAudioDevicesTouched = false };
+        var audioCard = cards.CardWindows[1];
+        cards._status.Text = ""; audioCard.MeasureHeight(); var compactHeight = audioCard.Height;
+        cards._status.Text = "Synthetic device error with enough detail to wrap onto a second line and verify the measured card grows with content.";
+        audioCard.MeasureHeight(); var errorHeight = audioCard.Height;
+        cards._status.Text = ""; audioCard.MeasureHeight();
+        if (errorHeight <= compactHeight || audioCard.Height != compactHeight)
+            throw new InvalidOperationException("Audio card did not grow and shrink with its visible status content.");
+        return new { switchReadback = true, independentFlowControls = true, muteButtonRoundTrip = true, volumePreserved = true, staleReplyIgnored = true,
+            compactHeight, errorHeight, contentHeightRestored = true, realAudioDevicesTouched = false };
     }
 }

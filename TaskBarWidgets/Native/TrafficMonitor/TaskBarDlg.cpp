@@ -1234,12 +1234,21 @@ void CTaskBarDlg::OnInitMenu(CMenu* pMenu)
     ::SendMessage(theApp.m_pMainWnd->GetSafeHwnd(), WM_TASKBAR_MENU_POPED_UP, 0, 0); //通知主窗口菜单已弹出
 }
 
+LRESULT CTaskBarDlg::WindowProc(UINT message, WPARAM wParam, LPARAM lParam)
+{
+    // Both queued pointer input and synchronous capture/cancel notifications use this path.
+    if (m_media_host && m_media_host->MouseInput(message, wParam, lParam)) return 0;
+    return CDialogEx::WindowProc(message, wParam, lParam);
+}
+
 BOOL CTaskBarDlg::PreTranslateMessage(MSG* pMsg)
 {
-    if (pMsg->hwnd == GetSafeHwnd() && m_media_host && m_media_host->MouseInput(pMsg->message, pMsg->wParam, pMsg->lParam)) return TRUE;
     // TODO: 在此添加专用代码和/或调用基类
     //屏蔽按回车键和ESC键退出
-    if (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_ESCAPE) return TRUE;
+    if (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_ESCAPE) {
+        if (m_media_host) m_media_host->MouseInput(WM_CANCELMODE, 0, 0);
+        return TRUE;
+    }
     if (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_RETURN) return TRUE;
 
     if (theApp.m_taskbar_data.show_tool_tip && !m_menu_popuped && IsWindow(m_tool_tips.GetSafeHwnd()) && (pMsg->message == WM_LBUTTONDOWN ||
@@ -1486,7 +1495,7 @@ void CTaskBarDlg::OnClose()
 
 void CTaskBarDlg::OnLButtonUp(UINT nFlags, CPoint point)
 {
-    if (m_media_host) m_media_host->TogglePanel();
+    // The native gesture owner handles release in WindowProc.
 }
 
 afx_msg LRESULT CTaskBarDlg::OnExitmenuloop(WPARAM wParam, LPARAM lParam)

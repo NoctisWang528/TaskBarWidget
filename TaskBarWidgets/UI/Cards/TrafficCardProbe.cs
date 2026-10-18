@@ -41,6 +41,7 @@ public sealed partial class CardGroup
             card.Root.RequestedTheme = theme;
             await Task.Delay(100);
             cards.RenderTraffic(fixture); card.Root.UpdateLayout();
+            VisualStateManager.GoToState(hovered, "PointerOver", false);
             var path = Path.Combine(outputDirectory, "heatmap-" + theme.ToString().ToLowerInvariant() + ".png");
             await UiLayoutProbe.CaptureAsync(card.Root, path);
             var rasterScale = card.Root.XamlRoot.RasterizationScale;
@@ -62,17 +63,33 @@ public sealed partial class CardGroup
             }
             if (cards._days.Any(button => button.IsEnabled == ((TrafficHeatmapDay)button.Tag).IsFuture))
                 errors.Add($"{theme}: only future cells should be disabled.");
+            if (cards._days.Any(button => !ReferenceEquals(button.Background, button.Resources["ButtonBackgroundPointerOver"]) ||
+                !ReferenceEquals(button.BorderBrush, button.Resources["ButtonBorderBrushPointerOver"])))
+                errors.Add($"{theme}: hovered template state retained a different cell brush.");
+            if (!cards._trafficHighContrast && (cards._glows.Count == 0 || cards._glows.Values.Any(glow => glow.Visual.Brush is not null || glow.Shadow.Mask is null)))
+                errors.Add($"{theme}: composition glow must use a rounded alpha mask and a shadow-only sprite.");
+            if (cards._dayGlows.Where(host => host.Children.Count > 0).Any(host => host.Children.Count != 1 ||
+                host.Children[0] is not Microsoft.UI.Xaml.Shapes.Rectangle shape || shape.RadiusX != 4 || shape.RadiusY != 4 ||
+                shape.Width != TrafficCellSize || shape.Height != TrafficCellSize))
+                errors.Add($"{theme}: glow mask must match the rounded cell dimensions.");
             if (VisualTreeHelper.GetChildrenCount(cards._trafficContent) == 0 || WalkTraffic(cards._trafficContent).Any(element => element is ScrollViewer))
                 errors.Add($"{theme}: scrolling or empty visual tree.");
             images.Add(new { theme = theme.ToString(), png = path, contentHeight = cards._trafficContent.DesiredSize.Height,
                 availableHeight = card.Height - 32, cellSize = TrafficCellSize, actualSizes, rasterScale, calendarWidth = 20 + 12 * TrafficPitch });
         }
+        // Exercise production's high-contrast branch without changing Windows.
+        cards._trafficHighContrast = true;
+        for (var index = 0; index < cards._days.Length; index++) cards.UpdateTrafficCell(cards._days[index], cards._dayGlows[index]);
+        if (cards._dayGlows.Any(host => host.Visibility != Visibility.Collapsed))
+            errors.Add("High contrast must suppress every composition glow.");
+        cards.RenderTraffic(fixture);
         cards._hoveredDays.Clear();
         await File.WriteAllTextAsync(Path.Combine(outputDirectory, "geometry.json"), System.Text.Json.JsonSerializer.Serialize(new { images, errors }));
         if (errors.Count > 0) throw new InvalidOperationException(string.Join("; ", errors) + " Images and geometry: " + outputDirectory);
         return new { images, dayCount = fixture.Days.Count, totalKiB = fixture.TotalKiB, peakKiB = fixture.PeakKiB,
             grades = fixture.Days.Select(fixture.LevelFor).Distinct().Order().ToArray(), selectedDetail = cards._trafficDetail.Text,
-            syntheticHover = true, systemBackdropCaptured = false, compositionGlowCaptured = false };
+            syntheticHover = true, roundedCompositionMask = true, highContrastGlowSuppression = true,
+            systemBackdropCaptured = false, compositionGlowCaptured = false };
     }
 
     private static IEnumerable<DependencyObject> WalkTraffic(DependencyObject parent)

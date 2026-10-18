@@ -3,6 +3,7 @@
 #include "NativeSettingsValidation.h"
 #include "PluginSettingsBridge.h"
 #include "TaskbarHelper.h"
+#include "auto_start_helper.h"
 #include "../Builtins/Weather/WeatherService.h"
 #include <winrt/Windows.Data.Json.h>
 #include <winrt/Windows.Foundation.Collections.h>
@@ -25,6 +26,7 @@ class NativeSettingsBridge
     };
     TaskBarSettingData taskbar = theApp.m_taskbar_data;
     GeneralSettingData general = theApp.m_general_data;
+    StartupRegistrationState startup = get_startup_registration_for_this_user();
     MainConfigData config = theApp.m_cfg_data;
     bool transparent = taskbar.IsTaskbarTransparent();
     std::vector<Field> fields;
@@ -32,6 +34,12 @@ class NativeSettingsBridge
     std::vector<CommonDisplayItem> items;
     JsonArray groups;
     PluginSettingsBridge pluginSettings;
+
+    static void SetStartup(bool enabled)
+    {
+        if (!theApp.SetAutoRun(enabled, true))
+            throw std::runtime_error("Windows startup registration failed (error " + std::to_string(theApp.m_startup_error) + "). Actual registration has been read back; retry or repair the startup entry.");
+    }
 
     static JsonValue Text(const std::wstring& value) { return JsonValue::CreateStringValue(value); }
     static void Invalid() { throw std::invalid_argument("Setting value has an invalid type or is outside its allowed range."); }
@@ -100,6 +108,7 @@ class NativeSettingsBridge
 public:
     NativeSettingsBridge()
     {
+        general.auto_run = startup.Enabled();
         Group(L"placement",L"任务栏位置与布局",L"taskbar"); Group(L"values",L"数值、单位与图表",L"taskbar");
         Group(L"appearance",L"共用任务栏外观",L"taskbar"); Group(L"monitorAppearance",L"监测颜色与绘制",L"taskbar"); Group(L"items",L"显示项、插件与排序",L"taskbar");
         Group(L"network",L"网络连接",L"hardware"); Group(L"sensors",L"硬件监测与传感器",L"hardware");
@@ -189,7 +198,6 @@ public:
         String(L"general.cpu_core_name",L"CPU 温度传感器",L"sensors",general.cpu_core_name,cpu_names); String(L"general.hard_disk_name",L"监测硬盘",L"sensors",general.hard_disk_name,disk_names);
         Boolean(L"general.show_notify_icon",L"显示通知区域图标",L"nativeGeneral",general.show_notify_icon);
         Boolean(L"general.auto_run",L"登录 Windows 时启动",L"nativeGeneral",general.auto_run);
-        Boolean(L"general.auto_run_by_task_scheduler",L"使用任务计划程序启动",L"nativeGeneral",general.auto_run_by_task_scheduler);
         std::vector<std::wstring> languages{general.language.bcp_47};
         for(const auto& language:theApp.m_str_table.GetLanguageList()) languages.push_back(language.bcp_47);
         CCommon::RemoveVectorDuplicateItem(languages);
@@ -205,7 +213,7 @@ public:
             std::wstring key=field.descriptor.GetNamedString(L"key").c_str();
             if(key==L"taskbar.disable_d2d" || key==L"taskbar.enable_colorful_emoji" || key==L"taskbar.dark_default_style" || key==L"taskbar.light_default_style"
                 || key==L"taskbar.transparent_color" || key==L"taskbar.auto_save_taskbar_color_settings_to_preset" || key==L"general.cpu_usage_acquire_method"
-                || key==L"general.auto_run_by_task_scheduler" || key==L"taskbar.double_click_action" || key==L"taskbar.double_click_exe")
+                || key==L"taskbar.double_click_action" || key==L"taskbar.double_click_exe")
                 field.descriptor.SetNamedValue(L"advanced",JsonValue::CreateBooleanValue(true));
             if(key.rfind(L"items.",0)==0)
             {
@@ -225,10 +233,28 @@ public:
     JsonObject Describe() const
     {
         JsonObject payload; JsonArray descriptors; for(const auto& field:fields) descriptors.Append(field.descriptor);
+        JsonObject registration;
+        registration.SetNamedValue(L"enabled",JsonValue::CreateBooleanValue(startup.Enabled()));
+        registration.SetNamedValue(L"needsRepair",JsonValue::CreateBooleanValue(startup.NeedsRepair()));
+        registration.SetNamedValue(L"registeredPath",Text(startup.taskPath.empty()?startup.legacyPath:startup.taskPath));
+        registration.SetNamedValue(L"legacyPath",Text(startup.legacyPath));
+        registration.SetNamedValue(L"currentPath",Text(startup.currentPath));
+        const HRESULT failure=FAILED(startup.error)?startup.error:HRESULT_FROM_WIN32(theApp.m_startup_error);
+        registration.SetNamedValue(L"status",Text(FAILED(failure)?L"error":startup.NeedsRepair()?L"repairRequired":startup.Enabled()?L"enabled":L"disabled"));
+        wchar_t failureText[128]{};
+        if(FAILED(failure)) swprintf_s(failureText,L"Windows 启动项操作失败 (0x%08X)",static_cast<unsigned>(failure));
+        registration.SetNamedValue(L"error",Text(failureText));
+        payload.SetNamedValue(L"startup",registration);
         payload.SetNamedValue(L"plugins",pluginSettings.Describe()); payload.SetNamedValue(L"groups",groups); payload.SetNamedValue(L"fields",descriptors); payload.SetNamedValue(L"configPath",Text(theApp.m_config_path)); return payload;
     }
     void Apply(const JsonObject& values)
     {
+        if(values.HasKey(L"general.repair_startup"))
+        {
+            if(values.Size()!=1 || values.GetNamedValue(L"general.repair_startup").ValueType()!=JsonValueType::Boolean || !values.GetNamedBoolean(L"general.repair_startup")) Invalid();
+            SetStartup(true);
+            return;
+        }
         for(const auto& pair:values)
         {
             auto found=std::find_if(fields.begin(),fields.end(),[&](const Field& field){return field.descriptor.GetNamedString(L"key")==pair.Key();});
@@ -240,6 +266,11 @@ public:
         taskbar.SetTaskabrTransparent(transparent);
         if(!taskbar.disable_d2d && !CTaskBarDlgDrawCommonSupport::CheckSupport()) throw std::invalid_argument("Direct2D is unavailable on this system.");
         auto previous=theApp.m_cfg_data; theApp.m_cfg_data=config;
+        const bool startupRequested=values.HasKey(L"general.auto_run");
+        const bool startupEnabled=general.auto_run;
+        // Startup is an explicit OS operation, applied after configuration validation and saving.
+        general.auto_run=theApp.m_general_data.auto_run;
+        general.auto_run_by_task_scheduler=theApp.m_general_data.auto_run_by_task_scheduler;
         auto* dialog=CTrafficMonitorDlg::Instance();
         bool network_changed=config.m_connection_name!=previous.m_connection_name || config.m_auto_select!=previous.m_auto_select || config.m_select_all!=previous.m_select_all;
         bool applied{}; std::wstring error;
@@ -255,6 +286,7 @@ public:
             pluginSettings.Rollback();
             throw;
         }
+        if(startupRequested) SetStartup(startupEnabled);
         for (const auto& pair : values) {
             if (std::wstring_view(pair.Key()).starts_with(L"builtins.weatherpro.dll.")) {
                 WeatherService::Instance().StartRefresh();

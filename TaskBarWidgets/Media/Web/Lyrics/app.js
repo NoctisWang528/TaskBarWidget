@@ -1659,9 +1659,12 @@ function updateMetrics() {
   // Exclude the host-provided descender buffer from row metrics.
   const measuredViewportHeight = viewportEl.clientHeight || 30;
   const minimumHostHeight = Math.max(2, Math.round(26 * layoutScaleFactor));
-  const hostHeight = Math.max(minimumHostHeight, measuredViewportHeight - viewportDescenderBufferPx);
-  rowHeightPx = Math.max(1, Math.floor(hostHeight / 2));
-  rowGapPx = Math.max(0, hostHeight - (rowHeightPx * 2));
+  const cardHost = window.taskbarCardHost === true;
+  const hostHeight = cardHost ? Math.max(1, measuredViewportHeight - viewportDescenderBufferPx) : Math.max(minimumHostHeight, measuredViewportHeight - viewportDescenderBufferPx);
+  const singleLine = cardHost && hostHeight < requestedFontSize * 2.4;
+  root.classList.toggle('card-single-line', singleLine);
+  rowHeightPx = Math.max(1, Math.floor(hostHeight / (singleLine ? 1 : 2)));
+  rowGapPx = singleLine ? 0 : Math.max(0, hostHeight - (rowHeightPx * 2));
   linePitchPx = rowHeightPx + rowGapPx;
   const currentSizeMax = Math.max(11.2 * layoutScaleFactor, rowHeightPx * 0.92);
   currentSize = Math.min(requestedFontSize, currentSizeMax);

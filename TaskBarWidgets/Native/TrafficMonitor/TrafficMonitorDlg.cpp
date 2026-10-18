@@ -479,6 +479,9 @@ void CTrafficMonitorDlg::CloseTaskBarWnd()
 
 void CTrafficMonitorDlg::OpenTaskBarWnd()
 {
+    // The logon task may run before Explorer has created its taskbar. MAIN_TIMER retries.
+    if (!theApp.m_win_version.IsWine() && !::FindWindowW(L"Shell_TrayWnd", nullptr))
+        return;
     // 强制初始化theApp.m_is_windows11_taskbar的值
     theApp.CheckWindows11Taskbar();
     if (theApp.m_win_version.IsWine())
@@ -778,7 +781,7 @@ bool CTrafficMonitorDlg::ApplyUnifiedSettings(const TaskBarSettingData& taskbar,
         {
             m_tBarDlg->WidthChanged();
         }
-        m_tBarDlg->ApplyWindowTransparentColor();
+        if (IsTaskbarWndValid()) m_tBarDlg->ApplyWindowTransparentColor();
     }
 
     bool startup_succeeded = true;
@@ -788,8 +791,8 @@ bool CTrafficMonitorDlg::ApplyUnifiedSettings(const TaskBarSettingData& taskbar,
         startup_succeeded = theApp.SetAutoRun(theApp.m_general_data.auto_run, theApp.m_general_data.auto_run_by_task_scheduler);
         theApp.m_silent_settings_errors = false;
         theApp.m_general_data.auto_run = theApp.GetAutoRun(nullptr, theApp.m_general_data.auto_run_by_task_scheduler);
-        // Removing an absent startup entry already satisfies the requested state.
-        startup_succeeded = theApp.m_general_data.auto_run == general.auto_run;
+        // Readback confirms state without hiding a failed registration or cleanup operation.
+        startup_succeeded = startup_succeeded && theApp.m_general_data.auto_run == general.auto_run;
         if (!startup_succeeded && error) *error = L"监测设置已应用，但无法更新 Windows 启动项。已读回实际状态。";
     }
 
@@ -1608,6 +1611,8 @@ void CTrafficMonitorDlg::OnTimer(UINT_PTR nIDEvent)
         //只有主窗口和任务栏窗口至少有一个显示时才执行下面的处理
         if (!theApp.m_cfg_data.m_hide_main_window || theApp.m_cfg_data.m_show_task_bar_wnd)
         {
+            if (theApp.m_cfg_data.m_show_task_bar_wnd && m_tBarDlg == nullptr)
+                OpenTaskBarWnd();
             //每隔10秒钟检测一次是否可以嵌入任务栏
             if (!theApp.m_win_version.IsWine() && IsTaskbarWndValid() && m_timer_cnt % 10 == 1)
             {
@@ -1616,7 +1621,7 @@ void CTrafficMonitorDlg::OnTimer(UINT_PTR nIDEvent)
                     CloseTaskBarWnd();
                     OpenTaskBarWnd();
                     m_insert_to_taskbar_cnt++;
-                    if (m_tBarDlg->GetCannotInsertToTaskBar() && m_insert_to_taskbar_cnt >= WARN_INSERT_TO_TASKBAR_CNT)
+                    if (IsTaskbarWndValid() && m_tBarDlg->GetCannotInsertToTaskBar() && m_insert_to_taskbar_cnt >= WARN_INSERT_TO_TASKBAR_CNT)
                     {
                         //写入错误日志
                         CString info = CCommon::LoadText(IDS_CONNOT_INSERT_TO_TASKBAR_ERROR_LOG);
@@ -1631,7 +1636,7 @@ void CTrafficMonitorDlg::OnTimer(UINT_PTR nIDEvent)
                         }
                     }
                 }
-                if (!m_tBarDlg->GetCannotInsertToTaskBar())
+                if (IsTaskbarWndValid() && !m_tBarDlg->GetCannotInsertToTaskBar())
                 {
                     m_insert_to_taskbar_cnt = 0;
                 }

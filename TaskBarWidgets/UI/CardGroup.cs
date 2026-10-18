@@ -29,6 +29,8 @@ public sealed partial class CardGroup : IDisposable
     private readonly DispatcherTimer _volumeTimer = new() { Interval = TimeSpan.FromMilliseconds(120) };
     private readonly DispatcherTimer _seekTimer = new() { Interval = TimeSpan.FromMilliseconds(180) };
     private readonly OutsideClickMonitor _outsideClicks;
+    private readonly CardLyricsView _lyrics = new();
+    private double _anchorX, _anchorY;
     private readonly List<MenuFlyout> _flyouts = [];
     private readonly Dictionary<string, (string Id, double Volume, int EndpointRevision)> _pendingVolumes = [];
     private readonly Dictionary<string, int> _endpointRevisions = new() { ["input"] = 0, ["output"] = 0 };
@@ -37,7 +39,12 @@ public sealed partial class CardGroup : IDisposable
     private readonly TextBlock _position = Text("0:00", 10), _duration = Text("0:00", 10), _status = Text("", 10);
     private readonly Slider _seek = new() { Minimum = 0, Maximum = 1, HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly Button _previous = Icon("\uE892", "上一首"), _play = Icon("\uE768", "播放 / 暂停", 42), _next = Icon("\uE893", "下一首");
-    private readonly Button _source = new() { HorizontalAlignment = HorizontalAlignment.Left, Padding = new Thickness(0), MinHeight = 24, MaxWidth = 240, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+    private readonly Button _source = new() { HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
+        Padding = new Thickness(8, 4, 8, 4), MinHeight = 34, Margin = new Thickness(0, 4, 0, 0) };
+    private readonly Image _sourceImage = new() { Width = 20, Height = 20, Stretch = Stretch.Uniform };
+    private readonly FontIcon _sourceFallback = new() { Glyph = "\uE8D6", FontSize = 16 };
+    private readonly Dictionary<string, ImageSource> _sourceImageCache = [];
+    private string _lastSourceIcon = "";
     private readonly Button _output = new() { HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch },
         _input = new() { HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
     private readonly TextBlock _outputName = Text("读取输出设备…", 12), _inputName = Text("读取输入设备…", 12),
@@ -61,7 +68,7 @@ public sealed partial class CardGroup : IDisposable
     {
         _connection = connection;
         _openSettings = openSettings;
-        _cards = [new CardWindow("流量消耗", BuildTraffic(), 284), new CardWindow("音频设备", BuildAudio(), 244),
+        _cards = [new CardWindow("流量消耗", BuildTraffic(), 284), new CardWindow("音频设备", BuildAudio(), 244, autoHeight: true),
             new CardWindow("媒体", BuildMedia(), 248)];
         _outsideClicks = new OutsideClickMonitor(_cards[0].Root.DispatcherQueue, () => _flyoutsOpen > 0);
         foreach (var card in _cards)
@@ -87,6 +94,14 @@ public sealed partial class CardGroup : IDisposable
         _trafficTotal.Text = "—";
         _trafficStatus.Text = "打开后读取流量历史";
         CardLifecycleLog.Write("created cards=3");
+        _status.Visibility = Visibility.Collapsed;
+        _status.TextWrapping = TextWrapping.Wrap; _status.MaxLines = 3;
+        _status.RegisterPropertyChangedCallback(TextBlock.TextProperty, (_, _) => {
+            _status.Visibility = string.IsNullOrWhiteSpace(_status.Text) ? Visibility.Collapsed : Visibility.Visible;
+            if (_visible) Position(_anchorX, _anchorY);
+        });
+        _cards[1].Root.Loaded += (_, _) => { if (_visible) Position(_anchorX, _anchorY); };
+        _connection.ConnectionChanged += OnLyricsConnection;
     }
 
     public void ToggleAtPhysicalPoint(double x, double y, nint entryWindow = 0)
@@ -98,6 +113,7 @@ public sealed partial class CardGroup : IDisposable
         _generation++;
         _ticks = 0;
         _visibleLifetime = new CancellationTokenSource();
+        _lyrics.Activate();
         foreach (var card in _cards) card.Show();
         _cards[2].Window.Activate();
         var generation = _generation;
@@ -110,6 +126,7 @@ public sealed partial class CardGroup : IDisposable
         CardLifecycleLog.Write($"shown generation={_generation} entry=0x{entryWindow:X}");
         _timer.Start();
         _ = RefreshAsync(true, true);
+        _ = SubscribeLyricsAsync(_generation, true);
     }
 
     public void Hide() => Hide("explicit");
@@ -120,6 +137,8 @@ public sealed partial class CardGroup : IDisposable
         CardLifecycleLog.Write($"hide reason={reason} generation={_generation} flyouts={_flyoutsOpen}");
         _visible = false;
         _generation++;
+        _lyrics.HideLyrics();
+        _ = SubscribeLyricsAsync(_generation, false);
         _timer.Stop();
         _outsideClicks.Stop();
         _seekTimer.Stop();
@@ -208,15 +227,23 @@ public sealed partial class CardGroup : IDisposable
         var metadata = new StackPanel { Margin = new Thickness(12, 0, 4, 0), VerticalAlignment = VerticalAlignment.Center };
         _title.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
         metadata.Children.Add(_title); metadata.Children.Add(_artist);
-        _source.Content = _sourceLabel;
+        var sourceButton = Columns(new GridLength(20), new GridLength(1, GridUnitType.Star), GridLength.Auto);
+        sourceButton.ColumnSpacing = 8;
+        var sourceBadge = new Grid(); sourceBadge.Children.Add(_sourceFallback); sourceBadge.Children.Add(_sourceImage);
+        Add(sourceButton, sourceBadge, 0); Add(sourceButton, _sourceLabel, 1);
+        _sourceLabel.FontSize = 12; _sourceLabel.VerticalAlignment = VerticalAlignment.Center;
+        Add(sourceButton, new FontIcon { Glyph = "\uE70D", FontSize = 12, VerticalAlignment = VerticalAlignment.Center }, 2);
+        _source.Content = sourceButton;
+        ToolTipService.SetToolTip(_source, "切换媒体来源");
         var sources = NewFlyout();
         sources.Opening += (_, _) =>
         {
             sources.Items.Clear();
             foreach (var choice in _sources)
             {
-                var item = new MenuFlyoutItem { Text = choice.Label };
-                if (choice.Id == _selectedSourceId) item.Icon = new FontIcon { Glyph = "\uE73E" };
+                var item = new MenuFlyoutItem { Text = choice.Label + (choice.Id == _selectedSourceId ? " · 当前" : ""), MinHeight = 44, MinWidth = 240, MaxWidth = 352,
+                    Icon = new FontIcon { Glyph = "\uE8D6" } };
+                _ = SetSourceMenuIconAsync(item, choice.IconDataUrl);
                 item.Click += async (_, _) => await CommandAsync("mediaCommand", new { action = "selectSource", sourceId = choice.Id });
                 sources.Items.Add(item);
             }
@@ -229,6 +256,7 @@ public sealed partial class CardGroup : IDisposable
         settings.Click += (_, _) => { Hide("settings"); _openSettings(); };
         Add(summary, settings, 2);
         content.Children.Add(summary);
+        Add(content, _lyrics, 0, 1);
         var controls = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 18, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 10) };
         controls.Children.Add(_previous); controls.Children.Add(_play); controls.Children.Add(_next);
         Add(content, controls, 0, 2);
@@ -315,9 +343,12 @@ public sealed partial class CardGroup : IDisposable
             _title.Text = String(state, "title", "暂无媒体");
             _artist.Text = String(state, "artist");
             var source = String(state, "source");
-            _sources = Array(state, "sources").Select(value => new SourceChoice(String(value, "id"), String(value, "label"))).ToArray();
+            _sources = Array(state, "sources").Select(value => new SourceChoice(String(value, "id"), String(value, "label"), String(value, "iconDataUrl"))).ToArray();
             _selectedSourceId = String(state, "selectedSourceId");
-            _sourceLabel.Text = source + (_sources.Length > 1 ? "  ▾" : "");
+            var selected = _sources.FirstOrDefault(choice => choice.Id == _selectedSourceId);
+            _sourceLabel.Text = selected?.Label ?? source;
+            var icon = selected?.IconDataUrl ?? "";
+            if (icon != _lastSourceIcon) { _lastSourceIcon = icon; _sourceImage.Source = null; _sourceFallback.Visibility = Visibility.Visible; _ = RenderSelectedSourceIconAsync(icon); }
             _source.IsEnabled = _sources.Length > 1;
             _previous.IsEnabled = Bool(state, "canPrevious"); _next.IsEnabled = Bool(state, "canNext");
             _play.IsEnabled = Bool(state, "canPlayPause");
@@ -334,6 +365,40 @@ public sealed partial class CardGroup : IDisposable
         finally { _rendering = false; }
     }
 
+    private async Task<ImageSource?> SourceImageAsync(string data)
+    {
+        if (_sourceImageCache.TryGetValue(data, out var cached)) return cached;
+        if (data.Length == 0 || data.Length > 256 * 1024 || !data.StartsWith("data:image/", StringComparison.Ordinal)) return null;
+        try
+        {
+            var comma = data.IndexOf(','); if (comma < 0) return null;
+            var header = data[..comma];
+            var bytes = header.EndsWith(";base64", StringComparison.Ordinal) ? Convert.FromBase64String(data[(comma + 1)..]) : System.Text.Encoding.UTF8.GetBytes(Uri.UnescapeDataString(data[(comma + 1)..]));
+            using var stream = new InMemoryRandomAccessStream();
+            using (var writer = new DataWriter(stream.GetOutputStreamAt(0))) { writer.WriteBytes(bytes); await writer.StoreAsync(); writer.DetachStream(); }
+            stream.Seek(0);
+            ImageSource image;
+            if (header.StartsWith("data:image/svg+xml", StringComparison.Ordinal))
+            { var svg = new SvgImageSource(); await svg.SetSourceAsync(stream); image = svg; }
+            else { var bitmap = new BitmapImage { DecodePixelWidth = 40 }; await bitmap.SetSourceAsync(stream); image = bitmap; }
+            if (_sourceImageCache.Count >= 64) _sourceImageCache.Clear();
+            _sourceImageCache[data] = image;
+            return image;
+        }
+        catch (Exception error) when (error is not OutOfMemoryException) { return null; }
+    }
+    private async Task RenderSelectedSourceIconAsync(string data)
+    {
+        var image = await SourceImageAsync(data);
+        if (_disposed || _lastSourceIcon != data) return;
+        _sourceImage.Source = image;
+        _sourceFallback.Visibility = image is null ? Visibility.Visible : Visibility.Collapsed;
+    }
+    private async Task SetSourceMenuIconAsync(MenuFlyoutItem item, string data)
+    {
+        var image = await SourceImageAsync(data);
+        if (!_disposed && image is not null) item.Icon = new ImageIcon { Source = image };
+    }
     private async Task RenderCoverAsync(string data)
     {
         _cover.Source = null;
@@ -527,6 +592,8 @@ public sealed partial class CardGroup : IDisposable
 
     internal void Position(double x, double y)
     {
+        _anchorX = x; _anchorY = y;
+        foreach (var card in _cards) card.MeasureHeight();
         var monitor = MonitorFromPoint(new NativePoint { X = (int)x, Y = (int)y }, 2);
         var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
         if (!GetMonitorInfo(monitor, ref info)) return;
@@ -556,15 +623,42 @@ public sealed partial class CardGroup : IDisposable
         _disposed = true; _visible = false; _generation++;
         _visibleLifetime?.Cancel(); _visibleLifetime?.Dispose(); _visibleLifetime = null;
         _volumeTimer.Stop(); _seekTimer.Stop(); _timer.Stop(); _outsideClicks.Dispose();
+        _connection.ConnectionChanged -= OnLyricsConnection;
+        _lyrics.Dispose();
         foreach (var flyout in _flyouts) flyout.Hide();
         _pendingVolumes.Clear();
         foreach (var card in _cards) card.Close();
-        foreach (var glow in _glows.Values) { glow.Visual.Dispose(); glow.Shadow.Dispose(); }
+        foreach (var glow in _glows.Values) { glow.Shadow.Mask?.Dispose(); glow.Visual.Dispose(); glow.Shadow.Dispose(); }
         _glows.Clear();
     }
 
+    private void OnLyricsConnection(bool connected)
+    {
+        _cards[2].Root.DispatcherQueue.TryEnqueue(() => {
+            if (_disposed || !_visible) return;
+            if (connected) { _lyrics.Activate(); _ = SubscribeLyricsAsync(_generation, true); }
+            else _lyrics.HideLyrics();
+        });
+    }
+    private async Task SubscribeLyricsAsync(int generation, bool visible)
+    {
+        try
+        {
+            var result = await _connection.RequestAsync("subscribeCardLyrics", new { visible, session = generation });
+            if (_disposed || !_visible || generation != _generation || !visible) return;
+            _lyrics.Initialize(String(result, "html"));
+            if (result.TryGetProperty("snapshot", out var snapshot)) _lyrics.Receive(snapshot);
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        { if (!_disposed && generation == _generation) CardLifecycleLog.Write($"card-lyrics subscribe-failed hr=0x{error.HResult:X8}"); }
+    }
+    internal void ReceiveLyrics(JsonElement message)
+    {
+        if (_disposed || !_visible || !message.TryGetProperty("session", out var session) || session.GetInt64() != _generation) return;
+        if (message.TryGetProperty("payload", out var payload)) _lyrics.Receive(payload);
+    }
     private sealed record AudioChoice(string Id, string Name, bool IsDefault, bool IsCommunications, double Volume, bool IsMuted, bool CanControl);
-    private sealed record SourceChoice(string Id, string Label);
+    private sealed record SourceChoice(string Id, string Label, string IconDataUrl);
     private static AudioChoice[] AudioChoices(JsonElement value, string name) => Array(value, name).Select(item => new AudioChoice(
         String(item, "id"), String(item, "name"), Bool(item, "isDefault"), Bool(item, "isCommunications"), Number(item, "volume"), Bool(item, "isMuted"),
         !item.TryGetProperty("canControl", out var control) || control.ValueKind != JsonValueKind.False)).ToArray();

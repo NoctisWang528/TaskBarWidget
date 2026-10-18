@@ -16,13 +16,18 @@ internal sealed class CardWindow
     internal Window Window { get; }
     internal Grid Root { get; }
     internal nint Handle { get; }
-    internal double Height { get; }
+    internal double Height { get; private set; }
+    private readonly FrameworkElement _content;
+    private readonly Grid _surface;
+    private readonly bool _autoHeight;
 
-    internal CardWindow(string title, FrameworkElement content, double height)
+    internal CardWindow(string title, FrameworkElement content, double height, bool autoHeight = false)
     {
         Height = height;
+        _content = content; _autoHeight = autoHeight;
         Root = new Grid();
         var surface = new Grid { Width = CardGroup.CardWidth, Height = height, Padding = new Thickness(16) };
+        _surface = surface;
         surface.Children.Add(content);
         Root.Children.Add(new Viewbox { Child = surface, Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly });
         Window = new Window { Title = "TaskBarWidgets · " + title, Content = Root, SystemBackdrop = new MicaBackdrop() };
@@ -37,6 +42,14 @@ internal sealed class CardWindow
             presenter.IsAlwaysOnTop = true;
             presenter.SetBorderAndTitleBar(true, false);
         }
+    }
+
+    internal void MeasureHeight()
+    {
+        if (!_autoHeight || _closed) return;
+        _content.Measure(new Windows.Foundation.Size(CardGroup.CardWidth - 32, double.PositiveInfinity));
+        Height = Math.Ceiling(_content.DesiredSize.Height + 32);
+        _surface.Height = Height;
     }
 
     internal void Show()

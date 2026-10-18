@@ -15,6 +15,7 @@ public partial class App : System.Windows.Application
     public App() => throw new InvalidOperationException("The media helper requires its native host launch arguments.");
     private readonly Process _host;
     private readonly string _pipeName;
+    private readonly bool? _portableData;
     private SettingsStore? _store;
     private MediaCoordinator? _media;
     private MediaPipeServer? _pipe;
@@ -24,14 +25,13 @@ public partial class App : System.Windows.Application
     private SettingsWindow? _settingsWindow;
     private SpectrumTuningWindow? _tuningWindow;
     private SmtcTimelineMonitorWindow? _timelineWindow;
-    private GlobalMediaHotkeyService? _hotkeys;
     private readonly CancellationTokenSource _stop = new();
     private bool _shutdownRequested;
     internal AppSettings Settings { get; private set; } = new();
 
-    internal App(Process host, string pipeName)
+    internal App(Process host, string pipeName, bool? portableData = null)
     {
-        _host = host; _pipeName = pipeName;
+        _host = host; _pipeName = pipeName; _portableData = portableData;
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
     }
 
@@ -40,7 +40,9 @@ public partial class App : System.Windows.Application
         base.OnStartup(args);
         try
         {
-            var settingsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TaskBarWidgets", "media-settings.json");
+            var applicationRoot = Directory.GetParent(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar))!.FullName;
+            AppDataPaths.ConfigureForApplicationRoot(applicationRoot, _portableData);
+            var settingsPath = Path.Combine(AppDataPaths.RootDirectory, "media-settings.json");
             _store = new SettingsStore(settingsPath);
             Settings = _store.Load();
             Settings.UseFloatingWindow = false;
@@ -57,8 +59,7 @@ public partial class App : System.Windows.Application
             _media.FrameReady += _pipe.Publish;
             _nativeSettings = new NativeSettingsClient((message, token) => _pipe.SendCommandAsync(message, token));
             _ui = new UiHostBridge((command, token) => Dispatcher.InvokeAsync(() => HandleUiRequestAsync(command, token)).Task.Unwrap());
-            _hotkeys = new GlobalMediaHotkeyService(ExecuteHotkeyAsync);
-            _hotkeys.Apply(Settings.GlobalMediaHotkeys);
+            _media.CardFrameReady += _ui.PublishCardLyrics;
             _pipe.Start();
             _media.Start();
             TaskObserver.Observe(WatchHostAsync(), "parent lifecycle");
@@ -92,7 +93,8 @@ public partial class App : System.Windows.Application
                 break;
             case "togglePanel":
                 if (TryNumber(command, "x", out var x) && TryNumber(command, "y", out var y) && _ui is not null)
-                    await _ui.SendAsync("togglePanel", x, y, entryWindow: ValidatedEntryWindow(command));
+                    await _ui.SendAsync("togglePanel", x, y, entryWindow: ValidatedEntryWindow(command),
+                        gestureId: command.TryGetProperty("gestureId", out var gesture) && gesture.TryGetInt64(out var gestureId) ? gestureId : 0);
                 break;
             case "openSettings":
                 if (_ui is not null) await _ui.SendAsync("openSettings", page: command.TryGetProperty("page", out var page) ? page.GetString() : null);
@@ -100,6 +102,10 @@ public partial class App : System.Windows.Application
             case "mediaVisible":
                 if (command.TryGetProperty("visible", out var visible) && visible.ValueKind is JsonValueKind.True or JsonValueKind.False)
                     _media?.SetVisible(visible.GetBoolean());
+                break;
+            case "taskbarAppearance":
+                if (_media is not null && command.TryGetProperty("payload", out var appearance) && appearance.ValueKind == JsonValueKind.Object)
+                    _media.NativeAppearanceScript = "window.taskbarLyrics?.receive({version:1,type:'nativeAppearance',payload:" + appearance.GetRawText() + "});";
                 break;
             default:
                 if (_media is not null) await _media.CommandAsync(action, TryNumber(command, "positionSeconds", out var position) ? position : null);
@@ -126,11 +132,18 @@ public partial class App : System.Windows.Application
         var payload = request.TryGetProperty("payload", out var body) ? body : default;
         switch (action)
         {
+            case "subscribeCardLyrics":
+                var cardVisible = payload.GetProperty("visible").GetBoolean();
+                var cardSession = payload.GetProperty("session").GetInt64();
+                _ui?.SetCardLyricsVisible(cardVisible, cardSession);
+                return new { html = cardVisible ? MediaCoordinator.GetHtml() : "", snapshot = cardVisible ? _media.CardSnapshot : null };
             case "getState":
                 var state = _media.ControlState;
                 return new { state.Title, state.Artist, state.Source, state.PositionSeconds, state.DurationSeconds,
                     state.IsPlaying, state.CanPrevious, state.CanNext, state.CanPlayPause, state.CanSeek,
-                    coverDataUrl = _media.CoverDataUrl, sources = (state.Sources ?? []).Select(source => new { source.Id, label = source.Name }),
+                    coverDataUrl = _media.CoverDataUrl, sources = (state.Sources ?? []).Select(source => new { source.Id,
+                        label = source.Name switch { "QQMusic" => "QQ 音乐", "Netease" => "网易云音乐", "Kugou" => "酷狗音乐", "Browser" => BrowserSourceName(source.Id), _ => source.Name },
+                        iconDataUrl = _media.SourceIcon(source) }),
                     state.SelectedSourceId, toolWindowTheme = (int)Settings.ToolWindowTheme };
             case "openPanel": OpenAudioPanel(); return new { success = true };
             case "getNativeSettings": return await GetNativeSettingsAsync();
@@ -161,7 +174,7 @@ public partial class App : System.Windows.Application
                 if (action == "selectDevice")
                 {
                     if (string.IsNullOrWhiteSpace(deviceId)) throw new ArgumentException("请选择音频设备。");
-                    var result = await _audio.SetDefaultAsync(deviceId, flow == "input", Settings.SyncDefaultCommunicationsDevice, token);
+                    var result = await _audio.SetDefaultAsync(deviceId, flow == "input", true, token);
                     return AudioPayload(await _audio.GetSnapshotAsync(token), result.Succeeded, result.Message);
                 }
                 else if (action == "setVolume")
@@ -174,6 +187,9 @@ public partial class App : System.Windows.Application
             default: throw new ArgumentException("不支持的界面操作。");
         }
     }
+    private static string BrowserSourceName(string id) => id.Contains("msedge", StringComparison.OrdinalIgnoreCase) ? "Microsoft Edge" :
+        id.Contains("chrome", StringComparison.OrdinalIgnoreCase) ? "Google Chrome" : id.Contains("firefox", StringComparison.OrdinalIgnoreCase) ? "Firefox" : "浏览器";
+
     private static object AudioPayload(AudioSnapshot snapshot, bool operationSucceeded = true, string? message = null)
     {
         static object Endpoint(AudioEndpoint item) => new { item.Id, item.Name, item.IsDefault, item.IsCommunications, volume = item.Volume / 100.0, item.IsMuted, item.CanControl };
@@ -186,30 +202,6 @@ public partial class App : System.Windows.Application
         return value.TryGetProperty(name, out var property) && property.ValueKind == JsonValueKind.Number &&
             property.TryGetDouble(out number) && double.IsFinite(number);
     }
-
-    private Task ExecuteHotkeyAsync(MediaHotkeyAction action, CancellationToken cancellationToken)
-    {
-        return Dispatcher.InvokeAsync(async () =>
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (_media is null) return;
-            if (action == MediaHotkeyAction.ToggleTranslation)
-            {
-                var settings = Settings.Clone(); settings.ShowLyricTranslation = !settings.ShowLyricTranslation; SaveSettings(settings);
-            }
-            else if (action == MediaHotkeyAction.ToggleWordScanning)
-            {
-                var settings = Settings.Clone(); settings.EnableWordScanning = !settings.EnableWordScanning; SaveSettings(settings);
-            }
-            else if (action == MediaHotkeyAction.ToggleLyricsVisibility)
-            {
-                if (_pipe is not null) await _pipe.SendCommandAsync(new { version = 1, type = "command", action = "toggleMedia" });
-            }
-            else await _media.Provider.ExecuteAsync(action, cancellationToken);
-        }).Task.Unwrap();
-    }
-
-    internal IReadOnlyDictionary<string, string> GetMediaHotkeyStatuses() => _hotkeys?.GetStatusSnapshot() ?? new Dictionary<string, string>();
 
     private SettingsWindow SettingsService()
     {
@@ -258,7 +250,6 @@ public partial class App : System.Windows.Application
         NativeWindowTheme.SetMode(Settings.ToolWindowTheme);
         _media?.ApplySettings(Settings);
         _media?.ApplyTuning(Settings.SpectrumTuning);
-        _hotkeys?.Apply(Settings.GlobalMediaHotkeys);
         return true;
     }
 
@@ -310,7 +301,7 @@ public partial class App : System.Windows.Application
         _settingsWindow?.Close(); _tuningWindow?.Close(); _timelineWindow?.Close();
         _audio.Dispose();
         if (_ui is not null) TaskObserver.Observe(_ui.DisposeAsync().AsTask(), "WinUI shutdown");
-        _hotkeys?.Dispose(); _media?.Dispose();
+        _media?.Dispose();
         if (_pipe is not null) TaskObserver.Observe(_pipe.DisposeAsync().AsTask(), "pipe shutdown");
         _stop.Dispose();
         base.OnExit(args);
@@ -327,7 +318,6 @@ public partial class App : System.Windows.Application
         _settingsWindow?.Close();
         _tuningWindow?.Close();
         _timelineWindow?.Close();
-        if (_hotkeys is not null) await _hotkeys.StopAsync(TimeSpan.FromMilliseconds(500));
         if (_ui is not null) await _ui.DisposeAsync();
         await _audio.DisposeAsync();
         _media?.Dispose();

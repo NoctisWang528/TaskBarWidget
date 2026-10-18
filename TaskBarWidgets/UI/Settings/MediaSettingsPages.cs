@@ -45,8 +45,6 @@ public sealed partial class SettingsWindow
             case "sources": RenderSources(); break;
             case "lyrics": RenderLyrics(); break;
             case "displayArea": RenderLyricsAppearance(); break;
-            case "audio": RenderAudio(); break;
-            case "shortcuts": RenderHotkeys(); break;
             case "trackOffsets": RenderOffsets(); break;
             case "lyricDiagnostics": RenderDiagnostics(); break;
             case "advanced": RenderMaintenance(); break;
@@ -55,9 +53,36 @@ public sealed partial class SettingsWindow
     }
     private void RenderGeneral()
     {
+        if (_schema["startup"] is JsonObject startup)
+        {
+            var registration = Section("登录启动状态");
+            registration.Children.Add(Copy(Text(startup["status"]) switch {
+                "enabled" => "已通过当前用户的登录计划任务启用。",
+                "repairRequired" => "启动项需要修复，请重新注册到当前程序位置。",
+                "error" => "无法读取或验证启动项。",
+                _ => "未启用登录启动。" }));
+            var path = Text(startup["registeredPath"], Text(startup["legacyPath"]));
+            if (!string.IsNullOrEmpty(path)) registration.Children.Add(Copy("已登记位置：" + path));
+            registration.Children.Add(Copy("当前程序：" + Text(startup["currentPath"])));
+            if (!string.IsNullOrEmpty(Text(startup["error"]))) registration.Children.Add(Copy(Text(startup["error"])));
+            var repair = ActionButton("修复并启用登录启动", async () => {
+                var result = await RequestAsync("applyNativeSettings", new Dictionary<string, object> { ["general.repair_startup"] = true });
+                SetNativeReadback(result, new SettingsDraft.SaveSnapshot(-1, new()));
+                RenderPage(); UpdateSaveStatus();
+            });
+            repair.IsEnabled = !_native.Pending.ContainsKey("general.auto_run");
+            if (_native.Pending.ContainsKey("general.auto_run")) registration.Children.Add(Copy("请先应用登录启动开关的更改。"));
+            registration.Children.Add(repair);
+            if (startup["needsRepair"]?.GetValue<bool>() == true)
+                registration.Children.Add(ActionButton("清除旧启动项", async () => {
+                    var result = await RequestAsync("applyNativeSettings", new Dictionary<string, object> { ["general.auto_run"] = false });
+                    SetNativeReadback(result, new SettingsDraft.SaveSnapshot(-1, new()));
+                    RenderPage(); UpdateSaveStatus();
+                }));
+        }
         var section = Section("应用界面");
         section.Children.Add(MediaEditor("toolWindowTheme", "界面主题", "select", choices: ["System", "Light", "Dark"], labels: ["跟随系统", "浅色", "深色"]));
-        section.Children.Add(Copy("主题在应用后同时用于设置窗口与快捷面板。开机启动由上方主程序设置管理。"));
+        section.Children.Add(Copy("主题立即在设置窗口预览，应用后同步到快捷面板。开机启动由上方主程序设置管理。"));
     }
     private void RenderLyrics()
     {
@@ -73,7 +98,7 @@ public sealed partial class SettingsWindow
             if (choice.SelectedIndex < 0) return;
             var mode = modes[choice.SelectedIndex];
             if (mode != "Disabled" && !_media.Bool("spectrumAudioAccessGranted")) {
-                var dialog = new ContentDialog { XamlRoot = _navigation.XamlRoot, Title = "允许读取系统播放声音？", Content = "频谱只在需要显示时读取扬声器或耳机当前播放的声音。可随时在这里撤销。", PrimaryButtonText = "允许并启用", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close };
+                var dialog = new ContentDialog { XamlRoot = _root.XamlRoot, RequestedTheme = _root.RequestedTheme, Title = "允许读取系统播放声音？", Content = "频谱只在需要显示时读取扬声器或耳机当前播放的声音。可随时在这里撤销。", PrimaryButtonText = "允许并启用", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close };
                 if (await dialog.ShowAsync() == ContentDialogResult.Primary) await ServiceCommandAsync("confirmSpectrumAudioAccess", JsonValue.Create(mode));
                 else RenderPage();
             }
@@ -125,13 +150,6 @@ public sealed partial class SettingsWindow
         cover.Children.Add(MediaEditor("coverGap", "封面间距", "number", 0, 240));
         cover.Children.Add(MediaEditor("coverCornerRadius", "封面圆角", "number", 0, 100));
     }
-    private void RenderAudio()
-    {
-        var section = Section("输出与输入", "在快捷面板内选择扬声器、耳机或麦克风，独立调整音量与静音。");
-        section.Children.Add(MediaEditor("enableControlPanel", "启用媒体与音频快捷面板"));
-        section.Children.Add(MediaEditor("syncDefaultCommunicationsDevice", "切换设备时同时设为默认通信设备", description: "只影响下一次主动切换；更改这个偏好不会立即切换设备。"));
-        section.Children.Add(ActionButton("打开音频面板", async () => { await _connection.RequestAsync("openPanel", null, _lifetime.Token); }));
-    }
     private IEnumerable<(string Id, string Label, string Key, bool Custom)> SourceList()
     {
         var order = (_media.Get("sourceRecognitionOrder") as JsonArray)?.Select(node => Text(node)).ToList() ?? Players.Select(player => player.Id).ToList();
@@ -182,7 +200,7 @@ public sealed partial class SettingsWindow
             enabled.Checked += (_, _) => { _media.Set(source.Key, true); Changed(); };
             enabled.Unchecked += (_, _) => { _media.Set(source.Key, false); Changed(); };
             Grid.SetColumn(enabled, 2); row.Children.Add(enabled);
-            var menu = new MenuFlyout();
+            var menu = ThemeFlyout(new MenuFlyout());
             var settings = new MenuFlyoutItem { Text = "设置" }; settings.Click += (_, _) => OpenSource(source.Id); menu.Items.Add(settings);
             foreach (var (text, delta) in new[] { ("提高优先级", -1), ("降低优先级", 1) }) {
                 var move = new MenuFlyoutItem { Text = text, IsEnabled = !_sourceReorderBusy && position + delta >= 0 && position + delta < list.Count };
@@ -191,7 +209,7 @@ public sealed partial class SettingsWindow
             var more = new Button { Content = new FontIcon { Glyph = "\uE712", FontSize = 16 }, Width = 36, Height = 36, Padding = new Thickness(0), Flyout = menu, VerticalAlignment = VerticalAlignment.Center };
             AutomationProperties.SetName(more, source.Label + "的更多操作");
             Grid.SetColumn(more, 3); row.Children.Add(more);
-            var surface = new Border { Child = row, CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1), BorderBrush = ResourceBrush("ControlStrokeColorDefaultBrush"), Background = ResourceBrush("CardBackgroundFillColorDefaultBrush"), HorizontalAlignment = HorizontalAlignment.Stretch, Tag = "SourcePriorityRow" };
+            var surface = UiThemeStyles.Apply(new Border { Child = row, CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1), HorizontalAlignment = HorizontalAlignment.Stretch, Tag = "SourcePriorityRow" }, "SettingsSourceSurface");
             surface.ContextFlyout = menu;
             _sourceRows.Add((source.Id, surface, handle)); rows.Children.Add(surface);
         }
@@ -211,10 +229,9 @@ public sealed partial class SettingsWindow
     private static Grid ReorderDots()
     {
         var dots = new Grid { Width = 14, Height = 20, IsHitTestVisible = false };
-        for (var index = 0; index < 6; index++) dots.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse {
+        for (var index = 0; index < 6; index++) dots.Children.Add(UiThemeStyles.Apply(new Microsoft.UI.Xaml.Shapes.Ellipse {
             Width = 3, Height = 3, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Thickness(index % 2 * 7 + 2, index / 2 * 6 + 2, 0, 0),
-            Fill = ResourceBrush("TextFillColorSecondaryBrush") });
+            Margin = new Thickness(index % 2 * 7 + 2, index / 2 * 6 + 2, 0, 0) }, "SettingsReorderDot"));
         return dots;
     }
     private int? SourceDropGap(Point point)
@@ -246,7 +263,7 @@ public sealed partial class SettingsWindow
     }
     private void ResetSourceReorderFeedback()
     {
-        foreach (var row in _sourceRows) { row.Surface.BorderBrush = ResourceBrush("ControlStrokeColorDefaultBrush"); row.Surface.BorderThickness = new Thickness(1); }
+        foreach (var row in _sourceRows) { row.Surface.ClearValue(Border.BorderBrushProperty); row.Surface.BorderThickness = new Thickness(1); }
     }
     private Task MoveSourceAsync(string id, int delta)
     {
@@ -303,30 +320,6 @@ public sealed partial class SettingsWindow
     }
     private static string ProviderLabel(string id) => id switch { "QQMusic" => "QQ 音乐", "Netease" => "网易云音乐", "Kugou" => "酷狗音乐", _ => id };
     private static JsonNode? JsonSerializerNode(object? value) => System.Text.Json.JsonSerializer.SerializeToNode(value);
-    private void RenderHotkeys()
-    {
-        var section = Section("全局播放器快捷键", "聚焦输入框后直接按组合键，或输入 Ctrl+Alt+P 形式的快捷键。应用后注册到 Windows。");
-        section.Children.Add(MediaEditor("enableGlobalMediaHotkeys", "启用全局快捷键"));
-        if (_media.Get("mediaHotkeys") is JsonArray hotkeys) foreach (var definition in hotkeys.OfType<JsonObject>()) {
-            var key = Text(definition["settingKey"]); var row = new StackPanel { Spacing = 4 };
-            var input = new TextBox { Header = Text(definition["displayName"]), Text = _media.Text(key), MinHeight = 32 };
-            input.KeyDown += (_, args) => {
-                if (args.Key is VirtualKey.Tab or VirtualKey.Escape or VirtualKey.Control or VirtualKey.Menu or VirtualKey.Shift or VirtualKey.LeftWindows or VirtualKey.RightWindows) return;
-                bool Down(VirtualKey value) => (InputKeyboardSource.GetKeyStateForCurrentThread(value) & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0;
-                var parts = new List<string>(); if (Down(VirtualKey.Control)) parts.Add("Ctrl"); if (Down(VirtualKey.Menu)) parts.Add("Alt"); if (Down(VirtualKey.Shift)) parts.Add("Shift"); if (Down(VirtualKey.LeftWindows) || Down(VirtualKey.RightWindows)) parts.Add("Win");
-                var name = args.Key.ToString();
-                if ((int)args.Key >= (int)VirtualKey.Number0 && (int)args.Key <= (int)VirtualKey.Number9) name = ((int)args.Key - (int)VirtualKey.Number0).ToString();
-                else if ((int)args.Key >= (int)VirtualKey.NumberPad0 && (int)args.Key <= (int)VirtualKey.NumberPad9) name = "NumPad" + ((int)args.Key - (int)VirtualKey.NumberPad0);
-                parts.Add(name); input.Text = string.Join('+', parts); args.Handled = true;
-                _media.Set(key, input.Text); Changed();
-            };
-            input.LostFocus += (_, _) => { _media.Set(key, input.Text); Changed(); }; row.Children.Add(input);
-            var status = (_media.Get("mediaHotkeyStatuses") as JsonObject)?[Text(definition["statusKey"])]; if (status is not null) row.Children.Add(Copy("注册状态：" + Text(status)));
-            var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            var clear = new Button { Content = "清除" }; clear.Click += (_, _) => { input.Text = ""; _media.Set(key, ""); Changed(); }; buttons.Children.Add(clear);
-            buttons.Children.Add(ActionButton("恢复默认", () => ServiceCommandAsync("resetMediaHotkey", definition["action"]?.DeepClone()))); row.Children.Add(buttons); section.Children.Add(row);
-        }
-    }
     private void RenderOffsets()
     {
         var current = Section("当前歌曲", "偏移按歌曲与歌词源分别保存，修改后立即作用于当前歌词。");
@@ -400,11 +393,11 @@ public sealed partial class SettingsWindow
         var section = Section("诊断与维护", "清理歌词缓存不会删除已保存的单曲偏移。");
         section.Children.Add(ActionButton("清理歌词缓存", () => ConfirmCommandAsync("清理歌词缓存？", "已缓存歌词将在下次播放时重新获取。", "clearCache")));
         section.Children.Add(ActionButton("清除全部单曲偏移", () => ConfirmCommandAsync("清除全部单曲偏移？", "这个操作会移除所有歌曲的单独同步调整。", "clearTrackOffsets")));
-        section.Children.Add(ActionButton("重置歌词设置", () => ConfirmCommandAsync("重置歌词设置？", "播放器、歌词效果和快捷键会恢复默认值；任务栏监测设置不受影响。", "resetDefaults")));
+        section.Children.Add(ActionButton("重置歌词设置", () => ConfirmCommandAsync("重置歌词设置？", "播放器和歌词效果会恢复默认值；任务栏监测设置不受影响。", "resetDefaults")));
     }
     private async Task ConfirmCommandAsync(string title, string message, string action)
     {
-        var dialog = new ContentDialog { XamlRoot = _navigation.XamlRoot, Title = title, Content = message, PrimaryButtonText = "继续", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close };
+        var dialog = new ContentDialog { XamlRoot = _root.XamlRoot, RequestedTheme = _root.RequestedTheme, Title = title, Content = message, PrimaryButtonText = "继续", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close };
         if (await dialog.ShowAsync() == ContentDialogResult.Primary) await ServiceCommandAsync(action);
     }
     private void RenderAbout()

@@ -225,6 +225,7 @@ public:
     //afx_msg void OnSetTextColor();
     afx_msg void OnInitMenu(CMenu* pMenu);
     virtual BOOL PreTranslateMessage(MSG* pMsg);
+    virtual LRESULT WindowProc(UINT message, WPARAM wParam, LPARAM lParam) override;
     //afx_msg void OnSetFont();
     afx_msg void OnMouseMove(UINT nFlags, CPoint point);
     afx_msg void OnLButtonDblClk(UINT nFlags, CPoint point);

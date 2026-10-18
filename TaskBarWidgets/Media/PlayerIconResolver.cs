@@ -9,7 +9,9 @@ internal static class PlayerIconResolver
     private static readonly ConcurrentDictionary<string, string> ResolvedIcons = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Lazy<AppsFolderCatalog> RegisteredApps = new(AppsFolderCatalog.Load);
 
-    public static string ResolveDataUrl(string? userModelId)
+    public static string ResolveDataUrl(string? userModelId) => ResolveDataUrl(userModelId, true);
+
+    public static string ResolveDataUrl(string? userModelId, bool allowActiveSessionFallback)
     {
         var value = userModelId?.Trim();
         if (string.IsNullOrEmpty(value))
@@ -29,7 +31,7 @@ internal static class PlayerIconResolver
             return dataUrl;
         }
 
-        return TryResolveActiveAudioSessionIcon() ?? string.Empty;
+        return allowActiveSessionFallback ? TryResolveActiveAudioSessionIcon() ?? string.Empty : string.Empty;
     }
 
     internal static bool IsPackagedUserModelId(string? userModelId) => userModelId?.Contains('!') == true;

@@ -28,6 +28,7 @@ output/
 # Personal runtime data and crash captures are never source inputs.
 **/plugins/*.ini
 media-settings.json
+/Data/
 *.dmp
 *.mdmp
 *.etl

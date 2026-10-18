@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using Windows.Globalization.NumberFormatting;
 using Windows.UI.Text;
+using TaskBarWidgets.UI.Settings;
 
 namespace TaskBarWidgets.UI;
 
@@ -41,7 +42,7 @@ public sealed partial class SettingsWindow
         var body = Section("共用任务栏外观", "监测与媒体使用同一套字体、背景色和不透明度。");
         body.Children.Add(AppearanceTypography());
         if (_fontListError is not null) body.Children.Add(Copy(_fontListError));
-        body.Children.Add(new Border { Height = 1, Background = ResourceBrush("CardStrokeColorDefaultBrush"), Margin = new Thickness(0, 6, 0, 4) });
+        body.Children.Add(UiThemeStyles.Apply(new Border { Height = 1, Margin = new Thickness(0, 6, 0, 4) }, "SettingsRule"));
         body.Children.Add(new TextBlock { Text = "背景", FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
         var typography = new HashSet<string>(StringComparer.Ordinal) { "taskbar.fontName", "taskbar.fontSize", "taskbar.fontBold", "taskbar.fontItalic", "taskbar.fontUnderline", "taskbar.fontStrikeOut" };
         body.Children.Add(ResponsiveFields(fields.Where(field => !typography.Contains(Text(field["key"]))).Select(field => FieldEditor(field, _native))));

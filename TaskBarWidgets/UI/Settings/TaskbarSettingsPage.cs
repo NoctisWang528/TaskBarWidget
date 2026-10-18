@@ -21,8 +21,7 @@ public sealed partial class SettingsWindow
     private sealed record ModuleDropTarget(Border Surface, int? Row, StackPanel? Chips);
     private void InitializeModuleGestures()
     {
-        var host = new Grid();
-        Content = host; host.Children.Add(_navigation); host.Children.Add(_dragOverlay);
+        Content = _root; _root.Children.Add(_navigation); _root.Children.Add(_dragOverlay);
         _pointerReorder = new PointerReorder(_navigation, _dragOverlay, ResetReorderFeedback);
         Activated += (_, args) => { if (args.WindowActivationState == WindowActivationState.Deactivated) _pointerReorder.Cancel("deactivated"); };
     }
@@ -32,7 +31,7 @@ public sealed partial class SettingsWindow
         var preview = Section("任务栏预览", "预览数值为示例，组合行与实际任务栏一致；透明背景使用对比底色示意。");
         _preview = new StackPanel { Tag = "TaskbarPreview", Spacing = 2, Padding = new Thickness(12), MinWidth = 48, MinHeight = 48, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center };
         var previewScroll = new ScrollViewer { Content = _preview, MinHeight = 64, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollMode = ScrollMode.Disabled };
-        _previewFrame = new Border { Tag = "TaskbarPreviewFrame", Child = previewScroll, MinHeight = 68, CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1), BorderBrush = ResourceBrush("ControlStrokeColorDefaultBrush"), Background = new SolidColorBrush(PreviewBackdrop()) };
+        _previewFrame = UiThemeStyles.Apply(new Border { Tag = "TaskbarPreviewFrame", Child = previewScroll, MinHeight = 68, CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1), Background = new SolidColorBrush(PreviewBackdrop()) }, "SettingsStroke");
         preview.Children.Add(_previewFrame);
         RenderPreview();
         var combinations = Section("显示组合", "从模块池拖入组合行即可启用；拖动调整先后或移到另一行。单击模块打开右侧属性。");
@@ -48,7 +47,7 @@ public sealed partial class SettingsWindow
                 combinations.Children.Add(Copy(_layout.SingleRow ? "单行组合" : row == 0 ? "上行组合" : "下行组合"));
                 var chips = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, MinHeight = 38 };
                 foreach (var module in _layout.InRow(row)) chips.Children.Add(ModuleChip(module));
-                var drop = new Border { Tag = "ModuleLane:" + row, Child = new ScrollViewer { Content = chips, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled }, MinHeight = 52, Padding = new Thickness(8), CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1), BorderBrush = ResourceBrush("ControlStrokeColorDefaultBrush") };
+                var drop = UiThemeStyles.Apply(new Border { Tag = "ModuleLane:" + row, Child = new ScrollViewer { Content = chips, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled }, MinHeight = 52, Padding = new Thickness(8), CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1) }, "SettingsStroke");
                 if (chips.Children.Count == 0) chips.Children.Add(Copy("将模块拖到此处，或在模块属性中点击添加。"));
                 _moduleDropTargets.Add(new ModuleDropTarget(drop, index, chips));
                 combinations.Children.Add(drop);
@@ -58,7 +57,7 @@ public sealed partial class SettingsWindow
         var available = new GridView { SelectionMode = ListViewSelectionMode.None, IsItemClickEnabled = false, HorizontalAlignment = HorizontalAlignment.Stretch };
         if (_layout is not null) foreach (var module in _layout.Ordered().Where(module => !_layout.Enabled(module.Id))) available.Items.Add(ModuleChip(module));
         if (available.Items.Count == 0) pool.Children.Add(Copy("所有模块均已加入组合。"));
-        var poolSurface = new Border { Child = available, MinHeight = 52, Padding = new Thickness(4), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), BorderBrush = ResourceBrush("ControlStrokeColorDefaultBrush") };
+        var poolSurface = UiThemeStyles.Apply(new Border { Child = available, MinHeight = 52, Padding = new Thickness(4), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6) }, "SettingsStroke");
         _moduleDropTargets.Add(new ModuleDropTarget(poolSurface, null, null));
         pool.Children.Add(poolSurface);
         RenderNativeGroups("taskbar");
@@ -77,7 +76,8 @@ public sealed partial class SettingsWindow
         _pointerReorder?.HideInsertion();
         foreach (var target in _moduleDropTargets) {
             var active = ReferenceEquals(target, destination);
-            target.Surface.BorderBrush = active ? new SolidColorBrush(AccentColor()) : ResourceBrush("ControlStrokeColorDefaultBrush");
+            if (active) target.Surface.BorderBrush = new SolidColorBrush(AccentColor());
+            else target.Surface.ClearValue(Border.BorderBrushProperty);
             target.Surface.BorderThickness = new Thickness(active ? 2 : 1);
         }
         if (destination?.Row is not null) {
@@ -138,7 +138,7 @@ public sealed partial class SettingsWindow
     internal void CancelPointerProbe() => _pointerReorder?.Cancel("probe-cleanup");
     private void ResetReorderFeedback()
     {
-        foreach (var target in _moduleDropTargets) { target.Surface.BorderBrush = ResourceBrush("ControlStrokeColorDefaultBrush"); target.Surface.BorderThickness = new Thickness(1); }
+        foreach (var target in _moduleDropTargets) { target.Surface.ClearValue(Border.BorderBrushProperty); target.Surface.BorderThickness = new Thickness(1); }
         ResetSourceReorderFeedback();
         UpdateSaveStatus();
     }

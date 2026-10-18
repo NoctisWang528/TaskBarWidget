@@ -11,10 +11,10 @@ public sealed class LyricPipelineCache : ILyricPipelineCache
     public const int RawCacheVersion = 1;
     public const int ParsedCacheVersion = 1;
 
-    private static readonly string DefaultCacheDirectory = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "TaskBarWidgets",
-        "database");
+    // An explicit static constructor prevents early beforefieldinit initialization before host configuration.
+    static LyricPipelineCache() { }
+
+    private static readonly string DefaultCacheDirectory = AppDataPaths.DatabaseDirectory;
     private static readonly JsonLyricCacheStore<RawLyricCacheEnvelope> DefaultRawStore = new(
         Path.Combine(DefaultCacheDirectory, "lyric-pipeline-raw-v1.json"));
     private static readonly JsonLyricCacheStore<ParsedLyricCacheEnvelope> DefaultParsedStore = new(
@@ -255,9 +255,7 @@ public sealed class LyricPipelineCache : ILyricPipelineCache
 
     private static void DeleteLegacyCacheFiles()
     {
-        var appDataDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "TaskBarWidgets");
+        var appDataDirectory = AppDataPaths.RootDirectory;
         var legacyPaths = new[]
         {
             Path.Combine(DefaultCacheDirectory, "smtc-generic-lyrics.json"),

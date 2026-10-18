@@ -1,6 +1,6 @@
 # Internal media protocol
 
-Transport: local named pipe `TaskBarWidgets.<native PID>`, UTF-8 JSON objects separated by LF, version 1. C# helper is a current-user-only server, native host is client. Native host launches `TaskBarWidgets.Media.exe --host-pid <PID> --pipe-name TaskBarWidgets.<PID>` from its adjacent `Media/` directory. Helper exits when parent exits. Serialize writes, cap messages at 4 MiB, observe disconnects and cancellation. No remote clients.
+Transport: local named pipe `TaskBarWidgets.<native PID>`, UTF-8 JSON objects separated by LF, version 1. C# helper is a current-user-only server, native host is client. Native host launches `TaskBarWidgets.Media.exe --host-pid <PID> --pipe-name TaskBarWidgets.<PID> --portable-data <0|1>` from its adjacent `Media/` directory. The optional portable argument is the host's resolved first-run/writability decision; older four-argument launches retain INI lookup compatibility. Helper exits when parent exits. Serialize writes, cap messages at 4 MiB, observe disconnects and cancellation. No remote clients.
 
 Helper to native:
 
@@ -29,7 +29,15 @@ Frame queues retain complete snapshots. Before serialization the helper suppress
 
 Lyrics HTML includes a base URL of `https://taskbarwidgets.local/Web/Lyrics/`. The native host maps that virtual host to its local `Media/` directory for packaged fonts. No HTTP listener or remote page is involved.
 
-Native owns the single taskbar area, automatic/manual display mode, wheel switching and right menu. Left click generally toggles panel, browser buttons send their action. WebView default context menu is disabled. Helper supplies a browser scene with metadata and controls, and forwards WebView actions through the native host to pipe.
+Native owns the single taskbar area, automatic/manual display mode, wheel switching and right menu. Native pairs left-button press/release across display transitions and owns panel toggles. Browser control hit testing returns a tagged action to that same gesture; disabled controls do nothing. Renderer readiness/input/query failure falls back to the panel, and a late browser callback cannot commit a completed gesture. WebView default context menu is disabled. `togglePanel` carries a diagnostic `gestureId` through the media bridge to the UI; it is not a second invocation path.
+
+## Card lyrics and startup state (2026-10-18)
+
+Settings simplification: global hotkey fields and `resetMediaHotkey` are removed from the settings API; legacy persisted hotkey objects are ignored. `enableControlPanel` and `syncDefaultCommunicationsDevice` are no longer configurable or serialized: the panel is always available and an explicit endpoint switch always synchronizes the communications role. Spectrum authorization/display policy remains a separate lyrics setting. `getState.sources[]` additionally contains `iconDataUrl` (bounded local application image; empty means generic icon). Icons resolve asynchronously by source ID without borrowing the active audio session's icon.
+
+UI request `subscribeCardLyrics` has `{visible:boolean,session:integer}`. Each panel visibility generation gets its own session; a newer session supersedes an older request. An active subscription returns `{html,snapshot}` and receives latest-only events `{version:1,type:"command",action:"cardLyricsFrame",session,payload:{revision,trackId,available,scripts}}`. Frames are complete snapshots, use the existing lyric style/animation renderer, and omit covers/spectrum/browser presentation. Unavailable lyrics clear the card without starting a separate search. The UI rejects stale sessions/revisions and stops executing on hide. Reconnection subscribes again. Native additionally sends `taskbarAppearance` with its shared typography payload to the media service; the card uses the same font attributes while adapting foreground contrast to its Mica theme.
+
+Native settings readback includes `startup:{enabled,status,registeredPath,currentPath,needsRepair,error,legacyPath}`. `enabled` means a verified current-user interactive elevated logon task for this executable. Legacy Run entries and outdated paths are reported as requiring repair. Submit `general.repair_startup:true` alone through `applyNativeSettings` to register/update and verify the task before removing the legacy Run entry. Explicit `general.auto_run:false` clears both product-specific registrations. Merely opening settings or applying unrelated changes never edits startup registration.
 
 Source layout: `Native/TrafficMonitor/` (copied C++ project), `Native/OpenHardwareMonitorApi/`, `Native/include/`, `Media/` (C# WPF helper), `Lyrics.Core/` (copied independent core). Runtime packaging: `artifacts/builds/<timestamp>/TaskBarWidgets.exe`, adjacent `Media/` and `UI/` subdirectories, and native hardware DLLs next to the main executable. Source code never references original project paths outside TaskBarWidgets.
 

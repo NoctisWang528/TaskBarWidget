@@ -157,9 +157,11 @@ public sealed class AppSettings
 
     public bool ShowCover { get; set; } = true;
 
-    public bool EnableControlPanel { get; set; } = true;
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool EnableControlPanel => true;
 
-    public bool SyncDefaultCommunicationsDevice { get; set; } = true;
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool SyncDefaultCommunicationsDevice => true;
 
     public double LyricsLayoutScalePercent { get; set; } = DefaultLyricsLayoutScalePercent;
 
@@ -197,7 +199,6 @@ public sealed class AppSettings
 
     public List<string> SelectedDisplayIds { get; set; } = new();
 
-    public GlobalMediaHotkeySettings GlobalMediaHotkeys { get; set; } = new();
 
     public static string NormalizeFontFamily(string? fontFamily)
     {
@@ -235,7 +236,6 @@ public sealed class AppSettings
         cloned.LocalMusicFolders = LocalMusicFolders.ToList();
         cloned.SelectedDisplayIds = (SelectedDisplayIds ?? []).ToList();
         cloned.SpectrumTuning = SpectrumTuning.Clone();
-        cloned.GlobalMediaHotkeys = (GlobalMediaHotkeys ?? new GlobalMediaHotkeySettings()).Clone();
         return cloned;
     }
 

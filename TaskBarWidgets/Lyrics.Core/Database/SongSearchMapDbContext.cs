@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.IO;
+using TaskbarLyrics.Core.Utilities;
 
 namespace TaskbarLyrics.Core.Database;
 
@@ -10,8 +11,7 @@ public class SongSearchMapDbContext : DbContext
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var dbDirectory = Path.Combine(appData, "TaskBarWidgets", "database");
+        var dbDirectory = AppDataPaths.DatabaseDirectory;
 
         try
         {

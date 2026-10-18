@@ -12,8 +12,7 @@ internal readonly record struct AppSettingsChangeSet(
     bool VisualStyleChanged,
     bool LyricsLayoutChanged,
     bool WindowLayoutChanged,
-    bool TaskbarEmbeddingChanged,
-    bool GlobalMediaHotkeysChanged)
+    bool TaskbarEmbeddingChanged)
 {
     public bool RequiresLyricsWindowApply =>
         IsInitialApplication ||
@@ -71,7 +70,6 @@ internal readonly record struct AppSettingsChangeSet(
             current.UseFloatingWindow != next.UseFloatingWindow ||
             current.FontSize != next.FontSize ||
             current.ShowCover != next.ShowCover ||
-            current.EnableControlPanel != next.EnableControlPanel ||
             current.CoverPosition != next.CoverPosition ||
             current.CoverSize != next.CoverSize ||
             current.CoverGap != next.CoverGap ||
@@ -109,9 +107,6 @@ internal readonly record struct AppSettingsChangeSet(
         var taskbarEmbeddingChanged = isInitialApplication ||
             current.UseFloatingWindow != next.UseFloatingWindow;
 
-        var globalMediaHotkeysChanged = isInitialApplication ||
-            !AreSameGlobalMediaHotkeys(current.GlobalMediaHotkeys, next.GlobalMediaHotkeys);
-
         return new AppSettingsChangeSet(
             isInitialApplication,
             playerRecognitionChanged,
@@ -124,8 +119,7 @@ internal readonly record struct AppSettingsChangeSet(
             visualStyleChanged,
             lyricsLayoutChanged,
             windowLayoutChanged,
-            taskbarEmbeddingChanged,
-            globalMediaHotkeysChanged);
+            taskbarEmbeddingChanged);
     }
 
     private static bool AreSameStrings(List<string>? current, List<string>? next)
@@ -179,20 +173,4 @@ internal readonly record struct AppSettingsChangeSet(
         return true;
     }
 
-    private static bool AreSameGlobalMediaHotkeys(
-        GlobalMediaHotkeySettings? current,
-        GlobalMediaHotkeySettings? next)
-    {
-        var currentSettings = current ?? new GlobalMediaHotkeySettings();
-        var nextSettings = next ?? new GlobalMediaHotkeySettings();
-        return currentSettings.Enabled == nextSettings.Enabled &&
-            string.Equals(currentSettings.TogglePlayPause, nextSettings.TogglePlayPause, StringComparison.Ordinal) &&
-            string.Equals(currentSettings.PreviousTrack, nextSettings.PreviousTrack, StringComparison.Ordinal) &&
-            string.Equals(currentSettings.NextTrack, nextSettings.NextTrack, StringComparison.Ordinal) &&
-            string.Equals(currentSettings.SeekBackward, nextSettings.SeekBackward, StringComparison.Ordinal) &&
-            string.Equals(currentSettings.SeekForward, nextSettings.SeekForward, StringComparison.Ordinal) &&
-            string.Equals(currentSettings.ToggleLyricsVisibility, nextSettings.ToggleLyricsVisibility, StringComparison.Ordinal) &&
-            string.Equals(currentSettings.ToggleTranslation, nextSettings.ToggleTranslation, StringComparison.Ordinal) &&
-            string.Equals(currentSettings.ToggleWordScanning, nextSettings.ToggleWordScanning, StringComparison.Ordinal);
-    }
 }

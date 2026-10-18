@@ -2,7 +2,7 @@ namespace TaskbarLyrics.App;
 
 internal interface IMediaPlaybackController
 {
-    Task ExecuteAsync(MediaHotkeyAction action, CancellationToken cancellationToken);
+    Task ExecuteAsync(MediaControlAction action, CancellationToken cancellationToken);
     Task SeekToAsync(TimeSpan position, CancellationToken cancellationToken);
 }
 

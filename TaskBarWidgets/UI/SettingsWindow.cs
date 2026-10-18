@@ -4,6 +4,7 @@ using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using TaskBarWidgets.UI.Settings;
 using Windows.Foundation;
@@ -18,6 +19,9 @@ public sealed partial class SettingsWindow : Window
     private readonly CancellationTokenSource _lifetime = new();
     private readonly SettingsDraft _native = new();
     private readonly SettingsDraft _media = new();
+    private readonly Grid _root = new();
+    private readonly Windows.UI.ViewManagement.AccessibilitySettings _accessibility = new();
+    private bool _highContrastSubscriptionAttempted, _highContrastSubscribed;
     private JsonObject _schema = new();
     private readonly NavigationView _navigation = new() { IsSettingsVisible = false, IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed, PaneDisplayMode = NavigationViewPaneDisplayMode.Auto, OpenPaneLength = 224, PaneTitle = "TaskBarWidgets" };
     private readonly SplitView _split = new() { PanePlacement = SplitViewPanePlacement.Right, DisplayMode = SplitViewDisplayMode.Overlay, OpenPaneLength = 352 };
@@ -48,10 +52,20 @@ public sealed partial class SettingsWindow : Window
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1180, 820));
         var pages = new (string Id, string Label, string Glyph)[] {
             ("taskbar", "任务栏与布局", "\uE950"), ("hardware", "硬件与网络", "\uE7F4"),
-            ("sources", "播放源", "\uE8D6"), ("lyrics", "歌词", "\uE8D2"), ("displayArea", "歌词布局与样式", "\uE790"),
-            ("audio", "音频", "\uE767"), ("general", "常规", "\uE713"), ("shortcuts", "快捷键", "\uE765"),
-            ("trackOffsets", "单曲偏移", "\uE823"), ("lyricDiagnostics", "歌词匹配", "\uE721"), ("advanced", "诊断与维护", "\uE90F"), ("about", "关于", "\uE946") };
-        foreach (var page in pages) _navigation.MenuItems.Add(new NavigationViewItem { Content = page.Label, Tag = page.Id, Icon = new FontIcon { Glyph = page.Glyph } });
+            ("sources", "播放源", "\uE8D6"), ("lyricsGroup", "歌词", "\uE8D2"),
+            ("general", "常规", "\uE713"), ("about", "关于", "\uE946") };
+        foreach (var page in pages)
+        {
+            var item = new NavigationViewItem { Content = page.Label, Tag = page.Id, Icon = new FontIcon { Glyph = page.Glyph } };
+            if (page.Id == "lyricsGroup")
+            {
+                item.SelectsOnInvoked = false;
+                foreach (var child in new[] { ("lyrics", "显示与行为"), ("displayArea", "布局与样式"),
+                    ("lyricDiagnostics", "歌词匹配"), ("trackOffsets", "单曲偏移"), ("advanced", "诊断与维护") })
+                    item.MenuItems.Add(new NavigationViewItem { Content = child.Item2, Tag = child.Item1 });
+            }
+            _navigation.MenuItems.Add(item);
+        }
         _navigation.SelectionChanged += (_, args) => {
             if (args.SelectedItem is NavigationViewItem item && item.Tag is string id) { _currentPage = id; RenderPage(); }
         };
@@ -78,25 +92,33 @@ public sealed partial class SettingsWindow : Window
         _pageScroll = scroll;
         Grid.SetRow(scroll, 3); body.Children.Add(scroll);
         _split.Content = body;
-        _split.Pane = new ScrollViewer { Content = _properties, Background = ResourceBrush("LayerFillColorDefaultBrush"), HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        _split.Pane = UiThemeStyles.Apply(new ScrollViewer { Content = _properties, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled }, "SettingsPane");
         _navigation.Content = _split; Content = _navigation;
         InitializeModuleGestures();
+        _root.ActualThemeChanged += (_, _) => UpdateTitleBarTheme();
+        _root.Loaded += (_, _) => { TrySubscribeSettingsHighContrast(); UpdateTitleBarTheme(); };
+        Activated += (_, _) => { if (!_closed) UpdateTitleBarTheme(); };
         _navigation.Loaded += async (_, _) => {
-            _navigation.SelectedItem = _navigation.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(item => (string)item.Tag == _currentPage);
+            _navigation.SelectedItem = NavigationPages().FirstOrDefault(item => (string)item.Tag == _currentPage);
             if (!_loaded && _connection.IsConnected) await GuardAsync(() => ReloadAsync());
         };
         _connection.ConnectionChanged += OnConnectionChanged;
         AppWindow.Closing += (_, args) => { CancelModulePointerDrag(); CancelWeatherPage(); if (!_shutdown) { args.Cancel = true; AppWindow.Hide(); Dismissed?.Invoke(); } };
-        Closed += (_, _) => { _closed = true; CancelWeatherPage(); _lifetime.Cancel(); _connection.ConnectionChanged -= OnConnectionChanged; _lifetime.Dispose(); };
+        Closed += (_, _) => { _closed = true; CancelWeatherPage(); _lifetime.Cancel(); _connection.ConnectionChanged -= OnConnectionChanged; UnsubscribeSettingsHighContrast(); _lifetime.Dispose(); };
         ShowPage("taskbar");
     }
 
     public void NavigateTo(string page) => ShowPage(page);
+    private IEnumerable<NavigationViewItem> NavigationPages() => _navigation.MenuItems.OfType<NavigationViewItem>()
+        .SelectMany(item => item.MenuItems.Count == 0 ? new[] { item } : item.MenuItems.OfType<NavigationViewItem>());
     public void ShowPage(string? page)
     {
-        var item = _navigation.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(item => (string)item.Tag == page)
+        if (page is "audio" or "shortcuts") page = "general";
+        var item = NavigationPages().FirstOrDefault(item => (string)item.Tag == page)
             ?? (NavigationViewItem)_navigation.MenuItems[0];
         _currentPage = (string)item.Tag;
+        foreach (var parent in _navigation.MenuItems.OfType<NavigationViewItem>())
+            if (parent.MenuItems.Contains(item)) parent.IsExpanded = true;
         if (_navigation.IsLoaded) { _navigation.SelectedItem = item; if (_currentPage == "hardware" && _weatherPage is null) RenderPage(); }
         else RenderPage();
         _split.IsPaneOpen = false;
@@ -105,7 +127,7 @@ public sealed partial class SettingsWindow : Window
     internal void LoadValidationData(JsonObject native, JsonObject media)
     {
         SetNativeReadback(native); _media.Readback(MediaValues(media)); _loaded = true;
-        _notice.IsOpen = false; RenderPage(); UpdateSaveStatus();
+        _notice.IsOpen = false; ApplyTheme(); RenderPage(); UpdateSaveStatus();
     }
     internal void OpenModuleProperties(string id) => OpenModule(id);
     private void OnConnectionChanged(bool connected) => DispatcherQueue.TryEnqueue(async () => {
@@ -156,6 +178,7 @@ public sealed partial class SettingsWindow : Window
         CancelModulePointerDrag();
         _busy = true; UpdateSaveStatus();
         var native = _native.Capture(); var media = _media.Capture();
+        var themeOnly = native.Values.Count == 0 && media.Values.Count == 1 && media.Values.ContainsKey("toolWindowTheme");
         try {
             if (native.Values.Count > 0) {
                 if (native.Values.ContainsKey("taskbar.horizontal_arrange") || native.Values.Keys.Any(key => key.StartsWith("items.") && (key.EndsWith(".show") || key.EndsWith(".row") || key.EndsWith(".order")))) _layout?.IncludeWholeLayout(native.Values);
@@ -165,9 +188,61 @@ public sealed partial class SettingsWindow : Window
             ApplyTheme();
             _notice.Severity = InfoBarSeverity.Success; _notice.Message = "已保存并读回主程序配置。"; _notice.IsOpen = true;
         }
-        finally { _busy = false; RenderPage(); UpdateSaveStatus(); }
+        finally { _busy = false; if (!themeOnly) RenderPage(); UpdateSaveStatus(); }
     }
-    private void ApplyTheme() => _navigation.RequestedTheme = _media.Text("toolWindowTheme") switch { "Light" or "1" => ElementTheme.Light, "Dark" or "2" => ElementTheme.Dark, _ => ElementTheme.Default };
+    private void ApplyTheme()
+    {
+        // Mica, popup targets and the sibling drag overlay share one theme root.
+        _root.RequestedTheme = _media.Text("toolWindowTheme") switch { "Light" or "1" => ElementTheme.Light, "Dark" or "2" => ElementTheme.Dark, _ => ElementTheme.Default };
+        UpdateTitleBarTheme();
+    }
+    private void UpdateTitleBarTheme()
+    {
+        var titleBar = AppWindow.TitleBar;
+        var contrast = _accessibility.HighContrast;
+        var dark = _root.ActualTheme == ElementTheme.Dark;
+        Color? foreground = contrast ? null : dark ? Colors.White : Colors.Black;
+        Color? background = contrast ? null : dark ? Color.FromArgb(255, 32, 32, 32) : Color.FromArgb(255, 243, 243, 243);
+        titleBar.ForegroundColor = titleBar.ButtonForegroundColor = foreground;
+        titleBar.BackgroundColor = titleBar.ButtonBackgroundColor = background;
+        titleBar.InactiveBackgroundColor = titleBar.ButtonInactiveBackgroundColor = background;
+        titleBar.InactiveForegroundColor = titleBar.ButtonInactiveForegroundColor = contrast ? null : dark ? Color.FromArgb(255, 160, 160, 160) : Color.FromArgb(255, 96, 96, 96);
+        titleBar.ButtonHoverBackgroundColor = contrast ? null : dark ? Color.FromArgb(255, 55, 55, 55) : Color.FromArgb(255, 224, 224, 224);
+        titleBar.ButtonPressedBackgroundColor = contrast ? null : dark ? Color.FromArgb(255, 48, 48, 48) : Color.FromArgb(255, 210, 210, 210);
+        titleBar.ButtonHoverForegroundColor = titleBar.ButtonPressedForegroundColor = foreground;
+    }
+    private void OnSettingsHighContrastChanged(Windows.UI.ViewManagement.AccessibilitySettings sender, object args) => DispatcherQueue.TryEnqueue(() => { if (!_closed) UpdateTitleBarTheme(); });
+    private void TrySubscribeSettingsHighContrast()
+    {
+        if (_closed || _highContrastSubscriptionAttempted) return;
+        _highContrastSubscriptionAttempted = true;
+        try { _accessibility.HighContrastChanged += OnSettingsHighContrastChanged; _highContrastSubscribed = true; }
+        catch (Exception error) when (error is System.Runtime.InteropServices.COMException or NotSupportedException or NotImplementedException)
+        {
+            // Some unpackaged desktop hosts expose HighContrast but cannot add
+            // its WinRT event (ERROR_NOT_FOUND). Loaded, activation and actual
+            // theme changes still refresh chrome; XAML ThemeResource stays live.
+        }
+    }
+    private void UnsubscribeSettingsHighContrast()
+    {
+        if (!_highContrastSubscribed) return;
+        _highContrastSubscribed = false;
+        try { _accessibility.HighContrastChanged -= OnSettingsHighContrastChanged; }
+        catch (Exception error) when (error is System.Runtime.InteropServices.COMException or NotSupportedException or NotImplementedException) { }
+    }
+    private T ThemeFlyout<T>(T flyout) where T : FlyoutBase
+    {
+        flyout.Opening += (_, _) => {
+            // Flyout presenters live in a popup, outside the settings visual root.
+            var type = flyout is MenuFlyout ? typeof(MenuFlyoutPresenter) : typeof(FlyoutPresenter);
+            var style = new Style(type) { BasedOn = (Style)Application.Current.Resources["Default" + type.Name + "Style"] };
+            style.Setters.Add(new Setter(FrameworkElement.RequestedThemeProperty, _root.RequestedTheme));
+            if (flyout is MenuFlyout menu) menu.MenuFlyoutPresenterStyle = style;
+            else if (flyout is Flyout content) content.FlyoutPresenterStyle = style;
+        };
+        return flyout;
+    }
     private void ShowError(string message) { _notice.Message = message; _notice.Severity = InfoBarSeverity.Error; _notice.IsOpen = true; }
     private void UpdateSaveStatus()
     {
@@ -184,7 +259,7 @@ public sealed partial class SettingsWindow : Window
         CancelModulePointerDrag();
         CancelWeatherPage();
         _page.Children.Clear(); _preview = null; _split.IsPaneOpen = false;
-        _heading.Text = _navigation.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(item => (string)item.Tag == _currentPage)?.Content?.ToString() ?? "设置";
+        _heading.Text = NavigationPages().FirstOrDefault(item => (string)item.Tag == _currentPage)?.Content?.ToString() ?? "设置";
         if (!_loaded) { _page.Children.Add(Copy("连接主程序后即可读取设置。")); return; }
         if (_currentPage == "taskbar") RenderTaskbar();
         else if (_currentPage is "hardware" or "general") { RenderNativeGroups(_currentPage); if (_currentPage == "general") RenderGeneral(); }
@@ -237,7 +312,7 @@ public sealed partial class SettingsWindow : Window
             var combo = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, MinHeight = 32 };
             foreach (var option in (field["options"] as JsonArray)?.OfType<JsonObject>() ?? []) combo.Items.Add(new ComboBoxItem { Content = Text(option["label"]), Tag = option["value"]?.DeepClone() });
             combo.SelectedItem = combo.Items.OfType<ComboBoxItem>().FirstOrDefault(item => SameChoice(item.Tag as JsonNode, draft.Get(key)));
-            combo.SelectionChanged += (_, _) => { if (combo.SelectedItem is ComboBoxItem selected) { draft.SetNode(key, (selected.Tag as JsonNode)?.DeepClone()); Changed(); after?.Invoke(); } }; control = combo;
+            combo.SelectionChanged += (_, _) => { if (combo.SelectedItem is ComboBoxItem selected) { draft.SetNode(key, (selected.Tag as JsonNode)?.DeepClone()); if (key == "toolWindowTheme") ApplyTheme(); Changed(); after?.Invoke(); } }; control = combo;
         }
         else {
             var text = new TextBox { Text = draft.Text(key), MinHeight = 32, PlaceholderText = type == "color" ? "#RRGGBB" : "" };
@@ -249,7 +324,7 @@ public sealed partial class SettingsWindow : Window
             control = text;
             if (type == "color") {
                 var picker = new ColorPicker { Color = ParseColor(text.Text), IsAlphaEnabled = !ReferenceEquals(draft, _native), IsAlphaSliderVisible = !ReferenceEquals(draft, _native), IsAlphaTextInputVisible = !ReferenceEquals(draft, _native) };
-                var colorButton = new Button { Content = new Border { Width = 18, Height = 18, Background = new SolidColorBrush(picker.Color) }, Padding = new Thickness(6), Flyout = new Flyout { Content = picker } };
+                var colorButton = new Button { Content = new Border { Width = 18, Height = 18, Background = new SolidColorBrush(picker.Color) }, Padding = new Thickness(6), Flyout = ThemeFlyout(new Flyout { Content = picker }) };
                 AutomationProperties.SetName(colorButton, label + "取色器");
                 picker.ColorChanged += (_, args) => {
                     var color = args.NewColor;
@@ -272,9 +347,9 @@ public sealed partial class SettingsWindow : Window
         header.Children.Add(new TextBlock { Text = title, FontSize = 17, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
         if (!string.IsNullOrWhiteSpace(description)) header.Children.Add(Copy(description));
         var card = new Grid(); card.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); card.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        card.Children.Add(new Border { Child = header, BorderBrush = ResourceBrush("CardStrokeColorDefaultBrush"), BorderThickness = new Thickness(0, 0, 0, 1) });
+        card.Children.Add(UiThemeStyles.Apply(new Border { Child = header, BorderThickness = new Thickness(0, 0, 0, 1) }, "SettingsDivider"));
         Grid.SetRow(stack, 1); card.Children.Add(stack);
-        _page.Children.Add(new Border { Child = card, CornerRadius = new CornerRadius(8), Background = ResourceBrush("CardBackgroundFillColorDefaultBrush"), BorderBrush = ResourceBrush("CardStrokeColorDefaultBrush"), BorderThickness = new Thickness(1) });
+        _page.Children.Add(UiThemeStyles.Apply(new Border { Child = card, CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1) }, "SettingsSurface"));
         return stack;
     }
     private static TextBlock Copy(string text, double size = 12) => new() { Text = text, FontSize = size, Opacity = .72, TextWrapping = TextWrapping.Wrap };
@@ -282,7 +357,6 @@ public sealed partial class SettingsWindow : Window
     {
         var button = new Button { Content = label, MinHeight = 32 }; button.Click += async (_, _) => await GuardAsync(action); return button;
     }
-    private static Brush ResourceBrush(string key) => Application.Current.Resources.TryGetValue(key, out var value) && value is Brush brush ? brush : new SolidColorBrush(Colors.Transparent);
     private static string Text(JsonNode? node, string fallback = "") => node?.ToString() ?? fallback;
     private static double Number(JsonNode? node, double fallback = 0) => double.TryParse(node?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value) ? value : fallback;
 }

@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$OutputDirectory)
+param([string]$OutputDirectory, [string]$ReleaseDirectory, [switch]$AllowDirtyLocal)
 $ErrorActionPreference = 'Stop'
 $productRoot = Split-Path -Parent $PSScriptRoot
 $repoRoot = Split-Path -Parent $productRoot
@@ -11,8 +11,12 @@ if ($info.component -ne 'All' -or $info.configuration -ne 'Release' -or $info.ve
 $version = $info.version
 $commit = (& git -C $repoRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Cannot determine the release source commit.' }
-if (& git -C $repoRoot status --porcelain --untracked-files=normal) { throw 'Commit the intended source changes before packaging a release.' }
-$releaseRoot = Join-Path $productRoot "artifacts\releases\$version"
+$sourceChanges = @(& git -c core.quotepath=false -C $repoRoot status --porcelain --untracked-files=all)
+if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect package source state.' }
+if ($sourceChanges.Count -and -not $AllowDirtyLocal) { throw 'Commit the intended source changes before packaging a release, or explicitly request a local dirty delivery.' }
+$releaseRoot = if ($ReleaseDirectory) { [IO.Path]::GetFullPath($ReleaseDirectory) } else { Join-Path $productRoot "artifacts\releases\$version" }
+$artifactPrefix = [IO.Path]::GetFullPath((Join-Path $productRoot 'artifacts')).TrimEnd('\') + '\'
+if (-not $releaseRoot.StartsWith($artifactPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'Release staging must be inside product artifacts.' }
 if (Test-Path -LiteralPath $releaseRoot) { throw 'Release staging already exists; inspect it before packaging again.' }
 $packageName = "TaskBarWidgets-$version-win-x64"
 $privateIni = @('WeatherPro.ini', 'Battery.dll.ini', 'PowerMonPlugin.dll.ini')
@@ -30,7 +34,8 @@ foreach ($directory in @('Media','UI','language','licenses')) {
         $relative = [IO.Path]::GetRelativePath($source, $file.FullName)
         if ($file.Name -in $privateIni -or $file.Extension -in @('.log','.pdb','.dmp','.mdmp','.etl','.bak') -or $file.Name -match '\.log($|\.)' -or
             $file.Name -match '^(config\.ini|global_cfg\.ini|history_traffic\.|media-settings\.json|ui-.*check\.json|template-probe\.json)' -or
-            $relative -match '(^|\\)(WebView2|User Data|Cache|logs|backups|ui-layout-check|ui-heatmap-check)(\\|$)') { continue }
+            $relative -match '(^|\\)(Data|database|.*\.WebView2|WebView2|EBWebView|User Data|Cache|logs|backups|ui-layout-check|ui-heatmap-check)(\\|$)' -or
+            $file.Extension -in @('.db','.sqlite','.sqlite3') -or $file.Name -match '(-wal|-shm)$') { continue }
         $destination = Join-Path $stage $relative
         New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
         Copy-Item -LiteralPath $file.FullName -Destination $destination
@@ -45,14 +50,29 @@ TaskBarWidgets $version — Windows 11 x64
 需要管理员权限和 Microsoft Edge WebView2 Runtime；请先退出旧版或其他任务栏监测工具。
 此包不包含个人配置，首次启动使用默认设置。升级前请自行备份配置与流量历史。
 
-源码、用法、许可证与来源：https://github.com/NoctisWang528/TaskBarWidget/tree/$version
+源码、用法、许可证与来源：https://github.com/NoctisWang528/TaskBarWidget
+本地构建的来源状态详见 release-manifest.json；工作区变更不代表已发布到远端。
 本项目使用了 TrafficMonitor、TaskbarLyrics、AF-Media-Bar 的部分代码。
 详见 LICENSE、THIRD-PARTY-NOTICES.md 和 licenses/。
 "@ | Set-Content -LiteralPath (Join-Path $stage 'README.txt') -Encoding utf8
-$manifest = [ordered]@{ version = $version; sourceCommit = $commit; sourceUrl = "https://github.com/NoctisWang528/TaskBarWidget/tree/$version"; architecture = 'win-x64' }
-$manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $stage 'release-manifest.json') -Encoding utf8
+$sourceFiles = @(& git -c core.quotepath=false -C $repoRoot ls-files --cached --others --exclude-standard)
+if ($LASTEXITCODE -ne 0) { throw 'Cannot enumerate package source state.' }
+$sourceHashes = @($sourceFiles | Sort-Object -Unique | ForEach-Object {
+    $path = Join-Path $repoRoot $_
+    if (Test-Path -LiteralPath $path -PathType Leaf) {
+        [ordered]@{ path = $_; sha256 = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() }
+    }
+})
+$manifest = [ordered]@{
+    version = $version; sourceState = $(if ($sourceChanges.Count) { 'working-tree' } else { 'commit' })
+    baselineCommit = $commit; sourceCommit = $(if ($sourceChanges.Count) { $null } else { $commit })
+    sourceUrl = $(if ($sourceChanges.Count) { $null } else { "https://github.com/NoctisWang528/TaskBarWidget/tree/$commit" })
+    localOnly = [bool]$AllowDirtyLocal; sourceRecordedAtPackaging = [DateTimeOffset]::UtcNow.ToString('o')
+    workingTreeStatus = $sourceChanges; sourceFiles = $sourceHashes; architecture = 'win-x64'
+}
+$manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $stage 'release-manifest.json') -Encoding utf8
 $forbidden = @(Get-ChildItem -LiteralPath $stage -File -Recurse | Where-Object {
-    $_.Name -in $privateIni -or $_.Name -match '^(config\.ini|global_cfg\.ini|history_traffic\..*|media-settings\.json|ChineseConverter\.dll)$' -or $_.Name -match '\.log($|\.)' -or $_.Extension -in @('.log','.pdb','.dmp','.mdmp','.db','.sqlite')
+    $_.Name -in $privateIni -or $_.Name -match '^(config\.ini|global_cfg\.ini|history_traffic\..*|media-settings\.json|ChineseConverter\.dll)$' -or $_.Name -match '\.log($|\.)|(-wal|-shm)$' -or $_.Extension -in @('.log','.pdb','.dmp','.mdmp','.db','.sqlite','.sqlite3')
 })
 if ($forbidden.Count) { throw 'Personal data, diagnostics or a removed dependency was found in the release package.' }
 $zip = Join-Path $releaseRoot ($packageName + '.zip')

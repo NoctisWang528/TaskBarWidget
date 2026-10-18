@@ -51,9 +51,8 @@ internal sealed class PointerReorder
     {
         _root = root; _overlay = overlay; _resetFeedback = resetFeedback;
         _ghostText = new TextBlock { FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 230 };
-        _ghost = new Border { Child = _ghostText, Padding = new Thickness(12, 8, 12, 8), CornerRadius = new CornerRadius(6), Opacity = .94, IsHitTestVisible = false, Visibility = Visibility.Collapsed,
-            Background = Brush("CardBackgroundFillColorDefaultBrush"), BorderBrush = Brush("ControlStrongStrokeColorDefaultBrush"), BorderThickness = new Thickness(1) };
-        _insertion = new Border { Background = Brush("AccentFillColorDefaultBrush"), IsHitTestVisible = false, Visibility = Visibility.Collapsed };
+        _ghost = UiThemeStyles.Apply(new Border { Child = _ghostText, Padding = new Thickness(12, 8, 12, 8), CornerRadius = new CornerRadius(6), Opacity = .94, IsHitTestVisible = false, Visibility = Visibility.Collapsed, BorderThickness = new Thickness(1) }, "SettingsDragGhost");
+        _insertion = UiThemeStyles.Apply(new Border { IsHitTestVisible = false, Visibility = Visibility.Collapsed }, "SettingsInsertion");
         overlay.Children.Add(_insertion); overlay.Children.Add(_ghost);
         _scrollTick = root.DispatcherQueue.CreateTimer(); _scrollTick.Interval = TimeSpan.FromMilliseconds(40);
         _scrollTick.Tick += (_, _) => { if (_gesture is { Started: true, AwaitingTerminal: false } gesture) gesture.Move(gesture.LastPoint); };
@@ -63,7 +62,6 @@ internal sealed class PointerReorder
         root.AddHandler(UIElement.PointerCaptureLostEvent, new PointerEventHandler((_, args) => CaptureLost(args)), true);
         root.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, args) => { if (args.Key == VirtualKey.Escape && _gesture is not null) { Cancel("escape"); args.Handled = true; } }), true);
     }
-    private static Brush Brush(string key) => Application.Current.Resources.TryGetValue(key, out var value) && value is Brush brush ? brush : new SolidColorBrush(Microsoft.UI.Colors.Gray);
     public bool IsActive => _gesture is not null;
     internal string[] Entries => _entries.ToArray();
     public void Record(string stage, string detail = "")
@@ -78,7 +76,6 @@ internal sealed class PointerReorder
         var gesture = new Gesture(++_sequence, source, args.Pointer, args.GetCurrentPoint(_root).Position, tap, move, drop);
         if (!_root.CapturePointer(args.Pointer)) { Record("capture-failed", $"pointer={args.Pointer.PointerId} contact={args.GetCurrentPoint(_root).IsInContact} loaded={_root.IsLoaded}"); return false; }
         _gesture = gesture;
-        _overlay.RequestedTheme = _root.RequestedTheme;
         _ghostText.Text = source is PointerDragButton button ? button.DragLabel : source.Content?.ToString() ?? "移动";
         Record("press", $"pointer={args.Pointer.PointerId} source={source.Tag} x={gesture.Origin.X:F1} y={gesture.Origin.Y:F1}");
         source.Focus(FocusState.Pointer);

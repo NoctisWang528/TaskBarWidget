@@ -26,6 +26,9 @@ internal static class UiTemplateProbe
         object? audioControls = null;
         object? heatmapChecks = null;
         object? weatherControls = null;
+        object? themeControls = null;
+        object? cardLyricsControls = null;
+        object? sourceSelector = null;
         string? error = null;
         try
         {
@@ -41,6 +44,8 @@ internal static class UiTemplateProbe
             var fixtureIndex = Array.IndexOf(args, "--fixture");
             if (fixtureIndex >= 0 && fixtureIndex + 1 < args.Length)
                 layoutChecks = await UiLayoutProbe.RunAsync(settings, args[fixtureIndex + 1], Path.Combine(AppContext.BaseDirectory, "..", "ui-layout-check"));
+            themeControls = await SettingsWindow.ProbeThemeControlsAsync(settings);
+            cardLyricsControls = await CardLyricsProbe.RunAsync();
             cards = new CardGroup(connection, () => throw new InvalidOperationException("Probe must not invoke settings."));
             foreach (var card in cards.CardWindows)
             {
@@ -66,6 +71,7 @@ internal static class UiTemplateProbe
                 checks.Add(new { surface = card.Window.Title, width = card.Root.ActualWidth, loaded = card.Root.IsLoaded, hideShowRacePassed = true });
             }
             cardLifecycle["firstShowWithoutActivation"] = true;
+            sourceSelector = await CardGroup.ProbeSourceSelectorAsync(cards);
             cardLifecycle["hideThenImmediateShow"] = true;
             ValidateOutsideClickPolicy(cards);
             cardLifecycle["externalClickPolicy"] = true;
@@ -89,7 +95,7 @@ internal static class UiTemplateProbe
             cards?.Dispose(); settings?.Shutdown();
             var resultIndex = Array.IndexOf(args, "--result");
             var result = resultIndex >= 0 && resultIndex + 1 < args.Length ? args[resultIndex + 1] : Path.Combine(AppContext.BaseDirectory, "template-probe.json");
-            File.WriteAllText(result, JsonSerializer.Serialize(new { success = error is null, error, checks, cardLifecycle, audioControls, weatherControls, heatmapChecks, layoutChecks, probeActivated = activated, externalForegroundChanged = GetForegroundWindow() != before }, new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(result, JsonSerializer.Serialize(new { success = error is null, error, checks, cardLifecycle, audioControls, weatherControls, themeControls, cardLyricsControls, sourceSelector, heatmapChecks, layoutChecks, probeActivated = activated, externalForegroundChanged = GetForegroundWindow() != before }, new JsonSerializerOptions { WriteIndented = true }));
             Environment.ExitCode = error is null ? 0 : 1;
             app.Exit();
         }

@@ -339,11 +339,6 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
                 await SaveSettingsAndNotifyWebAsync();
                 await PushSettingsToWebAsync();
                 break;
-            case "resetMediaHotkey":
-                ResetMediaHotkey(message.Value);
-                await SaveSettingsAndNotifyWebAsync();
-                await PushSettingsToWebAsync();
-                break;
             case "clearCache":
                 _clearLyricCache();
                 break;
@@ -514,7 +509,7 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
     internal async Task<JsonElement> ExecuteServiceCommandAsync(AppSettings current, string action, JsonElement? value)
     {
         string[] allowed = ["discoverPlayerSessions", "addPlayerSource", "updatePlayerSource", "removePlayerSource",
-            "reorderSources", "resetMediaHotkey", "clearCache", "runLyricDiagnostics", "applyLyricDiagnosticCandidate",
+            "reorderSources", "clearCache", "runLyricDiagnostics", "applyLyricDiagnosticCandidate",
             "queryTrackOffsets", "trackOffsetsPageActivated", "setCurrentTrackOffset", "setStoredTrackOffset", "deleteTrackOffset", "clearTrackOffsets",
             "confirmSpectrumAudioAccess", "revokeSpectrumAudioAccess", "retrySpectrumCapture", "disableSpectrum", "resetDefaults", "resetLyricsLayoutBase"];
         if (!allowed.Contains(action)) throw new ArgumentException("不支持的设置操作。");
@@ -1274,7 +1269,6 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         _settings.NormalizeLyricsTextAlignment();
         _settings.NormalizeCoverPosition();
         _settings.NormalizeWindowLayout();
-        var mediaHotkeys = _settings.GlobalMediaHotkeys ??= new GlobalMediaHotkeySettings();
         var layoutMetrics = CreateLyricsLayoutMetrics();
         var availableDisplays = DisplayMonitorService.GetDisplays();
         var targetDisplays = LyricsDisplayTargetSelector.Select(
@@ -1309,26 +1303,6 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
                 StringComparer.OrdinalIgnoreCase),
             EnableLocalLyrics = _settings.EnableLocalLyrics,
             LocalMusicFolders = NormalizeLocalMusicFolders(_settings.LocalMusicFolders),
-            EnableGlobalMediaHotkeys = mediaHotkeys.Enabled,
-            HotkeyTogglePlayPause = mediaHotkeys.TogglePlayPause,
-            HotkeyPreviousTrack = mediaHotkeys.PreviousTrack,
-            HotkeyNextTrack = mediaHotkeys.NextTrack,
-            HotkeySeekBackward = mediaHotkeys.SeekBackward,
-            HotkeySeekForward = mediaHotkeys.SeekForward,
-            HotkeyToggleLyricsVisibility = mediaHotkeys.ToggleLyricsVisibility,
-            HotkeyToggleTranslation = mediaHotkeys.ToggleTranslation,
-            HotkeyToggleWordScanning = mediaHotkeys.ToggleWordScanning,
-            MediaHotkeyStatuses = (System.Windows.Application.Current as App)?.GetMediaHotkeyStatuses()
-                .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal)
-                ?? new Dictionary<string, string>(StringComparer.Ordinal),
-            MediaHotkeys = MediaHotkeyCatalog.Definitions.Select(definition => new WebMediaHotkeyDefinition
-            {
-                Action = definition.Action.ToString(),
-                SettingKey = definition.SettingKey,
-                StatusKey = definition.StatusKey,
-                DisplayName = definition.DisplayName
-            })
-            .ToList(),
             ShowLyricsOnStartup = _settings.ShowLyricsOnStartup,
             AutoHideWhenNoPlayback = _settings.AutoHideWhenNoPlayback,
             StartWithWindows = _settings.StartWithWindows,
@@ -1341,8 +1315,6 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
             SpectrumTuning = _settings.SpectrumTuning.Clone(),
             FontSize = _settings.FontSize,
             ShowCover = _settings.ShowCover,
-            EnableControlPanel = _settings.EnableControlPanel,
-            SyncDefaultCommunicationsDevice = _settings.SyncDefaultCommunicationsDevice,
             CoverSize = _settings.CoverSize,
             CoverGap = _settings.CoverGap,
             CoverCornerRadius = _settings.CoverCornerRadius,
@@ -1556,17 +1528,6 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
             return;
         }
 
-        var hotkeyDefinition = MediaHotkeyCatalog.Definitions
-            .FirstOrDefault(definition => string.Equals(definition.SettingKey, key, StringComparison.Ordinal));
-        if (hotkeyDefinition is not null)
-        {
-            var hotkeySettings = EnsureMediaHotkeySettings();
-            hotkeyDefinition.WriteBinding(
-                hotkeySettings,
-                ReadHotkeyBinding(element, hotkeyDefinition.ReadBinding(hotkeySettings)));
-            return;
-        }
-
         switch (key)
         {
             case "spectrumTuning":
@@ -1593,9 +1554,6 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
                 break;
             case "localMusicFolders":
                 _settings.LocalMusicFolders = NormalizeLocalMusicFolders(ReadStringList(element));
-                break;
-            case "enableGlobalMediaHotkeys":
-                EnsureMediaHotkeySettings().Enabled = ReadBool(element, EnsureMediaHotkeySettings().Enabled);
                 break;
             case "showLyricsOnStartup":
                 _settings.ShowLyricsOnStartup = ReadBool(element, _settings.ShowLyricsOnStartup);
@@ -1659,12 +1617,6 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
                 break;
             case "showCover":
                 _settings.ShowCover = ReadBool(element, _settings.ShowCover);
-                break;
-            case "enableControlPanel":
-                _settings.EnableControlPanel = ReadBool(element, _settings.EnableControlPanel);
-                break;
-            case "syncDefaultCommunicationsDevice":
-                _settings.SyncDefaultCommunicationsDevice = ReadBool(element, _settings.SyncDefaultCommunicationsDevice);
                 break;
             case "coverSize":
                 _settings.CoverSize = AppSettings.ClampCoverSize(ReadDouble(element, _settings.CoverSize));
@@ -1801,32 +1753,9 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
             "selectedDisplayIds";
     }
 
-    private void ResetMediaHotkey(JsonElement? value)
-    {
-        if (value is null ||
-            !Enum.TryParse<MediaHotkeyAction>(ReadString(value.Value, string.Empty), true, out var action))
-        {
-            return;
-        }
-
-        EnsureMediaHotkeySettings().ResetBinding(action);
-    }
-
-    private GlobalMediaHotkeySettings EnsureMediaHotkeySettings()
-    {
-        return _settings.GlobalMediaHotkeys ??= new GlobalMediaHotkeySettings();
-    }
-
-    private static bool IsMediaHotkeySetting(string? key)
-    {
-        return key == "enableGlobalMediaHotkeys" ||
-            MediaHotkeyCatalog.Definitions.Any(definition =>
-                string.Equals(definition.SettingKey, key, StringComparison.Ordinal));
-    }
-
     private static bool RequiresSettingsStateRefresh(string? key)
     {
-        return key is "foregroundColorMode" or "spectrumDisplayMode" or "useFloatingWindow" || IsMediaHotkeySetting(key);
+        return key is "foregroundColorMode" or "spectrumDisplayMode" or "useFloatingWindow";
     }
 
     private static bool IsLyricsLayoutSetting(string? key)
@@ -1855,12 +1784,6 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
             "windowWidth" or
             "xOffset" or
             "yOffset";
-    }
-
-    private static string ReadHotkeyBinding(JsonElement element, string fallback)
-    {
-        var binding = ReadString(element, fallback).Trim();
-        return binding.Length <= 64 ? binding : fallback;
     }
 
     private void ApplySourceOrder(JsonElement? value)
@@ -2145,7 +2068,6 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
             StringComparer.OrdinalIgnoreCase);
         target.EnableLocalLyrics = source.EnableLocalLyrics;
         target.LocalMusicFolders = NormalizeLocalMusicFolders(source.LocalMusicFolders);
-        target.GlobalMediaHotkeys = (source.GlobalMediaHotkeys ?? new GlobalMediaHotkeySettings()).Clone();
         target.ShowLyricsOnStartup = source.ShowLyricsOnStartup;
         target.AutoHideWhenNoPlayback = source.AutoHideWhenNoPlayback;
         target.StartWithWindows = source.StartWithWindows;
@@ -2161,8 +2083,6 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         target.FontSize = source.FontSize;
         target.UseSafeCoverSizeRange = source.UseSafeCoverSizeRange;
         target.ShowCover = source.ShowCover;
-        target.EnableControlPanel = source.EnableControlPanel;
-        target.SyncDefaultCommunicationsDevice = source.SyncDefaultCommunicationsDevice;
         target.CoverSize = source.CoverSize;
         target.CoverGap = source.CoverGap;
         target.CoverCornerRadius = source.CoverCornerRadius;
@@ -2276,17 +2196,6 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         public Dictionary<string, int> DefaultPlayerLyricOffsets { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         public bool EnableLocalLyrics { get; set; }
         public List<string> LocalMusicFolders { get; set; } = new();
-        public bool EnableGlobalMediaHotkeys { get; set; }
-        public string HotkeyTogglePlayPause { get; set; } = "";
-        public string HotkeyPreviousTrack { get; set; } = "";
-        public string HotkeyNextTrack { get; set; } = "";
-        public string HotkeySeekBackward { get; set; } = "";
-        public string HotkeySeekForward { get; set; } = "";
-        public string HotkeyToggleLyricsVisibility { get; set; } = "";
-        public string HotkeyToggleTranslation { get; set; } = "";
-        public string HotkeyToggleWordScanning { get; set; } = "";
-        public Dictionary<string, string> MediaHotkeyStatuses { get; set; } = new(StringComparer.Ordinal);
-        public List<WebMediaHotkeyDefinition> MediaHotkeys { get; set; } = [];
         public bool ShowLyricsOnStartup { get; set; }
         public bool AutoHideWhenNoPlayback { get; set; }
         public bool StartWithWindows { get; set; }
@@ -2299,8 +2208,6 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         public SpectrumTuningSettings SpectrumTuning { get; set; } = new();
         public double FontSize { get; set; }
         public bool ShowCover { get; set; }
-        public bool EnableControlPanel { get; set; }
-        public bool SyncDefaultCommunicationsDevice { get; set; }
         public double CoverSize { get; set; }
         public double CoverGap { get; set; }
         public double CoverCornerRadius { get; set; }
@@ -2360,17 +2267,6 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         public int Width { get; set; }
 
         public int Height { get; set; }
-    }
-
-    private sealed class WebMediaHotkeyDefinition
-    {
-        public string Action { get; set; } = "";
-
-        public string SettingKey { get; set; } = "";
-
-        public string StatusKey { get; set; } = "";
-
-        public string DisplayName { get; set; } = "";
     }
 
     private sealed class UpdateStatusPayload

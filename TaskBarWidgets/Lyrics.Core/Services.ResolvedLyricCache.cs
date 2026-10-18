@@ -175,10 +175,7 @@ public sealed class JsonResolvedLyricCache : IContextualResolvedLyricCache, IDis
 
     private static string GetDefaultFilePath()
     {
-        var directory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "TaskBarWidgets",
-            "database");
+        var directory = AppDataPaths.DatabaseDirectory;
         return Path.Combine(directory, DefaultFileName);
     }
 

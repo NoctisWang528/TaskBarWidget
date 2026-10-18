@@ -13,6 +13,7 @@
   for (const [action, label, glyph] of [['previous', '上一首', '⏮'], ['playPause', '播放或暂停', '▶'], ['next', '下一首', '⏭']]) {
     const button = document.createElement('button');
     button.type = 'button'; button.ariaLabel = label; button.textContent = glyph;
+    button.dataset.mediaAction = action;
     button.style.cssText = 'border:0;background:transparent;color:inherit;padding:3px;cursor:pointer;font-size:14px';
     button.addEventListener('click', event => {
       event.preventDefault(); event.stopPropagation();

@@ -565,109 +565,49 @@ UINT CTrafficMonitorApp::InitOpenHardwareMonitorLibThreadFunc(LPVOID lpParam)
     return 0;
 }
 
-bool  CTrafficMonitorApp::SetAutoRun(bool auto_run, bool task_scheduler)
+bool CTrafficMonitorApp::SetAutoRun(bool auto_run, bool /*task_scheduler*/)
 {
-    if (task_scheduler)
+    m_startup_error = ERROR_SUCCESS;
+    bool success{};
+    if (auto_run)
     {
-        //使用任务计划的方式设置开机自启动
-        return SetAutoRunByTaskScheduler(auto_run);
+        // Never remove the old entry until the replacement has been saved and verified.
+        success = create_auto_start_task_for_this_user(true);
+        if (success) success = delete_legacy_auto_start_for_this_user();
+        if (!success) m_startup_error = GetLastError();
     }
     else
     {
-        //使用添加注册表项的方式实现开机自启动
-        return SetAutoRunByRegistry(auto_run);
+        const bool task_removed = delete_auto_start_task_for_this_user();
+        if (!task_removed) m_startup_error = GetLastError();
+        const bool registry_removed = delete_legacy_auto_start_for_this_user();
+        if (!registry_removed && !m_startup_error) m_startup_error = GetLastError();
+        success = task_removed && registry_removed;
     }
+    const auto actual = get_startup_registration_for_this_user();
+    m_general_data.auto_run = actual.Enabled();
+    m_general_data.auto_run_by_task_scheduler = true;
+    const bool verified = SUCCEEDED(actual.error) && (auto_run ? actual.Enabled() && !actual.registryExists : !actual.taskExists && !actual.registryExists);
+    if (!verified && !m_startup_error) m_startup_error = FAILED(actual.error) ? HRESULT_CODE(actual.error) : ERROR_INVALID_DATA;
+    return success && verified;
 }
 
-bool CTrafficMonitorApp::GetAutoRun(wstring* auto_run_path, bool task_scheduler)
+bool CTrafficMonitorApp::GetAutoRun(wstring* auto_run_path, bool /*task_scheduler*/)
 {
-    if (auto_run_path != nullptr)
-        auto_run_path->clear();
-
-    if (task_scheduler)
-    {
-        //使用任务计划的方式实现开机自启动
-        return is_auto_start_task_active_for_this_user(auto_run_path);
-    }
-    else
-    {
-        //使用添加注册表项的方式实现开机自启动
-        CRegKey key;
-        if (key.Open(HKEY_CURRENT_USER, _T("Software\\Microsoft\\Windows\\CurrentVersion\\Run")) != ERROR_SUCCESS)
-        {
-            //打开注册表“Software\\Microsoft\\Windows\\CurrentVersion\\Run”失败，则返回false
-            return false;
-        }
-        wchar_t buff[256];
-        ULONG size{ 256 };
-        if (key.QueryStringValue(APP_NAME, buff, &size) == ERROR_SUCCESS)       //如果找到了“TrafficMonitor”键
-        {
-            if (auto_run_path != nullptr)
-            {
-                //保存路径
-                *auto_run_path = buff;
-                //去掉前后的引号
-                if (auto_run_path->front() == L'\"')
-                    *auto_run_path = auto_run_path->substr(1);
-                if (!auto_run_path->empty() && auto_run_path->back() == L'\"')
-                    auto_run_path->pop_back();
-            }
-            return (m_module_path_reg == buff); //如果“TrafficMonitor”的值是当前程序的路径，就返回true，否则返回false
-        }
-        else
-        {
-            return false;       //没有找到“TrafficMonitor”键，返回false
-        }
-    }
+    const auto actual = get_startup_registration_for_this_user();
+    if (auto_run_path) *auto_run_path = actual.taskPath.empty() ? actual.legacyPath : actual.taskPath;
+    return SUCCEEDED(actual.error) && actual.Enabled();
 }
 
 bool CTrafficMonitorApp::SetAutoRunByRegistry(bool auto_run)
 {
-    CRegKey key;
-    //打开注册表项
-    if (key.Open(HKEY_CURRENT_USER, _T("Software\\Microsoft\\Windows\\CurrentVersion\\Run")) != ERROR_SUCCESS)
-    {
-        if (!m_silent_settings_errors) AfxMessageBox(CCommon::LoadText(IDS_AUTORUN_FAILED_NO_KEY), MB_OK | MB_ICONWARNING);
-        return false;
-    }
-    if (auto_run)       //写入注册表项
-    {
-        //通过注册表设置开机自启动项时删除计划任务中的自启动项
-        SetAutoRunByTaskScheduler(false);
-
-        if (key.SetStringValue(APP_NAME, m_module_path_reg.c_str()) != ERROR_SUCCESS)
-        {
-            if (!m_silent_settings_errors) AfxMessageBox(CCommon::LoadText(IDS_AUTORUN_FAILED_NO_ACCESS), MB_OK | MB_ICONWARNING);
-            return false;
-        }
-    }
-    else        //删除注册表项
-    {
-        //删除前先检查注册表项是否存在，如果不存在，则直接返回
-        wchar_t buff[256];
-        ULONG size{ 256 };
-        if (key.QueryStringValue(APP_NAME, buff, &size) != ERROR_SUCCESS)
-            return false;
-        if (key.DeleteValue(APP_NAME) != ERROR_SUCCESS)
-        {
-            if (!m_silent_settings_errors) AfxMessageBox(CCommon::LoadText(IDS_AUTORUN_DELETE_FAILED), MB_OK | MB_ICONWARNING);
-            return false;
-        }
-    }
-    return true;
+    // Compatibility callers also converge on the elevated interactive scheduled task.
+    return SetAutoRun(auto_run, true);
 }
 
 bool CTrafficMonitorApp::SetAutoRunByTaskScheduler(bool auto_run)
 {
-    bool succeed = delete_auto_start_task_for_this_user();     //先删除开机自启动
-    if (auto_run)
-    {
-        //通过计划任务设置开机自启动项时删除注册表中的自启动项
-        SetAutoRunByRegistry(false);
-
-        succeed = create_auto_start_task_for_this_user(true);
-    }
-    return succeed;
+    return SetAutoRun(auto_run, true);
 }
 
 CString CTrafficMonitorApp::GetSystemInfoString()

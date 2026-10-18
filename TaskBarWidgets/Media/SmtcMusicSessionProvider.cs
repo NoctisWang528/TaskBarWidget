@@ -336,7 +336,7 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
         return new LyricOffsetDiagnostics(playerOffset, trackOffset, playerOffset + trackOffset);
     }
 
-    public async Task TryControlAsync(MediaHotkeyAction action, CancellationToken cancellationToken)
+    public async Task TryControlAsync(MediaControlAction action, CancellationToken cancellationToken)
     {
         try
         {
@@ -350,7 +350,7 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
 
             switch (action)
             {
-                case MediaHotkeyAction.TogglePlayPause:
+                case MediaControlAction.TogglePlayPause:
                     var playback = session.GetPlaybackInfo();
                     cancellationToken.ThrowIfCancellationRequested();
                     if (playback?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
@@ -362,18 +362,18 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
                         EnsureCommandAccepted(await session.TryPlayAsync());
                     }
                     break;
-                case MediaHotkeyAction.PreviousTrack:
+                case MediaControlAction.PreviousTrack:
                     cancellationToken.ThrowIfCancellationRequested();
                     EnsureCommandAccepted(await session.TrySkipPreviousAsync());
                     break;
-                case MediaHotkeyAction.NextTrack:
+                case MediaControlAction.NextTrack:
                     cancellationToken.ThrowIfCancellationRequested();
                     EnsureCommandAccepted(await session.TrySkipNextAsync());
                     break;
-                case MediaHotkeyAction.SeekBackward:
+                case MediaControlAction.SeekBackward:
                     await TrySeekAsync(session, TimeSpan.FromSeconds(-5), cancellationToken);
                     break;
-                case MediaHotkeyAction.SeekForward:
+                case MediaControlAction.SeekForward:
                     await TrySeekAsync(session, TimeSpan.FromSeconds(5), cancellationToken);
                     break;
             }
@@ -389,7 +389,7 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
         }
     }
 
-    public Task ExecuteAsync(MediaHotkeyAction action, CancellationToken cancellationToken) =>
+    public Task ExecuteAsync(MediaControlAction action, CancellationToken cancellationToken) =>
         TryControlAsync(action, cancellationToken);
 
     public async Task SeekToAsync(TimeSpan position, CancellationToken cancellationToken)

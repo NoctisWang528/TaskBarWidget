@@ -1,410 +1,226 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "auto_start_helper.h"
-
-#include <Lmcons.h>
-
 #include <comdef.h>
 #include <taskschd.h>
-#include "SimpleXML.h"
-# pragma comment(lib, "taskschd.lib")
+#include <sddl.h>
+#include <wrl/client.h>
+#include <filesystem>
+#pragma comment(lib, "taskschd.lib")
+#pragma comment(lib, "advapi32.lib")
 
-// Helper macros from wix.
-// TODO: use "s" and "..." parameters to report errors from these functions.
-#define ExitOnFailure(x, s, ...) \
-    if (FAILED(x))               \
-    {                            \
-        goto LExit;              \
-    }
-#define ExitWithLastError(x, s, ...)       \
-    {                                      \
-        DWORD Dutil_er = ::GetLastError(); \
-        x = HRESULT_FROM_WIN32(Dutil_er);  \
-        if (!FAILED(x))                    \
-        {                                  \
-            x = E_FAIL;                    \
-        }                                  \
-        goto LExit;                        \
-    }
-#define ExitFunction() \
-    {                  \
-        goto LExit;    \
-    }
-
-const DWORD USERNAME_DOMAIN_LEN = DNLEN + UNLEN + 2; // Domain Name + '\' + User Name + '\0'
-const DWORD USERNAME_LEN = UNLEN + 1; // User Name + '\0'
-
-bool create_auto_start_task_for_this_user(bool runElevated)
+namespace
 {
-    HRESULT hr = S_OK;
+    using Microsoft::WRL::ComPtr;
+    constexpr auto TaskFolder = L"\\TaskBarWidgets";
+    constexpr auto RunKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    constexpr auto RunValue = L"TaskBarWidgets";
 
-    WCHAR username_domain[USERNAME_DOMAIN_LEN];
-    WCHAR username[USERNAME_LEN];
-
-    std::wstring wstrTaskName;
-
-    ITaskService* pService = NULL;
-    ITaskFolder* pTaskFolder = NULL;
-    ITaskDefinition* pTask = NULL;
-    IRegistrationInfo* pRegInfo = NULL;
-    ITaskSettings* pSettings = NULL;
-    ITriggerCollection* pTriggerCollection = NULL;
-    IRegisteredTask* pRegisteredTask = NULL;
-
-    // ------------------------------------------------------
-    // Get the Domain/Username for the trigger.
-    if (!GetEnvironmentVariable(L"USERNAME", username, USERNAME_LEN))
+    bool Missing(HRESULT result)
     {
-        ExitWithLastError(hr, "Getting username failed: %x", hr);
+        return result == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) || result == HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND);
     }
-    if (!GetEnvironmentVariable(L"USERDOMAIN", username_domain, USERNAME_DOMAIN_LEN))
+    HRESULT CurrentUser(std::wstring& sid, std::wstring& name)
     {
-        ExitWithLastError(hr, "Getting the user's domain failed: %x", hr);
+        wchar_t user[257]{}; DWORD size = _countof(user);
+        if (!GetUserNameW(user, &size)) return HRESULT_FROM_WIN32(GetLastError());
+        name = L"Autorun for "; name += user;
+        HANDLE token{};
+        if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return HRESULT_FROM_WIN32(GetLastError());
+        DWORD bytes{}; GetTokenInformation(token, TokenUser, nullptr, 0, &bytes);
+        std::vector<BYTE> data(bytes);
+        const BOOL read = GetTokenInformation(token, TokenUser, data.data(), bytes, &bytes);
+        const DWORD error = read ? ERROR_SUCCESS : GetLastError(); CloseHandle(token);
+        if (!read) return HRESULT_FROM_WIN32(error);
+        LPWSTR value{};
+        if (!ConvertSidToStringSidW(reinterpret_cast<TOKEN_USER*>(data.data())->User.Sid, &value)) return HRESULT_FROM_WIN32(GetLastError());
+        sid = value; LocalFree(value); return S_OK;
     }
-    wcscat_s(username_domain, L"\\");
-    wcscat_s(username_domain, username);
-
-    // Task Name.
-    wstrTaskName = L"Autorun for ";
-    wstrTaskName += username;
-
-    // Get the executable path passed to the custom action.
-    WCHAR wszExecutablePath[MAX_PATH];
-    GetModuleFileName(NULL, wszExecutablePath, MAX_PATH);
-
-    // ------------------------------------------------------
-    // Create an instance of the Task Service.
-    hr = CoCreateInstance(CLSID_TaskScheduler,
-                          NULL,
-                          CLSCTX_INPROC_SERVER,
-                          IID_ITaskService,
-                          (void**)&pService);
-    ExitOnFailure(hr, "Failed to create an instance of ITaskService: %x", hr);
-
-    // Connect to the task service.
-    hr = pService->Connect(_variant_t(), _variant_t(), _variant_t(), _variant_t());
-    ExitOnFailure(hr, "ITaskService::Connect failed: %x", hr);
-
-    // ------------------------------------------------------
-    // Get the TrafficMonitor task folder. Creates it if it doesn't exist.
-    hr = pService->GetFolder(_bstr_t(L"\\TaskBarWidgets"), &pTaskFolder);
-    if (FAILED(hr))
+    HRESULT Connect(ComPtr<ITaskService>& service)
     {
-        // Folder doesn't exist. Get the Root folder and create the TrafficMonitor subfolder.
-        ITaskFolder* pRootFolder = NULL;
-        hr = pService->GetFolder(_bstr_t(L"\\"), &pRootFolder);
-        ExitOnFailure(hr, "Cannot get Root Folder pointer: %x", hr);
-        hr = pRootFolder->CreateFolder(_bstr_t(L"\\TaskBarWidgets"), _variant_t(L""), &pTaskFolder);
-        if (FAILED(hr))
+        HRESULT result = CoCreateInstance(CLSID_TaskScheduler, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&service));
+        return FAILED(result) ? result : service->Connect(_variant_t(), _variant_t(), _variant_t(), _variant_t());
+    }
+    std::wstring ReadString(BSTR value) { return value ? std::wstring(value, SysStringLen(value)) : std::wstring(); }
+    bool SamePath(const std::wstring& left, const std::wstring& right) { return _wcsicmp(left.c_str(), right.c_str()) == 0; }
+    bool SameUser(const std::wstring& user, const std::wstring& sid)
+    {
+        if (user == sid) return true;
+        // Task Scheduler's getter resolves a stored SID to an account name on some Windows versions.
+        DWORD bytes{}, domainSize{}; SID_NAME_USE use{};
+        LookupAccountNameW(nullptr, user.c_str(), nullptr, &bytes, nullptr, &domainSize, &use);
+        if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) return false;
+        std::vector<BYTE> accountSid(bytes); std::vector<wchar_t> domain(domainSize);
+        if (!LookupAccountNameW(nullptr, user.c_str(), accountSid.data(), &bytes, domain.data(), &domainSize, &use)) return false;
+        LPWSTR value{};
+        if (!ConvertSidToStringSidW(accountSid.data(), &value)) return false;
+        const bool match = sid == value; LocalFree(value); return match;
+    }
+
+    // Build and inspect definitions separately from registration: tests never write startup entries.
+    HRESULT BuildDefinition(ITaskService* service, const std::wstring& sid, const std::wstring& path,
+        const std::wstring& directory, ComPtr<ITaskDefinition>& task)
+    {
+#define STARTUP_CHECK(call) do { const HRESULT result = (call); if (FAILED(result)) return result; } while (false)
+        STARTUP_CHECK(service->NewTask(0, &task));
+        ComPtr<IRegistrationInfo> registration; STARTUP_CHECK(task->get_RegistrationInfo(&registration));
+        STARTUP_CHECK(registration->put_Author(_bstr_t(L"TaskBarWidgets")));
+        ComPtr<ITaskSettings> settings; STARTUP_CHECK(task->get_Settings(&settings));
+        STARTUP_CHECK(settings->put_Enabled(VARIANT_TRUE));
+        STARTUP_CHECK(settings->put_StartWhenAvailable(VARIANT_TRUE));
+        STARTUP_CHECK(settings->put_StopIfGoingOnBatteries(VARIANT_FALSE));
+        STARTUP_CHECK(settings->put_DisallowStartIfOnBatteries(VARIANT_FALSE));
+        STARTUP_CHECK(settings->put_ExecutionTimeLimit(_bstr_t(L"PT0S")));
+        STARTUP_CHECK(settings->put_MultipleInstances(TASK_INSTANCES_IGNORE_NEW));
+        ComPtr<IPrincipal> principal; STARTUP_CHECK(task->get_Principal(&principal));
+        STARTUP_CHECK(principal->put_UserId(_bstr_t(sid.c_str())));
+        STARTUP_CHECK(principal->put_LogonType(TASK_LOGON_INTERACTIVE_TOKEN));
+        STARTUP_CHECK(principal->put_RunLevel(TASK_RUNLEVEL_HIGHEST));
+        ComPtr<ITriggerCollection> triggers; STARTUP_CHECK(task->get_Triggers(&triggers));
+        ComPtr<ITrigger> trigger; STARTUP_CHECK(triggers->Create(TASK_TRIGGER_LOGON, &trigger));
+        ComPtr<ILogonTrigger> logon; STARTUP_CHECK(trigger.As(&logon));
+        STARTUP_CHECK(logon->put_UserId(_bstr_t(sid.c_str())));
+        STARTUP_CHECK(logon->put_Enabled(VARIANT_TRUE));
+        STARTUP_CHECK(logon->put_Delay(_bstr_t(L"PT10S")));
+        ComPtr<IActionCollection> actions; STARTUP_CHECK(task->get_Actions(&actions));
+        ComPtr<IAction> action; STARTUP_CHECK(actions->Create(TASK_ACTION_EXEC, &action));
+        ComPtr<IExecAction> exec; STARTUP_CHECK(action.As(&exec));
+        STARTUP_CHECK(exec->put_Path(_bstr_t(path.c_str())));
+        STARTUP_CHECK(exec->put_Arguments(_bstr_t(L"")));
+        STARTUP_CHECK(exec->put_WorkingDirectory(_bstr_t(directory.c_str())));
+        return S_OK;
+    }
+    HRESULT InspectDefinition(ITaskDefinition* task, const std::wstring& sid, StartupRegistrationState& state)
+    {
+        state.taskValid = false;
+        ComPtr<IActionCollection> actions; STARTUP_CHECK(task->get_Actions(&actions));
+        LONG count{}; STARTUP_CHECK(actions->get_Count(&count));
+        if (count < 1) return S_OK;
+        ComPtr<IAction> action; STARTUP_CHECK(actions->get_Item(1, &action));
+        ComPtr<IExecAction> exec;
+        if (FAILED(action.As(&exec))) return S_OK;
+        _bstr_t path, directory, arguments;
+        STARTUP_CHECK(exec->get_Path(path.GetAddress()));
+        STARTUP_CHECK(exec->get_WorkingDirectory(directory.GetAddress()));
+        STARTUP_CHECK(exec->get_Arguments(arguments.GetAddress()));
+        state.taskPath = ReadString(path); state.workingDirectory = ReadString(directory);
+        if (count != 1) return S_OK;
+        if (!SamePath(state.taskPath, state.currentPath) || !SamePath(state.workingDirectory, state.currentDirectory) || arguments.length()) return S_OK;
+        ComPtr<IPrincipal> principal; STARTUP_CHECK(task->get_Principal(&principal));
+        TASK_RUNLEVEL_TYPE level{}; TASK_LOGON_TYPE type{}; _bstr_t user;
+        STARTUP_CHECK(principal->get_RunLevel(&level)); STARTUP_CHECK(principal->get_LogonType(&type));
+        STARTUP_CHECK(principal->get_UserId(user.GetAddress()));
+        if (level != TASK_RUNLEVEL_HIGHEST || type != TASK_LOGON_INTERACTIVE_TOKEN || !SameUser(ReadString(user), sid)) return S_OK;
+        ComPtr<ITriggerCollection> triggers; STARTUP_CHECK(task->get_Triggers(&triggers));
+        STARTUP_CHECK(triggers->get_Count(&count)); if (count != 1) return S_OK;
+        ComPtr<ITrigger> trigger; STARTUP_CHECK(triggers->get_Item(1, &trigger));
+        ComPtr<ILogonTrigger> logon; if (FAILED(trigger.As(&logon))) return S_OK;
+        _bstr_t triggerUser, delay; VARIANT_BOOL enabled{};
+        STARTUP_CHECK(logon->get_UserId(triggerUser.GetAddress())); STARTUP_CHECK(logon->get_Delay(delay.GetAddress()));
+        STARTUP_CHECK(logon->get_Enabled(&enabled));
+        if (!SameUser(ReadString(triggerUser), sid) || ReadString(delay) != L"PT10S" || enabled != VARIANT_TRUE) return S_OK;
+        ComPtr<ITaskSettings> settings; STARTUP_CHECK(task->get_Settings(&settings));
+        VARIANT_BOOL startsAvailable{}, stopsOnBattery{}, batteryBlocked{}, settingsEnabled{};
+        TASK_INSTANCES_POLICY instances{}; _bstr_t limit;
+        STARTUP_CHECK(settings->get_StartWhenAvailable(&startsAvailable));
+        STARTUP_CHECK(settings->get_StopIfGoingOnBatteries(&stopsOnBattery));
+        STARTUP_CHECK(settings->get_DisallowStartIfOnBatteries(&batteryBlocked));
+        STARTUP_CHECK(settings->get_Enabled(&settingsEnabled));
+        STARTUP_CHECK(settings->get_ExecutionTimeLimit(limit.GetAddress()));
+        STARTUP_CHECK(settings->get_MultipleInstances(&instances));
+        state.taskValid = startsAvailable == VARIANT_TRUE && stopsOnBattery == VARIANT_FALSE && batteryBlocked == VARIANT_FALSE
+            && settingsEnabled == VARIANT_TRUE && ReadString(limit) == L"PT0S" && instances == TASK_INSTANCES_IGNORE_NEW;
+        return S_OK;
+#undef STARTUP_CHECK
+    }
+}
+
+StartupRegistrationState get_startup_registration_for_this_user()
+{
+    StartupRegistrationState state;
+    wchar_t module[32768]{};
+    const DWORD length = GetModuleFileNameW(nullptr, module, _countof(module));
+    if (!length || length >= _countof(module)) { state.error = HRESULT_FROM_WIN32(length ? ERROR_INSUFFICIENT_BUFFER : GetLastError()); return state; }
+    state.currentPath.assign(module, length);
+    state.currentDirectory = std::filesystem::path(state.currentPath).parent_path().wstring();
+    DWORD type{}, bytes{};
+    LSTATUS registry = RegGetValueW(HKEY_CURRENT_USER, RunKey, RunValue, RRF_RT_REG_SZ, &type, nullptr, &bytes);
+    if (registry == ERROR_SUCCESS)
+    {
+        std::vector<wchar_t> value(bytes / sizeof(wchar_t) + 1);
+        registry = RegGetValueW(HKEY_CURRENT_USER, RunKey, RunValue, RRF_RT_REG_SZ, &type, value.data(), &bytes);
+        if (registry == ERROR_SUCCESS) { state.registryExists = true; state.legacyPath = value.data(); }
+    }
+    if (registry != ERROR_SUCCESS && registry != ERROR_FILE_NOT_FOUND && registry != ERROR_PATH_NOT_FOUND) state.error = HRESULT_FROM_WIN32(registry);
+    std::wstring sid, name; HRESULT result = CurrentUser(sid, name);
+    ComPtr<ITaskService> service; if (SUCCEEDED(result)) result = Connect(service);
+    ComPtr<ITaskFolder> folder; if (SUCCEEDED(result)) result = service->GetFolder(_bstr_t(TaskFolder), &folder);
+    ComPtr<IRegisteredTask> registered; if (SUCCEEDED(result)) result = folder->GetTask(_bstr_t(name.c_str()), &registered);
+    if (Missing(result)) return state;
+    if (SUCCEEDED(result))
+    {
+        state.taskExists = true;
+        VARIANT_BOOL enabled{}; result = registered->get_Enabled(&enabled); state.taskEnabled = enabled == VARIANT_TRUE;
+        ComPtr<ITaskDefinition> definition;
+        if (SUCCEEDED(result)) result = registered->get_Definition(&definition);
+        if (SUCCEEDED(result)) result = InspectDefinition(definition.Get(), sid, state);
+    }
+    if (FAILED(result)) state.error = result;
+    return state;
+}
+
+bool create_auto_start_task_for_this_user(bool /*runElevated*/)
+{
+    const auto current = get_startup_registration_for_this_user();
+    if (FAILED(current.error)) { SetLastError(HRESULT_CODE(current.error)); return false; }
+    std::wstring sid, name; HRESULT result = CurrentUser(sid, name);
+    ComPtr<ITaskService> service; if (SUCCEEDED(result)) result = Connect(service);
+    ComPtr<ITaskFolder> folder;
+    if (SUCCEEDED(result))
+    {
+        result = service->GetFolder(_bstr_t(TaskFolder), &folder);
+        if (Missing(result))
         {
-            pRootFolder->Release();
-            ExitOnFailure(hr, "Cannot create TrafficMonitor task folder: %x", hr);
+            ComPtr<ITaskFolder> root; result = service->GetFolder(_bstr_t(L"\\"), &root);
+            if (SUCCEEDED(result)) result = root->CreateFolder(_bstr_t(TaskFolder), _variant_t(), &folder);
         }
     }
-
-    // If the task exists, just enable it.
+    ComPtr<ITaskDefinition> definition;
+    if (SUCCEEDED(result)) result = BuildDefinition(service.Get(), sid, current.currentPath, current.currentDirectory, definition);
+    ComPtr<IRegisteredTask> registered;
+    // Correct the former Everyone full-access DACL during upgrades as well as new registrations.
+    const std::wstring security = L"D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;" + sid + L")";
+    if (SUCCEEDED(result)) result = folder->RegisterTaskDefinition(_bstr_t(name.c_str()), definition.Get(), TASK_CREATE_OR_UPDATE,
+        _variant_t(sid.c_str()), _variant_t(), TASK_LOGON_INTERACTIVE_TOKEN, _variant_t(security.c_str()), &registered);
+    if (SUCCEEDED(result))
     {
-        IRegisteredTask* pExistingRegisteredTask = NULL;
-        hr = pTaskFolder->GetTask(_bstr_t(wstrTaskName.c_str()), &pExistingRegisteredTask);
-        if (SUCCEEDED(hr))
-        {
-            // Task exists, try enabling it.
-            hr = pExistingRegisteredTask->put_Enabled(VARIANT_TRUE);
-            pExistingRegisteredTask->Release();
-            if (SUCCEEDED(hr))
-            {
-                // Function enable. Sounds like a success.
-                ExitFunction();
-            }
-        }
+        const auto readback = get_startup_registration_for_this_user();
+        result = FAILED(readback.error) ? readback.error : (readback.Enabled() ? S_OK : HRESULT_FROM_WIN32(ERROR_INVALID_DATA));
     }
-
-    // Create the task builder object to create the task.
-    hr = pService->NewTask(0, &pTask);
-    ExitOnFailure(hr, "Failed to create a task definition: %x", hr);
-
-    // ------------------------------------------------------
-    // Get the registration info for setting the identification.
-    hr = pTask->get_RegistrationInfo(&pRegInfo);
-    ExitOnFailure(hr, "Cannot get identification pointer: %x", hr);
-    hr = pRegInfo->put_Author(_bstr_t(username_domain));
-    ExitOnFailure(hr, "Cannot put identification info: %x", hr);
-
-    // ------------------------------------------------------
-    // Create the settings for the task
-    hr = pTask->get_Settings(&pSettings);
-    ExitOnFailure(hr, "Cannot get settings pointer: %x", hr);
-
-    hr = pSettings->put_StartWhenAvailable(VARIANT_FALSE);
-    ExitOnFailure(hr, "Cannot put_StartWhenAvailable setting info: %x", hr);
-    hr = pSettings->put_StopIfGoingOnBatteries(VARIANT_FALSE);
-    ExitOnFailure(hr, "Cannot put_StopIfGoingOnBatteries setting info: %x", hr);
-    hr = pSettings->put_ExecutionTimeLimit(_bstr_t(L"PT0S")); //Unlimited
-    ExitOnFailure(hr, "Cannot put_ExecutionTimeLimit setting info: %x", hr);
-    hr = pSettings->put_DisallowStartIfOnBatteries(VARIANT_FALSE);
-    ExitOnFailure(hr, "Cannot put_DisallowStartIfOnBatteries setting info: %x", hr);
-
-    // ------------------------------------------------------
-    // Get the trigger collection to insert the logon trigger.
-    hr = pTask->get_Triggers(&pTriggerCollection);
-    ExitOnFailure(hr, "Cannot get trigger collection: %x", hr);
-
-    // Add the logon trigger to the task.
-    {
-        ITrigger* pTrigger = NULL;
-        ILogonTrigger* pLogonTrigger = NULL;
-        hr = pTriggerCollection->Create(TASK_TRIGGER_LOGON, &pTrigger);
-        ExitOnFailure(hr, "Cannot create the trigger: %x", hr);
-
-        hr = pTrigger->QueryInterface(
-            IID_ILogonTrigger, (void**)&pLogonTrigger);
-        pTrigger->Release();
-        ExitOnFailure(hr, "QueryInterface call failed for ILogonTrigger: %x", hr);
-
-        hr = pLogonTrigger->put_Id(_bstr_t(L"Trigger1"));
-
-        // Timing issues may make explorer not be started when the task runs.
-        // Add a little delay to mitigate this.
-        hr = pLogonTrigger->put_Delay(_bstr_t(L"PT03S"));
-
-        // Define the user. The task will execute when the user logs on.
-        // The specified user must be a user on this computer.
-        hr = pLogonTrigger->put_UserId(_bstr_t(username_domain));
-        pLogonTrigger->Release();
-        ExitOnFailure(hr, "Cannot add user ID to logon trigger: %x", hr);
-    }
-
-    // ------------------------------------------------------
-    // Add an Action to the task. This task will execute the path passed to this custom action.
-    {
-        IActionCollection* pActionCollection = NULL;
-        IAction* pAction = NULL;
-        IExecAction* pExecAction = NULL;
-
-        // Get the task action collection pointer.
-        hr = pTask->get_Actions(&pActionCollection);
-        ExitOnFailure(hr, "Cannot get Action collection pointer: %x", hr);
-
-        // Create the action, specifying that it is an executable action.
-        hr = pActionCollection->Create(TASK_ACTION_EXEC, &pAction);
-        pActionCollection->Release();
-        ExitOnFailure(hr, "Cannot create the action: %x", hr);
-
-        // QI for the executable task pointer.
-        hr = pAction->QueryInterface(
-            IID_IExecAction, (void**)&pExecAction);
-        pAction->Release();
-        ExitOnFailure(hr, "QueryInterface call failed for IExecAction: %x", hr);
-
-        // Set the path of the executable to TrafficMonitor (passed as CustomActionData).
-        hr = pExecAction->put_Path(_bstr_t(wszExecutablePath));
-        pExecAction->Release();
-        ExitOnFailure(hr, "Cannot set path of executable: %x", hr);
-    }
-
-    // ------------------------------------------------------
-    // Create the principal for the task
-    {
-        IPrincipal* pPrincipal = NULL;
-        hr = pTask->get_Principal(&pPrincipal);
-        ExitOnFailure(hr, "Cannot get principal pointer: %x", hr);
-
-        // Set up principal information:
-        hr = pPrincipal->put_Id(_bstr_t(L"Principal1"));
-
-        hr = pPrincipal->put_UserId(_bstr_t(username_domain));
-
-        hr = pPrincipal->put_LogonType(TASK_LOGON_INTERACTIVE_TOKEN);
-
-        if (runElevated)
-        {
-            hr = pPrincipal->put_RunLevel(_TASK_RUNLEVEL::TASK_RUNLEVEL_HIGHEST);
-        }
-        else
-        {
-            hr = pPrincipal->put_RunLevel(_TASK_RUNLEVEL::TASK_RUNLEVEL_LUA);
-        }
-        pPrincipal->Release();
-        ExitOnFailure(hr, "Cannot put principal run level: %x", hr);
-    }
-    // ------------------------------------------------------
-    //  Save the task in the TrafficMonitor folder.
-    {
-        _variant_t SDDL_FULL_ACCESS_FOR_EVERYONE = L"D:(A;;FA;;;WD)";
-        hr = pTaskFolder->RegisterTaskDefinition(
-            _bstr_t(wstrTaskName.c_str()),
-            pTask,
-            TASK_CREATE_OR_UPDATE,
-            _variant_t(username_domain),
-            _variant_t(),
-            TASK_LOGON_INTERACTIVE_TOKEN,
-            SDDL_FULL_ACCESS_FOR_EVERYONE,
-            &pRegisteredTask);
-        ExitOnFailure(hr, "Error saving the Task : %x", hr);
-    }
-
-LExit:
-    if (pService)
-        pService->Release();
-    if (pTaskFolder)
-        pTaskFolder->Release();
-    if (pTask)
-        pTask->Release();
-    if (pRegInfo)
-        pRegInfo->Release();
-    if (pSettings)
-        pSettings->Release();
-    if (pTriggerCollection)
-        pTriggerCollection->Release();
-    if (pRegisteredTask)
-        pRegisteredTask->Release();
-
-    return (SUCCEEDED(hr));
+    SetLastError(SUCCEEDED(result) ? ERROR_SUCCESS : HRESULT_CODE(result));
+    return SUCCEEDED(result);
 }
 
 bool delete_auto_start_task_for_this_user()
 {
-    HRESULT hr = S_OK;
+    std::wstring sid, name; HRESULT result = CurrentUser(sid, name);
+    ComPtr<ITaskService> service; if (SUCCEEDED(result)) result = Connect(service);
+    ComPtr<ITaskFolder> folder; if (SUCCEEDED(result)) result = service->GetFolder(_bstr_t(TaskFolder), &folder);
+    if (SUCCEEDED(result)) result = folder->DeleteTask(_bstr_t(name.c_str()), 0);
+    if (Missing(result)) result = S_OK;
+    SetLastError(SUCCEEDED(result) ? ERROR_SUCCESS : HRESULT_CODE(result));
+    return SUCCEEDED(result);
+}
 
-    WCHAR username[USERNAME_LEN];
-    std::wstring wstrTaskName;
-
-    ITaskService* pService = NULL;
-    ITaskFolder* pTaskFolder = NULL;
-
-    // ------------------------------------------------------
-    // Get the Username for the task.
-    if (!GetEnvironmentVariable(L"USERNAME", username, USERNAME_LEN))
-    {
-        ExitWithLastError(hr, "Getting username failed: %x", hr);
-    }
-
-    // Task Name.
-    wstrTaskName = L"Autorun for ";
-    wstrTaskName += username;
-
-    // ------------------------------------------------------
-    // Create an instance of the Task Service.
-    hr = CoCreateInstance(CLSID_TaskScheduler,
-                          NULL,
-                          CLSCTX_INPROC_SERVER,
-                          IID_ITaskService,
-                          (void**)&pService);
-    ExitOnFailure(hr, "Failed to create an instance of ITaskService: %x", hr);
-
-    // Connect to the task service.
-    hr = pService->Connect(_variant_t(), _variant_t(), _variant_t(), _variant_t());
-    ExitOnFailure(hr, "ITaskService::Connect failed: %x", hr);
-
-    // ------------------------------------------------------
-    // Get the TrafficMonitor task folder.
-    hr = pService->GetFolder(_bstr_t(L"\\TaskBarWidgets"), &pTaskFolder);
-    if (FAILED(hr))
-    {
-        // Folder doesn't exist. No need to disable a non-existing task.
-        hr = S_OK;
-        ExitFunction();
-    }
-
-    // ------------------------------------------------------
-    // If the task exists, disable.
-    {
-        IRegisteredTask* pExistingRegisteredTask = NULL;
-        hr = pTaskFolder->GetTask(_bstr_t(wstrTaskName.c_str()), &pExistingRegisteredTask);
-        if (SUCCEEDED(hr))
-        {
-            // Task exists, try disabling it.
-            hr = pTaskFolder->DeleteTask(_bstr_t(wstrTaskName.c_str()), 0);
-        }
-    }
-
-LExit:
-    if (pService)
-        pService->Release();
-    if (pTaskFolder)
-        pTaskFolder->Release();
-
-    return (SUCCEEDED(hr));
+bool delete_legacy_auto_start_for_this_user()
+{
+    const LSTATUS result = RegDeleteKeyValueW(HKEY_CURRENT_USER, RunKey, RunValue);
+    const bool success = result == ERROR_SUCCESS || result == ERROR_FILE_NOT_FOUND || result == ERROR_PATH_NOT_FOUND;
+    SetLastError(success ? ERROR_SUCCESS : result); return success;
 }
 
 bool is_auto_start_task_active_for_this_user(std::wstring* path)
 {
-    HRESULT hr = S_OK;
-
-    WCHAR username[USERNAME_LEN];
-    std::wstring wstrTaskName;
-
-    ITaskService* pService = NULL;
-    ITaskFolder* pTaskFolder = NULL;
-
-    bool command_path_match{};
-
-    // ------------------------------------------------------
-    // Get the Username for the task.
-    if (!GetEnvironmentVariable(L"USERNAME", username, USERNAME_LEN))
-    {
-        ExitWithLastError(hr, "Getting username failed: %x", hr);
-    }
-
-    // Task Name.
-    wstrTaskName = L"Autorun for ";
-    wstrTaskName += username;
-
-    // ------------------------------------------------------
-    // Create an instance of the Task Service.
-    hr = CoCreateInstance(CLSID_TaskScheduler,
-                          NULL,
-                          CLSCTX_INPROC_SERVER,
-                          IID_ITaskService,
-                          (void**)&pService);
-    ExitOnFailure(hr, "Failed to create an instance of ITaskService: %x", hr);
-
-    // Connect to the task service.
-    hr = pService->Connect(_variant_t(), _variant_t(), _variant_t(), _variant_t());
-    ExitOnFailure(hr, "ITaskService::Connect failed: %x", hr);
-
-    // ------------------------------------------------------
-    // Get the TrafficMonitor task folder.
-    hr = pService->GetFolder(_bstr_t(L"\\TaskBarWidgets"), &pTaskFolder);
-    ExitOnFailure(hr, "ITaskFolder doesn't exist: %x", hr);
-
-    // ------------------------------------------------------
-    // If the task exists, disable.
-    {
-        IRegisteredTask* pExistingRegisteredTask = NULL;
-        hr = pTaskFolder->GetTask(_bstr_t(wstrTaskName.c_str()), &pExistingRegisteredTask);
-        if (SUCCEEDED(hr))
-        {
-            // Task exists, get its value.
-            VARIANT_BOOL is_enabled;
-            hr = pExistingRegisteredTask->get_Enabled(&is_enabled);
-            //判断已存在的任务计划命令的exe文件路径是否为当前exe的路径
-            BSTR xml_buff{};
-            pExistingRegisteredTask->get_Xml(&xml_buff);
-            CSimpleXML xml;
-            xml.LoadXMLContentDirect(xml_buff);
-            std::wstring command_path = xml.GetNode(L"Command", L"Exec");
-            if (path != nullptr)
-                *path = command_path;
-            WCHAR wszExecutablePath[MAX_PATH];
-            GetModuleFileName(NULL, wszExecutablePath, MAX_PATH);
-            command_path_match = (command_path == wszExecutablePath);
-
-            pExistingRegisteredTask->Release();
-            if (SUCCEEDED(hr))
-            {
-                // Got the value. Return it.
-                hr = (is_enabled == VARIANT_TRUE) ? S_OK : E_FAIL; // Fake success or fail to return the value.
-                ExitFunction();
-            }
-        }
-    }
-
-LExit:
-    if (pService)
-        pService->Release();
-    if (pTaskFolder)
-        pTaskFolder->Release();
-    //delete[] buff;
-
-    return (SUCCEEDED(hr) && command_path_match);
+    const auto state = get_startup_registration_for_this_user();
+    if (path) *path = state.taskPath;
+    return SUCCEEDED(state.error) && state.Enabled();
 }

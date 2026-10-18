@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using TaskbarLyrics.Core.Utilities;
 
 namespace TaskbarLyrics.Core.Database;
 
@@ -19,11 +20,7 @@ public sealed class UserDataDbContext : DbContext
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
-        var databasePath = _databasePath ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "TaskBarWidgets",
-            "database",
-            "user_data.db");
+        var databasePath = _databasePath ?? Path.Combine(AppDataPaths.DatabaseDirectory, "user_data.db");
         var dbDirectory = Path.GetDirectoryName(databasePath)!;
         Directory.CreateDirectory(dbDirectory);
         optionsBuilder.UseSqlite($"Data Source={databasePath}");
