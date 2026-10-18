@@ -60,7 +60,8 @@ std::wstring Lower(std::wstring w)
 }
 bool Equal(const fs::path &a, const fs::path &b)
 {
-    return Lower(a.wstring()) == Lower(b.wstring());
+    // Filesystem paths may mix slash styles when a relative child is appended.
+    return Lower(a.lexically_normal().generic_wstring()) == Lower(b.lexically_normal().generic_wstring());
 }
 bool Under(const fs::path &child, const fs::path &root)
 {

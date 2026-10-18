@@ -69,3 +69,5 @@ On 2026-10-18 the user accepted lightweight build 261018-1408 and authorized doc
 On 2026-10-18 the user authorized fixing settings/card theme synchronization and readability, producing personal build and clean release packages, and committing/pushing this change. No normal-product launch, installation replacement or GitHub Release publication is authorized by this request.
 
 On 2026-10-18 the user authorized committing and pushing the application updater implementation and documentation, rebuilding a clean Release with a fresh build-time version, and publishing it after draft asset verification so the existing 261018-1638 build can test updating. Preserve personal packages and daily installations; no normal-product launch or startup changes. This is not standing authorization for subsequent releases.
+
+On 2026-10-18 the user additionally authorized committing/pushing the updater process-path comparison fix and rebuilding/publishing a fresh complete Release containing the corrected native updater, so no second updater replacement is needed after upgrade. Use Claude Code for a bounded independent review. Do not start or modify the daily installation.

@@ -40,6 +40,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 {
     int count = 0;
     auto args = CommandLineToArgvW(GetCommandLineW(), &count);
+    if (count == 3 && wcscmp(args[1], L"--wait-for-exit") == 0)
+    {
+        const auto deadline = GetTickCount64() + 15000;
+        while (!fs::exists(args[2]) && GetTickCount64() < deadline) Sleep(20);
+        LocalFree(args);
+        return 0;
+    }
     if (count == 3 && wcscmp(args[1], L"--old") == 0)
     {
         Sleep((DWORD)_wtoi(args[2]));

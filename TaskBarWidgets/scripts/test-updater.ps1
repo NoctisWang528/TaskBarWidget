@@ -73,6 +73,40 @@ function Assert-Original($Case) {
     Check (([IO.File]::ReadAllText((Join-Path $Case.install 'UI\my-note.txt'))) -eq 'unknown user note') 'Uninventoried UI file was deleted.'
     Check (([IO.File]::ReadAllText((Join-Path $Case.install 'Media\custom.json'))) -eq 'unknown user file') 'Uninventoried Media file was deleted.'
 }
+$case=New-Case 'three-live-processes'
+$hosts=@()
+$signal=Join-Path $case.work 'fixture-exit.signal'
+try {
+    foreach($entry in @(@('nativePid','TaskBarWidgets.exe'),@('mediaPid','Media/TaskBarWidgets.Media.exe'),@('uiPid','UI/TaskBarWidgets.UI.exe'))) {
+        $target=Join-Path $case.install $entry[1]
+        if($entry[0] -ne 'nativePid') { Copy-Item -LiteralPath $fake -Destination $target }
+        $hostProcess=Start-Process -FilePath $target -ArgumentList @('--wait-for-exit',('"'+$signal+'"')) -WindowStyle Hidden -PassThru
+        $hosts+=$hostProcess
+        $case.job[$entry[0]]=$hostProcess.Id
+    }
+    Write-Json $case.path $case.job
+    $status=Invoke-Case $case -OnReady {param($readyCase);[IO.File]::WriteAllText((Join-Path $readyCase.work 'fixture-exit.signal'),'exit')}
+    Check ($status.phase -eq 'complete') 'Native/Media/UI process identities must match despite path separator spelling.'
+} finally {
+    [IO.File]::WriteAllText($signal,'exit')
+    foreach($hostProcess in $hosts) { Check ($hostProcess.WaitForExit(3000)) 'Fixture failed to exit normally.'; $hostProcess.Dispose() }
+}
+Write-Host 'PASS three live Native/Media/UI identities and graceful exit'
+$case=New-Case 'foreign-process'
+$foreignRoot=Join-Path (Split-Path $case.install) 'other-install/Media'
+New-Item -ItemType Directory -Path $foreignRoot -Force|Out-Null
+$foreignExe=Join-Path $foreignRoot 'TaskBarWidgets.Media.exe'
+Copy-Item -LiteralPath $fake -Destination $foreignExe
+$signal=Join-Path $case.work 'foreign-exit.signal'
+$foreign=Start-Process -FilePath $foreignExe -ArgumentList @('--wait-for-exit',('"'+$signal+'"')) -WindowStyle Hidden -PassThru
+try {
+    $case.job.mediaPid=$foreign.Id;Write-Json $case.path $case.job
+    $status=Invoke-Case $case
+    Check ($status.phase -eq 'error' -and $status.message -match 'Process ID no longer belongs' -and -not $foreign.HasExited) 'Other installation process must still be rejected without closing it.'
+    Check (-not (Test-Path (Join-Path $case.work 'journal.json'))) 'Identity mismatch must fail before mutation.'
+    Assert-Original $case
+} finally { [IO.File]::WriteAllText($signal,'exit');Check ($foreign.WaitForExit(3000)) 'Foreign fixture failed to exit.';$foreign.Dispose() }
+Write-Host 'PASS foreign same-name process rejected without mutation'
 $case=New-Case 'success'
 $previous=Join-Path (Split-Path -Parent $case.work) 'previous';New-Item -ItemType Directory -Path (Join-Path $previous 'backup\program') -Force|Out-Null
 $priorJob=@{};foreach($key in $case.job.Keys){$priorJob[$key]=$case.job[$key]};$priorJob.workRoot=$previous;$priorJob.nonce=[guid]::NewGuid().ToString('N');Write-Json (Join-Path $previous 'job.json') $priorJob
