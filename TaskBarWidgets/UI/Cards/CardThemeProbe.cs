@@ -21,7 +21,7 @@ public sealed partial class CardGroup
         var output = Path.Combine(AppContext.BaseDirectory, "..", "ui-theme-check");
         Directory.CreateDirectory(output);
         var result = new List<object>();
-        foreach (var card in cards._cards)
+        foreach (var card in cards.DisplayedCards)
         {
             card.Root.UpdateLayout();
             card.MeasureHeight(); card.Root.UpdateLayout();
@@ -41,7 +41,7 @@ public sealed partial class CardGroup
                 if (ratio < 4.5) throw new InvalidOperationException($"Low card text contrast: {card.Window.Title}, {text.Text}, {ratio:0.00}.");
                 textChecks.Add(ratio);
             }
-            var path = Path.Combine(output, $"{System.Array.IndexOf(cards._cards, card)}-{expected}.png");
+            var path = Path.Combine(output, $"{System.Array.IndexOf(cards.CardWindows.ToArray(), card)}-{expected}.png");
             await UiLayoutProbe.CaptureAsync(card.Root, path);
             result.Add(new { card = card.Window.Title, actual = card.Root.ActualTheme.ToString(), backdrop = backdrop?.Theme.ToString() ?? "unavailable-offscreen", minimumTextContrast = textChecks.Count > 0 ? textChecks.Min() : 0, path });
         }

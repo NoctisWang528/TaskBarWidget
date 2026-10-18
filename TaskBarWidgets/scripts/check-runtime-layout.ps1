@@ -21,7 +21,7 @@ foreach ($component in @('Media','UI')) {
         if ($resource.Directory.Name -notmatch '^(en(?:-.+)?|zh|zh-Hans|zh-CN|zh-SG)$') { throw "Unexpected translation: $($resource.Name)" }
     }
 }
-foreach ($file in @('Media/TaskBarWidgets.Media.dll','UI/TaskBarWidgets.UI.dll','UI/TaskBarWidgets.UI.pri','UI/App.xbf','UI/Microsoft.WindowsAppRuntime.Bootstrap.dll')) {
+foreach ($file in @('TaskBarWidgets.Updater.exe','Media/TaskBarWidgets.Media.dll','UI/TaskBarWidgets.UI.dll','UI/TaskBarWidgets.UI.pri','UI/App.xbf','UI/Microsoft.WindowsAppRuntime.Bootstrap.dll')) {
     if (-not (Test-Path -LiteralPath (Join-Path $Directory $file) -PathType Leaf)) { throw "Missing required application component: $file" }
 }
 Write-Host 'Shared .NET / Windows App Runtime package layout verified; no bundled runtime.'

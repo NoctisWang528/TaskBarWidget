@@ -406,6 +406,7 @@ public sealed partial class SettingsWindow
         section.Children.Add(Copy("版本 " + _media.Text("appVersion", "0.1.0")));
         section.Children.Add(new HyperlinkButton { Content = "项目主页", NavigateUri = new Uri("https://github.com/NoctisWang528/TaskBarWidget") });
         section.Children.Add(Copy("基于 TrafficMonitor、TaskbarLyrics 与 AF-Media-Bar。包含 Battery、PowerMon、WeatherPro 的集成实现。上游许可证与第三方署名见随程序分发的 THIRD-PARTY-NOTICES.md。"));
+        RenderUpdateSettings();
     }
     private async Task ServiceCommandAsync(string action, JsonNode? value = null)
     {

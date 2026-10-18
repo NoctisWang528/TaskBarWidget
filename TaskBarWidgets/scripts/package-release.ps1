@@ -24,7 +24,7 @@ $privateIni = @('WeatherPro.ini', 'Battery.dll.ini', 'PowerMonPlugin.dll.ini')
 $stage = Join-Path $releaseRoot $packageName
 New-Item -ItemType Directory -Path $stage | Out-Null
 # Only runtime roots are selected. Diagnostics and acceptance screenshots remain local.
-$files = @('TaskBarWidgets.exe','build-info.json','THIRD-PARTY-NOTICES.md')
+$files = @('TaskBarWidgets.exe','TaskBarWidgets.Updater.exe','build-info.json','THIRD-PARTY-NOTICES.md')
 $files += @(Get-ChildItem -LiteralPath $source -File -Filter '*.dll' | Select-Object -ExpandProperty Name)
 foreach ($relative in $files) { Copy-Item -LiteralPath (Join-Path $source $relative) -Destination (Join-Path $stage $relative) }
 foreach ($directory in @('Media','UI','language','licenses')) {
@@ -54,7 +54,7 @@ TaskBarWidgets $version — Windows 11 x64
 - Windows App Runtime 2.5.1 x64 或兼容的更新 2.x：https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads
 启动时检查依赖，缺失或无法加载时显示下载入口，不会自动安装。环境就绪后重新启动程序。
 需要管理员权限和 Microsoft Edge WebView2 Runtime；请先退出旧版或其他任务栏监测工具。
-此包不包含个人配置，首次启动使用默认设置。升级前请自行备份配置与流量历史。
+此发行 ZIP 不包含个人配置；更新会保留已有数据，首次启动使用默认设置。运行后的目录可能含个人配置、记录和凭据，分享前请检查。升级前请自行备份配置与流量历史。
 
 源码、用法、许可证与来源：https://github.com/NoctisWang528/TaskBarWidget
 本地构建的来源状态详见 release-manifest.json；工作区变更不代表已发布到远端。
@@ -81,9 +81,20 @@ $forbidden = @(Get-ChildItem -LiteralPath $stage -File -Recurse | Where-Object {
     $_.Name -in $privateIni -or $_.Name -match '^(config\.ini|global_cfg\.ini|history_traffic\..*|media-settings\.json|ChineseConverter\.dll)$' -or $_.Name -match '\.log($|\.)|(-wal|-shm)$' -or $_.Extension -in @('.log','.pdb','.dmp','.mdmp','.db','.sqlite','.sqlite3')
 })
 if ($forbidden.Count) { throw 'Personal data, diagnostics or a removed dependency was found in the release package.' }
+$programFiles = @(Get-ChildItem -LiteralPath $stage -File -Recurse | Sort-Object FullName | ForEach-Object {
+    [ordered]@{ path = [IO.Path]::GetRelativePath($stage, $_.FullName).Replace('\','/'); bytes = $_.Length;
+        sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
+})
+[ordered]@{ protocolVersion = 1; version = $version; architecture = 'win-x64'; files = $programFiles } |
+    ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $stage 'app-files.json') -Encoding utf8
+$inventoryHash = (Get-FileHash -LiteralPath (Join-Path $stage 'app-files.json') -Algorithm SHA256).Hash.ToLowerInvariant()
 $zip = Join-Path $releaseRoot ($packageName + '.zip')
 [IO.Compression.ZipFile]::CreateFromDirectory($stage, $zip, [IO.Compression.CompressionLevel]::Optimal, $true)
 $sha = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
 "$sha  $([IO.Path]::GetFileName($zip))" | Set-Content -LiteralPath (Join-Path $releaseRoot 'SHA256SUMS.txt') -Encoding ascii
+[ordered]@{ protocolVersion = 1; version = $version; architecture = 'win-x64'; assetName = [IO.Path]::GetFileName($zip);
+    size = (Get-Item -LiteralPath $zip).Length; sha256 = $sha; fileManifestSha256 = $inventoryHash;
+    requirements = [ordered]@{ dotnetDesktop = '8.0.0'; windowsAppRuntime = '2.5.1.0'; windowsBuild = 22000 } } |
+    ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $releaseRoot 'update.json') -Encoding utf8
 Write-Host "ZIP: $zip"
 Write-Host "SHA256: $sha"

@@ -25,7 +25,14 @@ public sealed partial class CardGroup : IDisposable
     private readonly UiConnection _connection;
     private readonly Action _openSettings;
     private readonly CardWindow[] _cards = [];
-    internal IReadOnlyList<CardWindow> CardWindows => _cards;
+    private readonly CardWindow _updateCard;
+    private readonly Button _updateInstall = new() { Content = "重启更新", MinHeight = 32, VerticalAlignment = VerticalAlignment.Center };
+    private readonly TextBlock _updateLabel = Text("更新已下载", 13);
+    private bool _updateReady;
+    private IEnumerable<CardWindow> AllCards => _cards.Append(_updateCard);
+    private IEnumerable<CardWindow> DisplayedCards => _updateReady ? _cards.Prepend(_updateCard) : _cards;
+    internal IReadOnlyList<CardWindow> CardWindows => DisplayedCards.ToArray();
+    internal event Action? InstallUpdateRequested;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(400) };
     private readonly DispatcherTimer _volumeTimer = new() { Interval = TimeSpan.FromMilliseconds(120) };
     private readonly DispatcherTimer _seekTimer = new() { Interval = TimeSpan.FromMilliseconds(180) };
@@ -74,8 +81,19 @@ public sealed partial class CardGroup : IDisposable
         _openSettings = openSettings;
         _cards = [new CardWindow("流量消耗", BuildTraffic(), 284), new CardWindow("音频设备", BuildAudio(), 244, autoHeight: true),
             new CardWindow("媒体", BuildMedia(), 248)];
+        var updateContent = Columns(new GridLength(1, GridUnitType.Star), GridLength.Auto);
+        _updateLabel.VerticalAlignment = VerticalAlignment.Center;
+        Add(updateContent, _updateLabel, 0); Add(updateContent, _updateInstall, 1);
+        AutomationProperties.SetAutomationId(_updateInstall, "card-install-update");
+        _updateInstall.Click += (_, _) => { if (_updateReady) InstallUpdateRequested?.Invoke(); };
+        _updateCard = new CardWindow("应用更新", updateContent, 72);
+        _updateCard.Root.Tapped += (_, args) => {
+            for (var source = args.OriginalSource as DependencyObject; source is not null; source = VisualTreeHelper.GetParent(source))
+                if (source is Button) return; // The button already owns its click.
+            if (_updateReady) { args.Handled = true; InstallUpdateRequested?.Invoke(); }
+        };
         _outsideClicks = new OutsideClickMonitor(_cards[0].Root.DispatcherQueue, () => _flyoutsOpen > 0);
-        foreach (var card in _cards)
+        foreach (var card in AllCards)
         {
             card.Window.AppWindow.Closing += (_, args) => { if (!_disposed) { args.Cancel = true; Hide("native-close"); } };
             card.Root.KeyDown += (_, args) => { if (args.Key == VirtualKey.Escape) { Hide("escape"); args.Handled = true; } };
@@ -118,7 +136,7 @@ public sealed partial class CardGroup : IDisposable
         _ticks = 0;
         _visibleLifetime = new CancellationTokenSource();
         _lyrics.Activate();
-        foreach (var card in _cards) card.Show();
+        foreach (var card in DisplayedCards) card.Show();
         _cards[2].Window.Activate();
         var generation = _generation;
         _outsideClicks.Start(entryWindow, click =>
@@ -151,7 +169,7 @@ public sealed partial class CardGroup : IDisposable
         _visibleLifetime?.Dispose();
         _visibleLifetime = null;
         foreach (var flyout in _flyouts) flyout.Hide();
-        foreach (var card in _cards) HideCard(card);
+        foreach (var card in AllCards) HideCard(card);
     }
 
     // Hide is a UI callback boundary: unexpected task faults must still reach
@@ -290,6 +308,20 @@ public sealed partial class CardGroup : IDisposable
         _themePreview = theme;
         ApplyTheme(theme);
     }
+    internal void SetUpdateState(UpdateUiState state)
+    {
+        if (_disposed) return;
+        var ready = state.CanInstall && state.Phase == "ready";
+        _updateLabel.Text = "版本 " + state.LatestVersion + "\n更新已下载";
+        ToolTipService.SetToolTip(_updateLabel, _updateLabel.Text);
+        _updateInstall.IsEnabled = ready;
+        if (_updateReady == ready) return;
+        _updateReady = ready;
+        if (!_visible) return;
+        if (!ready) HideCard(_updateCard);
+        Position(_anchorX, _anchorY);
+        if (ready) _updateCard.Show();
+    }
     internal void ApplyBackendTheme(JsonElement state)
     {
         if (state.ValueKind != JsonValueKind.Object || !state.TryGetProperty("toolWindowTheme", out var value) || value.ValueKind == JsonValueKind.Null) return;
@@ -300,9 +332,9 @@ public sealed partial class CardGroup : IDisposable
         if (_disposed || (_themeApplied && _requestedTheme == theme)) return;
         _themeApplied = true;
         _requestedTheme = theme;
-        foreach (var card in _cards) card.Root.RequestedTheme = theme;
+        foreach (var card in AllCards) card.Root.RequestedTheme = theme;
         foreach (var flyout in _flyouts) ThemeFlyout(flyout);
-        foreach (var card in _cards)
+        foreach (var card in AllCards)
             if (card.Root.XamlRoot is { } root)
                 foreach (var popup in VisualTreeHelper.GetOpenPopupsForXamlRoot(root))
                     if (popup.Child is FrameworkElement child) child.RequestedTheme = theme;
@@ -609,7 +641,7 @@ public sealed partial class CardGroup : IDisposable
         // A left click on the validated native entry HWND belongs to its normal
         // toggle command. Other buttons must still dismiss before opening menus.
         if (click.MouseButton == OutsideClickMonitor.Button.Left && click.IsEntryTarget) return false;
-        foreach (var card in _cards)
+        foreach (var card in DisplayedCards)
         {
             if (IsWindowVisible(card.Handle) && GetWindowRect(card.Handle, out var bounds) &&
                 click.X >= bounds.Left && click.X < bounds.Right && click.Y >= bounds.Top && click.Y < bounds.Bottom)
@@ -618,32 +650,34 @@ public sealed partial class CardGroup : IDisposable
         // The click snapshot survives MenuFlyout.Closed and native popup teardown
         // before the queued classifier runs. Same-process unrelated windows do not qualify.
         if (click.ProcessId == (uint)Environment.ProcessId &&
-            (_cards.Any(card => card.Handle == click.RootOwner) || click.FlyoutWasOpen && click.IsPopup)) return false;
+            (DisplayedCards.Any(card => card.Handle == click.RootOwner) || click.FlyoutWasOpen && click.IsPopup)) return false;
         return true;
     }
 
     internal void Position(double x, double y)
     {
         _anchorX = x; _anchorY = y;
-        foreach (var card in _cards) card.MeasureHeight();
+        var cards = DisplayedCards.ToArray();
+        foreach (var card in cards) card.MeasureHeight();
         var monitor = MonitorFromPoint(new NativePoint { X = (int)x, Y = (int)y }, 2);
         var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
         if (!GetMonitorInfo(monitor, ref info)) return;
-        foreach (var card in _cards)
+        foreach (var card in cards)
             if (MonitorFromWindow(card.Handle, 2) != monitor) card.Window.AppWindow.Move(new PointInt32(info.Work.Left + 10, info.Work.Top + 10));
         var dpi = GetDpiForWindow(_cards[0].Handle);
         var scale = dpi > 0 ? dpi / 96d : 1;
         var width = Math.Min((int)Math.Ceiling(CardWidth * scale), Math.Max(1, info.Work.Right - info.Work.Left - (int)(20 * scale)));
         var gap = (int)Math.Round(12 * scale);
-        var available = Math.Max(3, info.Work.Bottom - info.Work.Top - gap * 2 - (int)(20 * scale));
-        var fit = Math.Min(1, available / (_cards.Sum(card => card.Height) * scale));
-        var heights = _cards.Select(card => Math.Max(1, (int)Math.Floor(card.Height * scale * fit))).ToArray();
-        var total = heights.Sum() + gap * 2;
+        var gaps = gap * (cards.Length - 1);
+        var available = Math.Max(cards.Length, info.Work.Bottom - info.Work.Top - gaps - (int)(20 * scale));
+        var fit = Math.Min(1, available / (cards.Sum(card => card.Height) * scale));
+        var heights = cards.Select(card => Math.Max(1, (int)Math.Floor(card.Height * scale * fit))).ToArray();
+        var total = heights.Sum() + gaps;
         var left = Math.Clamp((int)Math.Round(x - width / 2d), info.Work.Left, Math.Max(info.Work.Left, info.Work.Right - width));
         var top = Math.Clamp((int)Math.Round(y - total - 10 * scale), info.Work.Top, Math.Max(info.Work.Top, info.Work.Bottom - total));
-        for (var index = 0; index < _cards.Length; index++)
+        for (var index = 0; index < cards.Length; index++)
         {
-            _cards[index].Window.AppWindow.MoveAndResize(new RectInt32(left, top, width, heights[index]));
+            cards[index].Window.AppWindow.MoveAndResize(new RectInt32(left, top, width, heights[index]));
             top += heights[index] + gap;
         }
     }
@@ -659,7 +693,7 @@ public sealed partial class CardGroup : IDisposable
         _lyrics.Dispose();
         foreach (var flyout in _flyouts) flyout.Hide();
         _pendingVolumes.Clear();
-        foreach (var card in _cards) card.Close();
+        foreach (var card in AllCards) card.Close();
         foreach (var glow in _glows.Values) { glow.Shadow.Mask?.Dispose(); glow.Visual.Dispose(); glow.Shadow.Dispose(); }
         _glows.Clear();
     }

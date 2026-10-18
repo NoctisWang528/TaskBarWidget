@@ -9,6 +9,7 @@ internal static class Program
     private static int Main(string[] args)
     {
         if (args.Length == 2 && args[0] == "--validate-package") return PackageProbe.Run(args[1]);
+        if (args.Length == 5 && args[0] == "--validate-update-package") return PackageProbe.ValidateUpdateAsync(args[1], args[2], args[3], args[4]).GetAwaiter().GetResult();
         if (!TryGetHostArguments(args, out var hostPid, out var pipeName, out var portableData)) return 2;
         try
         {

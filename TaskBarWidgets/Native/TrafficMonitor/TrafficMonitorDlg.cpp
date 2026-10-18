@@ -602,10 +602,15 @@ void CTrafficMonitorDlg::SaveHistoryTraffic()
     m_history_traffic.SaveTodayOnly();
 }
 
-void CTrafficMonitorDlg::SaveHistoryTrafficFull()
+bool CTrafficMonitorDlg::SaveHistoryTrafficFull()
 {
     // 完整保存，用于程序退出时确保所有数据都保存
-    m_history_traffic.Save();
+    return m_history_traffic.Save();
+}
+
+bool CTrafficMonitorDlg::FlushForUpdate()
+{
+    return theApp.SaveConfig() && SaveHistoryTrafficFull();
 }
 
 std::vector<TrafficHistorySnapshot::Day> CTrafficMonitorDlg::GetTrafficHistorySnapshot() const

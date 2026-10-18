@@ -50,12 +50,14 @@ void CHistoryTrafficFile::UpdateCache() const
 	m_cache_dirty = false; // 标记缓存已更新
 }
 
-void CHistoryTrafficFile::Save() const
+bool CHistoryTrafficFile::Save() const
 {
-	ofstream file{ m_file_path };
+	const auto temporary = m_file_path + L".saving";
+	if (GetFileAttributesW(temporary.c_str()) != INVALID_FILE_ATTRIBUTES && (GetFileAttributesW(temporary.c_str()) & FILE_ATTRIBUTE_REPARSE_POINT)) return false;
+	ofstream file{ temporary };
 	if (!file.is_open())
 	{
-		return;
+		return false;
 	}
 
 	char buff[64];
@@ -74,7 +76,12 @@ void CHistoryTrafficFile::Save() const
 		WriteTrafficRecord(file, history_traffic);
 	}
 
+	file.flush();
+	const bool written = file.good();
 	file.close();
+	if (!written || !file.good() || !MoveFileExW(temporary.c_str(), m_file_path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+	{ DeleteFileW(temporary.c_str()); return false; }
+	return true;
 }
 
 bool CHistoryTrafficFile::IsTodayRecord() const

@@ -58,6 +58,8 @@ try {
         Invoke-BuildCommand 'restore-native' 'dotnet' @('restore', 'scripts/NativePackages.csproj', '--verbosity', 'minimal')
         Invoke-BuildCommand 'build-native' $msbuild @('Native/TaskBarWidgets.sln', '/m:1', "/p:Configuration=$Configuration", '/p:Platform=x64', "/p:TaskBarWidgetsBuildVersion=$buildVersion", '/v:minimal', '/nologo')
         $nativeOutput = Join-Path $productRoot "Native\Bin\x64\$Configuration"
+        $updater = & (Join-Path $PSScriptRoot 'build-updater.ps1') -OutputDirectory $nativeOutput
+        Copy-Item -LiteralPath $updater -Destination $appDirectory -Force
         foreach ($file in @('TaskBarWidgets.exe', 'OpenHardwareMonitorApi.dll')) {
             Copy-Item -LiteralPath (Join-Path $nativeOutput $file) -Destination $appDirectory -Force
         }
@@ -115,7 +117,7 @@ try {
     Copy-Item -LiteralPath 'LICENSE', 'NOTICE' -Destination $appDirectory -Force
     if ($Component -eq 'All') {
         & (Join-Path $PSScriptRoot 'check-runtime-layout.ps1') -Directory $appDirectory
-        foreach ($required in @('TaskBarWidgets.exe', 'OpenHardwareMonitorApi.dll', 'LibreHardwareMonitorLib.dll', 'Media\TaskBarWidgets.Media.exe', 'UI\TaskBarWidgets.UI.exe', 'UI\TaskBarWidgets.UI.pri', 'UI\App.xbf')) {
+        foreach ($required in @('TaskBarWidgets.exe', 'TaskBarWidgets.Updater.exe', 'OpenHardwareMonitorApi.dll', 'LibreHardwareMonitorLib.dll', 'Media\TaskBarWidgets.Media.exe', 'UI\TaskBarWidgets.UI.exe', 'UI\TaskBarWidgets.UI.pri', 'UI\App.xbf')) {
             if (-not (Test-Path -LiteralPath (Join-Path $appDirectory $required))) { throw "Missing packaged file: $required" }
         }
     }

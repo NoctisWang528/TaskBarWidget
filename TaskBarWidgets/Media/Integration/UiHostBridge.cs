@@ -3,6 +3,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using TaskbarLyrics.Core.Utilities;
+using TaskbarLyrics.App;
 
 namespace TaskBarWidgets.Media.Integration;
 
@@ -16,6 +17,39 @@ internal sealed class UiHostBridge : IAsyncDisposable
     private int _pollLogs;
     private bool _cardLyricsVisible;
     private long _cardLyricsSession;
+    private readonly object _updateGate = new();
+    private JsonElement? _pendingUpdate;
+    private bool _sendingUpdate;
+    internal int ProcessId => _process is { HasExited: false } process ? process.Id : 0;
+
+    internal void PublishUpdateState(object snapshot)
+    {
+        lock (_updateGate)
+        {
+            if (_disposed) return;
+            _pendingUpdate = JsonSerializer.SerializeToElement(snapshot, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            if (_sendingUpdate) return;
+            _sendingUpdate = true;
+        }
+        TaskObserver.Observe(PumpUpdateStateAsync(), "update state notification");
+    }
+    private async Task PumpUpdateStateAsync()
+    {
+        try
+        {
+            while (true)
+            {
+                JsonElement payload;
+                lock (_updateGate)
+                {
+                    if (_disposed || _pendingUpdate is null) { _sendingUpdate = false; return; }
+                    payload = _pendingUpdate.Value; _pendingUpdate = null;
+                }
+                await _server.SendCommandAsync(new { version = 1, type = "command", action = "updateStateChanged", payload });
+            }
+        }
+        catch { lock (_updateGate) _sendingUpdate = false; throw; }
+    }
     internal void SetCardLyricsVisible(bool visible, long session)
     {
         if (session < _cardLyricsSession) return;

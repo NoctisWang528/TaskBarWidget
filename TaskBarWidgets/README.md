@@ -2,9 +2,21 @@
 
 Windows 11 任务栏工具，使用 WinUI 3 设置与快捷卡片，整合硬件与网络监测、同步歌词、媒体控制和输入输出音频设备控制。以 TrafficMonitor 任务栏与布局为基础，复用 TaskbarLyrics 歌词效果及 AF-Media-Bar 音频控制。左键面板从上到下为流量、设备、媒体三个等宽独立卡片。电池、功耗、天气直接编入程序，不扫描外部插件 DLL；选项放在硬件页。开发状态与待验收项目见 [验收记录](ACCEPTANCE.md)。
 
-发布 ZIP 从仓库的 [Releases](https://github.com/NoctisWang528/TaskBarWidget/releases) 下载；版本使用构建时刻的 `yymmdd-hhmm`。完整解压到可写目录，保留 `Media/`、`UI/`、`licenses/` 等子目录，再启动根目录的 `TaskBarWidgets.exe`。更新时先退出旧 TaskBarWidgets，备份并迁移配置和历史，再启动新目录中的程序。不要覆盖正在运行的目录。当前桌面验证范围与已知限制见 [ACCEPTANCE.md](ACCEPTANCE.md)。
+发布 ZIP 从仓库的 [Releases](https://github.com/NoctisWang528/TaskBarWidget/releases) 下载；版本使用构建时刻的 `yymmdd-hhmm`。完整解压到可写目录，保留 `Media/`、`UI/`、`licenses/` 等子目录，再启动根目录的 `TaskBarWidgets.exe`。较早版本首次升级需先退出旧程序，备份并迁移配置和历史，再使用含更新器的完整新包；不要手工覆盖正在运行的目录。后续支持下述应用内更新。当前桌面验证范围与已知限制见 [ACCEPTANCE.md](ACCEPTANCE.md)。
 
 所有产品源码与构建依赖均位于此目录。开发工作区可保留 `TrafficMonitor/`、`TaskbarLyrics/`、`AF-Media-Bar/` 三个只读参考目录；它们不跟踪、不随 GitHub 仓库或发布包分发，构建也不读取它们。
+
+## 应用更新
+
+“设置 → 关于”提供检查更新、下载／取消下载、版本、进度与更新说明。默认开启“自动检查并下载更新”，选项立即保存，不需要点击“应用更改”。后台仅使用本仓库的正式 GitHub Release，启动后延迟检查，并按已保存的检查时间、每日周期及服务端限流安排后续检查。草稿、预发布、缺少协议附件或不兼容版本会提示手动更新。
+
+校验完成后，下次打开卡片组会在流量卡片上方增加约 72 DIP 高、同宽同主题的更新提示卡。更新准备好时不会自动弹出卡片或发送系统通知。关于页与提示卡使用同一个安装确认流程；如果设置有草稿、未保存天气密钥／城市选择或天气操作尚未完成，会先提示处理，不自动保存或放弃。确认“安装并重启”后才启动实际替换。
+
+根目录的 `TaskBarWidgets.Updater.exe` 是独立原生更新器。安装时先复制到安装目录外的 `%LOCALAPPDATA%/TaskBarWidgets/Updates/<安装路径哈希>/jobs/<作业 ID>/`，完成预检并取得主程序关闭批准，等待 Native、Media、UI 正常退出；随后备份程序、配置与数据库，在原安装目录更新受管程序文件并重启。开机启动路径保持原目录。不会自动安装 .NET、Windows App Runtime 或 WebView2；缺少依赖时按提示进入官方页面安装后重试。
+
+新版本需要在 60 秒内完成原生初始化及 UI 就绪报告。失败时先请求新进程正常退出，再恢复本次备份并启动旧版本；遇到占用或不安全状态会保留作业和备份。断电或中断后若启动提示需要恢复，请保留整个作业目录，在应用已关闭后，用同一 Windows 用户运行其中的 `recover.cmd`（必要时使用与原程序相同的管理员权限）。它执行该目录内更新器的 `--recover job.json`；不要编辑作业文件或删除未完成备份。当前版本尚无更新器的旧安装不能通过这条链路自行升级，需要先完成一次手动升级。
+
+完整格式、状态与发布附件见[更新协议](docs/更新协议.md)。下载／校验和离屏检查不能代替真实 Explorer、管理员权限、退出重启及回滚的桌面验收。
 
 ## 构建
 
@@ -77,7 +89,7 @@ GitHub 的干净 ZIP 不带任何个人配置或历史。本地个人 build 已�
 
 设置用模块池和模块组合条定义显示内容；水平单行打开时为一条，关闭时为上／下两条。双行的上下项目共用列宽，各列按较宽项目预留空间，间距在列之间统一计算。拖入启用、拖回移除、条内或跨条移动；点击模块在右侧抽屉编辑属性。顶部预览用示例读数展示布局，透明背景使用对比底板。共用外观使用字体／字号与 B、I、U、删除线工具条；位置和监测选项随内容宽度分成一或两列。播放源通过左侧六点柄拖动排序，也支持 Alt + 上下方向键和右侧菜单。设备列表采用浮动菜单，不改变卡片尺寸。旧 WPF 卡片已删除，媒体服务继续复用原有核心逻辑。
 
-`dotnet run --project UI.Tests/TaskBarWidgets.UI.Tests.csproj -c Release` 检查前端管道，`scripts/validate-winui.ps1` 使用独立隐藏宿主检查 WinUI 初始化和卡片物理尺寸。隐藏窗口不能证明完整视觉布局、输入或材质已验收。
+`dotnet run --project UI.Tests/TaskBarWidgets.UI.Tests.csproj -c Release` 检查前端管道，`scripts/validate-winui.ps1` 使用正式发布程序的离屏诊断入口检查 WinUI 初始化和卡片物理尺寸。隐藏窗口不能证明完整视觉布局、输入或材质已验收。
 
 
 ## 发布包检查
@@ -90,6 +102,8 @@ GitHub 的干净 ZIP 不带任何个人配置或历史。本地个人 build 已�
 ```
 
 `test-ui-templates.ps1` 要求正式包中的应用 PRI 与 App.xbf 存在；每次发布也会校验其与本次生成资源的哈希。它使用模拟配置检查宽窄布局、预览和复选框间距，将不含系统 Mica 的控件图写入包内 `ui-layout-check/`，并验证卡片隐藏／重开／销毁竞态。构造成功或无参数启动成功都不能替代模板加载检查。
+
+`scripts/package-release.ps1` 从完整构建制作干净 ZIP、`SHA256SUMS.txt` 和 `update.json`，ZIP 内含逐文件 `app-files.json`。正式上传必须使用已提交的源代码状态，保留第三方许可证并排除个人配置、历史和检查产物。发布先创建 draft、上传全部附件，再下载核对大小、ZIP SHA-256 与清单哈希，确认一致后才公开为正式 Release；缺少更新元数据的附件不能供应用内安装。`-AllowDirtyLocal` 仅用于明确标记的本地交付，不作为正式发布替代。具体步骤见[更新协议的发布流程](docs/更新协议.md#发布流程)。
 
 上一版本的清理使用 `scripts/retire-previous-build.ps1 -PreviousBuild <上一构建目录>` 预览；显式 `-Execute` 才备份、迁移并删除。最新状态见 [ACCEPTANCE.md](ACCEPTANCE.md)。
 

@@ -6,7 +6,7 @@ public:
 	CHistoryTrafficFile(const wstring& file_path);
 	~CHistoryTrafficFile();
 
-	void Save() const;
+	bool Save() const;
 	void SaveTodayOnly() const;	// 仅更新第一行（lines计数）和今天的记录（第二行），用于频繁保存时减少I/O
 	void Load();
 	void LoadSize();			//仅读取文件的大小

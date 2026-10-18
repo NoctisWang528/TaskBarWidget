@@ -29,9 +29,11 @@ internal static class UiTemplateProbe
         object? themeControls = null;
         object? cardLyricsControls = null;
         object? sourceSelector = null;
+        object? updateCard = null, updateControls = null, updateOrdering = null;
         string? error = null;
         try
         {
+            updateOrdering = ((App)app).ProbeUpdateStateOrdering();
             settings = new SettingsWindow(connection);
             TrackActivation(settings);
             settings.AppWindow.IsShownInSwitchers = false;
@@ -47,6 +49,7 @@ internal static class UiTemplateProbe
             cardLyricsControls = await CardLyricsProbe.RunAsync();
             cards = new CardGroup(connection, () => throw new InvalidOperationException("Probe must not invoke settings."));
             cards.ApplyBackendTheme(JsonSerializer.SerializeToElement(new { toolWindowTheme = 2 }));
+            updateCard = await CardGroup.ProbeUpdateCardStateAsync(cards);
             if (cards.CardWindows.Any(card => card.Root.RequestedTheme != ElementTheme.Dark)) throw new InvalidOperationException("Initial panel theme did not apply before Show.");
             cardLifecycle["initialThemeBeforeShow"] = true;
             foreach (var point in new[] { (100d, 100d), (1200d, 900d), (100d, 100d) })
@@ -91,6 +94,7 @@ internal static class UiTemplateProbe
                 checks.Add(new { surface = card.Window.Title, width = card.Root.ActualWidth, loaded = card.Root.IsLoaded, hideShowRacePassed = true });
             }
             themeControls = await SettingsWindow.ProbeThemeControlsAsync(settings, cards);
+            updateControls = await SettingsWindow.ProbeUpdateControlsAsync(settings);
             cardLifecycle["firstShowWithoutActivation"] = true;
             sourceSelector = await CardGroup.ProbeSourceSelectorAsync(cards);
             cardLifecycle["hideThenImmediateShow"] = true;
@@ -123,7 +127,7 @@ internal static class UiTemplateProbe
             var result = resultIndex >= 0 && resultIndex + 1 < args.Length ? args[resultIndex + 1] : Path.Combine(AppContext.BaseDirectory, "template-probe.json");
             var winUiModule = System.Diagnostics.Process.GetCurrentProcess().Modules.Cast<System.Diagnostics.ProcessModule>()
                 .FirstOrDefault(module => string.Equals(module.ModuleName, "Microsoft.ui.xaml.dll", StringComparison.OrdinalIgnoreCase))?.FileName;
-            File.WriteAllText(result, JsonSerializer.Serialize(new { success = error is null, error, runtimeDirectory = RuntimeEnvironment.GetRuntimeDirectory(), winUiModule, checks, cardLifecycle, audioControls, weatherControls, themeControls, cardLyricsControls, sourceSelector, heatmapChecks, layoutChecks, probeActivated = activated, externalForegroundChanged = GetForegroundWindow() != before }, new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(result, JsonSerializer.Serialize(new { success = error is null, error, runtimeDirectory = RuntimeEnvironment.GetRuntimeDirectory(), winUiModule, checks, cardLifecycle, audioControls, weatherControls, themeControls, cardLyricsControls, sourceSelector, heatmapChecks, updateCard, updateControls, updateOrdering, layoutChecks, probeActivated = activated, externalForegroundChanged = GetForegroundWindow() != before }, new JsonSerializerOptions { WriteIndented = true }));
             Environment.ExitCode = error is null ? 0 : 1;
             app.Exit();
         }

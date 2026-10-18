@@ -7,6 +7,8 @@ using Microsoft.Win32;
 using TaskBarWidgets.Media.Integration;
 using TaskbarLyrics.Core.Database;
 using TaskbarLyrics.Core.Utilities;
+using TaskBarWidgets.Media.Updates;
+using System.Reflection;
 
 namespace TaskbarLyrics.App;
 
@@ -21,6 +23,9 @@ public partial class App : System.Windows.Application
     private MediaPipeServer? _pipe;
     private NativeSettingsClient? _nativeSettings;
     private UiHostBridge? _ui;
+    private UpdateCoordinator? _updates;
+    private UpdateInstallBridge? _updateInstaller;
+    private UpdateSnapshot _updateUnavailable = new() { Phase = "error", Error = "更新服务尚未准备好。" };
     private readonly AudioDeviceService _audio = new();
     private SettingsWindow? _settingsWindow;
     private SpectrumTuningWindow? _tuningWindow;
@@ -58,10 +63,26 @@ public partial class App : System.Windows.Application
                 _media.Snapshot, command => Dispatcher.InvokeAsync(() => HandleCommandAsync(command)).Task.Unwrap());
             _media.FrameReady += _pipe.Publish;
             _nativeSettings = new NativeSettingsClient((message, token) => _pipe.SendCommandAsync(message, token));
+            var currentVersion = typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion?.Split('+')[0] ?? "";
             _ui = new UiHostBridge((command, token) => Dispatcher.InvokeAsync(() => HandleUiRequestAsync(command, token)).Task.Unwrap());
+            try
+            {
+                _updates = new UpdateCoordinator(applicationRoot, currentVersion, Settings.ProductAutomaticUpdatesEnabled,
+                    snapshot => _ui?.PublishUpdateState(snapshot));
+                _updateInstaller = new UpdateInstallBridge(_updates, _nativeSettings, _ui, _host, applicationRoot, AppDataPaths.RootDirectory);
+            }
+            catch (Exception error)
+            {
+                Log.Warn("Update service unavailable: " + error.GetType().Name);
+                _updateUnavailable = new UpdateSnapshot { Revision = 1, Phase = "error", CurrentVersion = currentVersion,
+                    AutomaticEnabled = Settings.ProductAutomaticUpdatesEnabled,
+                    Error = "更新服务初始化失败：" + error.Message, Message = "媒体功能可继续使用。请检查目录权限，或手动下载更新后重启。" };
+            }
             _media.CardFrameReady += _ui.PublishCardLyrics;
             _pipe.Start();
             _media.Start();
+            _updates?.Start();
+            if (_updateInstaller is not null) TaskObserver.Observe(_updateInstaller.ReportPreviousFailureAsync(_stop.Token), "previous update outcome");
             TaskObserver.Observe(WatchHostAsync(), "parent lifecycle");
             SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
         }
@@ -88,6 +109,7 @@ public partial class App : System.Windows.Application
             case "nativeSettings": _nativeSettings?.Receive(command); break;
             case "trafficHistory": _nativeSettings?.Receive(command); break;
             case "weatherResult": _nativeSettings?.Receive(command); break;
+            case "updateResult": _nativeSettings?.Receive(command); break;
             case "shutdown":
                 _ = Dispatcher.BeginInvoke(() => TaskObserver.Observe(ShutdownAsync(), "helper shutdown"));
                 break;
@@ -132,6 +154,22 @@ public partial class App : System.Windows.Application
         var payload = request.TryGetProperty("payload", out var body) ? body : default;
         switch (action)
         {
+            case "getUpdateState": return _updates?.Snapshot ?? _updateUnavailable;
+            case "checkForUpdates": return _updates?.Check() ?? _updateUnavailable;
+            case "downloadUpdate": return _updates?.Download() ?? _updateUnavailable;
+            case "cancelUpdateDownload": return _updates?.CancelDownload() ?? _updateUnavailable;
+            case "setAutomaticUpdates":
+                var preference = Settings.Clone();
+                preference.ProductAutomaticUpdatesEnabled = payload.GetProperty("enabled").GetBoolean();
+                if (!SaveSettings(preference)) throw new IOException("更新设置保存失败，原设置保持不变。");
+                return _updates?.Snapshot ?? _updateUnavailable;
+            case "installUpdate":
+                if (!payload.TryGetProperty("confirmed", out var confirmed) || confirmed.ValueKind != JsonValueKind.True)
+                    throw new InvalidOperationException("安装前必须确认重启。");
+                return _updateInstaller?.Begin(_stop.Token) ?? _updateUnavailable;
+            case "reportUiReady":
+                await _nativeSettings!.RequestAsync("updateUiReady", cancellationToken: token);
+                return new { success = true };
             case "subscribeCardLyrics":
                 var cardVisible = payload.GetProperty("visible").GetBoolean();
                 var cardSession = payload.GetProperty("session").GetInt64();
@@ -247,6 +285,13 @@ public partial class App : System.Windows.Application
         var updated = settings.Clone();
         if (_store?.Save(updated) != true) return false;
         Settings = updated;
+        if (_updates is not null && _updates.Snapshot.AutomaticEnabled != Settings.ProductAutomaticUpdatesEnabled)
+            _updates.SetAutomatic(Settings.ProductAutomaticUpdatesEnabled);
+        if (_updates is null && _updateUnavailable.AutomaticEnabled != Settings.ProductAutomaticUpdatesEnabled)
+        {
+            _updateUnavailable = _updateUnavailable with { Revision = _updateUnavailable.Revision + 1, AutomaticEnabled = Settings.ProductAutomaticUpdatesEnabled };
+            _ui?.PublishUpdateState(_updateUnavailable);
+        }
         NativeWindowTheme.SetMode(Settings.ToolWindowTheme);
         _media?.ApplySettings(Settings);
         _media?.ApplyTuning(Settings.SpectrumTuning);
@@ -298,6 +343,7 @@ public partial class App : System.Windows.Application
         _nativeSettings?.Dispose();
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
         _stop.Cancel();
+        if (_updates is not null) TaskObserver.Observe(_updates.DisposeAsync().AsTask(), "update service shutdown");
         _settingsWindow?.Close(); _tuningWindow?.Close(); _timelineWindow?.Close();
         _audio.Dispose();
         if (_ui is not null) TaskObserver.Observe(_ui.DisposeAsync().AsTask(), "WinUI shutdown");
@@ -313,6 +359,7 @@ public partial class App : System.Windows.Application
         _shutdownRequested = true;
         _nativeSettings?.Dispose();
         _stop.Cancel();
+        if (_updates is not null) await _updates.DisposeAsync();
         // Window-close callbacks may restore previews. Run them while media services
         // still exist, then stop input producers before releasing those services.
         _settingsWindow?.Close();

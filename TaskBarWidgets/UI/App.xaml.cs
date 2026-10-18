@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 
 namespace TaskBarWidgets.UI;
 
@@ -14,6 +15,8 @@ public partial class App : Application
     private Window? _lifetimeWindow;
     private DispatcherQueue? _dispatcher;
     private bool _stopping;
+    private UpdateUiState _updateState = new();
+    private bool _installConfirmationOpen, _uiReadyReported;
 
     public App()
     {
@@ -59,6 +62,7 @@ public partial class App : Application
         _lifetimeWindow.AppWindow.Hide();
         _connection = new UiConnection(arguments[pipeIndex + 1]);
         _connection.EventReceived += OnBackendEvent;
+        _connection.ConnectionChanged += OnBackendConnectionChanged;
         _connection.Start();
         _ = WatchHostAsync(hostPid);
         // User-facing windows are created only when the backend requests them.
@@ -82,6 +86,9 @@ public partial class App : Application
                     payload.TryGetProperty("y", out var y) && y.TryGetDouble(out var py) && double.IsFinite(py))
                 {
                     _cards ??= new CardGroup(_connection, () => OpenSettings(null));
+                    _cards.InstallUpdateRequested -= OnInstallUpdateRequested;
+                    _cards.InstallUpdateRequested += OnInstallUpdateRequested;
+                    _cards.SetUpdateState(_updateState);
                     if (_settings?.ThemePreview is { } preview) _cards.SetThemePreview(preview);
                     _cards.ApplyBackendTheme(payload);
                     var entryWindow = payload.TryGetProperty("entryWindow", out var entry) && entry.ValueKind == JsonValueKind.Number &&
@@ -95,6 +102,12 @@ public partial class App : Application
                 break;
             case "cardLyricsFrame":
                 _cards?.ReceiveLyrics(message);
+                break;
+            case "uiReady":
+                _ = RefreshUpdateStateAsync();
+                break;
+            case "updateStateChanged":
+                AcceptUpdateState(payload);
                 break;
             case "shutdown":
                 Stop();
@@ -110,10 +123,68 @@ public partial class App : Application
         {
             _settings = new SettingsWindow(_connection);
             _settings.ThemePreviewChanged += theme => _cards?.SetThemePreview(theme);
+            _settings.UpdateStateReceived += AcceptUpdateState;
+            _settings.InstallUpdateRequested += OnInstallUpdateRequested;
+            _settings.SetUpdateState(_updateState);
             _settings.Closed += (_, args) => { if (!args.Handled) _settings = null; };
         }
         _settings.ShowPage(page);
         _settings.Activate();
+    }
+
+    private void OnBackendConnectionChanged(bool connected)
+    {
+        if (connected) _dispatcher?.TryEnqueue(() => { if (!_stopping) _ = RefreshUpdateStateAsync(); });
+    }
+
+    private async Task RefreshUpdateStateAsync()
+    {
+        if (_connection is null || _stopping) return;
+        try
+        {
+            AcceptUpdateState(await _connection.RequestAsync("getUpdateState", cancellationToken: _lifetime.Token));
+            if (!_uiReadyReported)
+            {
+                _uiReadyReported = true;
+                try { await _connection.RequestAsync("reportUiReady", cancellationToken: _lifetime.Token); }
+                catch { _uiReadyReported = false; throw; }
+            }
+        }
+        catch (Exception error) when (error is IOException or InvalidOperationException or OperationCanceledException or ObjectDisposedException) { }
+    }
+
+    private void AcceptUpdateState(JsonElement payload)
+    {
+        var state = UpdateUiState.Parse(payload);
+        if (_stopping || state is null || state.Revision <= _updateState.Revision) return;
+        _updateState = state;
+        _cards?.SetUpdateState(state);
+        _settings?.SetUpdateState(state);
+    }
+
+    private async void OnInstallUpdateRequested()
+    {
+        if (_installConfirmationOpen || !_updateState.CanInstall || _updateState.Phase != "ready" || _connection is null || _stopping) return;
+        _installConfirmationOpen = true;
+        var version = _updateState.LatestVersion;
+        try
+        {
+            _cards?.Hide();
+            // Check before navigation: changing the page disposes its weather editor.
+            if (_settings?.HasPendingChanges == true)
+            {
+                _settings.Activate();
+                await _settings.ShowUpdateDialogAsync(true, version);
+                return;
+            }
+            OpenSettings("about");
+            if (_settings is null) return;
+            if (await _settings.ShowUpdateDialogAsync(false, version) != ContentDialogResult.Primary) return;
+            if (_settings.HasPendingChanges || !_updateState.CanInstall || _updateState.Phase != "ready" || _updateState.LatestVersion != version) return;
+            AcceptUpdateState(await _connection.RequestAsync("installUpdate", new { confirmed = true }, _lifetime.Token));
+        }
+        catch (Exception error) when (error is not OutOfMemoryException) { if (!_stopping) _settings?.ShowUpdateError(error.Message); }
+        finally { _installConfirmationOpen = false; }
     }
 
     private async Task WatchHostAsync(int hostPid)
@@ -139,6 +210,7 @@ public partial class App : Application
         if (_connection is not null)
         {
             _connection.EventReceived -= OnBackendEvent;
+            _connection.ConnectionChanged -= OnBackendConnectionChanged;
             _connection.Dispose();
         }
         _lifetime.Dispose();

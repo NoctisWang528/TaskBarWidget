@@ -4,6 +4,7 @@
 
 #include "stdafx.h"
 #include "SharedDependencies.h"
+#include "UpdateHealth.h"
 #include <roapi.h>
 #include "TrafficMonitor.h"
 #include "../Builtins/BuiltinFeatures.h"
@@ -804,6 +805,7 @@ BOOL CTrafficMonitorApp::InitInstance()
         return FALSE;
     }
     m_runtime_initialized = true;
+    if (!UpdateHealth::Initialize(CCommon::GetModuleDir(), VERSION)) return FALSE;
     // Validate before loading user settings, hardware or spawning managed helpers.
     if (!EnsureSharedDependencies(CCommon::GetModuleDir())) return FALSE;
     //替换掉对话框程序的默认类名

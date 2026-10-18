@@ -3,6 +3,7 @@
 #include "MediaDisplayState.h"
 #include "MediaNavigationPolicy.h"
 #include "ManagedRuntimeEnvironment.h"
+#include "UpdateHealth.h"
 #include "TrafficMonitor.h"
 #include "NativeSettingsBridge.h"
 #include "NativeWeatherBridge.h"
@@ -131,6 +132,44 @@ struct NativeMediaHost::Impl : std::enable_shared_from_this<NativeMediaHost::Imp
         {try {reply.SetNamedValue(L"payload",NativeSettingsBridge().Describe());} catch(...) {Log(L"Could not read native settings after failure.",E_FAIL);}}
         Send(reply);
     }
+    void UpdateCommand(const JsonObject& request)
+    {
+        auto reply = Command(L"updateResult");
+        reply.SetNamedValue(L"requestId", JsonValue::CreateStringValue(request.GetNamedString(L"requestId", L"")));
+        try
+        {
+            const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+            if (!NativeSettingsValidation::Unexpired(request.GetNamedNumber(L"expiresAt", 0), now)) throw std::runtime_error("Update request expired.");
+            const auto action = request.GetNamedString(L"action");
+            JsonObject payload;
+            if (action == L"getUpdateContext")
+            {
+                payload.SetNamedValue(L"installRoot", JsonValue::CreateStringValue(theApp.m_module_dir));
+                payload.SetNamedValue(L"nativeDataRoot", JsonValue::CreateStringValue(theApp.m_config_dir));
+                payload.SetNamedValue(L"portableMode", JsonValue::CreateBooleanValue(theApp.m_general_data.portable_mode));
+            }
+            else if (action == L"updateUiReady") UpdateHealth::Report(VERSION);
+            else if (action == L"exitForUpdate")
+            {
+                auto values = request.GetNamedObject(L"payload");
+                auto job = UpdateHealth::Verify(values.GetNamedString(L"jobPath").c_str(), values.GetNamedString(L"nonce").c_str(), theApp.m_module_dir);
+                auto monitor = CTrafficMonitorDlg::Instance();
+                if (!monitor || !monitor->FlushForUpdate()) throw std::runtime_error("Cannot save settings or traffic history; update cancelled.");
+                JsonObject approval; approval.SetNamedValue(L"nonce", JsonValue::CreateStringValue(job.nonce));
+                UpdateHealth::Write(job.work / L"shutdown-approved.json", approval);
+                if (!SetTimer(nullptr, 0, 250, [](HWND, UINT, UINT_PTR timer, DWORD) {
+                    KillTimer(nullptr, timer);
+                    if (theApp.m_pMainWnd) PostMessageW(theApp.m_pMainWnd->GetSafeHwnd(), WM_CLOSE, 0, 0);
+                })) { DeleteFileW((job.work / L"shutdown-approved.json").c_str()); throw std::runtime_error("Cannot schedule update shutdown."); }
+            }
+            reply.SetNamedValue(L"payload", payload); reply.SetNamedValue(L"success", JsonValue::CreateBooleanValue(true));
+        }
+        catch (const std::exception& error)
+        { reply.SetNamedValue(L"success", JsonValue::CreateBooleanValue(false)); reply.SetNamedValue(L"error", JsonValue::CreateStringValue(winrt::to_hstring(error.what()))); }
+        catch (const winrt::hresult_error& error)
+        { reply.SetNamedValue(L"success", JsonValue::CreateBooleanValue(false)); reply.SetNamedValue(L"error", JsonValue::CreateStringValue(error.message())); }
+        Send(reply);
+    }
     void WeatherCommand(const JsonObject& request)
     {
         auto reply = Command(L"weatherResult");
@@ -223,6 +262,7 @@ struct NativeMediaHost::Impl : std::enable_shared_from_this<NativeMediaHost::Imp
         const auto action = message.GetNamedString(L"action", L"");
         if (action == L"togglePanel" || action == L"openSettings")
         {
+            if (UpdateHealth::AwaitingHealth()) return;
             const DWORD pid = helperPid;
             if (pid) AllowSetForegroundWindow(pid);
         }
@@ -673,6 +713,7 @@ struct NativeMediaHost::Impl : std::enable_shared_from_this<NativeMediaHost::Imp
                 else if(type==L"disconnected") { state.Disconnect(); documentReady=false; pendingScripts.clear(); pendingScriptBytes=0; Failure(L"Media helper disconnected; monitoring remains active while reconnecting.",HRESULT_FROM_WIN32(ERROR_BROKEN_PIPE)); }
                 else if(type==L"error") Failure(message.GetNamedString(L"message",L"").c_str(),E_FAIL);
                 else if(type==L"command" && (message.GetNamedString(L"action",L"")==L"getNativeSettings" || message.GetNamedString(L"action",L"")==L"applyNativeSettings")) NativeSettings(message);
+                else if(type==L"command" && (message.GetNamedString(L"action",L"")==L"getUpdateContext" || message.GetNamedString(L"action",L"")==L"exitForUpdate" || message.GetNamedString(L"action",L"")==L"updateUiReady")) UpdateCommand(message);
                 else if(type==L"command" && message.GetNamedString(L"action",L"")==L"getTrafficHistory") TrafficHistory(message);
                 else if(type==L"command" && message.GetNamedString(L"action",L"")==L"weatherCommand") WeatherCommand(message);
                 else if(type==L"command" && message.GetNamedString(L"action",L"")==L"openMonitorSettings")

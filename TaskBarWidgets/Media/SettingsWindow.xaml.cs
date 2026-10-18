@@ -2072,6 +2072,7 @@ public partial class SettingsWindow : System.Windows.Window
         target.AutoHideWhenNoPlayback = source.AutoHideWhenNoPlayback;
         target.StartWithWindows = source.StartWithWindows;
         target.AutoCheckUpdates = source.AutoCheckUpdates;
+        target.ProductAutomaticUpdatesEnabled = source.ProductAutomaticUpdatesEnabled;
         target.LastUpdateCheckUtc = source.LastUpdateCheckUtc;
         target.LastNotifiedUpdateVersion = source.LastNotifiedUpdateVersion;
         target.ShowLyricTranslation = source.ShowLyricTranslation;

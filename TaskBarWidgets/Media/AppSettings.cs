@@ -125,6 +125,9 @@ public sealed class AppSettings
 
     public bool AutoCheckUpdates { get; set; } = true;
 
+    // Product updater only. The inherited lyrics project's updater stays disabled.
+    public bool ProductAutomaticUpdatesEnabled { get; set; } = true;
+
     public DateTimeOffset? LastUpdateCheckUtc { get; set; }
 
     public string LastNotifiedUpdateVersion { get; set; } = "";
