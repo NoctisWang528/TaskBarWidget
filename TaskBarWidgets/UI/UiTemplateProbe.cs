@@ -68,41 +68,31 @@ internal static class UiTemplateProbe
                         bounds.Size.Width != expectedWidth)
                         throw new InvalidOperationException("Hidden card geometry is invalid.");
                 }
-                // Reading order fills the left column first, then the right column.
-                // Same column shares X; each row starts below the previous row, and
-                // every column bottom-aligns to the tallest column.
-                for (var index = 0; index < baseWindows.Length; index++)
+                // Cards choose their column freely, so group the result by X.
+                var baseColumns = baseWindows
+                    .GroupBy(card => card.Window.AppWindow.Position.X)
+                    .OrderBy(group => group.Key)
+                    .ToArray();
+                if (baseWindows.Length > 0 && baseColumns.Length > 2)
+                    throw new InvalidOperationException("Quick cards overflow the two available columns.");
+                foreach (var column in baseColumns)
                 {
-                    var bounds = baseWindows[index].Window.AppWindow;
-                    if (index >= 2)
+                    var ordered = column.OrderBy(card => card.Window.AppWindow.Position.Y).ToArray();
+                    for (var index = 1; index < ordered.Length; index++)
                     {
-                        var previous = baseWindows[index - 2].Window.AppWindow;
+                        var bounds = ordered[index].Window.AppWindow;
+                        var previous = ordered[index - 1].Window.AppWindow;
                         if (bounds.Position.X != previous.Position.X || bounds.Position.Y <= previous.Position.Y + previous.Size.Height)
                             throw new InvalidOperationException("Cards in the same column overlap or are misaligned.");
                     }
-                    if (index == 1)
-                    {
-                        var first = baseWindows[0].Window.AppWindow;
-                        if (bounds.Position.X <= first.Position.X)
-                            throw new InvalidOperationException("Second card did not start the right column to the right of the first card.");
-                    }
                 }
-                // The two columns are bottom-aligned: the lowest bottom edge of the
-                // left column equals the lowest bottom edge of the right column.
-                double BottomEdge(CardWindow card)
+                // Every populated column bottom-aligns to the tallest column.
+                if (baseColumns.Length >= 2)
                 {
-                    var rect = card.Window.AppWindow;
-                    return rect.Position.Y + rect.Size.Height;
-                }
-                if (baseWindows.Length >= 2)
-                {
-                    var leftBottom = (double)(baseWindows[0].Window.AppWindow.Position.Y + baseWindows[0].Window.AppWindow.Size.Height);
-                    for (var index = 2; index < baseWindows.Length; index += 2)
-                        leftBottom = Math.Max(leftBottom, BottomEdge(baseWindows[index]));
-                    var rightBottom = (double)(baseWindows[1].Window.AppWindow.Position.Y + baseWindows[1].Window.AppWindow.Size.Height);
-                    for (var index = 3; index < baseWindows.Length; index += 2)
-                        rightBottom = Math.Max(rightBottom, BottomEdge(baseWindows[index]));
-                    if (Math.Abs(leftBottom - rightBottom) > 1)
+                    var bottoms = baseColumns
+                        .Select(column => column.Max(card => card.Window.AppWindow.Position.Y + card.Window.AppWindow.Size.Height))
+                        .ToArray();
+                    if (Math.Abs(bottoms[0] - bottoms[1]) > 1)
                         throw new InvalidOperationException("Base columns are not bottom-aligned.");
                 }
             }

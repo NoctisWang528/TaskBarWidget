@@ -275,7 +275,7 @@ public partial class App : System.Windows.Application
         if (_ui is not null) TaskObserver.Observe(_ui.SendAsync("togglePanel", area.Left + area.Width / 2.0, area.Bottom,
             toolWindowTheme: (int)Settings.ToolWindowTheme, quickCards: QuickCards()), "WinUI cards");
     }
-    private object QuickCards() => new { order = Settings.QuickCardOrder, enabled = Settings.QuickCardEnabled,
+    private object QuickCards() => new { order = Settings.QuickCardOrder, columns = Settings.QuickCardColumns, enabled = Settings.QuickCardEnabled,
         resourceMode = Settings.QuickCardResourceMode.ToString(), weatherModules = Settings.WeatherCardModules };
     internal void ShowLyricsWindow() => SendNativeCommand("showMedia");
     private void SendNativeCommand(string action)

@@ -16,7 +16,7 @@ public partial class App : Application
     private DispatcherQueue? _dispatcher;
     private bool _stopping;
     private UpdateUiState _updateState = new();
-    private bool _installConfirmationOpen, _uiReadyReported;
+    private bool _installConfirmationOpen, _uiReadyReported, _installAfterDownload;
     private JsonElement _quickCards;
 
     public App()
@@ -90,8 +90,8 @@ public partial class App : Application
                         _quickCards = quickCards.Clone();
                     _cards ??= new CardGroup(_connection, OpenSettings);
                     _cards.ApplyQuickCards(_quickCards);
-                    _cards.InstallUpdateRequested -= OnInstallUpdateRequested;
-                    _cards.InstallUpdateRequested += OnInstallUpdateRequested;
+                    _cards.UpdateActionRequested -= OnUpdateActionRequested;
+                    _cards.UpdateActionRequested += OnUpdateActionRequested;
                     _cards.SetUpdateState(_updateState);
                     if (_settings?.ThemePreview is { } preview) _cards.SetThemePreview(preview);
                     _cards.ApplyBackendTheme(payload);
@@ -164,6 +164,27 @@ public partial class App : Application
         _updateState = state;
         _cards?.SetUpdateState(state);
         _settings?.SetUpdateState(state);
+        if (_installAfterDownload)
+        {
+            if (state.Phase == "ready" && state.CanInstall) { _installAfterDownload = false; OnInstallUpdateRequested(); }
+            else if (state.Phase is not ("downloading" or "verifying")) _installAfterDownload = false;
+        }
+    }
+
+    // The card offers "下载并安装" before a package exists and "更新并重启"
+    // once it is verified; both end in the same explicit install confirmation.
+    private async void OnUpdateActionRequested()
+    {
+        if (_connection is null || _stopping) return;
+        if (_updateState.Phase == "ready" && _updateState.CanInstall) { OnInstallUpdateRequested(); return; }
+        if (_updateState.Phase != "available" || !_updateState.CanDownload) return;
+        _installAfterDownload = true;
+        try { AcceptUpdateState(await _connection.RequestAsync("downloadUpdate", null, _lifetime.Token)); }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            _installAfterDownload = false;
+            if (!_stopping) _settings?.ShowUpdateError(error.Message);
+        }
     }
 
     private async void OnInstallUpdateRequested()

@@ -55,7 +55,7 @@ public sealed partial class CardGroup
     private readonly StackPanel _weatherWindBlock = new() { Spacing = 2, Margin = new Thickness(0, 0, 0, 8) };
     private readonly StackPanel _weatherAirBlock = new() { Spacing = 2, Margin = new Thickness(0, 0, 0, 8) };
     private readonly StackPanel _weatherPrecipitationBlock = new() { Spacing = 2, Margin = new Thickness(0, 0, 0, 8) };
-    private readonly StackPanel _weatherUpdatedBlock = new() { Spacing = 2, Margin = new Thickness(0, 0, 0, 8) };
+    private readonly StackPanel _weatherUpdatedBlock = new() { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Thickness(0, 0, 0, 8) };
     private readonly StackPanel _weatherAlerts = new() { Spacing = 6 };
     private readonly ScrollViewer _weatherAlertsHost = new()
     {
@@ -153,7 +153,13 @@ public sealed partial class CardGroup
         AddWeatherField(_weatherWindBlock, "风", _weatherWind, 3);
         AddWeatherField(_weatherAirBlock, "空气质量", _weatherAir, 4);
         AddWeatherField(_weatherPrecipitationBlock, "降水", _weatherPrecipitation, 5);
-        AddWeatherField(_weatherUpdatedBlock, "更新时间", _weatherUpdated, 6);
+        var updatedLabel = Text("更新时间：", 11);
+        Secondary(updatedLabel);
+        updatedLabel.VerticalAlignment = VerticalAlignment.Center;
+        _weatherUpdated.VerticalAlignment = VerticalAlignment.Center;
+        _weatherUpdatedBlock.Children.Add(updatedLabel);
+        _weatherUpdatedBlock.Children.Add(_weatherUpdated);
+        AddWeatherModule(_weatherUpdatedBlock, 6);
 
         _weatherAlertsHost.Content = _weatherAlerts;
         AddWeatherModule(_weatherAlertsHost, 7);

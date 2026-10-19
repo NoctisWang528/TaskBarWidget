@@ -87,12 +87,18 @@ internal static class UiLayoutProbe
             var cardIds = new[] { "weather", "traffic", "device", "media" };
             var cells = Walk(content).OfType<Border>().Where(border => border.Tag is string tag && cardIds.Contains(tag)).ToList();
             if (cells.Count < 2) throw new InvalidOperationException("Quick-card reorder grid did not realize its cells.");
-            var cellPositions = cells.Select(cell => (Row: Grid.GetRow(cell), Column: Grid.GetColumn(cell))).ToArray();
-            if (cellPositions.Distinct().Count() != cells.Count || cellPositions.Any(cell => cell.Column is not (0 or 1)))
-                throw new InvalidOperationException("Quick-card reorder cells overlap or are not a two-column grid.");
             if (cells.Select(cell => Math.Round(cell.ActualHeight)).Distinct().Count() != 1)
                 throw new InvalidOperationException("Quick-card reorder cells are not equal height.");
-            checks.Add(new { kind = "settingsQuickCardsGrid", requestedPhysicalWidth = width, cells = cells.Count, rows = cellPositions.Select(cell => cell.Row).Distinct().Count(), cellHeight = cells[0].ActualHeight });
+            // Each column is an independent drop zone, so group the cells by the
+            // X they ended up at instead of assuming a balanced two-row table.
+            var cardColumns = cells
+                .GroupBy(cell => Math.Round(cell.TransformToVisual(content).TransformPoint(new Point(0, 0)).X))
+                .OrderBy(group => group.Key)
+                .ToArray();
+            if (cardColumns.Length > 2) throw new InvalidOperationException("Quick-card reorder cells exceed the two available columns.");
+            if (cardColumns.Any(column => column.Select(cell => Math.Round(cell.ActualWidth)).Distinct().Count() != 1))
+                throw new InvalidOperationException("Quick-card reorder cells are not equal width.");
+            checks.Add(new { kind = "settingsQuickCardsGrid", requestedPhysicalWidth = width, cells = cells.Count, columns = cardColumns.Length, cellHeight = cells[0].ActualHeight });
         }
         return checks;
     }

@@ -1312,6 +1312,7 @@ public partial class SettingsWindow : System.Windows.Window
             EnableWordScanning = _settings.EnableWordScanning,
             ToolWindowTheme = _settings.ToolWindowTheme,
             QuickCardOrder = _settings.QuickCardOrder.ToList(),
+            QuickCardColumns = new Dictionary<string, int>(_settings.QuickCardColumns ?? [], StringComparer.Ordinal),
             QuickCardEnabled = new Dictionary<string, bool>(_settings.QuickCardEnabled, StringComparer.Ordinal),
             QuickCardResourceMode = _settings.QuickCardResourceMode,
             WeatherCardModules = new Dictionary<string, bool>(_settings.WeatherCardModules, StringComparer.Ordinal),
@@ -1588,6 +1589,15 @@ public partial class SettingsWindow : System.Windows.Window
             case "quickCardOrder":
                 _settings.QuickCardOrder = ReadStringList(element);
                 _settings.NormalizeQuickCards();
+                break;
+            case "quickCardColumns":
+                if (element.ValueKind == JsonValueKind.Object)
+                {
+                    _settings.QuickCardColumns = element.EnumerateObject()
+                        .Where(item => item.Value.ValueKind == JsonValueKind.Number && item.Value.TryGetInt32(out var column) && (column == 0 || column == 1))
+                        .ToDictionary(item => item.Name, item => item.Value.GetInt32(), StringComparer.Ordinal);
+                    _settings.NormalizeQuickCards();
+                }
                 break;
             case "quickCardEnabled":
                 if (element.ValueKind == JsonValueKind.Object) {
@@ -2108,6 +2118,7 @@ public partial class SettingsWindow : System.Windows.Window
         target.EnableWordScanning = source.EnableWordScanning;
         target.ToolWindowTheme = source.ToolWindowTheme;
         target.QuickCardOrder = source.QuickCardOrder.ToList();
+        target.QuickCardColumns = new Dictionary<string, int>(source.QuickCardColumns ?? [], StringComparer.Ordinal);
         target.QuickCardEnabled = new Dictionary<string, bool>(source.QuickCardEnabled, StringComparer.Ordinal);
         target.QuickCardResourceMode = source.QuickCardResourceMode;
         target.WeatherCardModules = new Dictionary<string, bool>(source.WeatherCardModules, StringComparer.Ordinal);
@@ -2238,6 +2249,7 @@ public partial class SettingsWindow : System.Windows.Window
         public bool EnableWordScanning { get; set; }
         public ToolWindowTheme ToolWindowTheme { get; set; }
         public List<string> QuickCardOrder { get; set; } = [];
+        public Dictionary<string, int> QuickCardColumns { get; set; } = new(StringComparer.Ordinal);
         public Dictionary<string, bool> QuickCardEnabled { get; set; } = new(StringComparer.Ordinal);
         public QuickCardResourceMode QuickCardResourceMode { get; set; }
         public Dictionary<string, bool> WeatherCardModules { get; set; } = new(StringComparer.Ordinal);

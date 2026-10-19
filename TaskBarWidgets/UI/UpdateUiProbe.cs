@@ -30,14 +30,15 @@ public sealed partial class CardGroup
     internal static async Task<object> ProbeUpdateCardStateAsync(CardGroup cards)
     {
         // An update that is merely available must already surface the notice
-        // card; only the install action waits for the downloaded/verified state.
+        // card with a download-and-install action.
         cards.SetUpdateState(new UpdateUiState(9, "available", LatestVersion: "991231-2359", CanDownload: true));
-        if (cards.CardWindows.Count != 5 || cards._updateInstall.IsEnabled)
-            throw new InvalidOperationException("An available update did not surface the update card.");
+        if (cards.CardWindows.Count != 5 || !cards._updateInstall.IsEnabled || !Equals(cards._updateInstall.Content, "下载并安装"))
+            throw new InvalidOperationException("An available update did not surface the update card with a download-and-install action.");
         var ready = new UpdateUiState(10, "ready", LatestVersion: "991231-2359", CanInstall: true);
         cards.SetUpdateState(ready);
         if (cards.CardWindows.Count != 5 || !ReferenceEquals(cards.CardWindows[^1], cards._updateCard) ||
-            cards._updateCard.Height != 180 || IsWindowVisible(cards._updateCard.Handle) || !cards._updateInstall.IsEnabled)
+            cards._updateCard.Height != 180 || IsWindowVisible(cards._updateCard.Handle) || !cards._updateInstall.IsEnabled ||
+            !Equals(cards._updateInstall.Content, "更新并重启"))
             throw new InvalidOperationException("Ready update card must be the second column and stay hidden until the group is opened.");
         cards.Position(100, 100);
         var bounds = cards._updateCard.Window.AppWindow;
@@ -70,13 +71,13 @@ public sealed partial class CardGroup
         }
         var requested = 0;
         void Install() => requested++;
-        cards.InstallUpdateRequested += Install;
+        cards.UpdateActionRequested += Install;
         try {
             var invoke = (IInvokeProvider)new ButtonAutomationPeer(cards._updateInstall).GetPattern(PatternInterface.Invoke);
             invoke.Invoke(); invoke.Invoke(); await Task.Delay(40);
             if (requested != 2) throw new InvalidOperationException("Update card did not route clicks to App confirmation.");
         }
-        finally { cards.InstallUpdateRequested -= Install; }
+        finally { cards.UpdateActionRequested -= Install; }
         await cards._updateCard.HideAsync(animate: false);
         cards.SetUpdateState(ready with { Phase = "preparing", CanInstall = false });
         if (cards.CardWindows.Count != 4) throw new InvalidOperationException("Preparing update card did not disappear.");

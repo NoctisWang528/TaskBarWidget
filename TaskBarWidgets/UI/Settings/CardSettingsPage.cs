@@ -30,9 +30,10 @@ public sealed partial class SettingsWindow
         ("alerts", "天气预警")
     ];
 
-    private readonly List<Border> _cardOrderRows = [];
-    private int _cardOrderDragTarget = -1;
-    private JsonArray QuickCardOrderValues()
+    private readonly List<(Border Cell, int Column, int Slot)> _cardOrderCells = [];
+    private int _cardOrderDragColumn = -1;
+    private int _cardOrderDragSlot = -1;
+    private List<string> QuickCardOrderList()
     {
         var value = _media.Get("quickCardOrder") as JsonArray;
         var result = (value ?? []).OfType<JsonValue>()
@@ -42,15 +43,42 @@ public sealed partial class SettingsWindow
             .ToList();
         foreach (var card in QuickCardDefinitions)
             if (!result.Contains(card.Id, StringComparer.Ordinal)) result.Add(card.Id);
-        return new JsonArray(result.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray());
+        return result;
+    }
+
+    private Dictionary<string, int> QuickCardColumnValues()
+    {
+        var result = new Dictionary<string, int>(StringComparer.Ordinal);
+        if (_media.Get("quickCardColumns") is JsonObject value)
+            foreach (var item in value)
+                if (item.Value is JsonValue column && column.TryGetValue<int>(out var number) && (number == 0 || number == 1))
+                    result[item.Key] = number;
+        var order = QuickCardOrderList();
+        for (var index = 0; index < order.Count; index++)
+            if (!result.ContainsKey(order[index])) result[order[index]] = index % 2;
+        foreach (var key in result.Keys.Where(key => !QuickCardDefinitions.Any(card => card.Id == key)).ToArray())
+            result.Remove(key);
+        return result;
+    }
+
+    private (List<string> Left, List<string> Right) QuickCardLayout()
+    {
+        var order = QuickCardOrderList();
+        var columns = QuickCardColumnValues();
+        return (order.Where(id => columns[id] == 0).ToList(), order.Where(id => columns[id] == 1).ToList());
     }
 
     private bool QuickCardEnabled(string id) => _media.Get("quickCardEnabled") is not JsonObject enabled ||
         !enabled.TryGetPropertyValue(id, out var value) || value?.GetValue<bool>() != false;
 
-    private void SetQuickCardOrder(JsonArray order)
+    private void SetQuickCardLayout(List<string> left, List<string> right)
     {
-        _media.SetNode("quickCardOrder", order);
+        var order = left.Concat(right).ToList();
+        var columns = new JsonObject();
+        foreach (var id in left) columns[id] = 0;
+        foreach (var id in right) columns[id] = 1;
+        _media.SetNode("quickCardOrder", new JsonArray(order.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray()));
+        _media.SetNode("quickCardColumns", columns);
         Changed();
         RenderPage();
     }
@@ -78,102 +106,29 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        var order = QuickCardOrderValues();
-        var section = Section("卡片与顺序", "卡片可独立启用。拖动手柄把卡片移到任意格子；关闭的卡片仍保留。两列按阅读顺序排列：左列第 1、3、5… 项，右列第 2、4、6… 项。");
-        _cardOrderRows.Clear();
-        var list = new Grid { ColumnSpacing = 10, RowSpacing = 10 };
+        var (left, right) = QuickCardLayout();
+        var section = Section("卡片与顺序", "卡片可独立启用。拖动手柄把卡片放进左/右任意一列的任意位置，每列数量不限；关闭的卡片仍保留。");
+        _cardOrderCells.Clear();
+        var list = new Grid { ColumnSpacing = 10 };
         list.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         list.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var rowCount = Math.Max(1, (order.Count + 1) / 2);
-        for (var row = 0; row < rowCount; row++)
-            list.RowDefinitions.Add(new RowDefinition { Height = new GridLength(64) });
-        for (var index = 0; index < order.Count; index++)
+        foreach (var (columnIds, column) in new[] { (left, 0), (right, 1) })
         {
-            var id = order[index]?.GetValue<string>() ?? "";
-            var definition = QuickCardDefinitions.First(card => card.Id == id);
-            var row = new Grid { ColumnSpacing = 8, MinHeight = 44 };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-            var handle = new PointerDragButton
+            var panel = new StackPanel { Spacing = 10, VerticalAlignment = VerticalAlignment.Top };
+            for (var slot = 0; slot < columnIds.Count; slot++)
             {
-                Content = new FontIcon { Glyph = "\uE700", FontSize = 16 },
-                DragLabel = definition.Label,
-                Width = 24,
-                Height = 28,
-                MinWidth = 0,
-                Padding = new Thickness(2),
-                Tag = id
-            };
-            AutomationProperties.SetName(handle, "拖动" + definition.Label + "调整顺序");
-            handle.StartPointerDrag = (source, args) => StartQuickCardPointerDrag(source, id, args);
-            AddCardRow(row, handle, 0);
-
-            var icon = new FontIcon { Glyph = definition.Glyph, FontSize = 16, VerticalAlignment = VerticalAlignment.Center };
-            AddCardRow(row, icon, 1);
-            var label = new TextBlock { Text = definition.Label, FontSize = 13, VerticalAlignment = VerticalAlignment.Center };
-            AddCardRow(row, label, 2);
-            var check = new CheckBox { IsChecked = QuickCardEnabled(id), MinWidth = 0, VerticalAlignment = VerticalAlignment.Center };
-            AutomationProperties.SetName(check, "启用" + definition.Label);
-            AutomationProperties.SetAutomationId(check, "quick-card-enabled-" + id);
-            check.Checked += (_, _) => ToggleQuickCard(id, true);
-            check.Unchecked += (_, _) => ToggleQuickCard(id, false);
-            check.KeyDown += (_, args) =>
-            {
-                if ((InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Menu) & Windows.UI.Core.CoreVirtualKeyStates.Down) == 0)
-                    return;
-                var current = QuickCardOrderValues().OfType<JsonValue>().Select(value => value.GetValue<string>()).ToList();
-                var index = current.IndexOf(id);
-                var target = args.Key switch
-                {
-                    Windows.System.VirtualKey.Up => index - 1,
-                    Windows.System.VirtualKey.Down => index + 1,
-                    _ => index
-                };
-                if (target == index || target < 0 || target >= current.Count) return;
-                current.RemoveAt(index); current.Insert(target, id);
-                SetQuickCardOrder(new JsonArray(current.Select(item => (JsonNode?)JsonValue.Create(item)).ToArray()));
-                args.Handled = true;
-            };
-            AddCardRow(row, check, 3);
-
-            var surface = UiThemeStyles.Apply(new Border
-            {
-                Child = row,
-                Padding = new Thickness(10, 4, 12, 4),
-                CornerRadius = new CornerRadius(6),
-                BorderThickness = new Thickness(1),
-                VerticalAlignment = VerticalAlignment.Stretch,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                Tag = id
-            }, "SettingsSourceSurface");
-            _cardOrderRows.Add(surface);
-            Grid.SetRow(surface, index / 2);
-            Grid.SetColumn(surface, index % 2);
-            list.Children.Add(surface);
-        }
-        // A trailing empty cell keeps the grid visibly divided when the card
-        // count is odd, and accepts a drop that moves the card to the end.
-        if (order.Count % 2 == 1)
-        {
-            var empty = UiThemeStyles.Apply(new Border
-            {
-                CornerRadius = new CornerRadius(6),
-                BorderThickness = new Thickness(1),
-                Opacity = .35,
-                IsHitTestVisible = false,
-                VerticalAlignment = VerticalAlignment.Stretch,
-                HorizontalAlignment = HorizontalAlignment.Stretch
-            }, "SettingsSourceSurface");
-            _cardOrderRows.Add(empty);
-            Grid.SetRow(empty, rowCount - 1);
-            Grid.SetColumn(empty, 1);
-            list.Children.Add(empty);
+                var surface = BuildQuickCardCell(columnIds[slot], column);
+                _cardOrderCells.Add((surface, column, slot));
+                panel.Children.Add(surface);
+            }
+            var empty = BuildQuickCardEmptyCell();
+            _cardOrderCells.Add((empty, column, columnIds.Count));
+            panel.Children.Add(empty);
+            Grid.SetColumn(panel, column);
+            list.Children.Add(panel);
         }
         section.Children.Add(list);
-        section.Children.Add(Copy("Alt + ↑ / ↓ 可调整顺序。更新提示卡不属于普通卡片，不在此列表中，并固定显示在最右侧。"));
+        section.Children.Add(Copy("Alt + ↑ / ↓ 可在本列内调整顺序。更新提示卡不属于普通卡片，不在此列表中，并固定显示在最右侧。"));
 
         var enabledCount = QuickCardDefinitions.Count(card => QuickCardEnabled(card.Id));
         if (enabledCount == 0)
@@ -274,10 +229,89 @@ public sealed partial class SettingsWindow
         Changed();
     }
 
+    private Border BuildQuickCardCell(string id, int column)
+    {
+        var definition = QuickCardDefinitions.First(card => card.Id == id);
+        var row = new Grid { ColumnSpacing = 8, MinHeight = 44 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var handle = new PointerDragButton
+        {
+            Content = new FontIcon { Glyph = "\uE700", FontSize = 16 },
+            DragLabel = definition.Label,
+            Width = 24,
+            Height = 28,
+            MinWidth = 0,
+            Padding = new Thickness(2),
+            Tag = id
+        };
+        AutomationProperties.SetName(handle, "拖动" + definition.Label + "调整顺序");
+        handle.StartPointerDrag = (source, args) => StartQuickCardPointerDrag(source, id, args);
+        AddCardRow(row, handle, 0);
+
+        var icon = new FontIcon { Glyph = definition.Glyph, FontSize = 16, VerticalAlignment = VerticalAlignment.Center };
+        AddCardRow(row, icon, 1);
+        var label = new TextBlock { Text = definition.Label, FontSize = 13, VerticalAlignment = VerticalAlignment.Center };
+        AddCardRow(row, label, 2);
+        var check = new CheckBox { IsChecked = QuickCardEnabled(id), MinWidth = 0, VerticalAlignment = VerticalAlignment.Center };
+        AutomationProperties.SetName(check, "启用" + definition.Label);
+        AutomationProperties.SetAutomationId(check, "quick-card-enabled-" + id);
+        check.Checked += (_, _) => ToggleQuickCard(id, true);
+        check.Unchecked += (_, _) => ToggleQuickCard(id, false);
+        check.KeyDown += (_, args) =>
+        {
+            if ((InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Menu) & Windows.UI.Core.CoreVirtualKeyStates.Down) == 0)
+                return;
+            var direction = args.Key switch { Windows.System.VirtualKey.Up => -1, Windows.System.VirtualKey.Down => 1, _ => 0 };
+            if (direction == 0) return;
+            MoveQuickCardWithinColumn(id, column, direction);
+            args.Handled = true;
+        };
+        AddCardRow(row, check, 3);
+
+        return UiThemeStyles.Apply(new Border
+        {
+            Child = row,
+            MinHeight = 64,
+            Padding = new Thickness(10, 4, 12, 4),
+            CornerRadius = new CornerRadius(6),
+            BorderThickness = new Thickness(1),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Tag = id
+        }, "SettingsSourceSurface");
+    }
+
+    private Border BuildQuickCardEmptyCell() => UiThemeStyles.Apply(new Border
+    {
+        MinHeight = 64,
+        CornerRadius = new CornerRadius(6),
+        BorderThickness = new Thickness(1),
+        Opacity = .35,
+        IsHitTestVisible = false,
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        Tag = "quick-card-empty"
+    }, "SettingsSourceSurface");
+
+    private void MoveQuickCardWithinColumn(string id, int column, int direction)
+    {
+        var (left, right) = QuickCardLayout();
+        var list = column == 0 ? left : right;
+        var index = list.IndexOf(id);
+        var target = index + direction;
+        if (index < 0 || target < 0 || target >= list.Count) return;
+        list.RemoveAt(index);
+        list.Insert(target, id);
+        SetQuickCardLayout(left, right);
+    }
+
     private bool StartQuickCardPointerDrag(PointerDragButton source, string id, PointerRoutedEventArgs args)
     {
         if (_busy) return false;
-        _cardOrderDragTarget = -1;
+        _cardOrderDragColumn = -1;
+        _cardOrderDragSlot = -1;
         return _pointerReorder?.Begin(source, args, null, point => MoveQuickCardDrag(id, point),
             point => FinishQuickCardDrag(id, point)) == true;
     }
@@ -285,36 +319,46 @@ public sealed partial class SettingsWindow
     private void MoveQuickCardDrag(string id, Windows.Foundation.Point point)
     {
         Border? target = null;
-        var targetIndex = -1;
-        for (var index = 0; index < _cardOrderRows.Count; index++)
+        var targetColumn = -1;
+        var targetSlot = -1;
+        foreach (var (cell, column, slot) in _cardOrderCells)
         {
-            var row = _cardOrderRows[index];
-            var origin = row.TransformToVisual(_navigation).TransformPoint(new Windows.Foundation.Point(0, 0));
-            if (point.X >= origin.X && point.X <= origin.X + row.ActualWidth && point.Y >= origin.Y - 4 && point.Y <= origin.Y + row.ActualHeight + 4)
+            var origin = cell.TransformToVisual(_navigation).TransformPoint(new Windows.Foundation.Point(0, 0));
+            if (point.X >= origin.X && point.X <= origin.X + cell.ActualWidth && point.Y >= origin.Y - 4 && point.Y <= origin.Y + cell.ActualHeight + 4)
             {
-                target = row;
-                targetIndex = index;
+                target = cell;
+                targetColumn = column;
+                targetSlot = slot;
                 break;
             }
         }
-        foreach (var row in _cardOrderRows)
+        foreach (var (cell, _, _) in _cardOrderCells)
         {
-            row.BorderBrush = target == row ? new Microsoft.UI.Xaml.Media.SolidColorBrush(AccentColor()) : null;
-            row.BorderThickness = new Thickness(target == row ? 2 : 1);
+            cell.BorderBrush = cell == target ? new Microsoft.UI.Xaml.Media.SolidColorBrush(AccentColor()) : null;
+            cell.BorderThickness = new Thickness(cell == target ? 2 : 1);
         }
-        // In the cell grid the highlighted cell itself is the drop target; the
-        // one-dimensional insertion line is only meaningful for a plain list.
+        // Each column is its own drop zone; the highlighted cell is the target.
         _pointerReorder?.HideInsertion();
-        _cardOrderDragTarget = targetIndex;
-        _saveStatus.Text = target is null ? "拖到任意格子上调整顺序；Esc 取消。" : "释放到高亮格子以应用新的卡片顺序。";
+        _cardOrderDragColumn = targetColumn;
+        _cardOrderDragSlot = targetSlot;
+        _saveStatus.Text = target is null ? "拖到左/右任意格子上调整布局；Esc 取消。" : "释放到高亮格子以应用新的卡片布局。";
     }
 
     private void FinishQuickCardDrag(string id, Windows.Foundation.Point point)
     {
-        var order = QuickCardOrderValues().OfType<JsonValue>().Select(value => value.GetValue<string>()).ToList();
-        var insertion = _cardOrderDragTarget >= 0 ? _cardOrderDragTarget : _cardOrderRows.Count;
-        var next = ReorderSequence.MoveToGap(order, id, insertion);
-        SetQuickCardOrder(new JsonArray(next.Select(item => (JsonNode?)JsonValue.Create(item)).ToArray()));
+        if (_cardOrderDragColumn is not (0 or 1)) return;
+        var (left, right) = QuickCardLayout();
+        var columns = QuickCardColumnValues();
+        var source = columns.GetValueOrDefault(id) == 0 ? left : right;
+        var sourceIndex = source.IndexOf(id);
+        if (sourceIndex < 0) return;
+        source.RemoveAt(sourceIndex);
+        var target = _cardOrderDragColumn == 0 ? left : right;
+        // The slot index was measured before removal, so only a move down inside
+        // the same column shifts by one.
+        var slot = _cardOrderDragSlot - (ReferenceEquals(source, target) && sourceIndex < _cardOrderDragSlot ? 1 : 0);
+        target.Insert(Math.Clamp(slot, 0, target.Count), id);
+        SetQuickCardLayout(left, right);
     }
 
     private static void AddCardRow(Grid row, FrameworkElement element, int column)

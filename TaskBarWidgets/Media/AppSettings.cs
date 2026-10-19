@@ -139,6 +139,10 @@ public sealed class AppSettings
 
     public List<string> QuickCardOrder { get; set; } = ["weather", "traffic", "device", "media"];
 
+    // Free two-column card layout: 0 = left column, 1 = right column. Cards keep
+    // their QuickCardOrder sequence inside the column they are assigned to.
+    public Dictionary<string, int> QuickCardColumns { get; set; } = new(StringComparer.Ordinal);
+
     public Dictionary<string, bool> QuickCardEnabled { get; set; } = new(StringComparer.Ordinal)
     {
         ["weather"] = false,
@@ -273,6 +277,7 @@ public sealed class AppSettings
         cloned.SelectedDisplayIds = (SelectedDisplayIds ?? []).ToList();
         cloned.SpectrumTuning = SpectrumTuning.Clone();
         cloned.QuickCardOrder = (QuickCardOrder ?? []).ToList();
+        cloned.QuickCardColumns = new Dictionary<string, int>(QuickCardColumns ?? [], StringComparer.Ordinal);
         cloned.QuickCardEnabled = new Dictionary<string, bool>(QuickCardEnabled ?? [], StringComparer.Ordinal);
         cloned.WeatherCardModules = new Dictionary<string, bool>(WeatherCardModules ?? [], StringComparer.Ordinal);
         return cloned;
@@ -330,7 +335,19 @@ public sealed class AppSettings
             .ToList();
         foreach (var id in QuickCardIds)
             if (!order.Contains(id, StringComparer.Ordinal)) order.Add(id);
-        QuickCardOrder = order;
+
+        QuickCardColumns ??= new Dictionary<string, int>(StringComparer.Ordinal);
+        for (var index = 0; index < order.Count; index++)
+            if (!QuickCardColumns.TryGetValue(order[index], out var column) || (column != 0 && column != 1))
+                QuickCardColumns[order[index]] = index % 2;
+        foreach (var key in QuickCardColumns.Keys.Where(key => !QuickCardIds.Contains(key, StringComparer.Ordinal)).ToArray())
+            QuickCardColumns.Remove(key);
+
+        // Persist one canonical reading order: left column top-to-bottom, then right.
+        QuickCardOrder = order
+            .Where(id => QuickCardColumns[id] == 0)
+            .Concat(order.Where(id => QuickCardColumns[id] == 1))
+            .ToList();
 
         QuickCardEnabled ??= new Dictionary<string, bool>(StringComparer.Ordinal);
         foreach (var id in QuickCardIds)

@@ -30,8 +30,10 @@ public sealed partial class CardGroup : IDisposable
     private readonly TextBlock _updateLabel = Text("更新已下载", 13);
     private readonly ProgressBar _updateProgress = new() { Minimum = 0, Maximum = 1, Height = 3, Visibility = Visibility.Collapsed };
     private bool _updateCardVisible;
-    private bool _updateInstallable;
+    private bool _updateActionEnabled;
     private string[] _quickCardOrder = ["weather", "traffic", "device", "media"];
+    private Dictionary<string, int> _quickCardColumns = new(StringComparer.Ordinal)
+        { ["weather"] = 0, ["traffic"] = 1, ["device"] = 0, ["media"] = 1 };
     private Dictionary<string, bool> _quickCardEnabled = new(StringComparer.Ordinal)
         { ["weather"] = false, ["traffic"] = true, ["device"] = true, ["media"] = true };
     private Dictionary<string, bool> _weatherModules = new(StringComparer.Ordinal)
@@ -46,7 +48,7 @@ public sealed partial class CardGroup : IDisposable
         .OfType<CardWindow>();
     private IEnumerable<CardWindow> DisplayedCards => _updateCardVisible ? EnabledCards.Append(_updateCard) : EnabledCards;
     internal IReadOnlyList<CardWindow> CardWindows => DisplayedCards.ToArray();
-    internal event Action? InstallUpdateRequested;
+    internal event Action? UpdateActionRequested;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(400) };
     private readonly DispatcherTimer _volumeTimer = new() { Interval = TimeSpan.FromMilliseconds(120) };
     private readonly DispatcherTimer _seekTimer = new() { Interval = TimeSpan.FromMilliseconds(180) };
@@ -124,7 +126,7 @@ public sealed partial class CardGroup : IDisposable
         _updateLabel.TextWrapping = TextWrapping.Wrap; _updateLabel.MaxLines = 3;
         updateContent.Children.Add(_updateLabel); updateContent.Children.Add(_updateProgress); updateContent.Children.Add(_updateInstall);
         AutomationProperties.SetAutomationId(_updateInstall, "card-install-update");
-        _updateInstall.Click += (_, _) => { if (_updateInstallable) InstallUpdateRequested?.Invoke(); };
+        _updateInstall.Click += (_, _) => { if (_updateActionEnabled) UpdateActionRequested?.Invoke(); };
         _updateCard = new CardWindow("应用更新", updateContent, 180, width: UpdateCardWidth);
         _outsideClicks = new OutsideClickMonitor(_slots["traffic"].Content.DispatcherQueue, () => _flyoutsOpen > 0);
         _output.IsEnabled = _input.IsEnabled = _outputMute.IsEnabled = _inputMute.IsEnabled = _outputVolume.IsEnabled = _inputVolume.IsEnabled = false;
@@ -415,7 +417,8 @@ public sealed partial class CardGroup : IDisposable
     {
         if (_disposed) return;
         var ready = state.CanInstall && state.Phase == "ready";
-        _updateInstallable = ready;
+        var downloadable = state.CanDownload && state.Phase == "available";
+        _updateActionEnabled = ready || downloadable;
         // The update card is an actionable notice, not just a post-download banner:
         // it appears as soon as an update is available so the user can find it.
         var show = state.Phase is "available" or "downloading" or "verifying" or "ready";
@@ -429,7 +432,13 @@ public sealed partial class CardGroup : IDisposable
                 _ => "应用更新\n下载与校验在关于页进行"
             };
         ToolTipService.SetToolTip(_updateLabel, _updateLabel.Text);
-        _updateInstall.IsEnabled = ready;
+        _updateInstall.Content = state.Phase switch
+        {
+            "downloading" => "正在下载…",
+            "verifying" => "正在校验…",
+            _ => ready ? "更新并重启" : downloadable ? "下载并安装" : "更新并重启"
+        };
+        _updateInstall.IsEnabled = _updateActionEnabled;
         _updateProgress.Visibility = state.TotalBytes > 0 && state.Phase is "downloading" or "verifying" ? Visibility.Visible : Visibility.Collapsed;
         _updateProgress.Value = state.TotalBytes > 0 ? Math.Clamp((double)state.BytesDownloaded / state.TotalBytes, 0, 1) : 0;
         if (_updateCardVisible == show) return;
@@ -452,7 +461,22 @@ public sealed partial class CardGroup : IDisposable
             var normalized = order.Where(id => _slots.ContainsKey(id)).Distinct(StringComparer.Ordinal).ToList();
             foreach (var id in new[] { "weather", "traffic", "device", "media" })
                 if (!normalized.Contains(id, StringComparer.Ordinal)) normalized.Add(id);
-            _quickCardOrder = normalized.ToArray();
+            if (value.TryGetProperty("columns", out var columns) && columns.ValueKind == JsonValueKind.Object)
+                foreach (var item in columns.EnumerateObject())
+                    if (_slots.ContainsKey(item.Name) && item.Value.ValueKind == JsonValueKind.Number &&
+                        item.Value.TryGetInt32(out var column) && (column == 0 || column == 1))
+                        _quickCardColumns[item.Name] = column;
+            foreach (var key in _quickCardColumns.Keys.Where(key => !_slots.ContainsKey(key)).ToArray())
+                _quickCardColumns.Remove(key);
+            for (var index = 0; index < normalized.Count; index++)
+                if (!_quickCardColumns.TryGetValue(normalized[index], out var assigned) || (assigned != 0 && assigned != 1))
+                    _quickCardColumns[normalized[index]] = index % 2;
+            // Cards choose their column freely; the saved order is the left
+            // column top-to-bottom followed by the right column.
+            _quickCardOrder = normalized
+                .Where(id => _quickCardColumns[id] == 0)
+                .Concat(normalized.Where(id => _quickCardColumns[id] == 1))
+                .ToArray();
         }
         if (value.TryGetProperty("enabled", out var enabled) && enabled.ValueKind == JsonValueKind.Object) {
             foreach (var id in _slots.Keys)
@@ -813,7 +837,17 @@ public sealed partial class CardGroup : IDisposable
     internal void Position(double x, double y)
     {
         _anchorX = x; _anchorY = y;
-        var baseCards = EnabledCards.ToArray();
+        // Cards choose their column freely; each column keeps its saved order.
+        var left = new List<CardWindow>();
+        var right = new List<CardWindow>();
+        foreach (var id in _quickCardOrder)
+        {
+            if (!_quickCardEnabled.GetValueOrDefault(id)) continue;
+            var card = _slots.GetValueOrDefault(id)?.Window;
+            if (card is null) continue;
+            (_quickCardColumns.GetValueOrDefault(id) == 0 ? left : right).Add(card);
+        }
+        var baseCards = left.Concat(right).ToArray();
         foreach (var card in baseCards.Append(_updateCard)) card.MeasureHeight();
         var monitor = MonitorFromPoint(new NativePoint { X = (int)x, Y = (int)y }, 2);
         var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
@@ -826,12 +860,6 @@ public sealed partial class CardGroup : IDisposable
         var baseWidth = Math.Min((int)Math.Ceiling(CardWidth * scale), Math.Max(1, info.Work.Right - info.Work.Left - (int)(20 * scale)));
         var updateWidth = Math.Min((int)Math.Ceiling(UpdateCardWidth * scale), Math.Max(1, info.Work.Right - info.Work.Left - (int)(20 * scale)));
 
-        // Reading order fills the left column first, then the right column. An
-        // odd card count simply leaves the right column shorter.
-        var left = new List<CardWindow>();
-        var right = new List<CardWindow>();
-        for (var index = 0; index < baseCards.Length; index++)
-            (index % 2 == 0 ? left : right).Add(baseCards[index]);
         var columns = new List<List<CardWindow>>();
         if (left.Count > 0) columns.Add(left);
         if (right.Count > 0) columns.Add(right);
