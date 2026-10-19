@@ -112,9 +112,10 @@ public sealed partial class CardGroup
         gradient.GradientStops.Add(new GradientStop { Color = Color.FromArgb(255, 46, 109, 164), Offset = 0.58 });
         gradient.GradientStops.Add(new GradientStop { Color = Color.FromArgb(255, 62, 127, 179), Offset = 1 });
 
-        var hero = new Grid { MinHeight = 160 };
+        var hero = new Grid { MinHeight = 108 };
         hero.Children.Add(new Rectangle { RadiusX = 8, RadiusY = 8, Fill = gradient });
         var columns = Columns(new GridLength(1, GridUnitType.Star), new GridLength(104));
+        columns.Margin = new Thickness(12, 0, 12, 0);
         var readings = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
         _weatherTemperature.Foreground = new SolidColorBrush(Colors.White);
         readings.Children.Add(_weatherTemperature);

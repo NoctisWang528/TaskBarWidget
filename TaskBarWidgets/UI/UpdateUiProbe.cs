@@ -29,10 +29,15 @@ public sealed partial class CardGroup
 {
     internal static async Task<object> ProbeUpdateCardStateAsync(CardGroup cards)
     {
+        // An update that is merely available must already surface the notice
+        // card; only the install action waits for the downloaded/verified state.
+        cards.SetUpdateState(new UpdateUiState(9, "available", LatestVersion: "991231-2359", CanDownload: true));
+        if (cards.CardWindows.Count != 5 || cards._updateInstall.IsEnabled)
+            throw new InvalidOperationException("An available update did not surface the update card.");
         var ready = new UpdateUiState(10, "ready", LatestVersion: "991231-2359", CanInstall: true);
         cards.SetUpdateState(ready);
         if (cards.CardWindows.Count != 5 || !ReferenceEquals(cards.CardWindows[^1], cards._updateCard) ||
-            cards._updateCard.Height != 180 || IsWindowVisible(cards._updateCard.Handle))
+            cards._updateCard.Height != 180 || IsWindowVisible(cards._updateCard.Handle) || !cards._updateInstall.IsEnabled)
             throw new InvalidOperationException("Ready update card must be the second column and stay hidden until the group is opened.");
         cards.Position(100, 100);
         var bounds = cards._updateCard.Window.AppWindow;
@@ -75,7 +80,7 @@ public sealed partial class CardGroup
         await cards._updateCard.HideAsync(animate: false);
         cards.SetUpdateState(ready with { Phase = "preparing", CanInstall = false });
         if (cards.CardWindows.Count != 4) throw new InvalidOperationException("Preparing update card did not disappear.");
-        return new { optionalCardAppears = true, preparingCardRemoved = true, hiddenUntilOpened = true, secondColumn = true, themePreview = true };
+        return new { optionalCardAppears = true, availableSurfacesCard = true, preparingCardRemoved = true, hiddenUntilOpened = true, secondColumn = true, themePreview = true };
     }
 }
 

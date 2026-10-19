@@ -79,13 +79,14 @@ public sealed partial class SettingsWindow
         }
 
         var order = QuickCardOrderValues();
-        var section = Section("卡片与顺序", "四张卡片均可独立启用。拖动手柄调整顺序；关闭的卡片仍保留在网格中。左列为第 1、3 项，右列为第 2、4 项。");
+        var section = Section("卡片与顺序", "卡片可独立启用。拖动手柄把卡片移到任意格子；关闭的卡片仍保留。两列按阅读顺序排列：左列第 1、3、5… 项，右列第 2、4、6… 项。");
         _cardOrderRows.Clear();
         var list = new Grid { ColumnSpacing = 10, RowSpacing = 10 };
         list.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         list.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        list.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        list.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var rowCount = Math.Max(1, (order.Count + 1) / 2);
+        for (var row = 0; row < rowCount; row++)
+            list.RowDefinitions.Add(new RowDefinition { Height = new GridLength(64) });
         for (var index = 0; index < order.Count; index++)
         {
             var id = order[index]?.GetValue<string>() ?? "";
@@ -144,12 +145,32 @@ public sealed partial class SettingsWindow
                 Padding = new Thickness(10, 4, 12, 4),
                 CornerRadius = new CornerRadius(6),
                 BorderThickness = new Thickness(1),
+                VerticalAlignment = VerticalAlignment.Stretch,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
                 Tag = id
             }, "SettingsSourceSurface");
             _cardOrderRows.Add(surface);
             Grid.SetRow(surface, index / 2);
             Grid.SetColumn(surface, index % 2);
             list.Children.Add(surface);
+        }
+        // A trailing empty cell keeps the grid visibly divided when the card
+        // count is odd, and accepts a drop that moves the card to the end.
+        if (order.Count % 2 == 1)
+        {
+            var empty = UiThemeStyles.Apply(new Border
+            {
+                CornerRadius = new CornerRadius(6),
+                BorderThickness = new Thickness(1),
+                Opacity = .35,
+                IsHitTestVisible = false,
+                VerticalAlignment = VerticalAlignment.Stretch,
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            }, "SettingsSourceSurface");
+            _cardOrderRows.Add(empty);
+            Grid.SetRow(empty, rowCount - 1);
+            Grid.SetColumn(empty, 1);
+            list.Children.Add(empty);
         }
         section.Children.Add(list);
         section.Children.Add(Copy("Alt + ↑ / ↓ 可调整顺序。更新提示卡不属于普通卡片，不在此列表中，并固定显示在最右侧。"));
@@ -256,6 +277,7 @@ public sealed partial class SettingsWindow
     private bool StartQuickCardPointerDrag(PointerDragButton source, string id, PointerRoutedEventArgs args)
     {
         if (_busy) return false;
+        _cardOrderDragTarget = -1;
         return _pointerReorder?.Begin(source, args, null, point => MoveQuickCardDrag(id, point),
             point => FinishQuickCardDrag(id, point)) == true;
     }
@@ -280,14 +302,11 @@ public sealed partial class SettingsWindow
             row.BorderBrush = target == row ? new Microsoft.UI.Xaml.Media.SolidColorBrush(AccentColor()) : null;
             row.BorderThickness = new Thickness(target == row ? 2 : 1);
         }
-        if (target is not null && target.Child is FrameworkElement content)
-        {
-            var origin = target.TransformToVisual(_navigation).TransformPoint(new Windows.Foundation.Point(0, 0));
-            _pointerReorder?.ShowInsertion(new Windows.Foundation.Rect(origin.X + 4, origin.Y + 2, Math.Max(1, target.ActualWidth - 8), 3));
-        }
-        else _pointerReorder?.HideInsertion();
+        // In the cell grid the highlighted cell itself is the drop target; the
+        // one-dimensional insertion line is only meaningful for a plain list.
+        _pointerReorder?.HideInsertion();
         _cardOrderDragTarget = targetIndex;
-        _saveStatus.Text = target is null ? "拖到卡片上调整顺序；Esc 取消。" : "释放后应用新的卡片顺序。";
+        _saveStatus.Text = target is null ? "拖到任意格子上调整顺序；Esc 取消。" : "释放到高亮格子以应用新的卡片顺序。";
     }
 
     private void FinishQuickCardDrag(string id, Windows.Foundation.Point point)

@@ -79,6 +79,20 @@ internal static class UiLayoutProbe
             var sourcePng = Path.Combine(outputDirectory, $"settings-sources-{width}.png");
             await CaptureAsync(content, sourcePng);
             checks.Add(new { kind = "settingsSourcesLayout", requestedPhysicalWidth = width, rowCount = sources.Count, rowWidth = sources[0].ActualWidth, boxes = sourceBoxes, png = sourcePng, systemBackdropCaptured = false });
+
+            window.ShowPage("quickCards");
+            await SettleAsync(content);
+            pageScroll.ChangeView(null, 0, null, true);
+            await SettleAsync(content);
+            var cardIds = new[] { "weather", "traffic", "device", "media" };
+            var cells = Walk(content).OfType<Border>().Where(border => border.Tag is string tag && cardIds.Contains(tag)).ToList();
+            if (cells.Count < 2) throw new InvalidOperationException("Quick-card reorder grid did not realize its cells.");
+            var cellPositions = cells.Select(cell => (Row: Grid.GetRow(cell), Column: Grid.GetColumn(cell))).ToArray();
+            if (cellPositions.Distinct().Count() != cells.Count || cellPositions.Any(cell => cell.Column is not (0 or 1)))
+                throw new InvalidOperationException("Quick-card reorder cells overlap or are not a two-column grid.");
+            if (cells.Select(cell => Math.Round(cell.ActualHeight)).Distinct().Count() != 1)
+                throw new InvalidOperationException("Quick-card reorder cells are not equal height.");
+            checks.Add(new { kind = "settingsQuickCardsGrid", requestedPhysicalWidth = width, cells = cells.Count, rows = cellPositions.Select(cell => cell.Row).Distinct().Count(), cellHeight = cells[0].ActualHeight });
         }
         return checks;
     }

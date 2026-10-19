@@ -29,7 +29,8 @@ public sealed partial class CardGroup : IDisposable
     private readonly Button _updateInstall = new() { Content = "更新并重启", MinHeight = 32, HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly TextBlock _updateLabel = Text("更新已下载", 13);
     private readonly ProgressBar _updateProgress = new() { Minimum = 0, Maximum = 1, Height = 3, Visibility = Visibility.Collapsed };
-    private bool _updateReady;
+    private bool _updateCardVisible;
+    private bool _updateInstallable;
     private string[] _quickCardOrder = ["weather", "traffic", "device", "media"];
     private Dictionary<string, bool> _quickCardEnabled = new(StringComparer.Ordinal)
         { ["weather"] = false, ["traffic"] = true, ["device"] = true, ["media"] = true };
@@ -43,7 +44,7 @@ public sealed partial class CardGroup : IDisposable
         .Where(id => _quickCardEnabled.GetValueOrDefault(id))
         .Select(id => _slots.GetValueOrDefault(id)?.Window)
         .OfType<CardWindow>();
-    private IEnumerable<CardWindow> DisplayedCards => _updateReady ? EnabledCards.Append(_updateCard) : EnabledCards;
+    private IEnumerable<CardWindow> DisplayedCards => _updateCardVisible ? EnabledCards.Append(_updateCard) : EnabledCards;
     internal IReadOnlyList<CardWindow> CardWindows => DisplayedCards.ToArray();
     internal event Action? InstallUpdateRequested;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(400) };
@@ -123,7 +124,7 @@ public sealed partial class CardGroup : IDisposable
         _updateLabel.TextWrapping = TextWrapping.Wrap; _updateLabel.MaxLines = 3;
         updateContent.Children.Add(_updateLabel); updateContent.Children.Add(_updateProgress); updateContent.Children.Add(_updateInstall);
         AutomationProperties.SetAutomationId(_updateInstall, "card-install-update");
-        _updateInstall.Click += (_, _) => { if (_updateReady) InstallUpdateRequested?.Invoke(); };
+        _updateInstall.Click += (_, _) => { if (_updateInstallable) InstallUpdateRequested?.Invoke(); };
         _updateCard = new CardWindow("应用更新", updateContent, 180, width: UpdateCardWidth);
         _outsideClicks = new OutsideClickMonitor(_slots["traffic"].Content.DispatcherQueue, () => _flyoutsOpen > 0);
         _output.IsEnabled = _input.IsEnabled = _outputMute.IsEnabled = _inputMute.IsEnabled = _outputVolume.IsEnabled = _inputVolume.IsEnabled = false;
@@ -414,17 +415,29 @@ public sealed partial class CardGroup : IDisposable
     {
         if (_disposed) return;
         var ready = state.CanInstall && state.Phase == "ready";
-        _updateLabel.Text = ready ? "版本 " + state.LatestVersion + "\n已下载 · 校验通过" : "应用更新\n下载与校验在关于页进行";
+        _updateInstallable = ready;
+        // The update card is an actionable notice, not just a post-download banner:
+        // it appears as soon as an update is available so the user can find it.
+        var show = state.Phase is "available" or "downloading" or "verifying" or "ready";
+        _updateLabel.Text = ready
+            ? "版本 " + state.LatestVersion + "\n已下载 · 校验通过"
+            : state.Phase switch
+            {
+                "available" => "版本 " + state.LatestVersion + "\n发现新更新",
+                "downloading" => "版本 " + state.LatestVersion + "\n正在下载…",
+                "verifying" => "版本 " + state.LatestVersion + "\n正在校验…",
+                _ => "应用更新\n下载与校验在关于页进行"
+            };
         ToolTipService.SetToolTip(_updateLabel, _updateLabel.Text);
         _updateInstall.IsEnabled = ready;
         _updateProgress.Visibility = state.TotalBytes > 0 && state.Phase is "downloading" or "verifying" ? Visibility.Visible : Visibility.Collapsed;
         _updateProgress.Value = state.TotalBytes > 0 ? Math.Clamp((double)state.BytesDownloaded / state.TotalBytes, 0, 1) : 0;
-        if (_updateReady == ready) return;
-        _updateReady = ready;
+        if (_updateCardVisible == show) return;
+        _updateCardVisible = show;
         if (!_visible) return;
-        if (!ready) HideCard(_updateCard);
+        if (!show) HideCard(_updateCard);
         Position(_anchorX, _anchorY);
-        if (ready) _updateCard.Show();
+        if (show) _updateCard.Show();
     }
     internal void ApplyBackendTheme(JsonElement state)
     {
@@ -824,9 +837,9 @@ public sealed partial class CardGroup : IDisposable
         if (right.Count > 0) columns.Add(right);
 
         double ColumnHeight(IEnumerable<CardWindow> column) => column.Sum(card => card.Height) + gap * (column.Count() - 1);
-        var desiredBaseHeight = columns.Count > 0 ? columns.Max(ColumnHeight) : _updateReady ? _updateCard.Height : 0;
+        var desiredBaseHeight = columns.Count > 0 ? columns.Max(ColumnHeight) : _updateCardVisible ? _updateCard.Height : 0;
         var baseColumns = columns.Count;
-        var updateColumns = _updateReady ? 1 : 0;
+        var updateColumns = _updateCardVisible ? 1 : 0;
         var totalColumns = baseColumns + updateColumns;
         var totalWidth = baseColumns * baseWidth + updateColumns * updateWidth + gap * Math.Max(0, totalColumns - 1);
         var fit = Math.Min(1, Math.Min(
@@ -857,7 +870,7 @@ public sealed partial class CardGroup : IDisposable
             }
             columnLeft += scaledBaseWidth + gap;
         }
-        if (_updateReady)
+        if (_updateCardVisible)
         {
             var updateLeft = groupLeft + scaledBaseWidth * baseColumns + gap * baseColumns;
             var updateTop = Math.Max(info.Work.Top, groupTop + baseBlockHeight - updateHeight);
