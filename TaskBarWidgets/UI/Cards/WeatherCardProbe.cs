@@ -50,7 +50,7 @@ public sealed partial class CardGroup
             throw new InvalidOperationException("Weather alert scroll limit changed.");
         if (cards._weatherIcon.Width != 96 || cards._weatherIcon.Height != 96)
             throw new InvalidOperationException("Weather hero icon is no longer the enlarged readable size.");
-        if (cards._weatherSky.Child is not Grid hero || hero.MinHeight < 136)
+        if (cards._weatherSky.Child is not Grid hero || hero.MinHeight < 160)
             throw new InvalidOperationException("Weather hero no longer reserves space for the enlarged icon.");
         var minimum = JsonSerializer.SerializeToElement(new
         {

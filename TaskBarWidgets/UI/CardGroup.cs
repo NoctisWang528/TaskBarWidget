@@ -848,7 +848,8 @@ public sealed partial class CardGroup : IDisposable
         var columnLeft = groupLeft;
         foreach (var column in columns)
         {
-            var columnTop = groupTop;
+            var columnPixelHeight = ColumnPixelHeight(column);
+            var columnTop = groupTop + baseBlockHeight - (int)Math.Round(columnPixelHeight);
             foreach (var card in column)
             {
                 card.Window.AppWindow.MoveAndResize(new RectInt32(columnLeft, columnTop, scaledBaseWidth, heights[card]));

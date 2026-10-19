@@ -84,6 +84,8 @@ public sealed partial class SettingsWindow
         var list = new Grid { ColumnSpacing = 10, RowSpacing = 10 };
         list.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         list.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        list.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        list.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         for (var index = 0; index < order.Count; index++)
         {
             var id = order[index]?.GetValue<string>() ?? "";

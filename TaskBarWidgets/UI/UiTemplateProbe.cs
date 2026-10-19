@@ -69,7 +69,8 @@ internal static class UiTemplateProbe
                         throw new InvalidOperationException("Hidden card geometry is invalid.");
                 }
                 // Reading order fills the left column first, then the right column.
-                // Same column shares X; each row starts below the previous row.
+                // Same column shares X; each row starts below the previous row, and
+                // every column bottom-aligns to the tallest column.
                 for (var index = 0; index < baseWindows.Length; index++)
                 {
                     var bounds = baseWindows[index].Window.AppWindow;
@@ -82,9 +83,27 @@ internal static class UiTemplateProbe
                     if (index == 1)
                     {
                         var first = baseWindows[0].Window.AppWindow;
-                        if (bounds.Position.X <= first.Position.X || bounds.Position.Y != first.Position.Y)
-                            throw new InvalidOperationException("Second card did not start the right column aligned with the first card.");
+                        if (bounds.Position.X <= first.Position.X)
+                            throw new InvalidOperationException("Second card did not start the right column to the right of the first card.");
                     }
+                }
+                // The two columns are bottom-aligned: the lowest bottom edge of the
+                // left column equals the lowest bottom edge of the right column.
+                double BottomEdge(CardWindow card)
+                {
+                    var rect = card.Window.AppWindow;
+                    return rect.Position.Y + rect.Size.Height;
+                }
+                if (baseWindows.Length >= 2)
+                {
+                    var leftBottom = (double)(baseWindows[0].Window.AppWindow.Position.Y + baseWindows[0].Window.AppWindow.Size.Height);
+                    for (var index = 2; index < baseWindows.Length; index += 2)
+                        leftBottom = Math.Max(leftBottom, BottomEdge(baseWindows[index]));
+                    var rightBottom = (double)(baseWindows[1].Window.AppWindow.Position.Y + baseWindows[1].Window.AppWindow.Size.Height);
+                    for (var index = 3; index < baseWindows.Length; index += 2)
+                        rightBottom = Math.Max(rightBottom, BottomEdge(baseWindows[index]));
+                    if (Math.Abs(leftBottom - rightBottom) > 1)
+                        throw new InvalidOperationException("Base columns are not bottom-aligned.");
                 }
             }
             cardLifecycle["hiddenMeasuredPlacement"] = true;

@@ -18,7 +18,7 @@ public sealed partial class CardGroup
 
     internal Button _weatherRefresh = CreateWeatherRefreshButton();
     internal Grid _weatherContent = new() { MaxWidth = WeatherCardDesignWidth };
-    internal TextBlock _weatherTemperature = new() { FontSize = 42, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, MaxLines = 1 };
+    internal TextBlock _weatherTemperature = new() { FontSize = 42, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis };
     internal TextBlock _weatherCity = new() { FontSize = 12, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis };
     internal TextBlock _weatherStatus = new() { FontSize = 11, MaxLines = 2, TextWrapping = TextWrapping.Wrap };
 
@@ -38,6 +38,7 @@ public sealed partial class CardGroup
         FontSize = 13,
         MaxLines = 2,
         TextWrapping = TextWrapping.Wrap,
+        TextTrimming = TextTrimming.CharacterEllipsis,
         Foreground = new SolidColorBrush(Color.FromArgb(236, 255, 255, 255))
     };
     private readonly TextBlock _weatherCurrentDetail = Text("", 11);
@@ -107,11 +108,11 @@ public sealed partial class CardGroup
             StartPoint = new Windows.Foundation.Point(0, 0),
             EndPoint = new Windows.Foundation.Point(1, 1)
         };
-        gradient.GradientStops.Add(new GradientStop { Color = Color.FromArgb(255, 61, 123, 176), Offset = 0 });
-        gradient.GradientStops.Add(new GradientStop { Color = Color.FromArgb(255, 87, 153, 196), Offset = 0.58 });
-        gradient.GradientStops.Add(new GradientStop { Color = Color.FromArgb(255, 111, 180, 214), Offset = 1 });
+        gradient.GradientStops.Add(new GradientStop { Color = Color.FromArgb(255, 31, 78, 121), Offset = 0 });
+        gradient.GradientStops.Add(new GradientStop { Color = Color.FromArgb(255, 46, 109, 164), Offset = 0.58 });
+        gradient.GradientStops.Add(new GradientStop { Color = Color.FromArgb(255, 62, 127, 179), Offset = 1 });
 
-        var hero = new Grid { MinHeight = 136 };
+        var hero = new Grid { MinHeight = 160 };
         hero.Children.Add(new Rectangle { RadiusX = 8, RadiusY = 8, Fill = gradient });
         var columns = Columns(new GridLength(1, GridUnitType.Star), new GridLength(104));
         var readings = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
@@ -123,7 +124,6 @@ public sealed partial class CardGroup
         Add(columns, readings, 0);
 
         var iconBack = new Grid { Width = 104, Height = 104, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        iconBack.Children.Add(new Ellipse { Fill = new SolidColorBrush(Color.FromArgb(51, 255, 255, 255)) });
         iconBack.Children.Add(_weatherIcon);
         Add(columns, iconBack, 1);
         hero.Children.Add(columns);
@@ -364,7 +364,10 @@ public sealed partial class CardGroup
 
             var icon = new Image { Width = 24, Height = 24, Stretch = Stretch.Uniform, VerticalAlignment = VerticalAlignment.Center };
             _ = SetIconAsync(icon, String(day, "conditionDayKind", "unknown"), clear: false);
-            Add(row, icon, 1);
+            var iconBack = new Grid { Width = 26, Height = 26, VerticalAlignment = VerticalAlignment.Center };
+            iconBack.Children.Add(new Ellipse { Fill = new SolidColorBrush(Color.FromArgb(255, 46, 109, 164)) });
+            iconBack.Children.Add(icon);
+            Add(row, iconBack, 1);
 
             var weather = Text(FirstNonEmpty(String(day, "weatherDay"), String(day, "weatherNight"), "—"), 12);
             weather.VerticalAlignment = VerticalAlignment.Center;
