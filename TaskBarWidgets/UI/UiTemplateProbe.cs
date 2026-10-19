@@ -57,19 +57,33 @@ internal static class UiTemplateProbe
             foreach (var point in new[] { (100d, 100d), (1200d, 900d), (100d, 100d) })
             {
                 cards.Position(point.Item1, point.Item2);
-                for (var index = 0; index < cards.CardWindows.Count; index++)
+                var windows = cards.CardWindows;
+                var baseWindows = windows.Where(card => !ReferenceEquals(card, cards._updateCard)).ToArray();
+                var baseWidth = baseWindows.Length > 0 ? baseWindows[0].Window.AppWindow.Size.Width : 0;
+                foreach (var card in windows)
                 {
-                    var card = cards.CardWindows[index];
                     var bounds = card.Window.AppWindow;
-                    var expectedWidth = ReferenceEquals(card, cards._updateCard) ? 220 : cards.CardWindows[0].Window.AppWindow.Size.Width;
+                    var expectedWidth = ReferenceEquals(card, cards._updateCard) ? 220 : baseWidth;
                     if (IsWindowVisible(card.Handle) || bounds.Size.Width <= 0 || bounds.Size.Height <= 0 ||
                         bounds.Size.Width != expectedWidth)
                         throw new InvalidOperationException("Hidden card geometry is invalid.");
-                    if (index > 0 && !ReferenceEquals(card, cards._updateCard))
+                }
+                // Reading order fills the left column first, then the right column.
+                // Same column shares X; each row starts below the previous row.
+                for (var index = 0; index < baseWindows.Length; index++)
+                {
+                    var bounds = baseWindows[index].Window.AppWindow;
+                    if (index >= 2)
                     {
-                        var previous = cards.CardWindows[index - 1].Window.AppWindow;
+                        var previous = baseWindows[index - 2].Window.AppWindow;
                         if (bounds.Position.X != previous.Position.X || bounds.Position.Y <= previous.Position.Y + previous.Size.Height)
-                            throw new InvalidOperationException("Card placement overlaps or has unequal alignment.");
+                            throw new InvalidOperationException("Cards in the same column overlap or are misaligned.");
+                    }
+                    if (index == 1)
+                    {
+                        var first = baseWindows[0].Window.AppWindow;
+                        if (bounds.Position.X <= first.Position.X || bounds.Position.Y != first.Position.Y)
+                            throw new InvalidOperationException("Second card did not start the right column aligned with the first card.");
                     }
                 }
             }

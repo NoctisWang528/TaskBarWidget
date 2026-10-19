@@ -31,6 +31,7 @@ public sealed partial class SettingsWindow
     ];
 
     private readonly List<Border> _cardOrderRows = [];
+    private int _cardOrderDragTarget = -1;
     private JsonArray QuickCardOrderValues()
     {
         var value = _media.Get("quickCardOrder") as JsonArray;
@@ -78,16 +79,18 @@ public sealed partial class SettingsWindow
         }
 
         var order = QuickCardOrderValues();
-        var section = Section("卡片与顺序", "四张卡片均可独立启用。拖动手柄调整顺序；关闭的卡片仍保留在列表中。");
+        var section = Section("卡片与顺序", "四张卡片均可独立启用。拖动手柄调整顺序；关闭的卡片仍保留在网格中。左列为第 1、3 项，右列为第 2、4 项。");
         _cardOrderRows.Clear();
-        var list = new StackPanel { Spacing = 4 };
+        var list = new Grid { ColumnSpacing = 10, RowSpacing = 10 };
+        list.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        list.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         for (var index = 0; index < order.Count; index++)
         {
             var id = order[index]?.GetValue<string>() ?? "";
             var definition = QuickCardDefinitions.First(card => card.Id == id);
-            var row = new Grid { ColumnSpacing = 10, MinHeight = 44 };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
+            var row = new Grid { ColumnSpacing = 8, MinHeight = 44 };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
@@ -95,19 +98,19 @@ public sealed partial class SettingsWindow
             {
                 Content = new FontIcon { Glyph = "\uE700", FontSize = 16 },
                 DragLabel = definition.Label,
-                Width = 28,
-                Height = 32,
+                Width = 24,
+                Height = 28,
                 MinWidth = 0,
-                Padding = new Thickness(4),
+                Padding = new Thickness(2),
                 Tag = id
             };
             AutomationProperties.SetName(handle, "拖动" + definition.Label + "调整顺序");
             handle.StartPointerDrag = (source, args) => StartQuickCardPointerDrag(source, id, args);
             AddCardRow(row, handle, 0);
 
-            var icon = new FontIcon { Glyph = definition.Glyph, FontSize = 18, VerticalAlignment = VerticalAlignment.Center };
+            var icon = new FontIcon { Glyph = definition.Glyph, FontSize = 16, VerticalAlignment = VerticalAlignment.Center };
             AddCardRow(row, icon, 1);
-            var label = new TextBlock { Text = definition.Label, FontSize = 14, VerticalAlignment = VerticalAlignment.Center };
+            var label = new TextBlock { Text = definition.Label, FontSize = 13, VerticalAlignment = VerticalAlignment.Center };
             AddCardRow(row, label, 2);
             var check = new CheckBox { IsChecked = QuickCardEnabled(id), MinWidth = 0, VerticalAlignment = VerticalAlignment.Center };
             AutomationProperties.SetName(check, "启用" + definition.Label);
@@ -142,10 +145,12 @@ public sealed partial class SettingsWindow
                 Tag = id
             }, "SettingsSourceSurface");
             _cardOrderRows.Add(surface);
+            Grid.SetRow(surface, index / 2);
+            Grid.SetColumn(surface, index % 2);
             list.Children.Add(surface);
         }
         section.Children.Add(list);
-        section.Children.Add(Copy("Alt + ↑ / ↓ 可调整顺序。更新提示卡不属于普通卡片，不在此列表中，并固定显示在第二列。"));
+        section.Children.Add(Copy("Alt + ↑ / ↓ 可调整顺序。更新提示卡不属于普通卡片，不在此列表中，并固定显示在最右侧。"));
 
         var enabledCount = QuickCardDefinitions.Count(card => QuickCardEnabled(card.Id));
         if (enabledCount == 0)
@@ -190,8 +195,7 @@ public sealed partial class SettingsWindow
         });
         status.Children.Add(Copy("天气卡的启停开关位于“快捷卡片 → 卡片与顺序”的天气行。此处配置来源、城市和卡片显示内容。"));
 
-        var weatherFields = NativeFields().Where(field => Text(field["group"]) == "builtins.weather").ToList();
-        RenderWeatherSettings(weatherFields);
+        RenderWeatherSettings();
 
         var modules = Section("天气卡内容", "按当前来源可用的数据自动显示；不支持的模块会隐藏并保留配置。");
         var values = _media.Get("weatherCardModules") as JsonObject ?? new JsonObject();
@@ -234,16 +238,6 @@ public sealed partial class SettingsWindow
             weatherEditor.CapabilitiesChanged = UpdateAvailability;
             UpdateAvailability();
         }
-        var reduced = new CheckBox
-        {
-            Content = "减少天气卡动画",
-            MinHeight = 32,
-            IsChecked = _media.Bool("weatherCardReducedMotion")
-        };
-        AutomationProperties.SetAutomationId(reduced, "weather-card-reduced-motion");
-        reduced.Checked += (_, _) => { _media.Set("weatherCardReducedMotion", true); Changed(); };
-        reduced.Unchecked += (_, _) => { _media.Set("weatherCardReducedMotion", false); Changed(); };
-        modules.Children.Add(reduced);
         modules.Children.Add(Copy("中国天气网不提供湿度、AQI 等部分字段；这些模块不会显示伪造数据。预警在卡片内独立滚动。"));
     }
 
@@ -267,12 +261,15 @@ public sealed partial class SettingsWindow
     private void MoveQuickCardDrag(string id, Windows.Foundation.Point point)
     {
         Border? target = null;
-        foreach (var row in _cardOrderRows)
+        var targetIndex = -1;
+        for (var index = 0; index < _cardOrderRows.Count; index++)
         {
+            var row = _cardOrderRows[index];
             var origin = row.TransformToVisual(_navigation).TransformPoint(new Windows.Foundation.Point(0, 0));
             if (point.X >= origin.X && point.X <= origin.X + row.ActualWidth && point.Y >= origin.Y - 4 && point.Y <= origin.Y + row.ActualHeight + 4)
             {
                 target = row;
+                targetIndex = index;
                 break;
             }
         }
@@ -287,19 +284,14 @@ public sealed partial class SettingsWindow
             _pointerReorder?.ShowInsertion(new Windows.Foundation.Rect(origin.X + 4, origin.Y + 2, Math.Max(1, target.ActualWidth - 8), 3));
         }
         else _pointerReorder?.HideInsertion();
-        _saveStatus.Text = target is null ? "拖到卡片行上调整顺序；Esc 取消。" : "释放后应用新的卡片顺序。";
+        _cardOrderDragTarget = targetIndex;
+        _saveStatus.Text = target is null ? "拖到卡片上调整顺序；Esc 取消。" : "释放后应用新的卡片顺序。";
     }
 
     private void FinishQuickCardDrag(string id, Windows.Foundation.Point point)
     {
         var order = QuickCardOrderValues().OfType<JsonValue>().Select(value => value.GetValue<string>()).ToList();
-        var insertion = _cardOrderRows.Count;
-        for (var index = 0; index < _cardOrderRows.Count; index++)
-        {
-            var row = _cardOrderRows[index];
-            var origin = row.TransformToVisual(_navigation).TransformPoint(new Windows.Foundation.Point(0, 0));
-            if (point.Y < origin.Y + row.ActualHeight / 2) { insertion = index; break; }
-        }
+        var insertion = _cardOrderDragTarget >= 0 ? _cardOrderDragTarget : _cardOrderRows.Count;
         var next = ReorderSequence.MoveToGap(order, id, insertion);
         SetQuickCardOrder(new JsonArray(next.Select(item => (JsonNode?)JsonValue.Create(item)).ToArray()));
     }

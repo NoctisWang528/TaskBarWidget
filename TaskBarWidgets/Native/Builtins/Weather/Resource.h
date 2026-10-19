@@ -19,7 +19,6 @@
 #define IDS_CITY                        49006
 #define IDC_CHECK_SHOW_WEATHER_ICON     49006
 #define IDS_CITY_AO                     49007
-#define IDC_CHECK_SHOW_WEATHE_IN_TOOLTIP 49007
 #define IDS_QUERY_ERR                   49008
 #define IDC_CHECK_SHOW_BRIEF_RT_WEATHER 49008
 #define IDI_ICON_B_A02                  49008

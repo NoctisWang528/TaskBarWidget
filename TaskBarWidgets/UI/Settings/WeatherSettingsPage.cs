@@ -57,7 +57,7 @@ public sealed partial class SettingsWindow
     private bool IsWeatherOperationCurrent(WeatherEditor page, CancellationToken token) =>
         IsWeatherCurrent(page) && !token.IsCancellationRequested && page.Operation is not null && page.Operation.Token == token;
 
-    private void RenderWeatherSettings(IReadOnlyList<JsonObject> fields)
+    private void RenderWeatherSettings()
     {
         var previous = _weatherPage;
         _weatherPage = null;
@@ -70,7 +70,7 @@ public sealed partial class SettingsWindow
             FontSize = 14,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
         });
-        var body = Section("天气", "搜索后选择城市，再保存并刷新。以下操作立即保存；其他天气显示选项使用上方“应用更改”。");
+        var body = Section("天气", "搜索后选择城市，再保存并刷新。以下操作立即保存；更新频率使用上方“应用更改”。");
         page.Provider.Items.Add("中国天气网"); page.Provider.Items.Add("和风天气");
         page.Provider.SelectedIndex = 0;
         var searchRow = new Grid { ColumnSpacing = 8 };
@@ -120,23 +120,26 @@ public sealed partial class SettingsWindow
         body.Loaded += async (_, _) => { if (IsWeatherCurrent(page) && _connection.IsConnected) await ReadWeatherStatusAsync(page); };
         UpdateWeatherButtons(page);
 
-        var advanced = fields.Where(field => !IsWeatherConnectionField(Text(field["key"])) &&
-            !Text(field["key"]).EndsWith(".city_name", StringComparison.Ordinal) &&
-            !Text(field["key"]).EndsWith(".city_no", StringComparison.Ordinal) &&
-            !Text(field["key"]).EndsWith(".api_type", StringComparison.Ordinal)).Select(field => {
-            var editable = (JsonObject)field.DeepClone(); editable["restartRequired"] = false; return editable;
-        }).ToList();
-        if (advanced.Count > 0)
+        var update = Section("天气更新", "天气卡与任务栏温度共用此频率。修改后点击上方“应用更改”，保存成功后会自动刷新天气。");
+        var updateFrequency = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, MinHeight = 32 };
+        updateFrequency.Items.Add(new ComboBoxItem { Content = "每小时三次", Tag = 0 });
+        updateFrequency.Items.Add(new ComboBoxItem { Content = "每小时两次", Tag = 1 });
+        updateFrequency.Items.Add(new ComboBoxItem { Content = "每小时一次", Tag = 2 });
+        updateFrequency.Items.Add(new ComboBoxItem { Content = "每两小时一次", Tag = 3 });
+        updateFrequency.Items.Add(new ComboBoxItem { Content = "每三小时一次", Tag = 4 });
+        const string UpdateFrequencyKey = "builtins.weatherpro.dll.config.update_freq";
+        var currentFrequency = (int)Math.Clamp(_native.Number(UpdateFrequencyKey, 1), 0, 4);
+        var bindingFrequency = true;
+        updateFrequency.SelectedItem = updateFrequency.Items.OfType<ComboBoxItem>().First(item => item.Tag is int value && value == currentFrequency);
+        bindingFrequency = false;
+        AutomationProperties.SetAutomationId(updateFrequency, "weather-update-frequency");
+        updateFrequency.SelectionChanged += (_, _) =>
         {
-            var options = new StackPanel { Spacing = 8 };
-            options.Children.Add(Copy("修改后点击上方“应用更改”；保存成功后会自动刷新天气。"));
-            options.Children.Add(ResponsiveFields(advanced.Select(field => FieldEditor(field, _native))));
-            body.Children.Add(new Expander { Header = "天气显示与更新选项", Content = options, HorizontalAlignment = HorizontalAlignment.Stretch });
-        }
+            if (bindingFrequency) return;
+            if (updateFrequency.SelectedItem is ComboBoxItem { Tag: int value }) { _native.Set(UpdateFrequencyKey, value); Changed(); }
+        };
+        update.Children.Add(updateFrequency);
     }
-
-    private static bool IsWeatherConnectionField(string key) => key.Split('.')[^1].ToLowerInvariant() is
-        "city_no" or "city_name" or "api_type" or "api_host" or "apihost" or "api_key" or "apikey" or "key";
 
     private static void WeatherMessage(WeatherEditor page, string text, InfoBarSeverity severity)
     {

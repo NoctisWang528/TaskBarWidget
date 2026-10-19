@@ -94,11 +94,6 @@ const wchar_t* CWeatherPro::GetInfo(PluginInfoIndex index)
     return L"";
 }
 
-const wchar_t* CWeatherPro::GetTooltipInfo()
-{
-    return L"";
-}
-
 ITMPlugin::OptionReturn CWeatherPro::ShowOptionsDialog(void* hParent)
 {
     return ITMPlugin::OR_OPTION_UNCHANGED;

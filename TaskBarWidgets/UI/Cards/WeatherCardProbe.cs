@@ -48,6 +48,10 @@ public sealed partial class CardGroup
             throw new InvalidOperationException("Missing precipitation module was not hidden.");
         if (cards._weatherAlertsHost.MaxHeight != 140)
             throw new InvalidOperationException("Weather alert scroll limit changed.");
+        if (cards._weatherIcon.Width != 96 || cards._weatherIcon.Height != 96)
+            throw new InvalidOperationException("Weather hero icon is no longer the enlarged readable size.");
+        if (cards._weatherSky.Child is not Grid hero || hero.MinHeight < 136)
+            throw new InvalidOperationException("Weather hero no longer reserves space for the enlarged icon.");
         var minimum = JsonSerializer.SerializeToElement(new
         {
             provider = 0, revision = 43, stale = true, updating = false, state = "error", message = "保留上次成功数据。",

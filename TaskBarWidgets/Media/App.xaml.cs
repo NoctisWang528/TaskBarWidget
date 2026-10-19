@@ -276,8 +276,7 @@ public partial class App : System.Windows.Application
             toolWindowTheme: (int)Settings.ToolWindowTheme, quickCards: QuickCards()), "WinUI cards");
     }
     private object QuickCards() => new { order = Settings.QuickCardOrder, enabled = Settings.QuickCardEnabled,
-        resourceMode = Settings.QuickCardResourceMode.ToString(), weatherModules = Settings.WeatherCardModules,
-        weatherReducedMotion = Settings.WeatherCardReducedMotion };
+        resourceMode = Settings.QuickCardResourceMode.ToString(), weatherModules = Settings.WeatherCardModules };
     internal void ShowLyricsWindow() => SendNativeCommand("showMedia");
     private void SendNativeCommand(string action)
     {

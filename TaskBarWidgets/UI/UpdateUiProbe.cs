@@ -36,10 +36,14 @@ public sealed partial class CardGroup
             throw new InvalidOperationException("Ready update card must be the second column and stay hidden until the group is opened.");
         cards.Position(100, 100);
         var bounds = cards._updateCard.Window.AppWindow;
-        var lastBase = cards.EnabledCards.Last().Window.AppWindow;
+        // The update card is an independent rightmost column and bottom-aligns
+        // with the tallest base column, not with the last card in flat order.
+        var baseWindows = cards.EnabledCards.ToArray();
+        var lastBase = baseWindows[0].Window.AppWindow;
+        var baseBottom = baseWindows.Max(card => card.Window.AppWindow.Position.Y + card.Window.AppWindow.Size.Height);
         var expectedUpdateWidth = (int)Math.Floor(220 * (lastBase.Size.Width / (double)CardGroup.CardWidth));
         if (Math.Abs(bounds.Size.Width - expectedUpdateWidth) > 1 || bounds.Position.X <= lastBase.Position.X ||
-            Math.Abs(bounds.Position.Y + bounds.Size.Height - (lastBase.Position.Y + lastBase.Size.Height)) > 2)
+            Math.Abs(bounds.Position.Y + bounds.Size.Height - baseBottom) > 2)
             throw new InvalidOperationException($"Optional update card did not participate in two-column placement: update={bounds.Position.X},{bounds.Position.Y},{bounds.Size.Width}x{bounds.Size.Height} last={lastBase.Position.X},{lastBase.Position.Y},{lastBase.Size.Width}x{lastBase.Size.Height}");
         cards.SetThemePreview(ElementTheme.Light);
         if (cards._updateCard.Root.RequestedTheme != ElementTheme.Light) throw new InvalidOperationException("Optional update card missed the settings theme preview.");

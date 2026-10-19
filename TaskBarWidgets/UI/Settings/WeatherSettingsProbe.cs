@@ -3,7 +3,9 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 
 namespace TaskBarWidgets.UI;
 
@@ -110,6 +112,12 @@ public sealed partial class SettingsWindow
             window.AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(-30000, -30000, 900, 1000)); window.AppWindow.Show(false);
             while (window._weatherPage?.HasStatus != true || window._weatherPage.LoadingStatus || statusReads < 2 || window._weatherPage.Status.Text.Contains("正在更新")) await Task.Delay(10, timeout.Token);
             var page = window._weatherPage ?? throw new InvalidOperationException("Weather settings were not created.");
+            var updateFrequency = WalkWeather(window._page).OfType<ComboBox>().FirstOrDefault(box => AutomationProperties.GetAutomationId(box) == "weather-update-frequency")
+                ?? throw new InvalidOperationException("Weather update frequency control is missing.");
+            updateFrequency.SelectedItem = updateFrequency.Items.OfType<ComboBoxItem>().First(item => item.Tag is int value && value == 3);
+            if ((int)window._native.Number("builtins.weatherpro.dll.config.update_freq", 1) != 3 || !window._apply.IsEnabled)
+                throw new InvalidOperationException("Weather update frequency did not draft the native setting.");
+            updateFrequency.SelectedItem = updateFrequency.Items.OfType<ComboBoxItem>().First(item => item.Tag is int value && value == 1);
             window._native.Set("builtins.weatherpro.dll.config.show_weather_icon", true); window.UpdateSaveStatus();
             if (!window._apply.IsEnabled) throw new InvalidOperationException("Synthetic native draft must be applicable before testing weather write exclusion.");
             window._busy = true; window.UpdateSaveStatus();
@@ -153,5 +161,12 @@ public sealed partial class SettingsWindow
             window.Shutdown(); timeout.Cancel();
             try { await backend; } catch (OperationCanceledException) { }
         }
+    }
+
+    private static IEnumerable<DependencyObject> WalkWeather(DependencyObject root)
+    {
+        yield return root;
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+            foreach (var child in WalkWeather(VisualTreeHelper.GetChild(root, index))) yield return child;
     }
 }

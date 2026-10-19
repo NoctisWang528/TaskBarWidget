@@ -17,7 +17,6 @@ public:
     IPluginItem* GetItem(int index) override;
     void DataRequired() override;
     const wchar_t* GetInfo(PluginInfoIndex index) override;
-    const wchar_t* GetTooltipInfo() override;
     OptionReturn ShowOptionsDialog(void* hParent) override;
     void OnExtenedInfo(ExtendedInfoIndex index, const wchar_t* data) override;
 

@@ -27,8 +27,8 @@ public sealed partial class CardGroup
     private readonly Border _weatherSky = new() { CornerRadius = new CornerRadius(8), Padding = new Thickness(16, 12, 16, 12) };
     private readonly Image _weatherIcon = new()
     {
-        Width = 76,
-        Height = 76,
+        Width = 96,
+        Height = 96,
         Stretch = Stretch.Uniform,
         HorizontalAlignment = HorizontalAlignment.Center,
         VerticalAlignment = VerticalAlignment.Center
@@ -107,21 +107,25 @@ public sealed partial class CardGroup
             StartPoint = new Windows.Foundation.Point(0, 0),
             EndPoint = new Windows.Foundation.Point(1, 1)
         };
-        gradient.GradientStops.Add(new GradientStop { Color = Color.FromArgb(122, 72, 139, 190), Offset = 0 });
-        gradient.GradientStops.Add(new GradientStop { Color = Color.FromArgb(78, 111, 174, 204), Offset = 0.58 });
-        gradient.GradientStops.Add(new GradientStop { Color = Color.FromArgb(34, 222, 201, 164), Offset = 1 });
+        gradient.GradientStops.Add(new GradientStop { Color = Color.FromArgb(255, 61, 123, 176), Offset = 0 });
+        gradient.GradientStops.Add(new GradientStop { Color = Color.FromArgb(255, 87, 153, 196), Offset = 0.58 });
+        gradient.GradientStops.Add(new GradientStop { Color = Color.FromArgb(255, 111, 180, 214), Offset = 1 });
 
-        var hero = new Grid { MinHeight = 116 };
+        var hero = new Grid { MinHeight = 136 };
         hero.Children.Add(new Rectangle { RadiusX = 8, RadiusY = 8, Fill = gradient });
-        var columns = Columns(new GridLength(1, GridUnitType.Star), new GridLength(84));
+        var columns = Columns(new GridLength(1, GridUnitType.Star), new GridLength(104));
         var readings = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
         _weatherTemperature.Foreground = new SolidColorBrush(Colors.White);
         readings.Children.Add(_weatherTemperature);
         readings.Children.Add(_weatherCondition);
-        _weatherStatus.Foreground = new SolidColorBrush(Color.FromArgb(218, 255, 255, 255));
+        _weatherStatus.Foreground = new SolidColorBrush(Color.FromArgb(255, 255, 255, 255));
         readings.Children.Add(_weatherStatus);
         Add(columns, readings, 0);
-        Add(columns, _weatherIcon, 1);
+
+        var iconBack = new Grid { Width = 104, Height = 104, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        iconBack.Children.Add(new Ellipse { Fill = new SolidColorBrush(Color.FromArgb(51, 255, 255, 255)) });
+        iconBack.Children.Add(_weatherIcon);
+        Add(columns, iconBack, 1);
         hero.Children.Add(columns);
         _weatherSky.Child = hero;
     }
@@ -269,7 +273,6 @@ public sealed partial class CardGroup
         var isNight = String(current, "observedAt").Length >= 2 &&
             int.TryParse(String(current, "observedAt")[..2], out var observedHour) && (observedHour >= 20 || observedHour < 6);
         _ = ShowWeatherIconAsync(String(current, "conditionKind", "unknown"), isNight);
-        _weatherIcon.Opacity = _weatherReducedMotion ? 1 : 0.96;
         _weatherStatus.Text = WeatherStatus(status);
         _weatherStatus.Visibility = HasValue(_weatherStatus.Text) ? Visibility.Visible : Visibility.Collapsed;
 
@@ -405,7 +408,7 @@ public sealed partial class CardGroup
     {
         var visible = hasContent && _weatherModules.GetValueOrDefault(id);
         module.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-        module.Opacity = visible || _weatherReducedMotion ? 1 : 0;
+        module.Opacity = visible ? 1 : 0;
     }
 
     private void ShowWeatherEmpty(bool empty)

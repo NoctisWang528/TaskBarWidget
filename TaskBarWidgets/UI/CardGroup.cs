@@ -35,7 +35,6 @@ public sealed partial class CardGroup : IDisposable
         { ["weather"] = false, ["traffic"] = true, ["device"] = true, ["media"] = true };
     private Dictionary<string, bool> _weatherModules = new(StringComparer.Ordinal)
         { ["current"] = true, ["forecast"] = true, ["updatedAt"] = true };
-    private bool _weatherReducedMotion;
     private bool _onDemand;
     private readonly Dictionary<string, CardSlot> _slots;
     private readonly Dictionary<string, CardWindow> _cardsById = new(StringComparer.Ordinal);
@@ -451,7 +450,6 @@ public sealed partial class CardGroup : IDisposable
             foreach (var id in new[] { "current", "forecast", "humidity", "wind", "airQuality", "precipitation", "updatedAt", "alerts" })
                 _weatherModules[id] = modules.TryGetProperty(id, out var flag) && flag.ValueKind == JsonValueKind.True;
         }
-        _weatherReducedMotion = value.TryGetProperty("weatherReducedMotion", out var reduced) && reduced.ValueKind == JsonValueKind.True;
         _onDemand = value.TryGetProperty("resourceMode", out var mode) && string.Equals(mode.GetString(), "OnDemand", StringComparison.OrdinalIgnoreCase);
         ReconcileCardWindows();
         if (_visible) { Position(_anchorX, _anchorY); RenderWeatherModules(); }
@@ -812,35 +810,58 @@ public sealed partial class CardGroup : IDisposable
         var dpi = GetDpiForWindow((baseCards.FirstOrDefault() ?? _updateCard).Handle);
         var scale = dpi > 0 ? dpi / 96d : 1;
         var gap = (int)Math.Round(12 * scale);
-        var twoColumns = _updateReady && baseCards.Length > 0;
         var baseWidth = Math.Min((int)Math.Ceiling(CardWidth * scale), Math.Max(1, info.Work.Right - info.Work.Left - (int)(20 * scale)));
         var updateWidth = Math.Min((int)Math.Ceiling(UpdateCardWidth * scale), Math.Max(1, info.Work.Right - info.Work.Left - (int)(20 * scale)));
-        var totalWidth = twoColumns ? baseWidth + gap + updateWidth : _updateReady ? updateWidth : baseWidth;
-        var desiredBaseHeight = baseCards.Length > 0 ? baseCards.Sum(card => card.Height) : _updateReady ? _updateCard.Height : 0;
+
+        // Reading order fills the left column first, then the right column. An
+        // odd card count simply leaves the right column shorter.
+        var left = new List<CardWindow>();
+        var right = new List<CardWindow>();
+        for (var index = 0; index < baseCards.Length; index++)
+            (index % 2 == 0 ? left : right).Add(baseCards[index]);
+        var columns = new List<List<CardWindow>>();
+        if (left.Count > 0) columns.Add(left);
+        if (right.Count > 0) columns.Add(right);
+
+        double ColumnHeight(IEnumerable<CardWindow> column) => column.Sum(card => card.Height) + gap * (column.Count() - 1);
+        var desiredBaseHeight = columns.Count > 0 ? columns.Max(ColumnHeight) : _updateReady ? _updateCard.Height : 0;
+        var baseColumns = columns.Count;
+        var updateColumns = _updateReady ? 1 : 0;
+        var totalColumns = baseColumns + updateColumns;
+        var totalWidth = baseColumns * baseWidth + updateColumns * updateWidth + gap * Math.Max(0, totalColumns - 1);
         var fit = Math.Min(1, Math.Min(
             (info.Work.Right - info.Work.Left - 20 * scale) / (double)Math.Max(1, totalWidth),
-            (info.Work.Bottom - info.Work.Top - 20 * scale - gap * Math.Max(0, baseCards.Length - 1)) / Math.Max(1, desiredBaseHeight * scale)));
-        var widths = twoColumns
-            ? new[] { Math.Max(1, (int)Math.Floor(baseWidth * fit)), Math.Max(1, (int)Math.Floor(updateWidth * fit)) }
-            : new[] { Math.Max(1, (int)Math.Floor((_updateReady ? updateWidth : baseWidth) * fit)) };
-        var heights = baseCards.Select(card => Math.Max(1, (int)Math.Floor(card.Height * scale * fit))).ToArray();
+            (info.Work.Bottom - info.Work.Top - 20 * scale) / Math.Max(1, desiredBaseHeight * scale)));
+        var scaledBaseWidth = Math.Max(1, (int)Math.Floor(baseWidth * fit));
+        var scaledUpdateWidth = Math.Max(1, (int)Math.Floor(updateWidth * fit));
+        var heights = new Dictionary<CardWindow, int>();
+        foreach (var card in baseCards)
+            heights[card] = Math.Max(1, (int)Math.Floor(card.Height * scale * fit));
         var updateHeight = Math.Max(1, (int)Math.Floor(_updateCard.Height * scale * fit));
-        var gaps = gap * Math.Max(0, baseCards.Length - 1);
-        var total = baseCards.Length > 0 ? heights.Sum() + gaps : _updateReady ? updateHeight : 0;
-        var totalBlockWidth = twoColumns ? widths[0] + gap + widths[1] : widths[0];
-        var left = Math.Clamp((int)Math.Round(x - totalBlockWidth / 2d), info.Work.Left, Math.Max(info.Work.Left, info.Work.Right - totalBlockWidth));
-        var top = Math.Clamp((int)Math.Round(y - total - 10 * scale), info.Work.Top, Math.Max(info.Work.Top, info.Work.Bottom - total));
-        var groupTop = top;
-        for (var index = 0; index < baseCards.Length; index++)
+
+        double ColumnPixelHeight(IEnumerable<CardWindow> column) => column.Sum(card => heights[card]) + gap * (column.Count() - 1);
+        var baseBlockHeight = (int)Math.Ceiling(columns.Count > 0 ? columns.Max(ColumnPixelHeight) : 0);
+        var totalBlockWidth = scaledBaseWidth * baseColumns + scaledUpdateWidth * updateColumns + gap * Math.Max(0, totalColumns - 1);
+        var groupLeft = Math.Clamp((int)Math.Round(x - totalBlockWidth / 2d), info.Work.Left, Math.Max(info.Work.Left, info.Work.Right - totalBlockWidth));
+        var groupTop = Math.Clamp((int)Math.Round(y - baseBlockHeight - 10 * scale), info.Work.Top, Math.Max(info.Work.Top, info.Work.Bottom - baseBlockHeight));
+
+        var columnLeft = groupLeft;
+        foreach (var column in columns)
         {
-            baseCards[index].Window.AppWindow.MoveAndResize(new RectInt32(left, top, widths[0], heights[index]));
-            top += heights[index] + gap;
+            var columnTop = groupTop;
+            foreach (var card in column)
+            {
+                card.Window.AppWindow.MoveAndResize(new RectInt32(columnLeft, columnTop, scaledBaseWidth, heights[card]));
+                columnTop += heights[card] + gap;
+            }
+            columnLeft += scaledBaseWidth + gap;
         }
-        if (!_updateReady) return;
-        var updateLeft = twoColumns ? left + widths[0] + gap : left;
-        var updateBottom = groupTop + total;
-        var updateTop = Math.Max(info.Work.Top, updateBottom - updateHeight);
-        _updateCard.Window.AppWindow.MoveAndResize(new RectInt32(updateLeft, updateTop, widths[^1], updateHeight));
+        if (_updateReady)
+        {
+            var updateLeft = groupLeft + scaledBaseWidth * baseColumns + gap * baseColumns;
+            var updateTop = Math.Max(info.Work.Top, groupTop + baseBlockHeight - updateHeight);
+            _updateCard.Window.AppWindow.MoveAndResize(new RectInt32(updateLeft, updateTop, scaledUpdateWidth, updateHeight));
+        }
     }
 
     public void Dispose()

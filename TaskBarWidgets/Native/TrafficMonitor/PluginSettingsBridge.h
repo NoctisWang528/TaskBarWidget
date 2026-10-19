@@ -231,25 +231,7 @@ public:
                     }
                     else
                     {
-                        String(optionFields, file, id, "config", "city_no", L"天气城市代码（对应所选来源）", 64);
-                        String(optionFields, file, id, "config", "city_name", L"天气城市名称", 128);
-                        Number(optionFields, file, id, "config", "api_type", L"天气来源：0 天气网 / 1 和风天气", 0, 1);
-                        Number(optionFields, file, id, "config", "wit", L"天气时段：0 实时 / 1 今天 / 2 明天 / 3 后天", 0, 3);
                         Number(optionFields, file, id, "config", "update_freq", L"更新频率：0 每小时三次 / 1 两次 / 2 一次 / 3 每两小时 / 4 每三小时", 0, 4);
-                        Number(optionFields, file, id, "config", "icon_type", L"天气图标：0 蓝色 / 1 白色 / 2 和风填充 / 3 和风线条", 0, 3);
-                        Boolean(optionFields, file, id, "config", "show_weather_icon", L"显示天气图标");
-                        Boolean(optionFields, file, id, "config", "show_weather_alerts", L"显示天气预警");
-                        Boolean(optionFields, file, id, "hfw", "show_rt_temp_feels_like", L"显示体感温度");
-                        Boolean(optionFields, file, id, "hfw", "show_rt_wind", L"显示风向");
-                        Boolean(optionFields, file, id, "hfw", "show_rt_wind_scale", L"显示风力");
-                        Boolean(optionFields, file, id, "hfw", "show_rt_humidity", L"显示实时湿度");
-                        Boolean(optionFields, file, id, "hfw", "show_fc_uv_index", L"显示紫外线指数");
-                        Boolean(optionFields, file, id, "hfw", "show_fc_humidity", L"显示预报湿度");
-                        Boolean(optionFields, file, id, "hfw", "show_rt_air_quality", L"显示空气质量");
-                        Boolean(optionFields, file, id, "hfw", "show_rt_air_quality_aqi", L"显示 AQI");
-                        Boolean(optionFields, file, id, "hfw", "show_rt_air_quality_pm2p5", L"显示 PM2.5");
-                        Boolean(optionFields, file, id, "hfw", "show_rt_air_quality_pm10", L"显示 PM10");
-                        Boolean(optionFields, file, id, "hfw", "show_weather_alert", L"显示和风天气预警");
                     }
                     note = optionFields.Size() ? (id == L"weatherpro.dll" ? L"保存后自动刷新。城市与和风连接在天气专用设置中配置，已有密钥不会返回界面。" : L"保存后重启应用生效。") : L"当前配置没有已知选项。";
                 }

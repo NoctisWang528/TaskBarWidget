@@ -161,8 +161,6 @@ public sealed class AppSettings
         ["alerts"] = false
     };
 
-    public bool WeatherCardReducedMotion { get; set; }
-
     public DateTimeOffset? LastUpdateCheckUtc { get; set; }
 
     public string LastNotifiedUpdateVersion { get; set; } = "";
