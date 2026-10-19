@@ -616,7 +616,6 @@ SConfiguration::SConfiguration() :
     m_update_frequency(UpdateFrequency::UF_2T1H),
     m_icon_type(IconType::IT_WCC_BULE),
     m_show_weather_icon(true),
-    m_show_weather_in_tooltips(true),
     m_show_brief_rt_weather_info(false),
     m_show_weather_alerts(true),
     m_show_brief_weather_alert_info(true),
@@ -726,10 +725,12 @@ std::wstring WeatherCDataManager::GetWeatherTemperature() const
     return m_weather_info_cache.WeatherTemperature;
 }
 
-std::wstring WeatherCDataManager::GetTooptipInfo() const
+bool WeatherCDataManager::GetWeatherDetails(WeatherDetails& details) const
 {
     std::lock_guard<std::recursive_mutex> cache_lock(m_cache_mutex);
-    return m_weather_info_cache.TooltipInfo;
+    if (!m_weather_info_cache.HasDetails) return false;
+    details = m_weather_info_cache.Details;
+    return true;
 }
 
 SConfiguration WeatherCDataManager::GetConfig() const
@@ -811,7 +812,6 @@ void WeatherCDataManager::LoadConfigs(const std::wstring &cfg_dir)
     config.m_update_frequency = static_cast<UpdateFrequency>(ini.GetLongValue(L"config", L"update_freq", 1));
     config.m_icon_type = static_cast<IconType>(ini.GetLongValue(L"config", L"icon_type", 0));
     config.m_show_weather_icon = ini.GetBoolValue(L"config", L"show_weather_icon", 1);
-    config.m_show_weather_in_tooltips = ini.GetBoolValue(L"config", L"show_weather_in_tooltips", 1);
     config.m_show_brief_rt_weather_info = ini.GetBoolValue(L"config", L"show_brief_rt_weather_info", 0);
     config.m_show_weather_alerts = ini.GetBoolValue(L"config", L"show_weather_alerts", 1);
     config.m_show_brief_weather_alert_info = ini.GetBoolValue(L"config", L"show_brief_weather_alert_info", 1);
@@ -853,7 +853,6 @@ void WeatherCDataManager::SaveConfigs() const
     ini.SetLongValue(L"config", L"icon_type", static_cast<int>(m_config.m_icon_type));
     ini.SetBoolValue(L"config", L"show_weather_icon", m_config.m_show_weather_icon);
     ini.SetBoolValue(L"config", L"show_weather_icon", m_config.m_show_weather_icon);
-    ini.SetBoolValue(L"config", L"show_weather_in_tooltips", m_config.m_show_weather_in_tooltips);
     ini.SetBoolValue(L"config", L"show_brief_rt_weather_info", m_config.m_show_brief_rt_weather_info);
     ini.SetBoolValue(L"config", L"show_weather_alerts", m_config.m_show_weather_alerts);
     ini.SetBoolValue(L"config", L"show_brief_weather_alert_info", m_config.m_show_brief_weather_alert_info);
@@ -907,39 +906,25 @@ std::wstring WeatherCDataManager::_getWeatherTemperature() const
         return L"";
 }
 
-std::wstring WeatherCDataManager::_getTooptipInfo() const
-{
-    auto api = GetCurrentApi();
-    if (api != nullptr)
-    {
-        std::wstringstream wss;
-
-        wss << m_currentCityInfo.CityName << L" " << api->GetWeatherInfoSummary();
-
-        auto lastErr = api->GetLastError();
-        if (m_config.m_show_error_info && !lastErr.empty())
-        {
-            wss << std::endl;
-
-            wss << L"=====WeatherPro-Errors=====" << std::endl
-                << lastErr << std::endl
-                << L"===========================";
-        }
-
-        return wss.str();
-    }
-
-    return L"";
-}
-
 void WeatherCDataManager::RefreshWeatherInfoCache()
 {
     // Backend formatting/HTTP is never performed while taskbar readers hold this lock.
     const auto temperature = _getWeatherTemperature();
-    const auto tooltip = _getTooptipInfo();
     const auto icon = _getIcon();
+    WeatherDetails details;
+    const bool hasDetails = [&] {
+        const auto api = GetCurrentApi();
+        if (!api) return false;
+        const auto snapshot = api->GetWeatherDetails();
+        if (!snapshot) return false;
+        details = *snapshot;
+        return true;
+    }();
     std::lock_guard<std::recursive_mutex> cache_lock(m_cache_mutex);
     m_weather_info_cache.WeatherTemperature = temperature;
-    m_weather_info_cache.TooltipInfo = tooltip;
+    if (hasDetails) {
+        m_weather_info_cache.Details = std::move(details);
+        m_weather_info_cache.HasDetails = true;
+    }
     m_weather_info_cache.Icon = icon;
 }

@@ -87,7 +87,8 @@ internal sealed class UiRequestDispatcher : IAsyncDisposable
     private static string Action(JsonElement request) => request.ValueKind == JsonValueKind.Object &&
         request.TryGetProperty("action", out var action) && action.ValueKind == JsonValueKind.String ? action.GetString() ?? "unknown" : "unknown";
     private static bool IsAudio(string action) => action is "getAudio" or "selectDevice" or "setVolume" or "setMute";
-    private static string SafeAction(string action) => IsAudio(action) || action is "getState" or "getNativeSettings" or "applyNativeSettings" or "getTrafficHistory" or "getMediaSettings" or "applyMediaSettings" or "getFonts" or "settingsCommand" or "mediaCommand" or "openPanel" ? action : "other";
+    private static bool IsWeather(string action) => action == "weatherCommand";
+    private static string SafeAction(string action) => IsAudio(action) || IsWeather(action) || action is "getState" or "getNativeSettings" or "applyNativeSettings" or "getTrafficHistory" or "getMediaSettings" or "applyMediaSettings" or "getFonts" or "settingsCommand" or "mediaCommand" or "openPanel" ? action : "other";
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;

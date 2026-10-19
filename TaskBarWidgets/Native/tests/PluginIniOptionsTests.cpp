@@ -38,5 +38,13 @@ int main()
     assert(!SetBoolean(unrelated, "config", "show_percent", true));
     std::string utf16("\xff\xfe[\0c\0o\0n\0f\0i\0g\0]\0", 18);
     assert(!FindBoolean(utf16, "config", "show_percent", token));
+    std::string migration = "\xef\xbb\xbf[config]\r\nshow_weather_icon=1\r\nshow_weather_in_tooltips=1\r\ncity_name=Beijing\r\n";
+    assert(DeleteValue(migration, "config", "show_weather_in_tooltips"));
+    assert(migration == "\xef\xbb\xbf[config]\r\nshow_weather_icon=1\r\ncity_name=Beijing\r\n");
+    assert(!DeleteValue(migration, "config", "show_weather_in_tooltips"));
+    assert(migration == "\xef\xbb\xbf[config]\r\nshow_weather_icon=1\r\ncity_name=Beijing\r\n");
+    std::string duplicateTooltip = "[config]\r\nshow_weather_in_tooltips=0\r\nshow_weather_in_tooltips=1\r\n";
+    assert(!DeleteValue(duplicateTooltip, "config", "show_weather_in_tooltips"));
+    assert(duplicateTooltip.find("show_weather_in_tooltips=0") != std::string::npos && duplicateTooltip.find("show_weather_in_tooltips=1") != std::string::npos);
     std::cout << "Plugin INI allowlist token and byte-preservation tests passed.\n";
 }

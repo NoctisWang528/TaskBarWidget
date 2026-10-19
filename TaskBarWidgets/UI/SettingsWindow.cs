@@ -39,6 +39,8 @@ public sealed partial class SettingsWindow : Window
     private bool _loaded;
     private bool _shutdown;
     private bool _closed;
+    private bool _closeDialogOpen;
+    internal bool ReloadWithoutPrompt;
     public event Action? Dismissed;
     internal event Action<ElementTheme>? ThemePreviewChanged;
     internal ElementTheme? ThemePreview => _loaded ? _root.RequestedTheme : null;
@@ -53,7 +55,7 @@ public sealed partial class SettingsWindow : Window
             _page.ChildrenTransitions = new Microsoft.UI.Xaml.Media.Animation.TransitionCollection { new Microsoft.UI.Xaml.Media.Animation.EntranceThemeTransition { IsStaggeringEnabled = false } };
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1180, 820));
         var pages = new (string Id, string Label, string Glyph)[] {
-            ("taskbar", "任务栏与布局", "\uE950"), ("hardware", "硬件与网络", "\uE7F4"),
+            ("taskbar", "任务栏与布局", "\uE950"), ("quickCards", "快捷卡片", "\uE8A9"), ("hardware", "硬件与网络", "\uE7F4"),
             ("sources", "播放源", "\uE8D6"), ("lyricsGroup", "歌词", "\uE8D2"),
             ("general", "常规", "\uE713"), ("about", "关于", "\uE946") };
         foreach (var page in pages)
@@ -64,6 +66,12 @@ public sealed partial class SettingsWindow : Window
                 item.SelectsOnInvoked = false;
                 foreach (var child in new[] { ("lyrics", "显示与行为"), ("displayArea", "布局与样式"),
                     ("lyricDiagnostics", "歌词匹配"), ("trackOffsets", "单曲偏移"), ("advanced", "诊断与维护") })
+                    item.MenuItems.Add(new NavigationViewItem { Content = child.Item2, Tag = child.Item1 });
+            }
+            if (page.Id == "quickCards")
+            {
+                item.SelectsOnInvoked = false;
+                foreach (var child in new[] { ("quickCards", "卡片与顺序"), ("quickCardsWeather", "天气") })
                     item.MenuItems.Add(new NavigationViewItem { Content = child.Item2, Tag = child.Item1 });
             }
             _navigation.MenuItems.Add(item);
@@ -105,7 +113,12 @@ public sealed partial class SettingsWindow : Window
             if (!_loaded && _connection.IsConnected) await GuardAsync(() => ReloadAsync());
         };
         _connection.ConnectionChanged += OnConnectionChanged;
-        AppWindow.Closing += (_, args) => { CancelModulePointerDrag(); CancelWeatherPage(); if (!_shutdown) { args.Cancel = true; AppWindow.Hide(); Dismissed?.Invoke(); } };
+        AppWindow.Closing += (_, args) => {
+            CancelModulePointerDrag();
+            if (_shutdown || _closed) return;
+            args.Cancel = true;
+            CloseDeferred();
+        };
         Closed += (_, _) => { _closed = true; CancelWeatherPage(); _lifetime.Cancel(); _connection.ConnectionChanged -= OnConnectionChanged; UnsubscribeSettingsHighContrast(); _lifetime.Dispose(); };
         ShowPage("taskbar");
     }
@@ -116,8 +129,9 @@ public sealed partial class SettingsWindow : Window
     public void ShowPage(string? page)
     {
         if (page is "audio" or "shortcuts") page = "general";
+        if (page is "weather") page = "quickCardsWeather";
         var item = NavigationPages().FirstOrDefault(item => (string)item.Tag == page)
-            ?? (NavigationViewItem)_navigation.MenuItems[0];
+            ?? NavigationPages().First();
         _currentPage = (string)item.Tag;
         foreach (var parent in _navigation.MenuItems.OfType<NavigationViewItem>())
             if (parent.MenuItems.Contains(item)) parent.IsExpanded = true;
@@ -126,6 +140,61 @@ public sealed partial class SettingsWindow : Window
         _split.IsPaneOpen = false;
     }
     public void Shutdown() { _shutdown = true; Close(); }
+    private void CloseDeferred() => BeginCloseConfirmation();
+    private async void BeginCloseConfirmation()
+    {
+        try { await CloseWithPendingChangesAsync(); }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            if (!_closed) ShowError(error.Message);
+        }
+    }
+    private async Task CloseWithPendingChangesAsync()
+    {
+        var weatherBusy = _weatherPage is { Committing: true };
+        var pending = _native.Pending.Count + _media.Pending.Count > 0 || weatherBusy || HasWeatherDraft();
+        if (!pending || _root.XamlRoot is null)
+        {
+            CancelWeatherPage();
+            AppWindow.Hide();
+            Dismissed?.Invoke();
+            return;
+        }
+        if (_closeDialogOpen) return;
+        _closeDialogOpen = true;
+        var dialog = new ContentDialog
+        {
+            XamlRoot = _root.XamlRoot,
+            RequestedTheme = _root.RequestedTheme,
+            Title = "有尚未应用的设置",
+            Content = weatherBusy
+                ? "天气操作仍在进行。可以继续编辑，之后应用或丢弃更改。"
+                : "设置中还有未应用的更改。要应用后关闭、丢弃更改，还是继续编辑？",
+            PrimaryButtonText = weatherBusy ? "继续编辑" : "应用并关闭",
+            SecondaryButtonText = "丢弃更改",
+            CloseButtonText = "继续编辑",
+            DefaultButton = ContentDialogButton.Close
+        };
+        ContentDialogResult result;
+        try { result = await dialog.ShowAsync(); }
+        finally { _closeDialogOpen = false; }
+        if (result == ContentDialogResult.Primary && !weatherBusy)
+        {
+            await GuardAsync(SaveAsync);
+            if (_native.Pending.Count + _media.Pending.Count > 0 || HasWeatherDraft()) return;
+        }
+        else if (result == ContentDialogResult.Primary || result == ContentDialogResult.None)
+        {
+            Activate();
+            return;
+        }
+        _native.Pending.Clear();
+        _media.Pending.Clear();
+        CancelWeatherPage();
+        CancelModulePointerDrag();
+        AppWindow.Hide();
+        Dismissed?.Invoke();
+    }
     internal void LoadValidationData(JsonObject native, JsonObject media)
     {
         SetNativeReadback(native); _media.Readback(MediaValues(media)); _loaded = true;
@@ -151,6 +220,25 @@ public sealed partial class SettingsWindow : Window
     private async Task ReloadAsync()
     {
         if (_busy || _weatherPage?.Committing == true) return;
+        if (ReloadWithoutPrompt)
+        {
+            ReloadWithoutPrompt = false;
+        }
+        else
+        if (HasPendingChanges && _root.XamlRoot is not null)
+        {
+            var dialog = new ContentDialog
+            {
+                XamlRoot = _root.XamlRoot,
+                RequestedTheme = _root.RequestedTheme,
+                Title = "重新读取设置？",
+                Content = "当前有尚未保存的更改。重新读取会丢弃这些更改。",
+                PrimaryButtonText = "继续编辑",
+                SecondaryButtonText = "丢弃并重新读取",
+                DefaultButton = ContentDialogButton.Primary
+            };
+            if (await dialog.ShowAsync() != ContentDialogResult.Secondary) return;
+        }
         CancelModulePointerDrag();
         _busy = true; UpdateSaveStatus();
         var nativeRevision = _native.Capture(); var mediaRevision = _media.Capture();
@@ -176,7 +264,6 @@ public sealed partial class SettingsWindow : Window
     private async Task SaveAsync()
     {
         if (_busy || !_loaded || _weatherPage?.Committing == true) return;
-        if (_layout is not null && !_layout.Modules.Any(module => _layout.Enabled(module.Id))) { ShowError("请至少添加一个显示模块再应用。"); return; }
         CancelModulePointerDrag();
         _busy = true; UpdateSaveStatus();
         var native = _native.Capture(); var media = _media.Capture();
@@ -252,7 +339,7 @@ public sealed partial class SettingsWindow : Window
         var count = _native.Pending.Count + _media.Pending.Count;
         var empty = _loaded && _layout is not null && !_layout.Modules.Any(module => _layout.Enabled(module.Id));
         var weatherSaving = _weatherPage?.Committing == true;
-        _apply.IsEnabled = !_busy && !weatherSaving && count > 0 && !empty;
+        _apply.IsEnabled = !_busy && !weatherSaving && count > 0;
         _saveStatus.Text = _busy ? "正在保存或读取；新的编辑会保留在草稿中…" : weatherSaving ? "正在保存或刷新天气…" : empty ? "请至少添加一个显示模块再应用。" : count > 0 ? $"{count} 项更改待应用" : "配置已同步";
         if (_weatherPage is not null) UpdateWeatherButtons(_weatherPage);
     }
@@ -260,11 +347,12 @@ public sealed partial class SettingsWindow : Window
     private void RenderPage()
     {
         CancelModulePointerDrag();
-        CancelWeatherPage();
+        if (_currentPage != "quickCardsWeather") CancelWeatherPage();
         _page.Children.Clear(); _preview = null; _split.IsPaneOpen = false;
         _heading.Text = NavigationPages().FirstOrDefault(item => (string)item.Tag == _currentPage)?.Content?.ToString() ?? "设置";
         if (!_loaded) { _page.Children.Add(Copy("连接主程序后即可读取设置。")); return; }
         if (_currentPage == "taskbar") RenderTaskbar();
+        else if (_currentPage is "quickCards" or "quickCardsWeather") RenderQuickCards();
         else if (_currentPage is "hardware" or "general") { RenderNativeGroups(_currentPage); if (_currentPage == "general") RenderGeneral(); }
         else RenderMediaPage(_currentPage);
     }
@@ -273,9 +361,8 @@ public sealed partial class SettingsWindow : Window
         var groups = ((_schema["groups"] as JsonArray)?.OfType<JsonObject>() ?? []).Where(group => Text(group["page"]) == page && Text(group["id"]) != "items").OrderBy(group => Text(group["id"]) == "appearance" ? 0 : 1);
         foreach (var group in groups) {
             var fields = NativeFields().Where(field => Text(field["group"]) == Text(group["id"]) && Text(field["key"]) != "taskbar.horizontal_arrange").ToList();
-            if (fields.Count == 0 && Text(group["id"]) != "builtins.weather") continue;
+            if (fields.Count == 0) continue;
             if (Text(group["id"]) == "appearance") { RenderAppearanceGroup(fields); continue; }
-            if (Text(group["id"]) == "builtins.weather") { RenderWeatherSettings(fields); continue; }
             var content = Section(Text(group["label"]));
             content.Children.Add(ResponsiveFields(fields.Where(field => field["advanced"]?.ToString() != "true").Select(field => FieldEditor(field, _native))));
             var advanced = fields.Where(field => field["advanced"]?.ToString() == "true").ToList();

@@ -63,6 +63,40 @@ namespace PluginIniOptions
         bytes.replace(token.start, token.length, value);
         return true;
     }
+    // Remove one unambiguous key line while preserving BOM, comments and the
+    // file's existing line-ending style. Missing keys are already migrated.
+    inline bool DeleteValue(std::string& bytes, const std::string& section, const std::string& key)
+    {
+        if (bytes.find('\0') != std::string::npos) return false;
+        size_t cursor = bytes.compare(0, 3, "\xef\xbb\xbf") == 0 ? 3 : 0;
+        std::string current;
+        int matches = 0; size_t matchStart{}, matchEnd{};
+        while (cursor < bytes.size())
+        {
+            const size_t newline = bytes.find('\n', cursor);
+            const size_t end = newline == std::string::npos ? bytes.size() : newline;
+            const auto line = bytes.substr(cursor, end - cursor);
+            const auto trimmed = Trim(line);
+            if (!trimmed.empty() && trimmed.front() == '[')
+            {
+                const auto close = trimmed.find(']');
+                current = close == std::string::npos ? std::string{} : Lower(Trim(trimmed.substr(1, close - 1)));
+            }
+            else if (current == Lower(section) && !trimmed.empty() && trimmed.front() != ';' && trimmed.front() != '#')
+            {
+                const auto equals = line.find('=');
+                if (equals != std::string::npos && Lower(Trim(line.substr(0, equals))) == Lower(key))
+                {
+                    if (++matches > 1) return false;
+                    matchStart = cursor; matchEnd = newline == std::string::npos ? bytes.size() : newline + 1;
+                }
+            }
+            cursor = newline == std::string::npos ? bytes.size() : newline + 1;
+        }
+        if (matches != 1) return false;
+        bytes.erase(matchStart, matchEnd - matchStart);
+        return true;
+    }
     // Add only an absent allowlisted key; ambiguous/unsupported files stay untouched.
     inline bool EnsureValue(std::string& bytes, const std::string& section, const std::string& key, const std::string& value)
     {

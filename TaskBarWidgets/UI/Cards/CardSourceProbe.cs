@@ -13,7 +13,7 @@ public sealed partial class CardGroup
             sources = new[] { new { id = "qq", label = "QQ 音乐", iconDataUrl = icon }, new { id = "edge", label = "Microsoft Edge · 较长名称", iconDataUrl = icon } } });
         cards.RenderMedia(state);
         await cards.RenderSelectedSourceIconAsync(icon);
-        cards._cards[2].Root.UpdateLayout();
+        cards._cardsById["media"].Root.UpdateLayout();
         if (cards._sourceImage.Source is null || !cards._sourceLabel.Text.StartsWith("Microsoft Edge") || !cards._source.IsEnabled || cards._source.ActualHeight < 33)
             throw new InvalidOperationException("Source selector label, icon or click target failed.");
         var menu = new MenuFlyoutItem(); await cards.SetSourceMenuIconAsync(menu, icon);

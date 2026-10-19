@@ -51,6 +51,7 @@ public:
     std::wstring GetTemprature(EWeatherInfoType type) override;
     std::wstring GetWeatherText(EWeatherInfoType type) override;
     std::wstring GetWeatherCode(EWeatherInfoType type) override;
+    std::optional<WeatherDetails> GetWeatherDetails() const override;
 
     bool UpdateWeather() override;
     std::wstring GetLastError() override;

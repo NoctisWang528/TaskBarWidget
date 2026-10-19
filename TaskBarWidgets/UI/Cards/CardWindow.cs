@@ -17,16 +17,18 @@ internal sealed class CardWindow
     internal Grid Root { get; }
     internal nint Handle { get; }
     internal double Height { get; private set; }
+    internal double Width { get; }
+    internal FrameworkElement Content => _content;
     private readonly FrameworkElement _content;
     private readonly Grid _surface;
     private readonly bool _autoHeight;
 
-    internal CardWindow(string title, FrameworkElement content, double height, bool autoHeight = false)
+    internal CardWindow(string title, FrameworkElement content, double height, bool autoHeight = false, double width = CardGroup.CardWidth)
     {
-        Height = height;
+        Height = height; Width = width;
         _content = content; _autoHeight = autoHeight;
         Root = new Grid();
-        var surface = new Grid { Width = CardGroup.CardWidth, Height = height, Padding = new Thickness(16) };
+        var surface = new Grid { Width = width, Height = height, Padding = new Thickness(16) };
         _surface = surface;
         surface.Children.Add(content);
         Root.Children.Add(new Viewbox { Child = surface, Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly });
@@ -47,9 +49,16 @@ internal sealed class CardWindow
     internal void MeasureHeight()
     {
         if (!_autoHeight || _closed) return;
-        _content.Measure(new Windows.Foundation.Size(CardGroup.CardWidth - 32, double.PositiveInfinity));
+        _content.Measure(new Windows.Foundation.Size(Width - 32, double.PositiveInfinity));
         Height = Math.Ceiling(_content.DesiredSize.Height + 32);
         _surface.Height = Height;
+    }
+
+    internal void SetMinimumWidth(double width)
+    {
+        if (_closed) return;
+        Root.MinWidth = width;
+        _surface.Width = Math.Max(Width, width);
     }
 
     internal void Show()
@@ -117,6 +126,8 @@ internal sealed class CardWindow
         if (_closed) return;
         _closed = true;
         _motionGeneration++;
+        if (_surface.Children.Contains(_content)) _surface.Children.Remove(_content);
+        Root.Children.Clear();
         Window.Close();
     }
 }

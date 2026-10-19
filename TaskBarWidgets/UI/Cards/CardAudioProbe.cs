@@ -23,7 +23,7 @@ public sealed partial class CardGroup
         await accepted;
         using var reader = new StreamReader(server, Encoding.UTF8, false, 4096, true);
         using var writer = new StreamWriter(server, new UTF8Encoding(false), 4096, true) { AutoFlush = true };
-        using var cards = new CardGroup(connection, () => throw new InvalidOperationException("Audio probe must not open settings."));
+        using var cards = new CardGroup(connection, _ => throw new InvalidOperationException("Audio probe must not open settings."));
         var activated = false;
         foreach (var card in cards.CardWindows) {
             UiTemplateProbe.PreventProbeActivation(card.Window);
@@ -40,8 +40,9 @@ public sealed partial class CardGroup
             inputs = new[] { new { id = "microphone", name = "Probe microphone", isDefault = true, isCommunications = false, volume = .50, isMuted = false } }
         };
         cards.RenderAudio(JsonSerializer.SerializeToElement(Snapshot()));
-        cards.CardWindows[1].Window.AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(-30000, -30000, 480, 340));
-        cards.CardWindows[1].Show();
+        var audioCardForProbe = cards._cardsById["device"];
+        audioCardForProbe.Window.AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(-30000, -30000, 480, 340));
+        audioCardForProbe.Show();
         await Task.Delay(200, timeout.Token);
         while (!connection.IsConnected) await Task.Delay(10, timeout.Token);
 
@@ -87,7 +88,7 @@ public sealed partial class CardGroup
         cards.ApplyAudioReply(older, 99);
         if (!cards._outputMuted) throw new InvalidOperationException("An old audio reply overwrote the latest mute state.");
         if (activated) throw new InvalidOperationException("Audio probe unexpectedly activated a window.");
-        var audioCard = cards.CardWindows[1];
+        var audioCard = cards._cardsById["device"];
         cards._status.Text = ""; audioCard.MeasureHeight(); var compactHeight = audioCard.Height;
         cards._status.Text = "Synthetic device error with enough detail to wrap onto a second line and verify the measured card grows with content.";
         audioCard.MeasureHeight(); var errorHeight = audioCard.Height;

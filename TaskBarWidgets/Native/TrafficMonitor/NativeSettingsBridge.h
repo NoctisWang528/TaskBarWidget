@@ -112,7 +112,7 @@ public:
         Group(L"placement",L"任务栏位置与布局",L"taskbar"); Group(L"values",L"数值、单位与图表",L"taskbar");
         Group(L"appearance",L"共用任务栏外观",L"taskbar"); Group(L"monitorAppearance",L"监测颜色与绘制",L"taskbar"); Group(L"items",L"显示项、插件与排序",L"taskbar");
         Group(L"network",L"网络连接",L"hardware"); Group(L"sensors",L"硬件监测与传感器",L"hardware");
-        Group(L"nativeGeneral",L"监测常规设置",L"general"); Group(L"builtins.battery",L"电池显示",L"hardware"); Group(L"builtins.power",L"电池与硬件功耗",L"hardware"); Group(L"builtins.weather",L"天气",L"hardware");
+        Group(L"nativeGeneral",L"监测常规设置",L"general"); Group(L"builtins.battery",L"电池显示",L"hardware"); Group(L"builtins.power",L"电池与硬件功耗",L"hardware");
 #define B(member,label,group) Boolean(std::wstring(L"taskbar.")+winrt::to_hstring(#member).c_str(),label,group,taskbar.member)
 #define N(member,label,group,min,max) Number(std::wstring(L"taskbar.")+winrt::to_hstring(#member).c_str(),label,group,taskbar.member,min,max)
         std::vector<HWND> secondary_displays; CTaskbarHelper::GetAllSecondaryDisplayTaskbar(secondary_displays);

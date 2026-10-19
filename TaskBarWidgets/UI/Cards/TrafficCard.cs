@@ -169,7 +169,7 @@ public sealed partial class CardGroup
         if (button.IsLoaded) UpdateGlow(button, glow);
     }
 
-    private bool IsDark => _cards.Length > 0 && _cards[0].Root.ActualTheme == ElementTheme.Dark;
+    private bool IsDark => _cardsById.TryGetValue("traffic", out var card) && card.Root.ActualTheme == ElementTheme.Dark;
 
     private Color ColorForLevel(int level)
     {

@@ -1269,6 +1269,7 @@ public partial class SettingsWindow : System.Windows.Window
         _settings.NormalizeLyricsTextAlignment();
         _settings.NormalizeCoverPosition();
         _settings.NormalizeWindowLayout();
+        _settings.NormalizeQuickCards();
         var layoutMetrics = CreateLyricsLayoutMetrics();
         var availableDisplays = DisplayMonitorService.GetDisplays();
         var targetDisplays = LyricsDisplayTargetSelector.Select(
@@ -1310,6 +1311,11 @@ public partial class SettingsWindow : System.Windows.Window
             ShowLyricTranslation = _settings.ShowLyricTranslation,
             EnableWordScanning = _settings.EnableWordScanning,
             ToolWindowTheme = _settings.ToolWindowTheme,
+            QuickCardOrder = _settings.QuickCardOrder.ToList(),
+            QuickCardEnabled = new Dictionary<string, bool>(_settings.QuickCardEnabled, StringComparer.Ordinal),
+            QuickCardResourceMode = _settings.QuickCardResourceMode,
+            WeatherCardModules = new Dictionary<string, bool>(_settings.WeatherCardModules, StringComparer.Ordinal),
+            WeatherCardReducedMotion = _settings.WeatherCardReducedMotion,
             SpectrumDisplayMode = _settings.SpectrumDisplayMode.ToString(),
             SpectrumAudioAccessGranted = _settings.SpectrumAudioAccessGranted,
             SpectrumTuning = _settings.SpectrumTuning.Clone(),
@@ -1579,6 +1585,33 @@ public partial class SettingsWindow : System.Windows.Window
                 {
                     _settings.ToolWindowTheme = toolWindowTheme;
                 }
+                break;
+            case "quickCardOrder":
+                _settings.QuickCardOrder = ReadStringList(element);
+                _settings.NormalizeQuickCards();
+                break;
+            case "quickCardEnabled":
+                if (element.ValueKind == JsonValueKind.Object) {
+                    _settings.QuickCardEnabled = element.EnumerateObject()
+                        .Where(item => item.Value.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                        .ToDictionary(item => item.Name, item => item.Value.GetBoolean(), StringComparer.Ordinal);
+                    _settings.NormalizeQuickCards();
+                }
+                break;
+            case "quickCardResourceMode":
+                if (Enum.TryParse<QuickCardResourceMode>(ReadString(element, _settings.QuickCardResourceMode.ToString()), true, out var resourceMode))
+                    _settings.QuickCardResourceMode = resourceMode;
+                break;
+            case "weatherCardModules":
+                if (element.ValueKind == JsonValueKind.Object) {
+                    _settings.WeatherCardModules = element.EnumerateObject()
+                        .Where(item => item.Value.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                        .ToDictionary(item => item.Name, item => item.Value.GetBoolean(), StringComparer.Ordinal);
+                    _settings.NormalizeQuickCards();
+                }
+                break;
+            case "weatherCardReducedMotion":
+                _settings.WeatherCardReducedMotion = ReadBool(element, _settings.WeatherCardReducedMotion);
                 break;
             case "spectrumDisplayMode":
                 var spectrumDisplayMode = ReadString(element, SpectrumDisplayMode.Disabled.ToString());
@@ -2078,6 +2111,11 @@ public partial class SettingsWindow : System.Windows.Window
         target.ShowLyricTranslation = source.ShowLyricTranslation;
         target.EnableWordScanning = source.EnableWordScanning;
         target.ToolWindowTheme = source.ToolWindowTheme;
+        target.QuickCardOrder = source.QuickCardOrder.ToList();
+        target.QuickCardEnabled = new Dictionary<string, bool>(source.QuickCardEnabled, StringComparer.Ordinal);
+        target.QuickCardResourceMode = source.QuickCardResourceMode;
+        target.WeatherCardModules = new Dictionary<string, bool>(source.WeatherCardModules, StringComparer.Ordinal);
+        target.WeatherCardReducedMotion = source.WeatherCardReducedMotion;
         target.SpectrumDisplayMode = source.SpectrumDisplayMode;
         target.SpectrumAudioAccessGranted = source.SpectrumAudioAccessGranted;
         target.UseSafeFontSizeRange = source.UseSafeFontSizeRange;
@@ -2204,6 +2242,11 @@ public partial class SettingsWindow : System.Windows.Window
         public bool ShowLyricTranslation { get; set; }
         public bool EnableWordScanning { get; set; }
         public ToolWindowTheme ToolWindowTheme { get; set; }
+        public List<string> QuickCardOrder { get; set; } = [];
+        public Dictionary<string, bool> QuickCardEnabled { get; set; } = new(StringComparer.Ordinal);
+        public QuickCardResourceMode QuickCardResourceMode { get; set; }
+        public Dictionary<string, bool> WeatherCardModules { get; set; } = new(StringComparer.Ordinal);
+        public bool WeatherCardReducedMotion { get; set; }
         public string SpectrumDisplayMode { get; set; } = TaskbarLyrics.App.SpectrumDisplayMode.Disabled.ToString();
         public bool SpectrumAudioAccessGranted { get; set; }
         public SpectrumTuningSettings SpectrumTuning { get; set; } = new();

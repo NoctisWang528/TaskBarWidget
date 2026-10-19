@@ -1,6 +1,11 @@
 {
   "licenseTextCopies": [
     {
+      "file": "Meteocons-LICENSE.txt",
+      "source": "https://github.com/basmilius/meteocons/blob/main/packages/svg-static/LICENSE",
+      "sha256": "2c7646145091766e97569d338a2266684c2c9e5fa7093764ef2d2dd620825c08"
+    },
+    {
       "file": "WinRing0-LICENSE.txt",
       "source": "https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/blob/b8077435b898d57539956388cddf49f7dacb86f7/WinRing0/COPYRIGHT.txt",
       "sha256": "89bed827a96edd80b0fe55b876f73f929ad33ae13e920eaf1b78416d7f073a4d"

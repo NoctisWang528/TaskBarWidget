@@ -279,6 +279,47 @@ std::wstring DataApiHefengWeather::GetWeatherCode(EWeatherInfoType type)
     }
 }
 
+std::optional<WeatherDetails> DataApiHefengWeather::GetWeatherDetails() const
+{
+    WeatherDetails details;
+    details.Current.Temperature = _realtimeWeather.Temperature;
+    details.Current.TemperatureFeelsLike = _realtimeWeather.TemperatureFeelsLike;
+    details.Current.WeatherText = _realtimeWeather.WeatherText;
+    details.Current.WeatherCode = _realtimeWeather.WeatherCode;
+    details.Current.ConditionKind = WeatherCondition::FromQWeather(_realtimeWeather.WeatherCode);
+    details.Current.Humidity = _realtimeWeather.Humidity;
+    details.Current.WindDirection = _realtimeWeather.WindDirection;
+    details.Current.WindScale = _realtimeWeather.WindScale;
+    details.Current.WindSpeed = _realtimeWeather.WindSpeed;
+    details.Current.ObservedAt = _realtimeWeather.UpdateTime;
+
+    details.AirQuality.AQI = _realtimeAirQuality.AQI;
+    details.AirQuality.Level = _realtimeAirQuality.Level;
+    details.AirQuality.Category = _realtimeAirQuality.Category;
+    details.AirQuality.PM2p5 = _realtimeAirQuality.PM2p5;
+    details.AirQuality.PM10 = _realtimeAirQuality.PM10;
+    details.AirQuality.PublishTime = _realtimeAirQuality.PublishTime;
+
+    const ForcastWeather* days[] = { &_forcastWeatherTD, &_forcastWeatherTM, &_forcastWeatherDATM };
+    for (const auto* source : days) {
+        WeatherForecastDay day;
+        day.TemperatureMin = source->TemperatureMin;
+        day.TemperatureMax = source->TemperatureMax;
+        day.WeatherDay = source->WeatherDay;
+        day.WeatherNight = source->WeatherNight;
+        day.WeatherCodeDay = source->WeatherCodeDay;
+        day.WeatherCodeNight = source->WeatherCodeNight;
+        day.ConditionDayKind = WeatherCondition::FromQWeather(source->WeatherCodeDay);
+        day.ConditionNightKind = WeatherCondition::FromQWeather(source->WeatherCodeNight);
+        if (!day.TemperatureMin.empty() || !day.TemperatureMax.empty() ||
+            !day.WeatherDay.empty() || !day.WeatherNight.empty()) details.Forecast.push_back(std::move(day));
+    }
+
+    for (const auto& source : _weatherAlerts) details.Alerts.push_back({
+        source.Type, source.TypeName, source.Level, source.Title, source.Text, source.Severity, source.PublishTime });
+    return details;
+}
+
 bool DataApiHefengWeather::UpdateWeather()
 {
     CHECK_KEY;

@@ -97,11 +97,12 @@ internal sealed class UiHostBridge : IAsyncDisposable
             catch (InvalidOperationException) { }
         };
     }
-    internal Task SendAsync(string action, double x = 0, double y = 0, string? page = null, long entryWindow = 0, long gestureId = 0, int? toolWindowTheme = null)
+    internal Task SendAsync(string action, double x = 0, double y = 0, string? page = null, long entryWindow = 0, long gestureId = 0,
+        int? toolWindowTheme = null, object? quickCards = null)
     {
         EnsureProcess();
         if (_process is { HasExited: false }) AllowSetForegroundWindow(_process.Id);
-        return _server.SendCommandAsync(new { version = 1, type = "command", action, x, y, page, entryWindow, gestureId, toolWindowTheme });
+        return _server.SendCommandAsync(new { version = 1, type = "command", action, x, y, page, entryWindow, gestureId, toolWindowTheme, quickCards });
     }
     private Task HandleRequestAsync(JsonElement message)
     {

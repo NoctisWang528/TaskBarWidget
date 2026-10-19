@@ -23,6 +23,70 @@ namespace NativeWeatherBridge
         wcsftime(result, _countof(result), L"%Y-%m-%d %H:%M:%S", &local);
         return result;
     }
+    inline JsonObject Details(const WeatherDetails& details)
+    {
+        auto text = [](const std::wstring& value) { return Text(value); };
+        JsonObject current;
+        current.SetNamedValue(L"temperature", text(details.Current.Temperature));
+        current.SetNamedValue(L"feelsLike", text(details.Current.TemperatureFeelsLike));
+        current.SetNamedValue(L"weather", text(details.Current.WeatherText));
+        current.SetNamedValue(L"conditionKind", text(details.Current.ConditionKind));
+        current.SetNamedValue(L"humidity", text(details.Current.Humidity));
+        current.SetNamedValue(L"windDirection", text(details.Current.WindDirection));
+        current.SetNamedValue(L"windScale", text(details.Current.WindScale));
+        current.SetNamedValue(L"windSpeed", text(details.Current.WindSpeed));
+        current.SetNamedValue(L"observedAt", text(details.Current.ObservedAt));
+
+        JsonArray forecast;
+        for (const auto& day : details.Forecast) {
+            JsonObject item;
+            item.SetNamedValue(L"min", text(day.TemperatureMin));
+            item.SetNamedValue(L"max", text(day.TemperatureMax));
+            item.SetNamedValue(L"weatherDay", text(day.WeatherDay));
+            item.SetNamedValue(L"weatherNight", text(day.WeatherNight));
+            item.SetNamedValue(L"conditionDayKind", text(day.ConditionDayKind));
+            item.SetNamedValue(L"conditionNightKind", text(day.ConditionNightKind));
+            forecast.Append(item);
+        }
+
+        JsonObject air;
+        air.SetNamedValue(L"aqi", text(details.AirQuality.AQI));
+        air.SetNamedValue(L"level", text(details.AirQuality.Level));
+        air.SetNamedValue(L"category", text(details.AirQuality.Category));
+        air.SetNamedValue(L"pm25", text(details.AirQuality.PM2p5));
+        air.SetNamedValue(L"pm10", text(details.AirQuality.PM10));
+        air.SetNamedValue(L"publishedAt", text(details.AirQuality.PublishTime));
+
+        JsonArray alerts;
+        for (size_t index = 0; index < details.Alerts.size() && index < 16; ++index) {
+            const auto& alert = details.Alerts[index];
+            JsonObject item;
+            item.SetNamedValue(L"type", text(alert.Type));
+            item.SetNamedValue(L"typeName", text(alert.TypeName));
+            item.SetNamedValue(L"level", text(alert.Level));
+            item.SetNamedValue(L"title", text(alert.Title));
+            item.SetNamedValue(L"text", text(alert.Text));
+            item.SetNamedValue(L"severity", text(alert.Severity));
+            item.SetNamedValue(L"publishedAt", text(alert.PublishTime));
+            alerts.Append(item);
+        }
+
+        JsonObject result;
+        result.SetNamedValue(L"current", current);
+        result.SetNamedValue(L"forecast", forecast);
+        result.SetNamedValue(L"airQuality", air);
+        result.SetNamedValue(L"alerts", alerts);
+        JsonObject capabilities;
+        capabilities.SetNamedValue(L"forecast", JsonValue::CreateBooleanValue(!details.Forecast.empty()));
+        capabilities.SetNamedValue(L"humidity", JsonValue::CreateBooleanValue(!details.Current.Humidity.empty()));
+        capabilities.SetNamedValue(L"wind", JsonValue::CreateBooleanValue(!details.Current.WindDirection.empty() || !details.Current.WindScale.empty()));
+        capabilities.SetNamedValue(L"airQuality", JsonValue::CreateBooleanValue(!details.AirQuality.AQI.empty() || !details.AirQuality.PM2p5.empty()));
+        capabilities.SetNamedValue(L"precipitation", JsonValue::CreateBooleanValue(false));
+        capabilities.SetNamedValue(L"alerts", JsonValue::CreateBooleanValue(!details.Alerts.empty()));
+        capabilities.SetNamedValue(L"updatedAt", JsonValue::CreateBooleanValue(!details.Current.ObservedAt.empty()));
+        result.SetNamedValue(L"capabilities", capabilities);
+        return result;
+    }
     inline JsonObject Status(const WeatherService::StatusData& status)
     {
         JsonObject city; city.SetNamedValue(L"id", Text(status.cityId)); city.SetNamedValue(L"name", Text(status.cityName)); city.SetNamedValue(L"region", Text(status.cityRegion));
@@ -38,6 +102,9 @@ namespace NativeWeatherBridge
         JsonObject lastCity; lastCity.SetNamedValue(L"id", Text(status.lastSuccessCityId)); lastCity.SetNamedValue(L"name", Text(status.lastSuccessCityName));
         result.SetNamedValue(L"lastSuccessCity", lastCity);
         result.SetNamedValue(L"temperature", Text(status.temperature));
+        result.SetNamedValue(L"revision", JsonValue::CreateNumberValue(static_cast<double>(status.revision)));
+        result.SetNamedValue(L"stale", JsonValue::CreateBooleanValue(status.stale));
+        result.SetNamedValue(L"details", Details(status.details));
         return result;
     }
     inline JsonObject Job(const WeatherService::JobResult& job)

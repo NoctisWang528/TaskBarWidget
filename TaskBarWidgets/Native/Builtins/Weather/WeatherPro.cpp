@@ -118,11 +118,6 @@ void CWeatherPro::OnExtenedInfo(ExtendedInfoIndex index, const wchar_t* data)
     }
 }
 
-void CWeatherPro::UpdateTooltip(const std::wstring &info)
-{
-    m_tooltips_info = info;
-}
-
 void CWeatherPro::UpdateWeatherInfo(bool force /* = false */)
 {
     const auto t = std::time(nullptr);

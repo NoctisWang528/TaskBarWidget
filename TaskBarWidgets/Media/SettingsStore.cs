@@ -34,10 +34,12 @@ public sealed class SettingsStore
             MigrateLegacySpectrumSettings(document.RootElement, settings);
             MigrateSpectrumAudioAccess(document.RootElement, settings);
             MigrateTaskbarPresentation(document.RootElement, settings);
+            MigrateQuickCards(document.RootElement, settings);
             settings.NormalizePlayerSources();
             settings.NormalizeLyricsLayout();
             settings.NormalizeDisplaySelection();
             settings.NormalizeWindowLayout();
+            settings.NormalizeQuickCards();
             return settings;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
@@ -56,6 +58,7 @@ public sealed class SettingsStore
             settings.NormalizeLyricsLayout();
             settings.NormalizeDisplaySelection();
             settings.NormalizeWindowLayout();
+            settings.NormalizeQuickCards();
             var directory = Path.GetDirectoryName(_filePath);
             if (!string.IsNullOrWhiteSpace(directory))
             {
@@ -118,6 +121,19 @@ public sealed class SettingsStore
         {
             settings.SpectrumDisplayMode = SpectrumDisplayMode.Disabled;
         }
+    }
+
+    private static void MigrateQuickCards(JsonElement root, AppSettings settings)
+    {
+        if (root.TryGetProperty(nameof(AppSettings.QuickCardOrder), out _))
+        {
+            return;
+        }
+
+        // Existing installations receive the new weather card enabled at the top;
+        // fresh installations use AppSettings' disabled default.
+        settings.QuickCardEnabled ??= new Dictionary<string, bool>(StringComparer.Ordinal);
+        settings.QuickCardEnabled["weather"] = true;
     }
 
     private static void MigrateSpectrumAudioAccess(JsonElement root, AppSettings settings)

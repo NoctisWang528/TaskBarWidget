@@ -2180,7 +2180,7 @@ it("keeps the shared taskbar font and background across subsequent lyric styles"
   receive("nativeAppearance", {fontFamily: "MiSans", fontSize: 16, fontWeight: 700, surfaceColor: "rgba(20, 30, 40, 0.5)"});
   receive("style", {fontFamily: "Old font", fontSize: 28, fontWeight: 400, surfaceColor: "black"});
   const style = dom.window.document.documentElement.style;
-  expect(style.getPropertyValue("--font-family")).toBe("MiSans");
+  expect(style.getPropertyValue("--font-family")).toBe('MiSans, "Microsoft YaHei UI", "Segoe UI", sans-serif');
   expect(style.getPropertyValue("--font-size")).toBe("16px");
   expect(style.getPropertyValue("--surface-color")).toBe("rgba(20, 30, 40, 0.5)");
   dom.window.close();

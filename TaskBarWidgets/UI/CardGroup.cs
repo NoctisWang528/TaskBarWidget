@@ -22,15 +22,29 @@ namespace TaskBarWidgets.UI;
 public sealed partial class CardGroup : IDisposable
 {
     internal const double CardWidth = 384;
+    internal const double UpdateCardWidth = 220;
     private readonly UiConnection _connection;
-    private readonly Action _openSettings;
-    private readonly CardWindow[] _cards = [];
-    private readonly CardWindow _updateCard;
-    private readonly Button _updateInstall = new() { Content = "重启更新", MinHeight = 32, VerticalAlignment = VerticalAlignment.Center };
+    private readonly Action<string?> _openSettings;
+    internal readonly CardWindow _updateCard;
+    private readonly Button _updateInstall = new() { Content = "更新并重启", MinHeight = 32, HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly TextBlock _updateLabel = Text("更新已下载", 13);
+    private readonly ProgressBar _updateProgress = new() { Minimum = 0, Maximum = 1, Height = 3, Visibility = Visibility.Collapsed };
     private bool _updateReady;
-    private IEnumerable<CardWindow> AllCards => _cards.Append(_updateCard);
-    private IEnumerable<CardWindow> DisplayedCards => _updateReady ? _cards.Prepend(_updateCard) : _cards;
+    private string[] _quickCardOrder = ["weather", "traffic", "device", "media"];
+    private Dictionary<string, bool> _quickCardEnabled = new(StringComparer.Ordinal)
+        { ["weather"] = false, ["traffic"] = true, ["device"] = true, ["media"] = true };
+    private Dictionary<string, bool> _weatherModules = new(StringComparer.Ordinal)
+        { ["current"] = true, ["forecast"] = true, ["updatedAt"] = true };
+    private bool _weatherReducedMotion;
+    private bool _onDemand;
+    private readonly Dictionary<string, CardSlot> _slots;
+    private readonly Dictionary<string, CardWindow> _cardsById = new(StringComparer.Ordinal);
+    private IEnumerable<CardWindow> AllCards => _cardsById.Values.Append(_updateCard);
+    private IEnumerable<CardWindow> EnabledCards => _quickCardOrder
+        .Where(id => _quickCardEnabled.GetValueOrDefault(id))
+        .Select(id => _slots.GetValueOrDefault(id)?.Window)
+        .OfType<CardWindow>();
+    private IEnumerable<CardWindow> DisplayedCards => _updateReady ? EnabledCards.Append(_updateCard) : EnabledCards;
     internal IReadOnlyList<CardWindow> CardWindows => DisplayedCards.ToArray();
     internal event Action? InstallUpdateRequested;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(400) };
@@ -73,32 +87,46 @@ public sealed partial class CardGroup : IDisposable
     private bool _outputMuted, _inputMuted;
     private ElementTheme? _themePreview;
     private ElementTheme _requestedTheme;
-    private bool _themeApplied;
+    private string? _lastWeatherSnapshotKey;
+    private long _lastWeatherRevision = -1;
+    private bool _weatherRefreshing;
+    private readonly Dictionary<string, string> _weatherIconCache = new(StringComparer.Ordinal);
+    private readonly DateTimeOffset _createdAt = DateTimeOffset.UtcNow;
+    private DateTimeOffset _lastHiddenAt = DateTimeOffset.UtcNow;
+    private bool _residentResourcesReleased;
+    private readonly DispatcherTimer _idleReleaseTimer = new() { Interval = TimeSpan.FromSeconds(30) };
+    private bool _memoryNotificationsSubscribed;
+    private sealed class CardSlot(string id, string title, FrameworkElement content, double height, bool autoHeight, double width)
+    {
+        internal string Id { get; } = id;
+        internal string Title { get; } = title;
+        internal FrameworkElement Content { get; } = content;
+        internal double Height { get; } = height;
+        internal bool AutoHeight { get; } = autoHeight;
+        internal double Width { get; } = width;
+        internal CardWindow? Window { get; set; }
+        internal bool AllowClose { get; set; }
+    }
 
-    public CardGroup(UiConnection connection, Action openSettings)
+    public CardGroup(UiConnection connection, Action<string?> openSettings)
     {
         _connection = connection;
         _openSettings = openSettings;
-        _cards = [new CardWindow("流量消耗", BuildTraffic(), 284), new CardWindow("音频设备", BuildAudio(), 244, autoHeight: true),
-            new CardWindow("媒体", BuildMedia(), 248)];
-        var updateContent = Columns(new GridLength(1, GridUnitType.Star), GridLength.Auto);
-        _updateLabel.VerticalAlignment = VerticalAlignment.Center;
-        Add(updateContent, _updateLabel, 0); Add(updateContent, _updateInstall, 1);
+        _slots = new Dictionary<string, CardSlot>(StringComparer.Ordinal)
+        {
+            ["traffic"] = new("traffic", "流量消耗", BuildTraffic(), 284, false, CardWidth),
+            ["device"] = new("device", "音频设备", BuildAudio(), 244, true, CardWidth),
+            ["media"] = new("media", "媒体", BuildMedia(), 248, false, CardWidth),
+            ["weather"] = new("weather", "天气", BuildWeather(), 280, true, CardWidth)
+        };
+        _residentResourcesReleased = false;
+        var updateContent = new StackPanel { Spacing = 8 };
+        _updateLabel.TextWrapping = TextWrapping.Wrap; _updateLabel.MaxLines = 3;
+        updateContent.Children.Add(_updateLabel); updateContent.Children.Add(_updateProgress); updateContent.Children.Add(_updateInstall);
         AutomationProperties.SetAutomationId(_updateInstall, "card-install-update");
         _updateInstall.Click += (_, _) => { if (_updateReady) InstallUpdateRequested?.Invoke(); };
-        _updateCard = new CardWindow("应用更新", updateContent, 72);
-        _updateCard.Root.Tapped += (_, args) => {
-            for (var source = args.OriginalSource as DependencyObject; source is not null; source = VisualTreeHelper.GetParent(source))
-                if (source is Button) return; // The button already owns its click.
-            if (_updateReady) { args.Handled = true; InstallUpdateRequested?.Invoke(); }
-        };
-        _outsideClicks = new OutsideClickMonitor(_cards[0].Root.DispatcherQueue, () => _flyoutsOpen > 0);
-        foreach (var card in AllCards)
-        {
-            card.Window.AppWindow.Closing += (_, args) => { if (!_disposed) { args.Cancel = true; Hide("native-close"); } };
-            card.Root.KeyDown += (_, args) => { if (args.Key == VirtualKey.Escape) { Hide("escape"); args.Handled = true; } };
-        }
-        _cards[0].Root.ActualThemeChanged += (_, _) => RenderTraffic(_traffic);
+        _updateCard = new CardWindow("应用更新", updateContent, 180, width: UpdateCardWidth);
+        _outsideClicks = new OutsideClickMonitor(_slots["traffic"].Content.DispatcherQueue, () => _flyoutsOpen > 0);
         _output.IsEnabled = _input.IsEnabled = _outputMute.IsEnabled = _inputMute.IsEnabled = _outputVolume.IsEnabled = _inputVolume.IsEnabled = false;
         _previous.IsEnabled = _play.IsEnabled = _next.IsEnabled = _seek.IsEnabled = _source.IsEnabled = false;
         _timer.Tick += async (_, _) =>
@@ -106,6 +134,12 @@ public sealed partial class CardGroup : IDisposable
             if (_visible) await RefreshAsync(++_ticks % 8 == 0, _ticks % 25 == 0);
         };
         _volumeTimer.Tick += async (_, _) => await FlushVolumesAsync();
+        _idleReleaseTimer.Tick += (_, _) =>
+        {
+            if (_visible) _idleReleaseTimer.Stop();
+            else if (!_onDemand && SystemMemoryPressure()) _lyrics.SetMemoryLevel(true);
+            else ReleaseResidentResourcesIfNeeded();
+        };
         _seekTimer.Tick += async (_, _) =>
         {
             _seekTimer.Stop();
@@ -115,29 +149,93 @@ public sealed partial class CardGroup : IDisposable
         RenderTraffic(_traffic);
         _trafficTotal.Text = "—";
         _trafficStatus.Text = "打开后读取流量历史";
-        CardLifecycleLog.Write("created cards=3");
+        CardLifecycleLog.Write($"created cards={_cardsById.Count} ordinary; update=1");
         _status.Visibility = Visibility.Collapsed;
         _status.TextWrapping = TextWrapping.Wrap; _status.MaxLines = 3;
         _status.RegisterPropertyChangedCallback(TextBlock.TextProperty, (_, _) => {
             _status.Visibility = string.IsNullOrWhiteSpace(_status.Text) ? Visibility.Collapsed : Visibility.Visible;
             if (_visible) Position(_anchorX, _anchorY);
         });
-        _cards[1].Root.Loaded += (_, _) => { if (_visible) Position(_anchorX, _anchorY); };
+        ReconcileCardWindows();
         _connection.ConnectionChanged += OnLyricsConnection;
+        TrySubscribeMemoryNotifications();
+    }
+
+    private void ReconcileCardWindows()
+    {
+        foreach (var slot in _slots.Values)
+        {
+            var enabled = _quickCardEnabled.GetValueOrDefault(slot.Id);
+            if (enabled && slot.Window is null) CreateCardWindow(slot);
+            else if (!enabled && slot.Window is not null) DestroyCardWindow(slot);
+        }
+    }
+
+    private void CreateCardWindow(CardSlot slot)
+    {
+        var card = new CardWindow(slot.Title, slot.Content, slot.Height, slot.AutoHeight, slot.Width);
+        slot.Window = card;
+        _cardsById[slot.Id] = card;
+        card.Window.AppWindow.Closing += (_, args) =>
+        {
+            if (_disposed || slot.AllowClose) return;
+            args.Cancel = true;
+            Hide("native-close");
+        };
+        card.Root.KeyDown += (_, args) =>
+        {
+            if (args.Key == VirtualKey.Escape) { Hide("escape"); args.Handled = true; }
+        };
+        if (slot.Id == "traffic")
+            card.Root.ActualThemeChanged += (_, _) => RenderTraffic(_traffic);
+        if (slot.Id == "device")
+            card.Root.Loaded += (_, _) => { if (_visible) Position(_anchorX, _anchorY); };
+        if (_themePreview is { } preview) card.Root.RequestedTheme = preview;
+        else if (_requestedTheme != ElementTheme.Default) card.Root.RequestedTheme = _requestedTheme;
+    }
+
+    private void DestroyCardWindow(CardSlot slot)
+    {
+        var card = slot.Window;
+        if (card is null) return;
+        slot.AllowClose = true;
+        slot.Window = null;
+        _cardsById.Remove(slot.Id);
+        card.Close();
+        slot.AllowClose = false;
+        if (slot.Id == "media")
+        {
+            _lyrics.ReleaseRenderer();
+            _sourceImageCache.Clear();
+            _lastCover = null;
+            _lastSourceIcon = "";
+        }
+        else if (slot.Id == "traffic")
+        {
+            foreach (var glow in _glows.Values) { glow.Shadow.Mask?.Dispose(); glow.Visual.Dispose(); glow.Shadow.Dispose(); }
+            _glows.Clear();
+        }
+        else if (slot.Id == "weather")
+        {
+            _weatherIconCache.Clear();
+        }
     }
 
     public void ToggleAtPhysicalPoint(double x, double y, nint entryWindow = 0)
     {
         if (_disposed) return;
         if (_visible) { Hide("toggle"); return; }
+        var cards = DisplayedCards.ToArray();
+        if (cards.Length == 0) return;
         Position(x, y);
         _visible = true;
         _generation++;
         _ticks = 0;
+        if (_residentResourcesReleased) RestoreResidentResources();
         _visibleLifetime = new CancellationTokenSource();
-        _lyrics.Activate();
-        foreach (var card in DisplayedCards) card.Show();
-        _cards[2].Window.Activate();
+        if (_quickCardEnabled.GetValueOrDefault("media")) _lyrics.Activate();
+        foreach (var card in cards) card.Show();
+        (EnabledCards.LastOrDefault() ?? _updateCard).Window.Activate();
         var generation = _generation;
         _outsideClicks.Start(entryWindow, click =>
         {
@@ -147,8 +245,10 @@ public sealed partial class CardGroup : IDisposable
         });
         CardLifecycleLog.Write($"shown generation={_generation} entry=0x{entryWindow:X}");
         _timer.Start();
-        _ = RefreshAsync(true, true);
-        _ = SubscribeLyricsAsync(_generation, true);
+        _idleReleaseTimer.Stop();
+        _ = RefreshAsync(_quickCardEnabled.GetValueOrDefault("device"), _quickCardEnabled.GetValueOrDefault("traffic"));
+        if (_quickCardEnabled.GetValueOrDefault("media")) _ = SubscribeLyricsAsync(_generation, true);
+        if (_quickCardEnabled.GetValueOrDefault("weather")) _ = LoadWeatherAsync();
     }
 
     public void Hide() => Hide("explicit");
@@ -160,7 +260,7 @@ public sealed partial class CardGroup : IDisposable
         _visible = false;
         _generation++;
         _lyrics.HideLyrics();
-        _ = SubscribeLyricsAsync(_generation, false);
+        if (_quickCardEnabled.GetValueOrDefault("media")) _ = SubscribeLyricsAsync(_generation, false);
         _timer.Stop();
         _outsideClicks.Stop();
         _seekTimer.Stop();
@@ -168,6 +268,9 @@ public sealed partial class CardGroup : IDisposable
         _visibleLifetime?.Cancel();
         _visibleLifetime?.Dispose();
         _visibleLifetime = null;
+        _lastHiddenAt = DateTimeOffset.UtcNow;
+        _idleReleaseTimer.Start();
+        ReleaseResidentResourcesIfNeeded();
         foreach (var flyout in _flyouts) flyout.Hide();
         foreach (var card in AllCards) HideCard(card);
     }
@@ -275,7 +378,7 @@ public sealed partial class CardGroup : IDisposable
         Add(summary, metadata, 1);
         var settings = Icon("\uE713", "打开设置");
         settings.VerticalAlignment = VerticalAlignment.Top;
-        settings.Click += (_, _) => { Hide("settings"); _openSettings(); };
+        settings.Click += (_, _) => { Hide("settings"); _openSettings("quickCards"); };
         Add(summary, settings, 2);
         content.Children.Add(summary);
         Add(content, _lyrics, 0, 1);
@@ -312,9 +415,11 @@ public sealed partial class CardGroup : IDisposable
     {
         if (_disposed) return;
         var ready = state.CanInstall && state.Phase == "ready";
-        _updateLabel.Text = "版本 " + state.LatestVersion + "\n更新已下载";
+        _updateLabel.Text = ready ? "版本 " + state.LatestVersion + "\n已下载 · 校验通过" : "应用更新\n下载与校验在关于页进行";
         ToolTipService.SetToolTip(_updateLabel, _updateLabel.Text);
         _updateInstall.IsEnabled = ready;
+        _updateProgress.Visibility = state.TotalBytes > 0 && state.Phase is "downloading" or "verifying" ? Visibility.Visible : Visibility.Collapsed;
+        _updateProgress.Value = state.TotalBytes > 0 ? Math.Clamp((double)state.BytesDownloaded / state.TotalBytes, 0, 1) : 0;
         if (_updateReady == ready) return;
         _updateReady = ready;
         if (!_visible) return;
@@ -327,10 +432,47 @@ public sealed partial class CardGroup : IDisposable
         if (state.ValueKind != JsonValueKind.Object || !state.TryGetProperty("toolWindowTheme", out var value) || value.ValueKind == JsonValueKind.Null) return;
         ApplyTheme(_themePreview ?? UiThemeStyles.ParseTheme(value.ToString()));
     }
+    internal void ApplyQuickCards(JsonElement value)
+    {
+        if (_disposed || value.ValueKind != JsonValueKind.Object) return;
+        var order = ReadStringArray(value, "order");
+        if (order is { Length: > 0 }) {
+            var normalized = order.Where(id => _slots.ContainsKey(id)).Distinct(StringComparer.Ordinal).ToList();
+            foreach (var id in new[] { "weather", "traffic", "device", "media" })
+                if (!normalized.Contains(id, StringComparer.Ordinal)) normalized.Add(id);
+            _quickCardOrder = normalized.ToArray();
+        }
+        if (value.TryGetProperty("enabled", out var enabled) && enabled.ValueKind == JsonValueKind.Object) {
+            foreach (var id in _slots.Keys)
+                _quickCardEnabled[id] = !enabled.TryGetProperty(id, out var flag) || flag.ValueKind != JsonValueKind.False;
+        }
+        if (value.TryGetProperty("weatherModules", out var modules) && modules.ValueKind == JsonValueKind.Object) {
+            _weatherModules.Clear();
+            foreach (var id in new[] { "current", "forecast", "humidity", "wind", "airQuality", "precipitation", "updatedAt", "alerts" })
+                _weatherModules[id] = modules.TryGetProperty(id, out var flag) && flag.ValueKind == JsonValueKind.True;
+        }
+        _weatherReducedMotion = value.TryGetProperty("weatherReducedMotion", out var reduced) && reduced.ValueKind == JsonValueKind.True;
+        _onDemand = value.TryGetProperty("resourceMode", out var mode) && string.Equals(mode.GetString(), "OnDemand", StringComparison.OrdinalIgnoreCase);
+        ReconcileCardWindows();
+        if (_visible) { Position(_anchorX, _anchorY); RenderWeatherModules(); }
+    }
+    internal void SetQuickCardEnabled(string id, bool enabled)
+    {
+        if (_quickCardEnabled.ContainsKey(id))
+        {
+            _quickCardEnabled[id] = enabled;
+            ReconcileCardWindows();
+        }
+    }
+    private void RefreshWeatherLayout()
+    {
+        if (_disposed) return;
+        if (_cardsById.TryGetValue("weather", out var card)) card.MeasureHeight();
+        if (_visible) Position(_anchorX, _anchorY);
+    }
     private void ApplyTheme(ElementTheme theme)
     {
-        if (_disposed || (_themeApplied && _requestedTheme == theme)) return;
-        _themeApplied = true;
+        if (_disposed) return;
         _requestedTheme = theme;
         foreach (var card in AllCards) card.Root.RequestedTheme = theme;
         foreach (var flyout in _flyouts) ThemeFlyout(flyout);
@@ -360,6 +502,7 @@ public sealed partial class CardGroup : IDisposable
     private async Task RefreshAsync(bool audio, bool traffic)
     {
         if (!_visible || _visibleLifetime is null) return;
+        if (!audio && !traffic && !_quickCardEnabled.GetValueOrDefault("media")) return;
         // Audio must not wait for media metadata or native traffic-history requests.
         if (audio) _ = RefreshAudioAsync(_visibleLifetime.Token);
         if (_refreshing) { _refreshAgain = true; _audioAgain |= audio; _trafficAgain |= traffic; return; }
@@ -368,12 +511,14 @@ public sealed partial class CardGroup : IDisposable
         var token = _visibleLifetime.Token;
         try
         {
-            var state = await _connection.RequestAsync("getState", cancellationToken: token);
+            var stateTask = _connection.RequestAsync("getState", cancellationToken: token);
+            var trafficTask = traffic ? _connection.RequestAsync("getTrafficHistory", cancellationToken: token) : Task.FromResult(default(JsonElement));
+            await Task.WhenAll(stateTask, trafficTask);
+            var state = await stateTask;
             if (!_visible || generation != _generation) return;
-            RenderMedia(state);
-            if (traffic)
-            {
-                var history = await _connection.RequestAsync("getTrafficHistory", cancellationToken: token);
+            if (_quickCardEnabled.GetValueOrDefault("media")) RenderMedia(state);
+            if (traffic) {
+                var history = await trafficTask;
                 if (!_visible || generation != _generation) return;
                 RenderTraffic(TrafficHeatmap.Parse(history));
                 _trafficStatus.Text = "";
@@ -485,7 +630,7 @@ public sealed partial class CardGroup : IDisposable
 
     private async Task RefreshAudioAsync(CancellationToken token)
     {
-        if (_disposed || _audioRefreshing || _busyAudioFlows.Count > 0) return;
+        if (_disposed || _audioRefreshing || _busyAudioFlows.Count > 0 || !_quickCardEnabled.GetValueOrDefault("device")) return;
         _audioRefreshing = true;
         var generation = _audioGeneration;
         var sequence = ++_audioRequestSequence;
@@ -657,29 +802,45 @@ public sealed partial class CardGroup : IDisposable
     internal void Position(double x, double y)
     {
         _anchorX = x; _anchorY = y;
-        var cards = DisplayedCards.ToArray();
-        foreach (var card in cards) card.MeasureHeight();
+        var baseCards = EnabledCards.ToArray();
+        foreach (var card in baseCards.Append(_updateCard)) card.MeasureHeight();
         var monitor = MonitorFromPoint(new NativePoint { X = (int)x, Y = (int)y }, 2);
         var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
         if (!GetMonitorInfo(monitor, ref info)) return;
-        foreach (var card in cards)
+        foreach (var card in baseCards.Append(_updateCard))
             if (MonitorFromWindow(card.Handle, 2) != monitor) card.Window.AppWindow.Move(new PointInt32(info.Work.Left + 10, info.Work.Top + 10));
-        var dpi = GetDpiForWindow(_cards[0].Handle);
+        var dpi = GetDpiForWindow((baseCards.FirstOrDefault() ?? _updateCard).Handle);
         var scale = dpi > 0 ? dpi / 96d : 1;
-        var width = Math.Min((int)Math.Ceiling(CardWidth * scale), Math.Max(1, info.Work.Right - info.Work.Left - (int)(20 * scale)));
         var gap = (int)Math.Round(12 * scale);
-        var gaps = gap * (cards.Length - 1);
-        var available = Math.Max(cards.Length, info.Work.Bottom - info.Work.Top - gaps - (int)(20 * scale));
-        var fit = Math.Min(1, available / (cards.Sum(card => card.Height) * scale));
-        var heights = cards.Select(card => Math.Max(1, (int)Math.Floor(card.Height * scale * fit))).ToArray();
-        var total = heights.Sum() + gaps;
-        var left = Math.Clamp((int)Math.Round(x - width / 2d), info.Work.Left, Math.Max(info.Work.Left, info.Work.Right - width));
+        var twoColumns = _updateReady && baseCards.Length > 0;
+        var baseWidth = Math.Min((int)Math.Ceiling(CardWidth * scale), Math.Max(1, info.Work.Right - info.Work.Left - (int)(20 * scale)));
+        var updateWidth = Math.Min((int)Math.Ceiling(UpdateCardWidth * scale), Math.Max(1, info.Work.Right - info.Work.Left - (int)(20 * scale)));
+        var totalWidth = twoColumns ? baseWidth + gap + updateWidth : _updateReady ? updateWidth : baseWidth;
+        var desiredBaseHeight = baseCards.Length > 0 ? baseCards.Sum(card => card.Height) : _updateReady ? _updateCard.Height : 0;
+        var fit = Math.Min(1, Math.Min(
+            (info.Work.Right - info.Work.Left - 20 * scale) / (double)Math.Max(1, totalWidth),
+            (info.Work.Bottom - info.Work.Top - 20 * scale - gap * Math.Max(0, baseCards.Length - 1)) / Math.Max(1, desiredBaseHeight * scale)));
+        var widths = twoColumns
+            ? new[] { Math.Max(1, (int)Math.Floor(baseWidth * fit)), Math.Max(1, (int)Math.Floor(updateWidth * fit)) }
+            : new[] { Math.Max(1, (int)Math.Floor((_updateReady ? updateWidth : baseWidth) * fit)) };
+        var heights = baseCards.Select(card => Math.Max(1, (int)Math.Floor(card.Height * scale * fit))).ToArray();
+        var updateHeight = Math.Max(1, (int)Math.Floor(_updateCard.Height * scale * fit));
+        var gaps = gap * Math.Max(0, baseCards.Length - 1);
+        var total = baseCards.Length > 0 ? heights.Sum() + gaps : _updateReady ? updateHeight : 0;
+        var totalBlockWidth = twoColumns ? widths[0] + gap + widths[1] : widths[0];
+        var left = Math.Clamp((int)Math.Round(x - totalBlockWidth / 2d), info.Work.Left, Math.Max(info.Work.Left, info.Work.Right - totalBlockWidth));
         var top = Math.Clamp((int)Math.Round(y - total - 10 * scale), info.Work.Top, Math.Max(info.Work.Top, info.Work.Bottom - total));
-        for (var index = 0; index < cards.Length; index++)
+        var groupTop = top;
+        for (var index = 0; index < baseCards.Length; index++)
         {
-            cards[index].Window.AppWindow.MoveAndResize(new RectInt32(left, top, width, heights[index]));
+            baseCards[index].Window.AppWindow.MoveAndResize(new RectInt32(left, top, widths[0], heights[index]));
             top += heights[index] + gap;
         }
+        if (!_updateReady) return;
+        var updateLeft = twoColumns ? left + widths[0] + gap : left;
+        var updateBottom = groupTop + total;
+        var updateTop = Math.Max(info.Work.Top, updateBottom - updateHeight);
+        _updateCard.Window.AppWindow.MoveAndResize(new RectInt32(updateLeft, updateTop, widths[^1], updateHeight));
     }
 
     public void Dispose()
@@ -688,8 +849,9 @@ public sealed partial class CardGroup : IDisposable
         CardLifecycleLog.Write($"dispose visible={_visible}");
         _disposed = true; _visible = false; _generation++;
         _visibleLifetime?.Cancel(); _visibleLifetime?.Dispose(); _visibleLifetime = null;
-        _volumeTimer.Stop(); _seekTimer.Stop(); _timer.Stop(); _outsideClicks.Dispose();
+        _volumeTimer.Stop(); _seekTimer.Stop(); _timer.Stop(); _idleReleaseTimer.Stop(); _outsideClicks.Dispose();
         _connection.ConnectionChanged -= OnLyricsConnection;
+        UnsubscribeMemoryNotifications();
         _lyrics.Dispose();
         foreach (var flyout in _flyouts) flyout.Hide();
         _pendingVolumes.Clear();
@@ -700,8 +862,9 @@ public sealed partial class CardGroup : IDisposable
 
     private void OnLyricsConnection(bool connected)
     {
-        _cards[2].Root.DispatcherQueue.TryEnqueue(() => {
+        _slots["media"].Content.DispatcherQueue.TryEnqueue(() => {
             if (_disposed || !_visible) return;
+            if (!_quickCardEnabled.GetValueOrDefault("media")) return;
             if (connected) { _lyrics.Activate(); _ = SubscribeLyricsAsync(_generation, true); }
             else _lyrics.HideLyrics();
         });
@@ -723,12 +886,76 @@ public sealed partial class CardGroup : IDisposable
         if (_disposed || !_visible || !message.TryGetProperty("session", out var session) || session.GetInt64() != _generation) return;
         if (message.TryGetProperty("payload", out var payload)) _lyrics.Receive(payload);
     }
+    private void ReleaseResidentResourcesIfNeeded()
+    {
+        if (!_onDemand || _visible || _residentResourcesReleased) return;
+        if (DateTimeOffset.UtcNow - _lastHiddenAt < TimeSpan.FromMinutes(10)) return;
+        _residentResourcesReleased = true;
+        _lyrics.ReleaseRenderer();
+        _cover.Source = null;
+        _sourceImage.Source = null;
+        _sourceImageCache.Clear();
+        _lastCover = null;
+        _lastSourceIcon = "";
+        _weatherIconCache.Clear();
+        CardLifecycleLog.Write("resident-resources-released reason=on-demand-idle");
+    }
+    private void RestoreResidentResources()
+    {
+        if (!_residentResourcesReleased) return;
+        _residentResourcesReleased = false;
+        _lyrics.SetMemoryLevel(false);
+        CardLifecycleLog.Write("resident-resources-restored");
+    }
+    private static bool SystemMemoryPressure()
+    {
+        var status = new MemoryStatusEx { Length = (uint)Marshal.SizeOf<MemoryStatusEx>() };
+        return GlobalMemoryStatusEx(ref status) && status.MemoryLoad >= 90;
+    }
+    private void OnMemoryUsageChanged(object? sender, object args)
+    {
+        if (_disposed) return;
+        try
+        {
+            var low = Windows.System.MemoryManager.AppMemoryUsageLevel >= Windows.System.AppMemoryUsageLevel.High;
+            _lyrics.SetMemoryLevel(low && !_visible);
+        }
+        catch (Exception error) when (error is InvalidOperationException or System.Runtime.InteropServices.COMException or NotSupportedException) { }
+    }
+    private void TrySubscribeMemoryNotifications()
+    {
+        try
+        {
+            Windows.System.MemoryManager.AppMemoryUsageIncreased += OnMemoryUsageChanged;
+            Windows.System.MemoryManager.AppMemoryUsageDecreased += OnMemoryUsageChanged;
+            _memoryNotificationsSubscribed = true;
+        }
+        catch (Exception error) when (error is InvalidOperationException or System.Runtime.InteropServices.COMException or NotSupportedException)
+        {
+            CardLifecycleLog.Write($"memory-notifications-unavailable hr=0x{error.HResult:X8}");
+        }
+    }
+    private void UnsubscribeMemoryNotifications()
+    {
+        if (!_memoryNotificationsSubscribed) return;
+        _memoryNotificationsSubscribed = false;
+        try
+        {
+            Windows.System.MemoryManager.AppMemoryUsageIncreased -= OnMemoryUsageChanged;
+            Windows.System.MemoryManager.AppMemoryUsageDecreased -= OnMemoryUsageChanged;
+        }
+        catch (Exception error) when (error is InvalidOperationException or System.Runtime.InteropServices.COMException or NotSupportedException) { }
+    }
     private sealed record AudioChoice(string Id, string Name, bool IsDefault, bool IsCommunications, double Volume, bool IsMuted, bool CanControl);
     private sealed record SourceChoice(string Id, string Label, string IconDataUrl);
     private static AudioChoice[] AudioChoices(JsonElement value, string name) => Array(value, name).Select(item => new AudioChoice(
         String(item, "id"), String(item, "name"), Bool(item, "isDefault"), Bool(item, "isCommunications"), Number(item, "volume"), Bool(item, "isMuted"),
         !item.TryGetProperty("canControl", out var control) || control.ValueKind != JsonValueKind.False)).ToArray();
     private static IEnumerable<JsonElement> Array(JsonElement value, string name) => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var items) && items.ValueKind == JsonValueKind.Array ? items.EnumerateArray() : [];
+    private static string[]? ReadStringArray(JsonElement value, string name) => value.ValueKind == JsonValueKind.Object &&
+        value.TryGetProperty(name, out var items) && items.ValueKind == JsonValueKind.Array
+        ? items.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String).Select(item => item.GetString() ?? "").Where(item => item.Length > 0).ToArray()
+        : null;
     private static string String(JsonElement value, string name, string fallback = "") => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var item) && item.ValueKind == JsonValueKind.String ? item.GetString() ?? fallback : fallback;
     private static bool Bool(JsonElement value, string name) => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var item) && item.ValueKind == JsonValueKind.True;
     private static double Number(JsonElement value, string name) => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var item) && item.ValueKind == JsonValueKind.Number && item.TryGetDouble(out var number) && double.IsFinite(number) ? number : 0;
@@ -746,6 +973,12 @@ public sealed partial class CardGroup : IDisposable
     }
     private static void Add(Grid grid, FrameworkElement element, int column, int row = 0) { Grid.SetColumn(element, column); Grid.SetRow(element, row); grid.Children.Add(element); }
     [StructLayout(LayoutKind.Sequential)] private struct NativePoint { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)] private struct MemoryStatusEx
+    {
+        public uint Length, MemoryLoad;
+        public ulong TotalPhysical, AvailablePhysical, TotalPageFile, AvailablePageFile, TotalVirtual, AvailableVirtual, AvailableExtendedVirtual;
+    }
+    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GlobalMemoryStatusEx(ref MemoryStatusEx status);
     [StructLayout(LayoutKind.Sequential)] private struct NativeRect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] private struct MonitorInfo { public int Size; public NativeRect Monitor, Work; public uint Flags; }
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetWindowRect(nint window, out NativeRect bounds);

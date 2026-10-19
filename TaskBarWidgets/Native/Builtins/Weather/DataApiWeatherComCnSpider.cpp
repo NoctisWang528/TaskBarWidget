@@ -691,6 +691,37 @@ std::wstring DataApiWeatherComCnSpider::GetWeatherCode(EWeatherInfoType type)
     }
 }
 
+std::optional<WeatherDetails> DataApiWeatherComCnSpider::GetWeatherDetails() const
+{
+    WeatherDetails details;
+    details.Current.Temperature = _realtimeWeather.Temperature;
+    details.Current.WeatherText = _realtimeWeather.Weather;
+    details.Current.WeatherCode = _realtimeWeather.WeatherCode;
+    details.Current.ConditionKind = WeatherCondition::FromWeatherComCn(_realtimeWeather.WeatherCode);
+    details.Current.WindDirection = _realtimeWeather.WindDirection;
+    details.Current.WindScale = _realtimeWeather.WindStrength;
+    details.Current.ObservedAt = _realtimeWeather.UpdateTime;
+    details.AirQuality.PM2p5 = _realtimeWeather.AqiPM25;
+
+    const SWeatherInfo* days[] = { &_weatherTD, &_weatherTM, &_weatherDATM };
+    for (const auto* source : days) {
+        WeatherForecastDay day;
+        day.TemperatureMin = source->TemperatureNight;
+        day.TemperatureMax = source->TemperatureDay;
+        day.WeatherDay = source->WeatherDay;
+        day.WeatherNight = source->WeatherNight;
+        day.WeatherCodeDay = source->WeatherCodeDay;
+        day.WeatherCodeNight = source->WeatherCodeNight;
+        day.ConditionDayKind = WeatherCondition::FromWeatherComCn(source->WeatherCodeDay);
+        day.ConditionNightKind = WeatherCondition::FromWeatherComCn(source->WeatherCodeNight);
+        if (!day.TemperatureMin.empty() || !day.TemperatureMax.empty() ||
+            !day.WeatherDay.empty() || !day.WeatherNight.empty()) details.Forecast.push_back(std::move(day));
+    }
+    for (const auto& source : _weatherAlerts) details.Alerts.push_back({
+        source.Type, source.Type, source.Level, source.BriefMessage, source.DetailedMessage, L"", source.PublishTime });
+    return details;
+}
+
 bool DataApiWeatherComCnSpider::UpdateWeather()
 {
     const auto city = WeatherCDataManager::Instance().GetCurrentCityInfo();

@@ -22,15 +22,12 @@ public:
     void OnExtenedInfo(ExtendedInfoIndex index, const wchar_t* data) override;
 
     void UpdateWeatherInfo(bool force = false);
-    void UpdateTooltip(const std::wstring &info);
 
     std::time_t GetLastUpdateTimestamp() const;
 
 private:
 
     CWeatherProItem m_item;
-    std::wstring m_tooltips_info;
-
     std::time_t m_last_update_timestamp;
     std::time_t m_next_update_time_span;
 };

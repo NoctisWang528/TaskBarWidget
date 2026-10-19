@@ -130,6 +130,10 @@ void WeatherService::UpdateStatus()
     m_status.provider = static_cast<int>(config.m_api_type); m_status.cityId = city.CityNO; m_status.cityName = city.CityName;
     m_status.cityRegion = city.CityAdministrativeOwnership; m_status.apiHost = host.value_or(L""); m_status.hasApiKey = !data.m_api_hfw->config.AppKey.empty();
     m_status.temperature = data.GetWeatherTemperature();
+    WeatherDetails details;
+    if (data.GetWeatherDetails(details)) m_status.details = std::move(details);
+    m_status.stale = m_status.stale ||
+        !m_status.lastSuccessCityId.empty() && m_status.lastSuccessCityId != m_status.cityId;
 }
 void WeatherService::Configure(const ConfigPatch& patch)
 {
@@ -168,11 +172,13 @@ void WeatherService::Refresh()
         auto message = NetworkMessage(data.GetCurrentApi().get());
         const auto city = data.GetCurrentCityInfo();
         { std::lock_guard<std::mutex> lock(m_mutex);
+          m_status.stale = true; ++m_status.revision;
           if (!m_status.lastSuccessCityId.empty() && m_status.lastSuccessCityId != city.CityNO) message += L" 当前保留的是上次成功城市（" + m_status.lastSuccessCityName + L"）的数据。"; }
         throw Failure{message};
     }
     UpdateStatus();
-    { std::lock_guard<std::mutex> lock(m_mutex); m_status.lastSuccessUnix = std::time(nullptr); m_status.lastSuccessCityId = m_status.cityId; m_status.lastSuccessCityName = m_status.cityName; }
+    { std::lock_guard<std::mutex> lock(m_mutex); m_status.lastSuccessUnix = std::time(nullptr); m_status.lastSuccessCityId = m_status.cityId; m_status.lastSuccessCityName = m_status.cityName;
+      m_status.stale = false; ++m_status.revision; }
 }
 void WeatherService::Work()
 {
@@ -180,7 +186,7 @@ void WeatherService::Work()
         Job job;
         { std::unique_lock<std::mutex> lock(m_mutex); m_ready.wait(lock, [&] { return m_stopping || !m_jobs.empty(); });
           if (m_stopping) return; job = std::move(m_jobs.front()); m_jobs.pop_front();
-          m_results[job.id].state = L"running"; m_status.updating = true; m_status.state = L"updating"; m_status.message = L"正在处理天气任务…"; }
+          m_results[job.id].state = L"running"; m_status.updating = true; m_status.state = L"updating"; m_status.message = L"正在处理天气任务…"; ++m_status.revision; }
         JobResult result{job.id, L"success", L"天气已更新。"};
         try {
             if (job.action == Action::Search) {
@@ -210,7 +216,7 @@ void WeatherService::Work()
         catch (const Failure& failure) { result.state = L"error"; result.message = failure.message; }
         catch (...) { result.state = L"error"; result.message = L"天气服务响应或配置处理失败，已保留上次成功天气。"; }
         UpdateStatus();
-        { std::lock_guard<std::mutex> lock(m_mutex); m_status.updating = false; m_status.state = result.state == L"success" ? L"ready" : L"error"; m_status.message = result.message;
+        { std::lock_guard<std::mutex> lock(m_mutex); m_status.updating = false; m_status.state = result.state == L"success" ? L"ready" : L"error"; m_status.message = result.message; ++m_status.revision;
           result.status = m_status; m_results[job.id] = std::move(result);
           while (m_results.size() > 24) m_results.erase(m_results.begin()); }
     }

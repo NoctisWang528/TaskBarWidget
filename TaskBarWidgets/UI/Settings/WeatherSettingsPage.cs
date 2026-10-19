@@ -34,6 +34,8 @@ public sealed partial class SettingsWindow
         internal readonly Button ClearKey = new() { Content = "清除已保存密钥" };
         internal JsonObject? SelectedCity;
         internal JsonObject? SavedCity;
+        internal JsonObject? Capabilities;
+        internal Action? CapabilitiesChanged;
         internal int SavedProvider;
         internal bool ProviderEdited;
         internal bool Binding;
@@ -57,8 +59,17 @@ public sealed partial class SettingsWindow
 
     private void RenderWeatherSettings(IReadOnlyList<JsonObject> fields)
     {
+        var previous = _weatherPage;
+        _weatherPage = null;
+        previous?.Dispose();
         var page = new WeatherEditor(_lifetime.Token);
         _weatherPage = page;
+        _page.Children.Add(new TextBlock
+        {
+            Text = QuickCardEnabled("weather") ? "天气卡已启用" : "天气卡未启用",
+            FontSize = 14,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+        });
         var body = Section("天气", "搜索后选择城市，再保存并刷新。以下操作立即保存；其他天气显示选项使用上方“应用更改”。");
         page.Provider.Items.Add("中国天气网"); page.Provider.Items.Add("和风天气");
         page.Provider.SelectedIndex = 0;
@@ -109,7 +120,10 @@ public sealed partial class SettingsWindow
         body.Loaded += async (_, _) => { if (IsWeatherCurrent(page) && _connection.IsConnected) await ReadWeatherStatusAsync(page); };
         UpdateWeatherButtons(page);
 
-        var advanced = fields.Where(field => !IsWeatherConnectionField(Text(field["key"]))).Select(field => {
+        var advanced = fields.Where(field => !IsWeatherConnectionField(Text(field["key"])) &&
+            !Text(field["key"]).EndsWith(".city_name", StringComparison.Ordinal) &&
+            !Text(field["key"]).EndsWith(".city_no", StringComparison.Ordinal) &&
+            !Text(field["key"]).EndsWith(".api_type", StringComparison.Ordinal)).Select(field => {
             var editable = (JsonObject)field.DeepClone(); editable["restartRequired"] = false; return editable;
         }).ToList();
         if (advanced.Count > 0)
@@ -162,6 +176,7 @@ public sealed partial class SettingsWindow
     {
         if (!IsWeatherCurrent(page)) return;
         page.HasStatus = true; page.SavedProvider = (int)Number(status["provider"]);
+        page.Capabilities = status["details"] is JsonObject details && details["capabilities"] is JsonObject capabilities ? (JsonObject)capabilities.DeepClone() : null;
         page.SavedCity = status["city"] is JsonObject city ? (JsonObject)city.DeepClone() : null;
         if (page.Committing && page.SelectedCity is JsonObject selected && page.SavedProvider == page.Provider.SelectedIndex && Text(selected["id"]) == Text(page.SavedCity?["id"]))
             page.SelectedCity = null;
@@ -179,6 +194,7 @@ public sealed partial class SettingsWindow
         }
         if (!page.HostEdited) { page.Binding = true; page.ApiHost.Text = Text(status["apiHost"]); page.Binding = false; }
         UpdateWeatherSelection(page); UpdateWeatherButtons(page);
+        page.CapabilitiesChanged?.Invoke();
     }
 
     private async Task<JsonObject> WeatherCommandAsync(WeatherEditor page, object payload, CancellationToken token)

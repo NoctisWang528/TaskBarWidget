@@ -22,7 +22,7 @@ public sealed partial class CardGroup
         totals[today] = 0; totals[today.AddDays(-1)] = 2 * gib; totals[today.AddDays(-2)] = 3 * gib;
         totals[today.AddDays(-7)] = .5 * gib;
         var fixture = TrafficHeatmap.Create(today, totals, "已监测网卡 · 上传 + 下载");
-        var card = cards._cards[0];
+        var card = cards._cardsById["traffic"];
         var scale = GetDpiForWindow(card.Handle) / 96d;
         card.Window.AppWindow.MoveAndResize(new RectInt32(-30000, -30000, (int)Math.Ceiling(CardWidth * scale), (int)Math.Ceiling(card.Height * scale)));
         cards.RenderTraffic(fixture); cards._trafficStatus.Text = "";

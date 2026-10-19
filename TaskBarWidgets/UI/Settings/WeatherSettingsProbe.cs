@@ -99,9 +99,9 @@ public sealed partial class SettingsWindow
         window.Activated += (_, args) => { if (args.WindowActivationState != WindowActivationState.Deactivated) activated = true; };
         try
         {
-            window.ShowPage("hardware");
+            window.ShowPage("quickCardsWeather");
             window.LoadValidationData(new JsonObject {
-                ["groups"] = new JsonArray(new JsonObject { ["id"] = "builtins.weather", ["page"] = "hardware", ["label"] = "天气" }),
+                ["groups"] = new JsonArray(new JsonObject { ["id"] = "builtins.weather", ["page"] = "quickCardsWeather", ["label"] = "天气" }),
                 ["fields"] = new JsonArray(
                     new JsonObject { ["key"] = "builtins.weatherpro.dll.config.city_no", ["group"] = "builtins.weather", ["type"] = "string", ["label"] = "城市", ["value"] = "101010100" },
                     new JsonObject { ["key"] = "items.native_0.label", ["itemId"] = "native_0", ["itemName"] = "CPU", ["value"] = "CPU" },

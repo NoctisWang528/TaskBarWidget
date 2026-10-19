@@ -19,6 +19,9 @@ internal sealed class CardLyricsView : Grid, IDisposable
     private bool _active, _ready, _applying, _applyAgain, _disposed;
     private string _displayedTrack = "";
     private readonly Dictionary<string, string> _appliedStyles = [];
+    private static readonly SemaphoreSlim EnvironmentGate = new(1, 1);
+    private static CoreWebView2Environment? _sharedEnvironment;
+    private static string? _sharedProfile;
 
     internal CardLyricsView()
     {
@@ -34,6 +37,20 @@ internal sealed class CardLyricsView : Grid, IDisposable
     private void ResetRenderer()
     {
         _web?.Close(); Children.Clear(); _web = null; _initializing = null; _ready = false; _appliedStyles.Clear();
+    }
+    internal bool HasRenderer => _web is not null;
+    internal void SetMemoryLevel(bool low)
+    {
+        if (_web?.CoreWebView2 is not { } core) return;
+        try { core.MemoryUsageTargetLevel = low ? CoreWebView2MemoryUsageTargetLevel.Low : CoreWebView2MemoryUsageTargetLevel.Normal; }
+        catch (Exception error) when (error is InvalidOperationException or System.Runtime.InteropServices.COMException) { }
+    }
+    internal void ReleaseRenderer()
+    {
+        ResetRenderer();
+        _html = null;
+        _pending = default;
+        _displayedTrack = "";
     }
     internal void HideLyrics()
     {
@@ -66,7 +83,7 @@ internal sealed class CardLyricsView : Grid, IDisposable
             _web = new WebView2 { DefaultBackgroundColor = Microsoft.UI.Colors.Transparent, Visibility = Visibility.Collapsed, IsTabStop = false };
             Children.Add(_web);
             var profile = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TaskBarWidgets", "CardWebView2");
-            var environment = await CoreWebView2Environment.CreateWithOptionsAsync(null, profile, new CoreWebView2EnvironmentOptions());
+            var environment = await SharedEnvironmentAsync(profile);
             if (_disposed) return;
             await _web.EnsureCoreWebView2Async(environment);
             if (_disposed) return;
@@ -112,6 +129,19 @@ internal sealed class CardLyricsView : Grid, IDisposable
             _ready = false;
             CardLifecycleLog.Write($"card-lyrics initialize-failed hr=0x{error.HResult:X8}");
         }
+    }
+    private static async Task<CoreWebView2Environment> SharedEnvironmentAsync(string profile)
+    {
+        if (_sharedEnvironment is not null && string.Equals(_sharedProfile, profile, StringComparison.OrdinalIgnoreCase)) return _sharedEnvironment;
+        await EnvironmentGate.WaitAsync();
+        try {
+            if (_sharedEnvironment is null || !string.Equals(_sharedProfile, profile, StringComparison.OrdinalIgnoreCase)) {
+                _sharedEnvironment = await CoreWebView2Environment.CreateWithOptionsAsync(null, profile, new CoreWebView2EnvironmentOptions());
+                _sharedProfile = profile;
+            }
+            return _sharedEnvironment;
+        }
+        finally { EnvironmentGate.Release(); }
     }
     private async Task ApplyAsync()
     {

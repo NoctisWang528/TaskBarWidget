@@ -5,6 +5,70 @@ namespace TaskbarLyrics.App.Tests;
 
 public sealed class SettingsStoreTests
 {
+    [Fact]
+    public void QuickCardsRoundTripAndNormalizeUnknownValues()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        var filePath = Path.Combine(directory, "settings.json");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var settings = new AppSettings
+            {
+                QuickCardOrder = ["media", "unknown", "weather", "media"],
+                QuickCardEnabled = new Dictionary<string, bool>(StringComparer.Ordinal)
+                {
+                    ["media"] = false,
+                    ["weather"] = true,
+                    ["unknown"] = true
+                },
+                QuickCardResourceMode = QuickCardResourceMode.OnDemand,
+                WeatherCardModules = new Dictionary<string, bool>(StringComparer.Ordinal)
+                {
+                    ["wind"] = true,
+                    ["unknown"] = true
+                }
+            };
+            Assert.True(new SettingsStore(filePath).Save(settings));
+            var loaded = new SettingsStore(filePath).Load();
+            Assert.Equal(["media", "weather", "traffic", "device"], loaded.QuickCardOrder);
+            Assert.False(loaded.QuickCardEnabled["media"]);
+            Assert.True(loaded.QuickCardEnabled["weather"]);
+            Assert.True(loaded.QuickCardEnabled["traffic"]);
+            Assert.False(loaded.QuickCardEnabled.ContainsKey("unknown"));
+            Assert.Equal(QuickCardResourceMode.OnDemand, loaded.QuickCardResourceMode);
+            Assert.True(loaded.WeatherCardModules["wind"]);
+            Assert.False(loaded.WeatherCardModules.ContainsKey("unknown"));
+            Assert.True(loaded.WeatherCardModules["current"]);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ExistingSettingsWithoutQuickCardsEnableWeatherCard()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        var filePath = Path.Combine(directory, "settings.json");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.WriteAllText(filePath, "{\"EnableWordScanning\":false}");
+            var loaded = new SettingsStore(filePath).Load();
+            Assert.True(loaded.QuickCardEnabled["weather"]);
+            Assert.True(loaded.QuickCardEnabled["traffic"]);
+            Assert.True(loaded.QuickCardEnabled["device"]);
+            Assert.True(loaded.QuickCardEnabled["media"]);
+            Assert.Equal(["weather", "traffic", "device", "media"], loaded.QuickCardOrder);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData("{}", true)]
     [InlineData("{\"EnableWordScanning\":false}", false)]

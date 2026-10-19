@@ -31,18 +31,21 @@ public sealed partial class CardGroup
     {
         var ready = new UpdateUiState(10, "ready", LatestVersion: "991231-2359", CanInstall: true);
         cards.SetUpdateState(ready);
-        if (cards.CardWindows.Count != 4 || !ReferenceEquals(cards.CardWindows[0], cards._updateCard) ||
-            !ReferenceEquals(cards.CardWindows[1], cards._cards[0]) || cards._updateCard.Height != 72 || IsWindowVisible(cards._updateCard.Handle))
-            throw new InvalidOperationException("Ready update card must precede traffic and stay hidden until the group is opened.");
+        if (cards.CardWindows.Count != 5 || !ReferenceEquals(cards.CardWindows[^1], cards._updateCard) ||
+            cards._updateCard.Height != 180 || IsWindowVisible(cards._updateCard.Handle))
+            throw new InvalidOperationException("Ready update card must be the second column and stay hidden until the group is opened.");
         cards.Position(100, 100);
         var bounds = cards._updateCard.Window.AppWindow;
-        if (bounds.Size.Width != cards._cards[0].Window.AppWindow.Size.Width || bounds.Position.Y + bounds.Size.Height >= cards._cards[0].Window.AppWindow.Position.Y)
-            throw new InvalidOperationException("Optional update card did not participate in card placement.");
+        var lastBase = cards.EnabledCards.Last().Window.AppWindow;
+        var expectedUpdateWidth = (int)Math.Floor(220 * (lastBase.Size.Width / (double)CardGroup.CardWidth));
+        if (Math.Abs(bounds.Size.Width - expectedUpdateWidth) > 1 || bounds.Position.X <= lastBase.Position.X ||
+            Math.Abs(bounds.Position.Y + bounds.Size.Height - (lastBase.Position.Y + lastBase.Size.Height)) > 2)
+            throw new InvalidOperationException($"Optional update card did not participate in two-column placement: update={bounds.Position.X},{bounds.Position.Y},{bounds.Size.Width}x{bounds.Size.Height} last={lastBase.Position.X},{lastBase.Position.Y},{lastBase.Size.Width}x{lastBase.Size.Height}");
         cards.SetThemePreview(ElementTheme.Light);
         if (cards._updateCard.Root.RequestedTheme != ElementTheme.Light) throw new InvalidOperationException("Optional update card missed the settings theme preview.");
         cards.SetThemePreview(ElementTheme.Dark);
         UiTemplateProbe.PreventProbeActivation(cards._updateCard.Window);
-        cards._updateCard.Window.AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(-30000, -30000, 384, 72));
+        cards._updateCard.Window.AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(-30000, -30000, 220, 180));
         cards._updateCard.Show();
         await Task.Delay(80);
         cards._updateCard.Root.UpdateLayout();
@@ -67,8 +70,8 @@ public sealed partial class CardGroup
         finally { cards.InstallUpdateRequested -= Install; }
         await cards._updateCard.HideAsync(animate: false);
         cards.SetUpdateState(ready with { Phase = "preparing", CanInstall = false });
-        if (cards.CardWindows.Count != 3) throw new InvalidOperationException("Preparing update card did not disappear.");
-        return new { optionalCardAppears = true, preparingCardRemoved = true, hiddenUntilOpened = true, orderedAboveTraffic = true, themePreview = true };
+        if (cards.CardWindows.Count != 4) throw new InvalidOperationException("Preparing update card did not disappear.");
+        return new { optionalCardAppears = true, preparingCardRemoved = true, hiddenUntilOpened = true, secondColumn = true, themePreview = true };
     }
 }
 

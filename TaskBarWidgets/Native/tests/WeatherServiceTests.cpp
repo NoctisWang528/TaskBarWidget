@@ -83,6 +83,10 @@ int wmain(int argc, wchar_t** argv)
         WeatherCCommon::SetTestTransport(Transport);
         Require(WeatherCCommon::URLEncode(L"\x0001") == L"%01", "URI byte padding");
         Require(WeatherService::NormalizeApiHost(L"https://TEST.qweatherapi.com") == L"test.qweatherapi.com", "host normalization");
+        Require(WeatherCondition::FromWeatherComCn(L"d03") == L"rain" && WeatherCondition::FromWeatherComCn(L"d04") == L"thunder" &&
+            WeatherCondition::FromWeatherComCn(L"d07") == L"snow" && WeatherCondition::FromWeatherComCn(L"d54") == L"haze" &&
+            WeatherCondition::FromQWeather(L"200") == L"thunder" && WeatherCondition::FromQWeather(L"503") == L"dust",
+            "provider-neutral condition mapping");
         for (const auto* host : {L"qweatherapi.com", L"test.qweatherapi.com.evil.test", L"test.qweatherapi.com/path", L"test.qweatherapi.com:443", L"user@test.qweatherapi.com", L"http://test.qweatherapi.com", L".qweatherapi.com"}) Require(!WeatherService::NormalizeApiHost(host), "unsafe host accepted");
         auto& service = WeatherService::Instance();
         const auto cities = Wait(service.StartSearch(0, L"南京"));
@@ -95,6 +99,9 @@ int wmain(int argc, wchar_t** argv)
         WeatherService::ConfigPatch city; city.provider = 0; city.cityId = L"101190101"; city.cityName = L"南京"; city.cityRegion = L"南京-江苏";
         auto result = Wait(service.StartConfigure(city));
         Require(result.state == L"success" && result.status.temperature == L"22.6℃" && result.status.lastSuccessCityId == L"101190101" && result.status.cityRegion == L"南京-江苏", "configure/refresh snapshot");
+        Require(result.status.revision > 0 && !result.status.stale && !result.status.details.Current.Temperature.empty() &&
+            result.status.details.Forecast.size() == 3 && !result.status.details.Current.ConditionKind.empty(),
+            "structured weather snapshot");
         Require(data.m_api_wccs->GetTemprature(EWeatherInfoType::WEATHER_TOMMROW) == L"21℃~29℃" && data.m_api_wccs->GetWeatherText(EWeatherInfoType::WEATHER_TOMMROW) == L"多云转小雨" && data.m_api_wccs->GetTemprature(EWeatherInfoType::WEATHER_DAY_AFTER_TOMMROW) == L"18℃~26℃", "current forecast HTML");
         optionalFailure = true; result = Wait(service.StartRefresh()); Require(result.state == L"success", "optional failure discarded realtime"); optionalFailure = false;
         badRealtime = true; city.cityId = L"101010100"; city.cityName = L"北京"; result = Wait(service.StartConfigure(city));

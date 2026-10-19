@@ -14,13 +14,21 @@ public sealed partial class SettingsWindow
     {
         var top = window._navigation.MenuItems.OfType<NavigationViewItem>().ToArray();
         var lyricsGroup = top.Single(item => Equals(item.Tag, "lyricsGroup"));
-        if (top.Length != 6 || top.Any(item => Equals(item.Tag, "audio") || Equals(item.Tag, "shortcuts")) || lyricsGroup.MenuItems.Count != 5)
+        var quickCards = top.Single(item => Equals(item.Tag, "quickCards"));
+        if (top.Length != 7 || top.Any(item => Equals(item.Tag, "audio") || Equals(item.Tag, "shortcuts")) ||
+            lyricsGroup.MenuItems.Count != 5 || quickCards.MenuItems.Count != 2)
             throw new InvalidOperationException("Simplified settings navigation did not group lyrics or remove obsolete pages.");
         foreach (var child in lyricsGroup.MenuItems.OfType<NavigationViewItem>())
         {
             window.NavigateTo((string)child.Tag);
             if (window._currentPage != (string)child.Tag || !lyricsGroup.IsExpanded)
                 throw new InvalidOperationException("Nested lyrics navigation failed.");
+        }
+        foreach (var child in quickCards.MenuItems.OfType<NavigationViewItem>())
+        {
+            window.NavigateTo((string)child.Tag);
+            if (window._currentPage != (string)child.Tag || !quickCards.IsExpanded)
+                throw new InvalidOperationException("Nested quick-card navigation failed.");
         }
         window.NavigateTo("general");
         var theme = window._media.Get("toolWindowTheme");

@@ -26,6 +26,7 @@ internal static class UiTemplateProbe
         object? audioControls = null;
         object? heatmapChecks = null;
         object? weatherControls = null;
+        object? weatherCardControls = null;
         object? themeControls = null;
         object? cardLyricsControls = null;
         object? sourceSelector = null;
@@ -47,7 +48,8 @@ internal static class UiTemplateProbe
             if (fixtureIndex >= 0 && fixtureIndex + 1 < args.Length)
                 layoutChecks = await UiLayoutProbe.RunAsync(settings, args[fixtureIndex + 1], Path.Combine(AppContext.BaseDirectory, "..", "ui-layout-check"));
             cardLyricsControls = await CardLyricsProbe.RunAsync();
-            cards = new CardGroup(connection, () => throw new InvalidOperationException("Probe must not invoke settings."));
+            cards = new CardGroup(connection, _ => throw new InvalidOperationException("Probe must not invoke settings."));
+            cards.SetQuickCardEnabled("weather", true);
             cards.ApplyBackendTheme(JsonSerializer.SerializeToElement(new { toolWindowTheme = 2 }));
             updateCard = await CardGroup.ProbeUpdateCardStateAsync(cards);
             if (cards.CardWindows.Any(card => card.Root.RequestedTheme != ElementTheme.Dark)) throw new InvalidOperationException("Initial panel theme did not apply before Show.");
@@ -59,9 +61,11 @@ internal static class UiTemplateProbe
                 {
                     var card = cards.CardWindows[index];
                     var bounds = card.Window.AppWindow;
-                    if (IsWindowVisible(card.Handle) || bounds.Size.Width <= 0 || bounds.Size.Height <= 0 || bounds.Size.Width != cards.CardWindows[0].Window.AppWindow.Size.Width)
+                    var expectedWidth = ReferenceEquals(card, cards._updateCard) ? 220 : cards.CardWindows[0].Window.AppWindow.Size.Width;
+                    if (IsWindowVisible(card.Handle) || bounds.Size.Width <= 0 || bounds.Size.Height <= 0 ||
+                        bounds.Size.Width != expectedWidth)
                         throw new InvalidOperationException("Hidden card geometry is invalid.");
-                    if (index > 0)
+                    if (index > 0 && !ReferenceEquals(card, cards._updateCard))
                     {
                         var previous = cards.CardWindows[index - 1].Window.AppWindow;
                         if (bounds.Position.X != previous.Position.X || bounds.Position.Y <= previous.Position.Y + previous.Size.Height)
@@ -100,6 +104,7 @@ internal static class UiTemplateProbe
             cardLifecycle["hideThenImmediateShow"] = true;
             ValidateOutsideClickPolicy(cards);
             cardLifecycle["externalClickPolicy"] = true;
+            weatherCardControls = await CardGroup.ProbeWeatherCardAsync(cards);
             heatmapChecks = await CardGroup.ProbeTrafficCardAsync(cards, Path.Combine(AppContext.BaseDirectory, "..", "ui-heatmap-check"));
             var settingsHandle = WinRT.Interop.WindowNative.GetWindowHandle(settings);
             SendMessage(settingsHandle, 0x0010, 0, 0);
@@ -127,7 +132,7 @@ internal static class UiTemplateProbe
             var result = resultIndex >= 0 && resultIndex + 1 < args.Length ? args[resultIndex + 1] : Path.Combine(AppContext.BaseDirectory, "template-probe.json");
             var winUiModule = System.Diagnostics.Process.GetCurrentProcess().Modules.Cast<System.Diagnostics.ProcessModule>()
                 .FirstOrDefault(module => string.Equals(module.ModuleName, "Microsoft.ui.xaml.dll", StringComparison.OrdinalIgnoreCase))?.FileName;
-            File.WriteAllText(result, JsonSerializer.Serialize(new { success = error is null, error, runtimeDirectory = RuntimeEnvironment.GetRuntimeDirectory(), winUiModule, checks, cardLifecycle, audioControls, weatherControls, themeControls, cardLyricsControls, sourceSelector, heatmapChecks, updateCard, updateControls, updateOrdering, layoutChecks, probeActivated = activated, externalForegroundChanged = GetForegroundWindow() != before }, new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(result, JsonSerializer.Serialize(new { success = error is null, error, runtimeDirectory = RuntimeEnvironment.GetRuntimeDirectory(), winUiModule, checks, cardLifecycle, audioControls, weatherControls, weatherCardControls, themeControls, cardLyricsControls, sourceSelector, heatmapChecks, updateCard, updateControls, updateOrdering, layoutChecks, probeActivated = activated, externalForegroundChanged = GetForegroundWindow() != before }, new JsonSerializerOptions { WriteIndented = true }));
             Environment.ExitCode = error is null ? 0 : 1;
             app.Exit();
         }

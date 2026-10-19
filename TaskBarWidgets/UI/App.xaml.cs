@@ -17,6 +17,7 @@ public partial class App : Application
     private bool _stopping;
     private UpdateUiState _updateState = new();
     private bool _installConfirmationOpen, _uiReadyReported;
+    private JsonElement _quickCards;
 
     public App()
     {
@@ -85,7 +86,10 @@ public partial class App : Application
                     payload.TryGetProperty("x", out var x) && x.TryGetDouble(out var px) && double.IsFinite(px) &&
                     payload.TryGetProperty("y", out var y) && y.TryGetDouble(out var py) && double.IsFinite(py))
                 {
-                    _cards ??= new CardGroup(_connection, () => OpenSettings(null));
+                    if (payload.TryGetProperty("quickCards", out var quickCards) && quickCards.ValueKind == JsonValueKind.Object)
+                        _quickCards = quickCards.Clone();
+                    _cards ??= new CardGroup(_connection, OpenSettings);
+                    _cards.ApplyQuickCards(_quickCards);
                     _cards.InstallUpdateRequested -= OnInstallUpdateRequested;
                     _cards.InstallUpdateRequested += OnInstallUpdateRequested;
                     _cards.SetUpdateState(_updateState);

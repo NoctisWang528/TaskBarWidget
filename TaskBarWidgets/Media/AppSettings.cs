@@ -51,8 +51,17 @@ public enum LyricsDisplayMode
     Selected
 }
 
+public enum QuickCardResourceMode
+{
+    Resident,
+    OnDemand
+}
+
 public sealed class AppSettings
 {
+    public static readonly string[] QuickCardIds = ["weather", "traffic", "device", "media"];
+    public static readonly string[] WeatherCardModuleIds = ["current", "forecast", "humidity", "wind", "airQuality", "precipitation", "updatedAt", "alerts"];
+
     public const int MinimumPlayerLyricOffsetMilliseconds = -5000;
     public const int MaximumPlayerLyricOffsetMilliseconds = 5000;
     public const double ExtendedFontSizeMin = 6;
@@ -127,6 +136,32 @@ public sealed class AppSettings
 
     // Product updater only. The inherited lyrics project's updater stays disabled.
     public bool ProductAutomaticUpdatesEnabled { get; set; } = true;
+
+    public List<string> QuickCardOrder { get; set; } = ["weather", "traffic", "device", "media"];
+
+    public Dictionary<string, bool> QuickCardEnabled { get; set; } = new(StringComparer.Ordinal)
+    {
+        ["weather"] = false,
+        ["traffic"] = true,
+        ["device"] = true,
+        ["media"] = true
+    };
+
+    public QuickCardResourceMode QuickCardResourceMode { get; set; } = QuickCardResourceMode.Resident;
+
+    public Dictionary<string, bool> WeatherCardModules { get; set; } = new(StringComparer.Ordinal)
+    {
+        ["current"] = true,
+        ["forecast"] = true,
+        ["humidity"] = false,
+        ["wind"] = false,
+        ["airQuality"] = false,
+        ["precipitation"] = false,
+        ["updatedAt"] = true,
+        ["alerts"] = false
+    };
+
+    public bool WeatherCardReducedMotion { get; set; }
 
     public DateTimeOffset? LastUpdateCheckUtc { get; set; }
 
@@ -239,6 +274,9 @@ public sealed class AppSettings
         cloned.LocalMusicFolders = LocalMusicFolders.ToList();
         cloned.SelectedDisplayIds = (SelectedDisplayIds ?? []).ToList();
         cloned.SpectrumTuning = SpectrumTuning.Clone();
+        cloned.QuickCardOrder = (QuickCardOrder ?? []).ToList();
+        cloned.QuickCardEnabled = new Dictionary<string, bool>(QuickCardEnabled ?? [], StringComparer.Ordinal);
+        cloned.WeatherCardModules = new Dictionary<string, bool>(WeatherCardModules ?? [], StringComparer.Ordinal);
         return cloned;
     }
 
@@ -284,6 +322,31 @@ public sealed class AppSettings
         }
 
         PlayerSources = normalized;
+    }
+
+    public void NormalizeQuickCards()
+    {
+        var order = (QuickCardOrder ?? [])
+            .Where(id => QuickCardIds.Contains(id, StringComparer.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        foreach (var id in QuickCardIds)
+            if (!order.Contains(id, StringComparer.Ordinal)) order.Add(id);
+        QuickCardOrder = order;
+
+        QuickCardEnabled ??= new Dictionary<string, bool>(StringComparer.Ordinal);
+        foreach (var id in QuickCardIds)
+            QuickCardEnabled[id] = QuickCardEnabled.TryGetValue(id, out var enabled) ? enabled : true;
+        foreach (var key in QuickCardEnabled.Keys.Where(key => !QuickCardIds.Contains(key, StringComparer.Ordinal)).ToArray())
+            QuickCardEnabled.Remove(key);
+
+        if (!Enum.IsDefined(QuickCardResourceMode)) QuickCardResourceMode = QuickCardResourceMode.Resident;
+
+        WeatherCardModules ??= new Dictionary<string, bool>(StringComparer.Ordinal);
+        foreach (var id in WeatherCardModuleIds)
+            WeatherCardModules[id] = WeatherCardModules.TryGetValue(id, out var enabled) ? enabled : id is "current" or "forecast" or "updatedAt";
+        foreach (var key in WeatherCardModules.Keys.Where(key => !WeatherCardModuleIds.Contains(key, StringComparer.Ordinal)).ToArray())
+            WeatherCardModules.Remove(key);
     }
 
     public bool AddCustomPlayerSource(string? sourceId, string? displayName, string? iconDataUrl = null,

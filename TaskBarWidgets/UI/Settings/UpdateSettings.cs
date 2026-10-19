@@ -18,6 +18,9 @@ public sealed partial class SettingsWindow
     internal event Action? InstallUpdateRequested;
     public bool HasPendingChanges => _native.Pending.Count > 0 || _media.Pending.Count > 0 || _busy || _weatherPage is { } weather &&
         (weather.Committing || weather.Searching || weather.LoadingStatus || weather.ProviderEdited || weather.HostEdited || weather.SelectedCity is not null || weather.ApiKey.Password.Length > 0);
+    private bool HasWeatherDraft() => _weatherPage is { } weather &&
+        (weather.Committing || weather.Searching || weather.LoadingStatus || weather.ProviderEdited || weather.HostEdited ||
+         weather.SelectedCity is not null || weather.ApiKey.Password.Length > 0);
 
     internal void SetUpdateState(UpdateUiState state)
     {

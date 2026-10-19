@@ -41,7 +41,6 @@ struct SConfiguration
     UpdateFrequency m_update_frequency;
     IconType m_icon_type;
     bool m_show_weather_icon;
-    bool m_show_weather_in_tooltips;
     bool m_show_brief_rt_weather_info;
     bool m_show_weather_alerts;
     bool m_show_brief_weather_alert_info;
@@ -72,7 +71,7 @@ public:
     void UpdateWeather(WeatherInfoUpdatedCallback callback = nullptr);
 
     std::wstring GetWeatherTemperature() const;
-    std::wstring GetTooptipInfo() const;
+    bool GetWeatherDetails(WeatherDetails& details) const;
 
     SConfiguration GetConfig() const;
     std::wstring ConfigPath() const;
@@ -94,7 +93,6 @@ private:
     HICON _getIcon();
 
     std::wstring _getWeatherTemperature() const;
-    std::wstring _getTooptipInfo() const;
 
     void _setLangID(const std::wstring &cfg_dir);
 
@@ -111,7 +109,8 @@ private:
     struct SWeatherInfoCache
     {
         std::wstring WeatherTemperature;
-        std::wstring TooltipInfo;
+        WeatherDetails Details;
+        bool HasDetails{};
 
         IconType CurrentIconType{ IconType::IT_WCC_BULE };
         HICON Icon{ nullptr };

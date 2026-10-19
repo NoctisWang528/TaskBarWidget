@@ -1,4 +1,5 @@
 #pragma once
+#include "DataAPI.h"
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -27,6 +28,9 @@ public:
         bool hasApiKey{}, updating{};
         std::wstring state{L"idle"}, message;
         int64_t lastAttemptUnix{}, lastSuccessUnix{};
+        uint64_t revision{};
+        bool stale{};
+        WeatherDetails details;
     };
     struct JobResult
     {
