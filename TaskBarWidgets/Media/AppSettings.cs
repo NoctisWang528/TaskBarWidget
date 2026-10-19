@@ -151,6 +151,8 @@ public sealed class AppSettings
 
     public QuickCardResourceMode QuickCardResourceMode { get; set; } = QuickCardResourceMode.Resident;
 
+    public string CardFontFamily { get; set; } = DefaultFontFamily;
+
     public DateTimeOffset? LastUpdateCheckUtc { get; set; }
 
     public string LastNotifiedUpdateVersion { get; set; } = "";
@@ -342,6 +344,7 @@ public sealed class AppSettings
 
         if (!Enum.IsDefined(QuickCardResourceMode)) QuickCardResourceMode = QuickCardResourceMode.Resident;
 
+        CardFontFamily = NormalizeFontFamily(CardFontFamily);
     }
 
     public bool AddCustomPlayerSource(string? sourceId, string? displayName, string? iconDataUrl = null,

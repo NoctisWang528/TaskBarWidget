@@ -27,11 +27,10 @@ public sealed partial class CardGroup
     internal TextBlock _weatherTemperature = new()
     {
         FontFamily = WeatherFontFamily,
-        FontSize = 54,
+        FontSize = 48,
         FontWeight = Microsoft.UI.Text.FontWeights.Light,
-        LineHeight = 58,
-        MaxLines = 1,
-        TextTrimming = TextTrimming.CharacterEllipsis
+        LineHeight = 52,
+        MaxLines = 1
     };
     internal TextBlock _weatherCity = new()
     {
@@ -69,7 +68,7 @@ public sealed partial class CardGroup
     };
     private readonly StackPanel _weatherRight = new()
     {
-        Spacing = 7,
+        Spacing = 5,
         Margin = new Thickness(12, 0, 0, 0),
         HorizontalAlignment = HorizontalAlignment.Stretch,
         VerticalAlignment = VerticalAlignment.Center
@@ -100,7 +99,7 @@ public sealed partial class CardGroup
     private readonly FontIcon _weatherIcon = CreateWeatherIcon(42);
     private readonly Grid _weatherCurrentRow = new()
     {
-        MinHeight = 62,
+        MinHeight = 58,
         HorizontalAlignment = HorizontalAlignment.Stretch
     };
     private readonly StackPanel _weatherSummary = new() { Spacing = 1, HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -121,8 +120,7 @@ public sealed partial class CardGroup
     };
     private readonly Button _weatherSettings = new() { Content = "打开天气设置", MinHeight = 32, HorizontalAlignment = HorizontalAlignment.Left };
 
-    private static FontFamily WeatherFontFamily =>
-        new("Segoe UI Variable, Microsoft YaHei UI, PingFang SC, SF Pro Text");
+    private static FontFamily WeatherFontFamily => new("Microsoft YaHei UI");
 
     private static readonly FontFamily WeatherIconFont =
         new("ms-appx:///Assets/QWeatherIcons/qweather-icons.ttf#qweather-icons");
@@ -178,7 +176,7 @@ public sealed partial class CardGroup
         _weatherLeft.Children.Add(_weatherLocationRow);
 
         _weatherCurrentRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        _weatherCurrentRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(44) });
+        _weatherCurrentRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(42) });
         Add(_weatherCurrentRow, _weatherTemperature, 0);
         _weatherIconHost.Children.Add(_weatherIcon);
         Add(_weatherCurrentRow, _weatherIconHost, 1);
@@ -357,13 +355,13 @@ public sealed partial class CardGroup
             if (row >= forecast.Length) continue;
 
             var day = forecast[row];
-            var rowGrid = Columns(new GridLength(32), new GridLength(28), new GridLength(24), new GridLength(1, GridUnitType.Star), new GridLength(26));
-            rowGrid.ColumnSpacing = 4;
+            var rowGrid = Columns(new GridLength(30), new GridLength(28), new GridLength(26), new GridLength(1, GridUnitType.Star), new GridLength(28));
+            rowGrid.ColumnSpacing = 3;
             rowGrid.VerticalAlignment = VerticalAlignment.Center;
             rowGrid.HorizontalAlignment = HorizontalAlignment.Stretch;
             Grid.SetRow(rowGrid, row);
 
-            var label = Text(WeatherDayLabels[row], 12);
+            var label = Text(WeatherDayLabels[row], 11);
             label.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
             label.VerticalAlignment = VerticalAlignment.Center;
             Add(rowGrid, label, 0);
@@ -371,7 +369,7 @@ public sealed partial class CardGroup
             var icon = CreateWeatherIcon(28, String(day, "conditionDayKind", "unknown"));
             Add(rowGrid, icon, 1);
 
-            var min = Text(NormalizeTemperature(String(day, "min")), 12);
+            var min = Text(NormalizeTemperature(String(day, "min")), 11);
             min.FontWeight = Microsoft.UI.Text.FontWeights.Light;
             Secondary(min);
             min.VerticalAlignment = VerticalAlignment.Center;
@@ -393,24 +391,31 @@ public sealed partial class CardGroup
                 CornerRadius = new CornerRadius(3),
                 Background = new SolidColorBrush(ForecastColor(row))
             };
-            if (TryTemperature(String(day, "min"), out var low) && TryTemperature(String(day, "max"), out var high))
-            {
-                var left = Math.Clamp((low - minimum) / span, 0, 1);
-                var width = Math.Clamp(Math.Max(0.08, (high - low) / span), 0, 1);
-                fill.Margin = new Thickness(left * 46, 0, 0, 0);
-                fill.Width = Math.Max(5, width * 46);
-            }
+            var hasRange = TryTemperature(String(day, "min"), out var low) && TryTemperature(String(day, "max"), out var high);
+            void ResizeRange(object _, SizeChangedEventArgs args) =>
+                SetForecastRange(fill, args.NewSize.Width, hasRange, low,
+                    TryTemperature(String(day, "max"), out var parsedHigh) ? parsedHigh : 0, minimum, span);
+            bar.SizeChanged += ResizeRange;
             range.Children.Add(fill);
             bar.Child = range;
             Add(rowGrid, bar, 3);
 
-            var max = Text(NormalizeTemperature(String(day, "max")), 12);
+            var max = Text(NormalizeTemperature(String(day, "max")), 11);
             max.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
             max.VerticalAlignment = VerticalAlignment.Center;
             max.HorizontalAlignment = HorizontalAlignment.Right;
             Add(rowGrid, max, 4);
             _weatherForecast.Children.Add(rowGrid);
         }
+    }
+
+    private static void SetForecastRange(Border fill, double width, bool hasRange, double low, double high, double minimum, double span)
+    {
+        if (!hasRange || width <= 0) return;
+        var left = Math.Clamp((low - minimum) / span, 0, 1);
+        var size = Math.Clamp(Math.Max(0.08, (high - low) / span), 0, 1);
+        fill.Margin = new Thickness(left * width, 0, 0, 0);
+        fill.Width = Math.Max(5, size * width);
     }
 
     private void RenderAlerts(JsonElement[] alerts)

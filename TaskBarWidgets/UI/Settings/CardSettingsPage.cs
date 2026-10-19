@@ -95,6 +95,28 @@ public sealed partial class SettingsWindow
         }
 
         var (left, right) = QuickCardLayout();
+        var appearance = Section("卡片字体", "所有快捷卡片的文字使用同一套系统字体。");
+        var font = new ComboBox { IsEditable = true, IsTextSearchEnabled = true, HorizontalAlignment = HorizontalAlignment.Stretch, MinWidth = 0 };
+        AutomationProperties.SetName(font, "卡片字体");
+        AutomationProperties.SetAutomationId(font, "setting-cardFontFamily");
+        foreach (var option in _fontOptions) font.Items.Add(new ComboBoxItem { Content = option.Label, Tag = option.Value });
+        var current = _media.Text("cardFontFamily", "Microsoft YaHei UI");
+        var selectedFont = font.Items.OfType<ComboBoxItem>().FirstOrDefault(item => string.Equals(item.Tag as string, current, StringComparison.OrdinalIgnoreCase));
+        if (selectedFont is null) { selectedFont = new ComboBoxItem { Content = current, Tag = current }; font.Items.Add(selectedFont); }
+        font.SelectedItem = selectedFont;
+        font.Text = selectedFont.Content?.ToString() ?? current;
+        void CommitCardFont(string value)
+        {
+            value = value.Trim();
+            if (value.Length is 0 or >= 32) { ShowError("请选择字体或输入不超过 31 个字符的字体名称。"); return; }
+            _media.Set("cardFontFamily", value); Changed();
+        }
+        font.SelectionChanged += (_, _) => { if (font.SelectedItem is ComboBoxItem item && item.Tag is string name) CommitCardFont(name); };
+        font.TextSubmitted += (_, args) => { CommitCardFont(args.Text); args.Handled = true; };
+        font.LostFocus += (_, _) => CommitCardFont(font.Text);
+        appearance.Children.Add(new TextBlock { Text = "卡片字体", FontSize = 14 });
+        appearance.Children.Add(font);
+        appearance.Children.Add(Copy("字体列表不可用时仍可输入系统已安装字体名称。"));
         var section = Section("卡片与顺序", "卡片可独立启用。拖动手柄把卡片放进左/右任意一列的任意位置，每列数量不限；关闭的卡片仍保留。");
         _cardOrderCells.Clear();
         var list = new Grid { ColumnSpacing = 10 };

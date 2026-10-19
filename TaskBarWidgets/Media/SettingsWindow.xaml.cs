@@ -1315,6 +1315,7 @@ public partial class SettingsWindow : System.Windows.Window
             QuickCardColumns = new Dictionary<string, int>(_settings.QuickCardColumns ?? [], StringComparer.Ordinal),
             QuickCardEnabled = new Dictionary<string, bool>(_settings.QuickCardEnabled, StringComparer.Ordinal),
             QuickCardResourceMode = _settings.QuickCardResourceMode,
+            CardFontFamily = _settings.CardFontFamily,
             SpectrumDisplayMode = _settings.SpectrumDisplayMode.ToString(),
             SpectrumAudioAccessGranted = _settings.SpectrumAudioAccessGranted,
             SpectrumTuning = _settings.SpectrumTuning.Clone(),
@@ -1609,6 +1610,9 @@ public partial class SettingsWindow : System.Windows.Window
             case "quickCardResourceMode":
                 if (Enum.TryParse<QuickCardResourceMode>(ReadString(element, _settings.QuickCardResourceMode.ToString()), true, out var resourceMode))
                     _settings.QuickCardResourceMode = resourceMode;
+                break;
+            case "cardFontFamily":
+                _settings.CardFontFamily = AppSettings.NormalizeFontFamily(ReadString(element, _settings.CardFontFamily));
                 break;
             case "spectrumDisplayMode":
                 var spectrumDisplayMode = ReadString(element, SpectrumDisplayMode.Disabled.ToString());
@@ -2112,6 +2116,7 @@ public partial class SettingsWindow : System.Windows.Window
         target.QuickCardColumns = new Dictionary<string, int>(source.QuickCardColumns ?? [], StringComparer.Ordinal);
         target.QuickCardEnabled = new Dictionary<string, bool>(source.QuickCardEnabled, StringComparer.Ordinal);
         target.QuickCardResourceMode = source.QuickCardResourceMode;
+        target.CardFontFamily = source.CardFontFamily;
         target.SpectrumDisplayMode = source.SpectrumDisplayMode;
         target.SpectrumAudioAccessGranted = source.SpectrumAudioAccessGranted;
         target.UseSafeFontSizeRange = source.UseSafeFontSizeRange;
@@ -2242,6 +2247,7 @@ public partial class SettingsWindow : System.Windows.Window
         public Dictionary<string, int> QuickCardColumns { get; set; } = new(StringComparer.Ordinal);
         public Dictionary<string, bool> QuickCardEnabled { get; set; } = new(StringComparer.Ordinal);
         public QuickCardResourceMode QuickCardResourceMode { get; set; }
+        public string CardFontFamily { get; set; } = AppSettings.DefaultFontFamily;
         public string SpectrumDisplayMode { get; set; } = TaskbarLyrics.App.SpectrumDisplayMode.Disabled.ToString();
         public bool SpectrumAudioAccessGranted { get; set; }
         public SpectrumTuningSettings SpectrumTuning { get; set; } = new();

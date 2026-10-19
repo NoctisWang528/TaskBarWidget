@@ -22,7 +22,8 @@ public sealed class SettingsStoreTests
                     ["weather"] = true,
                     ["unknown"] = true
                 },
-                QuickCardResourceMode = QuickCardResourceMode.OnDemand
+                QuickCardResourceMode = QuickCardResourceMode.OnDemand,
+                CardFontFamily = "Segoe UI"
             };
             Assert.True(new SettingsStore(filePath).Save(settings));
             var loaded = new SettingsStore(filePath).Load();
@@ -32,6 +33,7 @@ public sealed class SettingsStoreTests
             Assert.True(loaded.QuickCardEnabled["traffic"]);
             Assert.False(loaded.QuickCardEnabled.ContainsKey("unknown"));
             Assert.Equal(QuickCardResourceMode.OnDemand, loaded.QuickCardResourceMode);
+            Assert.Equal("Segoe UI", loaded.CardFontFamily);
         }
         finally
         {

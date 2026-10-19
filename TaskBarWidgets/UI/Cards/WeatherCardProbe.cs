@@ -65,6 +65,8 @@ public sealed partial class CardGroup
             throw new InvalidOperationException("Weather current icon is not the compact hero size.");
         if (cards._weatherIcon.Glyph != "\uF101")
             throw new InvalidOperationException("Daytime clear weather did not use the daytime icon.");
+        if (cards._weatherTemperature.FontFamily.Source != "Microsoft YaHei UI")
+            throw new InvalidOperationException("Weather text did not use the configured card font.");
         if (cards._weatherAlertsHost.MaxHeight != 54)
             throw new InvalidOperationException("Weather alert scroll limit changed.");
         if (cards._weatherAlerts.Children.Count != 2)

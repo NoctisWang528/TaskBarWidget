@@ -37,6 +37,7 @@ public sealed partial class CardGroup : IDisposable
     private Dictionary<string, bool> _quickCardEnabled = new(StringComparer.Ordinal)
         { ["weather"] = false, ["traffic"] = true, ["device"] = true, ["media"] = true };
     private bool _onDemand;
+    private FontFamily _cardFontFamily = new("Microsoft YaHei UI");
     private readonly Dictionary<string, CardSlot> _slots;
     private readonly Dictionary<string, CardWindow> _cardsById = new(StringComparer.Ordinal);
     private IEnumerable<CardWindow> AllCards => _cardsById.Values.Append(_updateCard);
@@ -475,9 +476,31 @@ public sealed partial class CardGroup : IDisposable
             foreach (var id in _slots.Keys)
                 _quickCardEnabled[id] = !enabled.TryGetProperty(id, out var flag) || flag.ValueKind != JsonValueKind.False;
         }
+        if (value.TryGetProperty("font", out var font) && font.ValueKind == JsonValueKind.String)
+        {
+            var family = font.GetString();
+            if (!string.IsNullOrWhiteSpace(family) && family!.Length < 32)
+            {
+                _cardFontFamily = new FontFamily(family);
+                ApplyCardFont(_slots.Values.Select(slot => slot.Content).Append(_updateCard.Content));
+            }
+        }
         _onDemand = value.TryGetProperty("resourceMode", out var mode) && string.Equals(mode.GetString(), "OnDemand", StringComparison.OrdinalIgnoreCase);
         ReconcileCardWindows();
         if (_visible) { Position(_anchorX, _anchorY); RenderWeatherModules(); }
+    }
+
+    private void ApplyCardFont(IEnumerable<FrameworkElement> roots)
+    {
+        foreach (var root in roots) ApplyCardFont(root);
+    }
+
+    private void ApplyCardFont(DependencyObject root)
+    {
+        if (_disposed) return;
+        if (root is TextBlock text) text.FontFamily = _cardFontFamily;
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+            ApplyCardFont(VisualTreeHelper.GetChild(root, index));
     }
     internal void SetQuickCardEnabled(string id, bool enabled)
     {
