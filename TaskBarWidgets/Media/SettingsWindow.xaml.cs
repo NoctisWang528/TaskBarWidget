@@ -1315,7 +1315,6 @@ public partial class SettingsWindow : System.Windows.Window
             QuickCardColumns = new Dictionary<string, int>(_settings.QuickCardColumns ?? [], StringComparer.Ordinal),
             QuickCardEnabled = new Dictionary<string, bool>(_settings.QuickCardEnabled, StringComparer.Ordinal),
             QuickCardResourceMode = _settings.QuickCardResourceMode,
-            WeatherCardModules = new Dictionary<string, bool>(_settings.WeatherCardModules, StringComparer.Ordinal),
             SpectrumDisplayMode = _settings.SpectrumDisplayMode.ToString(),
             SpectrumAudioAccessGranted = _settings.SpectrumAudioAccessGranted,
             SpectrumTuning = _settings.SpectrumTuning.Clone(),
@@ -1610,14 +1609,6 @@ public partial class SettingsWindow : System.Windows.Window
             case "quickCardResourceMode":
                 if (Enum.TryParse<QuickCardResourceMode>(ReadString(element, _settings.QuickCardResourceMode.ToString()), true, out var resourceMode))
                     _settings.QuickCardResourceMode = resourceMode;
-                break;
-            case "weatherCardModules":
-                if (element.ValueKind == JsonValueKind.Object) {
-                    _settings.WeatherCardModules = element.EnumerateObject()
-                        .Where(item => item.Value.ValueKind is JsonValueKind.True or JsonValueKind.False)
-                        .ToDictionary(item => item.Name, item => item.Value.GetBoolean(), StringComparer.Ordinal);
-                    _settings.NormalizeQuickCards();
-                }
                 break;
             case "spectrumDisplayMode":
                 var spectrumDisplayMode = ReadString(element, SpectrumDisplayMode.Disabled.ToString());
@@ -2121,7 +2112,6 @@ public partial class SettingsWindow : System.Windows.Window
         target.QuickCardColumns = new Dictionary<string, int>(source.QuickCardColumns ?? [], StringComparer.Ordinal);
         target.QuickCardEnabled = new Dictionary<string, bool>(source.QuickCardEnabled, StringComparer.Ordinal);
         target.QuickCardResourceMode = source.QuickCardResourceMode;
-        target.WeatherCardModules = new Dictionary<string, bool>(source.WeatherCardModules, StringComparer.Ordinal);
         target.SpectrumDisplayMode = source.SpectrumDisplayMode;
         target.SpectrumAudioAccessGranted = source.SpectrumAudioAccessGranted;
         target.UseSafeFontSizeRange = source.UseSafeFontSizeRange;
@@ -2252,7 +2242,6 @@ public partial class SettingsWindow : System.Windows.Window
         public Dictionary<string, int> QuickCardColumns { get; set; } = new(StringComparer.Ordinal);
         public Dictionary<string, bool> QuickCardEnabled { get; set; } = new(StringComparer.Ordinal);
         public QuickCardResourceMode QuickCardResourceMode { get; set; }
-        public Dictionary<string, bool> WeatherCardModules { get; set; } = new(StringComparer.Ordinal);
         public string SpectrumDisplayMode { get; set; } = TaskbarLyrics.App.SpectrumDisplayMode.Disabled.ToString();
         public bool SpectrumAudioAccessGranted { get; set; }
         public SpectrumTuningSettings SpectrumTuning { get; set; } = new();

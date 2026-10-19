@@ -18,18 +18,6 @@ public sealed partial class SettingsWindow
         ("media", "媒体", "\uE8D6")
     ];
 
-    private static readonly (string Id, string Label)[] WeatherModuleDefinitions =
-    [
-        ("current", "当前天气"),
-        ("forecast", "三日预报"),
-        ("humidity", "湿度"),
-        ("wind", "风速风向"),
-        ("airQuality", "空气质量"),
-        ("precipitation", "降水"),
-        ("updatedAt", "更新时间"),
-        ("alerts", "天气预警")
-    ];
-
     private readonly List<(Border Cell, int Column, int Slot)> _cardOrderCells = [];
     private int _cardOrderDragColumn = -1;
     private int _cardOrderDragSlot = -1;
@@ -171,62 +159,9 @@ public sealed partial class SettingsWindow
             FontSize = 16,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
         });
-        status.Children.Add(Copy("天气卡的启停开关位于“快捷卡片 → 卡片与顺序”的天气行。此处配置来源、城市和卡片显示内容。"));
+        status.Children.Add(Copy("天气卡的启停开关位于“快捷卡片 → 卡片与顺序”的天气行。此处配置来源、城市和连接。"));
 
         RenderWeatherSettings();
-
-        var modules = Section("天气卡内容", "按当前来源可用的数据自动显示；不支持的模块会隐藏并保留配置。");
-        var values = _media.Get("weatherCardModules") as JsonObject ?? new JsonObject();
-        var moduleChecks = new List<(string Id, string Label, CheckBox Check)>();
-        foreach (var (id, label) in WeatherModuleDefinitions)
-        {
-            var check = new CheckBox
-            {
-                Content = label,
-                MinHeight = 32,
-                IsChecked = values[id]?.GetValue<bool>() ?? id is "current" or "forecast" or "updatedAt"
-            };
-            AutomationProperties.SetAutomationId(check, "weather-card-module-" + id);
-            check.Checked += (_, _) => SetWeatherModule(id, true);
-            check.Unchecked += (_, _) => SetWeatherModule(id, false);
-            moduleChecks.Add((id, label, check));
-            modules.Children.Add(check);
-        }
-        if (_weatherPage is { } weatherEditor)
-        {
-            void UpdateAvailability()
-            {
-                foreach (var (id, label, check) in moduleChecks)
-                {
-                    var available = id switch
-                    {
-                        "current" => true,
-                        "forecast" => weatherEditor.Capabilities?["forecast"]?.GetValue<bool>() ?? true,
-                        "humidity" => weatherEditor.Capabilities?["humidity"]?.GetValue<bool>() ?? true,
-                        "wind" => weatherEditor.Capabilities?["wind"]?.GetValue<bool>() ?? true,
-                        "airQuality" => weatherEditor.Capabilities?["airQuality"]?.GetValue<bool>() ?? true,
-                        "precipitation" => weatherEditor.Capabilities?["precipitation"]?.GetValue<bool>() ?? false,
-                        "updatedAt" => weatherEditor.Capabilities?["updatedAt"]?.GetValue<bool>() ?? true,
-                        "alerts" => weatherEditor.Capabilities?["alerts"]?.GetValue<bool>() ?? true,
-                        _ => true
-                    };
-                    check.Content = available ? label : label + "（当前来源不可用）";
-                }
-            }
-            weatherEditor.CapabilitiesChanged = UpdateAvailability;
-            UpdateAvailability();
-        }
-        modules.Children.Add(Copy("中国天气网不提供湿度、AQI 等部分字段；这些模块不会显示伪造数据。预警在卡片内独立滚动。"));
-    }
-
-    private void SetWeatherModule(string id, bool enabled)
-    {
-        var values = _media.Get("weatherCardModules") as JsonObject ?? new JsonObject();
-        values[id] = enabled;
-        foreach (var (moduleId, _) in WeatherModuleDefinitions)
-            values[moduleId] ??= moduleId is "current" or "forecast" or "updatedAt";
-        _media.SetNode("weatherCardModules", values);
-        Changed();
     }
 
     private Border BuildQuickCardCell(string id, int column)

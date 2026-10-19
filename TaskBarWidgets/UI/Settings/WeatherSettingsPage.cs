@@ -34,8 +34,6 @@ public sealed partial class SettingsWindow
         internal readonly Button ClearKey = new() { Content = "清除已保存密钥" };
         internal JsonObject? SelectedCity;
         internal JsonObject? SavedCity;
-        internal JsonObject? Capabilities;
-        internal Action? CapabilitiesChanged;
         internal int SavedProvider;
         internal bool ProviderEdited;
         internal bool Binding;
@@ -179,7 +177,6 @@ public sealed partial class SettingsWindow
     {
         if (!IsWeatherCurrent(page)) return;
         page.HasStatus = true; page.SavedProvider = (int)Number(status["provider"]);
-        page.Capabilities = status["details"] is JsonObject details && details["capabilities"] is JsonObject capabilities ? (JsonObject)capabilities.DeepClone() : null;
         page.SavedCity = status["city"] is JsonObject city ? (JsonObject)city.DeepClone() : null;
         if (page.Committing && page.SelectedCity is JsonObject selected && page.SavedProvider == page.Provider.SelectedIndex && Text(selected["id"]) == Text(page.SavedCity?["id"]))
             page.SelectedCity = null;
@@ -197,7 +194,6 @@ public sealed partial class SettingsWindow
         }
         if (!page.HostEdited) { page.Binding = true; page.ApiHost.Text = Text(status["apiHost"]); page.Binding = false; }
         UpdateWeatherSelection(page); UpdateWeatherButtons(page);
-        page.CapabilitiesChanged?.Invoke();
     }
 
     private async Task<JsonObject> WeatherCommandAsync(WeatherEditor page, object payload, CancellationToken token)

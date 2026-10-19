@@ -1,93 +1,148 @@
+using System.Globalization;
 using System.Text.Json;
-using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Imaging;
-using Microsoft.UI.Xaml.Shapes;
 using Windows.UI;
 
 namespace TaskBarWidgets.UI;
 
 public sealed partial class CardGroup
 {
-    private const double WeatherCardDesignWidth = 384;
-    private const double WeatherAlertMaxHeight = 140;
-    private static readonly string[] WeatherDayLabels = ["今天", "明天", "后天"];
+    private const double WeatherCardDesignWidth = CardWidth - 32;
+    private const double WeatherCardDesignHeight = 176;
+    private const double WeatherAlertMaxHeight = 54;
+    private const int WeatherForecastRows = 5;
+    private static readonly string[] WeatherDayLabels = ["今天", "明天", "后天", "周四", "周五"];
 
     internal Button _weatherRefresh = CreateWeatherRefreshButton();
-    internal Grid _weatherContent = new() { MaxWidth = WeatherCardDesignWidth };
-    internal TextBlock _weatherTemperature = new() { FontSize = 42, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis };
-    internal TextBlock _weatherCity = new() { FontSize = 12, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis };
-    internal TextBlock _weatherStatus = new() { FontSize = 11, MaxLines = 2, TextWrapping = TextWrapping.Wrap };
-
-    private JsonElement _weatherLastStatus;
-    private JsonElement _weatherLastDetails;
-    private readonly Border _weatherSky = new() { CornerRadius = new CornerRadius(8), Padding = new Thickness(16, 12, 16, 12) };
-    private readonly Image _weatherIcon = new()
+    internal Grid _weatherContent = new()
     {
-        Width = 96,
-        Height = 96,
-        Stretch = Stretch.Uniform,
+        Width = WeatherCardDesignWidth,
+        Height = WeatherCardDesignHeight,
         HorizontalAlignment = HorizontalAlignment.Center,
         VerticalAlignment = VerticalAlignment.Center
     };
-    private readonly TextBlock _weatherCondition = new()
+    internal TextBlock _weatherTemperature = new()
     {
-        FontSize = 13,
-        MaxLines = 2,
-        TextWrapping = TextWrapping.Wrap,
-        TextTrimming = TextTrimming.CharacterEllipsis,
-        Foreground = new SolidColorBrush(Color.FromArgb(236, 255, 255, 255))
+        FontFamily = WeatherFontFamily,
+        FontSize = 54,
+        FontWeight = Microsoft.UI.Text.FontWeights.Light,
+        LineHeight = 58,
+        MaxLines = 1,
+        TextTrimming = TextTrimming.CharacterEllipsis
     };
-    private readonly TextBlock _weatherCurrentDetail = Text("", 11);
-    private readonly TextBlock _weatherUpdated = Text("", 11);
-    private readonly TextBlock _weatherHumidity = Text("", 12);
-    private readonly TextBlock _weatherWind = Text("", 12);
-    private readonly TextBlock _weatherAir = Text("", 12);
-    private readonly TextBlock _weatherPrecipitation = Text("", 12);
-    private readonly TextBlock _weatherEmpty = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap, MaxLines = 3 };
-    private readonly Button _weatherSettings = new() { Content = "打开天气设置", MinHeight = 32, HorizontalAlignment = HorizontalAlignment.Left };
-    private readonly StackPanel _weatherCurrent = new() { Spacing = 2, Margin = new Thickness(0, 0, 0, 8) };
-    private readonly StackPanel _weatherForecast = new() { Spacing = 5, Margin = new Thickness(0, 0, 0, 8) };
-    private readonly StackPanel _weatherHumidityBlock = new() { Spacing = 2, Margin = new Thickness(0, 0, 0, 8) };
-    private readonly StackPanel _weatherWindBlock = new() { Spacing = 2, Margin = new Thickness(0, 0, 0, 8) };
-    private readonly StackPanel _weatherAirBlock = new() { Spacing = 2, Margin = new Thickness(0, 0, 0, 8) };
-    private readonly StackPanel _weatherPrecipitationBlock = new() { Spacing = 2, Margin = new Thickness(0, 0, 0, 8) };
-    private readonly StackPanel _weatherUpdatedBlock = new() { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Thickness(0, 0, 0, 8) };
-    private readonly StackPanel _weatherAlerts = new() { Spacing = 6 };
+    internal TextBlock _weatherCity = new()
+    {
+        FontFamily = WeatherFontFamily,
+        FontSize = 15,
+        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+        MaxLines = 1,
+        TextTrimming = TextTrimming.CharacterEllipsis
+    };
+    internal TextBlock _weatherStatus = new()
+    {
+        FontFamily = WeatherFontFamily,
+        FontSize = 11,
+        MaxLines = 1,
+        TextWrapping = TextWrapping.Wrap
+    };
+
+    private JsonElement _weatherLastStatus;
+    private JsonElement _weatherLastDetails;
+    private readonly DispatcherTimer _weatherAlertTimer = new() { Interval = TimeSpan.FromSeconds(4) };
+    private int _weatherAlertIndex;
+    private readonly Grid _weatherLeft = new()
+    {
+        Margin = new Thickness(0, 0, 12, 0),
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        VerticalAlignment = VerticalAlignment.Stretch
+    };
+    private readonly StackPanel _weatherLocationRow = new()
+    {
+        Spacing = 6,
+        MinHeight = 28,
+        Orientation = Orientation.Horizontal,
+        HorizontalAlignment = HorizontalAlignment.Left,
+        VerticalAlignment = VerticalAlignment.Center
+    };
+    private readonly StackPanel _weatherRight = new()
+    {
+        Spacing = 7,
+        Margin = new Thickness(12, 0, 0, 0),
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        VerticalAlignment = VerticalAlignment.Center
+    };
+    private readonly Grid _weatherMain = new()
+    {
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        VerticalAlignment = VerticalAlignment.Stretch
+    };
+    private readonly Grid _weatherForecast = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly Grid _weatherAlertPanel = new() { VerticalAlignment = VerticalAlignment.Bottom };
+    private readonly StackPanel _weatherAlerts = new() { Spacing = 4 };
     private readonly ScrollViewer _weatherAlertsHost = new()
     {
         MaxHeight = WeatherAlertMaxHeight,
         VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
         HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
     };
+    private readonly TextBlock _weatherCondition = new()
+    {
+        FontFamily = WeatherFontFamily,
+        FontSize = 13,
+        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+        MaxLines = 2,
+        TextWrapping = TextWrapping.Wrap,
+        TextTrimming = TextTrimming.CharacterEllipsis
+    };
+    private readonly FontIcon _weatherIcon = CreateWeatherIcon(42);
+    private readonly Grid _weatherCurrentRow = new()
+    {
+        MinHeight = 62,
+        HorizontalAlignment = HorizontalAlignment.Stretch
+    };
+    private readonly StackPanel _weatherSummary = new() { Spacing = 1, HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly Grid _weatherIconHost = new()
+    {
+        Width = 42,
+        Height = 42,
+        HorizontalAlignment = HorizontalAlignment.Left,
+        VerticalAlignment = VerticalAlignment.Center
+    };
     private readonly StackPanel _weatherEmptyState = new() { Spacing = 8 };
+    private readonly TextBlock _weatherEmpty = new()
+    {
+        FontFamily = WeatherFontFamily,
+        FontSize = 12,
+        TextWrapping = TextWrapping.Wrap,
+        MaxLines = 3
+    };
+    private readonly Button _weatherSettings = new() { Content = "打开天气设置", MinHeight = 32, HorizontalAlignment = HorizontalAlignment.Left };
+
+    private static FontFamily WeatherFontFamily =>
+        new("Segoe UI Variable, Microsoft YaHei UI, PingFang SC, SF Pro Text");
+
+    private static readonly FontFamily WeatherIconFont =
+        new("ms-appx:///Assets/QWeatherIcons/qweather-icons.ttf#qweather-icons");
 
     private FrameworkElement BuildWeather()
     {
-        var root = new StackPanel { Spacing = 10 };
-        var header = Columns(new GridLength(1, GridUnitType.Star), GridLength.Auto);
-        var heading = new StackPanel { Spacing = 2 };
-        var title = Text("天气", 13);
-        title.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
-        heading.Children.Add(title);
-        Secondary(_weatherCity);
-        heading.Children.Add(_weatherCity);
-        Add(header, heading, 0);
-        Add(header, _weatherRefresh, 1);
-        root.Children.Add(header);
-
-        BuildWeatherSky();
-        root.Children.Add(_weatherSky);
+        var root = new Grid { Width = WeatherCardDesignWidth, Height = WeatherCardDesignHeight };
+        BuildWeatherContent();
+        root.Children.Add(_weatherContent);
         root.Children.Add(BuildWeatherEmptyState());
-        root.Children.Add(BuildWeatherContent());
 
         _weatherRefresh.Click += async (_, _) => await RefreshWeatherButtonAsync();
         _weatherSettings.Click += (_, _) => OpenWeatherSettings();
+        _weatherAlertTimer.Tick += (_, _) =>
+        {
+            if (_disposed || _weatherAlerts.Children.Count <= 1) return;
+            ShowWeatherAlert((_weatherAlertIndex + 1) % _weatherAlerts.Children.Count);
+        };
         _weatherSettings.Visibility = Visibility.Collapsed;
-        _weatherSky.ActualThemeChanged += (_, _) => RenderWeatherModules();
+        _weatherContent.ActualThemeChanged += (_, _) => RenderWeatherModules();
         AutomationProperties.SetName(_weatherRefresh, "刷新天气");
         AutomationProperties.SetName(_weatherSettings, "打开天气设置");
 
@@ -97,38 +152,49 @@ public sealed partial class CardGroup
         _weatherTemperature.Text = "";
         _weatherEmpty.Text = "打开天气卡后读取天气。";
         ShowWeatherEmpty(true);
-        _weatherSky.Visibility = Visibility.Collapsed;
         return root;
     }
 
-    private void BuildWeatherSky()
+    private void BuildWeatherContent()
     {
-        var gradient = new LinearGradientBrush
-        {
-            StartPoint = new Windows.Foundation.Point(0, 0),
-            EndPoint = new Windows.Foundation.Point(1, 1)
-        };
-        gradient.GradientStops.Add(new GradientStop { Color = Color.FromArgb(255, 31, 78, 121), Offset = 0 });
-        gradient.GradientStops.Add(new GradientStop { Color = Color.FromArgb(255, 46, 109, 164), Offset = 0.58 });
-        gradient.GradientStops.Add(new GradientStop { Color = Color.FromArgb(255, 62, 127, 179), Offset = 1 });
+        _weatherContent.Children.Add(_weatherMain);
 
-        var hero = new Grid { MinHeight = 108 };
-        hero.Children.Add(new Rectangle { RadiusX = 8, RadiusY = 8, Fill = gradient });
-        var columns = Columns(new GridLength(1, GridUnitType.Star), new GridLength(104));
-        columns.Margin = new Thickness(12, 0, 12, 0);
-        var readings = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
-        _weatherTemperature.Foreground = new SolidColorBrush(Colors.White);
-        readings.Children.Add(_weatherTemperature);
-        readings.Children.Add(_weatherCondition);
-        _weatherStatus.Foreground = new SolidColorBrush(Color.FromArgb(255, 255, 255, 255));
-        readings.Children.Add(_weatherStatus);
-        Add(columns, readings, 0);
+        _weatherMain.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(45, GridUnitType.Star) });
+        _weatherMain.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(55, GridUnitType.Star) });
+        Add(_weatherMain, _weatherLeft, 0);
+        Add(_weatherMain, _weatherRight, 1);
 
-        var iconBack = new Grid { Width = 104, Height = 104, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        iconBack.Children.Add(_weatherIcon);
-        Add(columns, iconBack, 1);
-        hero.Children.Add(columns);
-        _weatherSky.Child = hero;
+        _weatherLeft.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        _weatherLeft.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        _weatherLeft.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        _weatherLeft.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        _weatherLeft.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        _weatherCity.VerticalAlignment = VerticalAlignment.Center;
+        _weatherRefresh.VerticalAlignment = VerticalAlignment.Center;
+        _weatherLocationRow.Children.Add(_weatherCity);
+        _weatherLocationRow.Children.Add(_weatherRefresh);
+        Grid.SetRow(_weatherLocationRow, 0);
+        _weatherLeft.Children.Add(_weatherLocationRow);
+
+        _weatherCurrentRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        _weatherCurrentRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(44) });
+        Add(_weatherCurrentRow, _weatherTemperature, 0);
+        _weatherIconHost.Children.Add(_weatherIcon);
+        Add(_weatherCurrentRow, _weatherIconHost, 1);
+        Grid.SetRow(_weatherCurrentRow, 1);
+        _weatherLeft.Children.Add(_weatherCurrentRow);
+
+        _weatherSummary.Children.Add(_weatherCondition);
+        _weatherSummary.Children.Add(_weatherStatus);
+        Grid.SetRow(_weatherSummary, 2);
+        _weatherLeft.Children.Add(_weatherSummary);
+
+        _weatherAlertPanel.Children.Add(_weatherAlertsHost);
+        Grid.SetRow(_weatherAlertPanel, 4);
+        _weatherLeft.Children.Add(_weatherAlertPanel);
+
+        _weatherRight.Children.Add(_weatherForecast);
     }
 
     private FrameworkElement BuildWeatherEmptyState()
@@ -137,48 +203,6 @@ public sealed partial class CardGroup
         _weatherEmptyState.Children.Add(_weatherEmpty);
         _weatherEmptyState.Children.Add(_weatherSettings);
         return _weatherEmptyState;
-    }
-
-    private FrameworkElement BuildWeatherContent()
-    {
-        for (var row = 0; row < 8; row++)
-            _weatherContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
-        Secondary(_weatherCurrentDetail);
-        _weatherCurrent.Children.Add(_weatherCurrentDetail);
-        AddWeatherModule(_weatherCurrent, 0);
-
-        AddWeatherModule(_weatherForecast, 1);
-        AddWeatherField(_weatherHumidityBlock, "湿度", _weatherHumidity, 2);
-        AddWeatherField(_weatherWindBlock, "风", _weatherWind, 3);
-        AddWeatherField(_weatherAirBlock, "空气质量", _weatherAir, 4);
-        AddWeatherField(_weatherPrecipitationBlock, "降水", _weatherPrecipitation, 5);
-        var updatedLabel = Text("更新时间：", 11);
-        Secondary(updatedLabel);
-        updatedLabel.VerticalAlignment = VerticalAlignment.Center;
-        _weatherUpdated.VerticalAlignment = VerticalAlignment.Center;
-        _weatherUpdatedBlock.Children.Add(updatedLabel);
-        _weatherUpdatedBlock.Children.Add(_weatherUpdated);
-        AddWeatherModule(_weatherUpdatedBlock, 6);
-
-        _weatherAlertsHost.Content = _weatherAlerts;
-        AddWeatherModule(_weatherAlertsHost, 7);
-        return _weatherContent;
-    }
-
-    private void AddWeatherModule(FrameworkElement module, int row)
-    {
-        Grid.SetRow(module, row);
-        _weatherContent.Children.Add(module);
-    }
-
-    private void AddWeatherField(StackPanel block, string label, TextBlock value, int row)
-    {
-        var heading = Text(label, 10);
-        Secondary(heading);
-        block.Children.Add(heading);
-        block.Children.Add(value);
-        AddWeatherModule(block, row);
     }
 
     internal async Task RefreshWeatherAsync()
@@ -269,17 +293,17 @@ public sealed partial class CardGroup
         var current = Object(details, "current");
         var shownCity = Bool(status, "stale") && HasValue(String(lastSuccessCity, "name")) ? lastSuccessCity : city;
         var cityName = String(shownCity, "name");
-        var region = String(shownCity, "region");
         var hasCity = HasValue(cityName);
-        _weatherCity.Text = !hasCity ? "未设置城市" : HasValue(region) && region != cityName ? cityName + " · " + region : cityName;
+        _weatherCity.Text = hasCity ? cityName : "未设置城市";
 
         var currentTemperature = String(current, "temperature");
         var temperature = FirstNonEmpty(currentTemperature, String(status, "temperature"));
         _weatherTemperature.Text = NormalizeTemperature(temperature);
         _weatherCondition.Text = FirstNonEmpty(String(current, "weather"), String(status, "message"), "天气");
-        var isNight = String(current, "observedAt").Length >= 2 &&
-            int.TryParse(String(current, "observedAt")[..2], out var observedHour) && (observedHour >= 20 || observedHour < 6);
-        _ = ShowWeatherIconAsync(String(current, "conditionKind", "unknown"), isNight);
+        var observedAt = String(current, "observedAt");
+        var isNight = DateTime.TryParse(observedAt, CultureInfo.InvariantCulture, DateTimeStyles.None, out var observedTime) &&
+            (observedTime.Hour >= 20 || observedTime.Hour < 6);
+        SetWeatherIcon(_weatherIcon, String(current, "conditionKind", "unknown"), isNight);
         _weatherStatus.Text = WeatherStatus(status);
         _weatherStatus.Visibility = HasValue(_weatherStatus.Text) ? Visibility.Visible : Visibility.Collapsed;
 
@@ -287,25 +311,20 @@ public sealed partial class CardGroup
         var alerts = Array(details, "alerts").ToArray();
         var available = details.ValueKind == JsonValueKind.Object &&
             (HasValue(currentTemperature) || HasValue(String(current, "weather")) || forecast.Length > 0 || alerts.Length > 0);
-        var showDetails = hasCity && available;
-        var showCurrent = showDetails && _weatherModules.GetValueOrDefault("current");
-        ShowWeatherEmpty(!showDetails);
-        _weatherSky.Visibility = showCurrent ? Visibility.Visible : Visibility.Collapsed;
-        if (!showDetails)
+        ShowWeatherEmpty(!hasCity || !available);
+        if (!hasCity || !available)
         {
             _weatherEmpty.Text = hasCity
                 ? FirstNonEmpty(String(status, "message"), "当前天气来源还没有完整数据。可以稍后刷新，或在天气设置中切换来源。")
                 : "还没有设置天气城市。设置城市后，这里会显示当前天气和预报。";
             _weatherSettings.Visibility = hasCity ? Visibility.Collapsed : Visibility.Visible;
             _weatherRefresh.IsEnabled = !_weatherRefreshing;
-            RefreshWeatherLayout();
             return;
         }
 
         RenderWeatherModules();
         _weatherSettings.Visibility = Visibility.Collapsed;
         _weatherRefresh.IsEnabled = !_weatherRefreshing && !Bool(status, "updating");
-        RefreshWeatherLayout();
     }
 
     internal void RenderWeatherModules()
@@ -313,112 +332,139 @@ public sealed partial class CardGroup
         if (_disposed || _weatherLastStatus.ValueKind != JsonValueKind.Object) return;
         var details = _weatherLastDetails.ValueKind == JsonValueKind.Object ? _weatherLastDetails : Object(_weatherLastStatus, "details");
         var current = Object(details, "current");
-        var forecast = Array(details, "forecast").Take(3).ToArray();
-        var air = Object(details, "airQuality");
+        var forecast = Array(details, "forecast").ToArray();
         var alerts = Array(details, "alerts").ToArray();
-
-        var feelsLike = String(current, "feelsLike");
-        var observedAt = String(current, "observedAt");
-        _weatherCurrentDetail.Text = string.Join(" · ", new[]
-        {
-            HasValue(feelsLike) ? "体感 " + NormalizeTemperature(feelsLike) : "",
-            HasValue(observedAt) ? observedAt : ""
-        }.Where(HasValue));
-        RenderModule("current", _weatherCurrent, true);
-
         RenderForecast(forecast);
-        RenderModule("forecast", _weatherForecast, forecast.Length > 0);
-
-        _weatherHumidity.Text = FormatMeasure(String(current, "humidity"), "%");
-        RenderModule("humidity", _weatherHumidityBlock, HasValue(_weatherHumidity.Text));
-
-        var windScale = FormatWindScale(String(current, "windScale"));
-        var windSpeed = String(current, "windSpeed");
-        _weatherWind.Text = string.Join(" · ", new[]
-        {
-            String(current, "windDirection"),
-            windScale,
-            HasValue(windSpeed) ? windSpeed + (windSpeed.EndsWith("km/h", StringComparison.OrdinalIgnoreCase) ? "" : " km/h") : ""
-        }.Where(HasValue));
-        RenderModule("wind", _weatherWindBlock, HasValue(_weatherWind.Text));
-
-        _weatherAir.Text = AirQualityText(air);
-        RenderModule("airQuality", _weatherAirBlock, HasValue(_weatherAir.Text));
-
-        // Precipitation is not included in the current status payload.
-        _weatherPrecipitation.Text = "";
-        RenderModule("precipitation", _weatherPrecipitationBlock, false);
-
-        _weatherUpdated.Text = FirstNonEmpty(String(current, "observedAt"), String(_weatherLastStatus, "lastSuccess"));
-        RenderModule("updatedAt", _weatherUpdatedBlock, HasValue(_weatherUpdated.Text));
         RenderAlerts(alerts);
-        RefreshWeatherLayout();
     }
 
     private void RenderForecast(JsonElement[] forecast)
     {
         _weatherForecast.Children.Clear();
-        for (var index = 0; index < forecast.Length; index++)
+        _weatherForecast.RowDefinitions.Clear();
+        var temperatures = forecast
+            .SelectMany(day => new[] { String(day, "min"), String(day, "max") })
+            .Select(value => TryTemperature(value, out var number) ? number : (double?)null)
+            .Where(value => value.HasValue)
+            .Select(value => value!.Value)
+            .ToArray();
+        var minimum = temperatures.Length > 0 ? temperatures.Min() : 0;
+        var maximum = temperatures.Length > 0 ? temperatures.Max() : 1;
+        var span = Math.Max(1, maximum - minimum);
+        for (var row = 0; row < WeatherForecastRows; row++)
         {
-            var day = forecast[index];
-            var row = Columns(new GridLength(44), new GridLength(26), new GridLength(1, GridUnitType.Star), GridLength.Auto);
-            row.ColumnSpacing = 8;
-            row.MinHeight = 27;
+            _weatherForecast.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            if (row >= forecast.Length) continue;
 
-            var label = Text(WeatherDayLabels[index], 12);
+            var day = forecast[row];
+            var rowGrid = Columns(new GridLength(32), new GridLength(28), new GridLength(24), new GridLength(1, GridUnitType.Star), new GridLength(26));
+            rowGrid.ColumnSpacing = 4;
+            rowGrid.VerticalAlignment = VerticalAlignment.Center;
+            rowGrid.HorizontalAlignment = HorizontalAlignment.Stretch;
+            Grid.SetRow(rowGrid, row);
+
+            var label = Text(WeatherDayLabels[row], 12);
+            label.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
             label.VerticalAlignment = VerticalAlignment.Center;
-            Add(row, label, 0);
+            Add(rowGrid, label, 0);
 
-            var icon = new Image { Width = 24, Height = 24, Stretch = Stretch.Uniform, VerticalAlignment = VerticalAlignment.Center };
-            _ = SetIconAsync(icon, String(day, "conditionDayKind", "unknown"), clear: false);
-            var iconBack = new Grid { Width = 26, Height = 26, VerticalAlignment = VerticalAlignment.Center };
-            iconBack.Children.Add(new Ellipse { Fill = new SolidColorBrush(Color.FromArgb(255, 46, 109, 164)) });
-            iconBack.Children.Add(icon);
-            Add(row, iconBack, 1);
+            var icon = CreateWeatherIcon(28, String(day, "conditionDayKind", "unknown"));
+            Add(rowGrid, icon, 1);
 
-            var weather = Text(FirstNonEmpty(String(day, "weatherDay"), String(day, "weatherNight"), "—"), 12);
-            weather.VerticalAlignment = VerticalAlignment.Center;
-            Add(row, weather, 2);
+            var min = Text(NormalizeTemperature(String(day, "min")), 12);
+            min.FontWeight = Microsoft.UI.Text.FontWeights.Light;
+            Secondary(min);
+            min.VerticalAlignment = VerticalAlignment.Center;
+            Add(rowGrid, min, 2);
 
-            var range = Text(TemperatureRange(day), 12);
-            range.HorizontalAlignment = HorizontalAlignment.Right;
-            range.VerticalAlignment = VerticalAlignment.Center;
-            Add(row, range, 3);
-            _weatherForecast.Children.Add(row);
+            var bar = new Border
+            {
+                Height = 6,
+                Margin = new Thickness(1, 0, 1, 0),
+                CornerRadius = new CornerRadius(3),
+                Background = new SolidColorBrush(Color.FromArgb(72, 112, 120, 128)),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            var range = new Grid();
+            var fill = new Border
+            {
+                Height = 6,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                CornerRadius = new CornerRadius(3),
+                Background = new SolidColorBrush(ForecastColor(row))
+            };
+            if (TryTemperature(String(day, "min"), out var low) && TryTemperature(String(day, "max"), out var high))
+            {
+                var left = Math.Clamp((low - minimum) / span, 0, 1);
+                var width = Math.Clamp(Math.Max(0.08, (high - low) / span), 0, 1);
+                fill.Margin = new Thickness(left * 46, 0, 0, 0);
+                fill.Width = Math.Max(5, width * 46);
+            }
+            range.Children.Add(fill);
+            bar.Child = range;
+            Add(rowGrid, bar, 3);
+
+            var max = Text(NormalizeTemperature(String(day, "max")), 12);
+            max.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
+            max.VerticalAlignment = VerticalAlignment.Center;
+            max.HorizontalAlignment = HorizontalAlignment.Right;
+            Add(rowGrid, max, 4);
+            _weatherForecast.Children.Add(rowGrid);
         }
     }
 
     private void RenderAlerts(JsonElement[] alerts)
     {
         _weatherAlerts.Children.Clear();
+        _weatherAlertsHost.Content = _weatherAlerts;
+        if (alerts.Length == 0)
+        {
+            _weatherAlertTimer.Stop();
+            _weatherAlertPanel.Visibility = Visibility.Collapsed;
+            _weatherAlertsHost.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        _weatherAlertPanel.Visibility = Visibility.Visible;
+        _weatherAlertsHost.Visibility = Visibility.Visible;
+        _weatherAlertsHost.VerticalScrollBarVisibility = alerts.Length > 1 ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled;
         foreach (var alert in alerts)
         {
-            var block = new StackPanel { Spacing = 2 };
+            var block = new StackPanel { Spacing = 1 };
             var type = FirstNonEmpty(String(alert, "typeName"), String(alert, "type"), "天气预警");
             var level = String(alert, "level");
-            var title = Text(HasValue(level) ? "[" + level + "] " + type : type, 12);
-            title.TextWrapping = TextWrapping.Wrap;
-            title.MaxLines = 3;
+            var title = Text(HasValue(level) ? level + " · " + type : type, 11);
+            title.FontFamily = WeatherFontFamily;
             title.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
+            title.TextWrapping = TextWrapping.Wrap;
+            title.MaxLines = 1;
             block.Children.Add(title);
 
-            var text = Text(String(alert, "text"), 11);
+            var text = Text(String(alert, "text"), 10);
+            text.FontFamily = WeatherFontFamily;
             text.TextWrapping = TextWrapping.Wrap;
-            text.MaxLines = 8;
+            text.MaxLines = 2;
             Secondary(text);
             block.Children.Add(text);
             _weatherAlerts.Children.Add(block);
         }
-        _weatherAlertsHost.Content = _weatherAlerts;
-        var enabled = _weatherModules.GetValueOrDefault("alerts");
-        _weatherAlertsHost.Visibility = enabled && alerts.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (alerts.Length > 1)
+        {
+            ShowWeatherAlert(0);
+            _weatherAlertTimer.Start();
+        }
+        else
+        {
+            _weatherAlertTimer.Stop();
+            ShowWeatherAlert(0);
+        }
     }
 
-    private void RenderModule(string id, FrameworkElement module, bool hasContent)
+    private void ShowWeatherAlert(int index)
     {
-        var visible = hasContent && _weatherModules.GetValueOrDefault(id);
-        module.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-        module.Opacity = visible ? 1 : 0;
+        _weatherAlertIndex = index;
+        for (var item = 0; item < _weatherAlerts.Children.Count; item++)
+            _weatherAlerts.Children[item].Visibility = item == index ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void ShowWeatherEmpty(bool empty)
@@ -460,20 +506,6 @@ public sealed partial class CardGroup
         return string.Join(" · ", parts.Distinct(StringComparer.Ordinal));
     }
 
-    private static string AirQualityText(JsonElement air)
-    {
-        if (air.ValueKind != JsonValueKind.Object) return "";
-        var category = String(air, "category");
-        var aqi = String(air, "aqi");
-        if (HasValue(aqi))
-            return string.Join(" · ", new[] { "AQI " + aqi, category }.Where(HasValue));
-        var pm25 = String(air, "pm25");
-        if (HasValue(pm25)) return "PM2.5 " + pm25;
-        var pm10 = String(air, "pm10");
-        if (HasValue(pm10)) return "PM10 " + pm10;
-        return category;
-    }
-
     private static string NormalizeTemperature(string value)
     {
         if (!HasValue(value)) return "";
@@ -481,73 +513,55 @@ public sealed partial class CardGroup
         return value + "°";
     }
 
-    private static string FormatMeasure(string value, string suffix)
+    private static bool TryTemperature(string value, out double result)
     {
-        if (!HasValue(value)) return "";
-        return value.EndsWith(suffix, StringComparison.Ordinal) ? value : value + suffix;
+        result = 0;
+        if (!HasValue(value)) return false;
+        var normalized = value.Trim().Replace("°C", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("°", "", StringComparison.Ordinal).Replace("℃", "", StringComparison.Ordinal);
+        return double.TryParse(normalized, NumberStyles.Float, CultureInfo.InvariantCulture, out result) && double.IsFinite(result);
     }
 
-    private static string FormatWindScale(string value) =>
-        !HasValue(value) || value.Contains('级', StringComparison.Ordinal) ? value : value + "级";
-
-    private static string TemperatureRange(JsonElement day)
+    private static Color ForecastColor(int index) => index switch
     {
-        var min = FormatMeasure(String(day, "min"), "°");
-        var max = FormatMeasure(String(day, "max"), "°");
-        if (!HasValue(min)) return max;
-        if (!HasValue(max)) return min;
-        return min + "~" + max;
-    }
+        0 => Color.FromArgb(255, 242, 201, 76),
+        1 => Color.FromArgb(255, 151, 196, 145),
+        2 => Color.FromArgb(255, 114, 183, 170),
+        3 => Color.FromArgb(255, 169, 197, 174),
+        _ => Color.FromArgb(255, 220, 203, 113)
+    };
 
     private static string FirstNonEmpty(params string[] values) => values.FirstOrDefault(HasValue) ?? "";
     private static bool HasValue(string? value) => !string.IsNullOrWhiteSpace(value) && value != "--";
 
-    private Task ShowWeatherIconAsync(string kind, bool clear)
+    private static FontIcon CreateWeatherIcon(double size, string kind = "", bool night = false) => new()
     {
-        var cacheKey = kind + (clear ? ":night" : ":day");
-        var cached = _weatherIconCache.GetValueOrDefault(cacheKey);
-        if (cached is not null) { _weatherIcon.Source = new SvgImageSource { UriSource = new Uri(cached) }; return Task.CompletedTask; }
-        var path = WeatherIconPath(kind, clear);
-        try
-        {
-            var image = new SvgImageSource { UriSource = new Uri(path) };
-            if (_disposed) return Task.CompletedTask;
-            _weatherIconCache[cacheKey] = path;
-            _weatherIcon.Source = image;
-        }
-        catch (Exception error) when (error is IOException or ArgumentException or System.Runtime.InteropServices.COMException) { }
-        return Task.CompletedTask;
-    }
+        Width = size,
+        Height = size,
+        FontFamily = WeatherIconFont,
+        FontSize = size - 4,
+        Glyph = WeatherIconGlyph(kind, night),
+        HorizontalAlignment = HorizontalAlignment.Left,
+        VerticalAlignment = VerticalAlignment.Center
+    };
 
-    private Task SetIconAsync(Image image, string kind, bool clear)
-    {
-        try
-        {
-            var bitmap = new SvgImageSource { UriSource = new Uri(WeatherIconPath(kind, clear)) };
-            if (!_disposed) image.Source = bitmap;
-        }
-        catch (Exception error) when (error is IOException or ArgumentException or System.Runtime.InteropServices.COMException) { }
-        return Task.CompletedTask;
-    }
+    private static void SetWeatherIcon(FontIcon icon, string kind, bool night) =>
+        icon.Glyph = WeatherIconGlyph(kind, night);
 
-    private static string WeatherIconPath(string kind, bool clear)
+    private static string WeatherIconGlyph(string kind, bool night) => kind.ToLowerInvariant() switch
     {
-        var name = kind.ToLowerInvariant() switch
-        {
-            "clear" => clear ? "clear-night" : "clear-day",
-            "partly-cloudy" => clear ? "partly-cloudy-night" : "partly-cloudy-day",
-            "overcast" => clear ? "overcast-night" : "overcast-day",
-            "rain" => "rain",
-            "drizzle" => "drizzle",
-            "snow" => "snow",
-            "sleet" => "sleet",
-            "fog" => clear ? "fog-night" : "fog-day",
-            "haze" => clear ? "haze-night" : "haze-day",
-            "dust" => clear ? "dust-night" : "dust-day",
-            "thunder" => clear ? "thunderstorms-night" : "thunderstorms-day",
-            "wind" => "wind",
-            _ => "cloudy"
-        };
-        return "ms-appx:///Assets/WeatherIcons/" + name + ".svg";
-    }
+        "clear" => night ? "\uF106" : "\uF101",
+        "partly-cloudy" => night ? "\uF108" : "\uF103",
+        "overcast" => "\uF105",
+        "rain" => "\uF10F",
+        "drizzle" => "\uF110",
+        "snow" => "\uF120",
+        "sleet" => "\uF124",
+        "fog" => "\uF12F",
+        "haze" => "\uF130",
+        "dust" => "\uF131",
+        "thunder" => "\uF10C",
+        "wind" => "\uF146",
+        _ => "\uF102"
+    };
 }

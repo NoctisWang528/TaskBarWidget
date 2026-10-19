@@ -24,7 +24,10 @@ if (-not $result.runtimeDirectory.StartsWith($runtimePrefix, [StringComparison]:
 if ($result.winUiModule -notmatch '\\WindowsApps\\Microsoft.WindowsAppRuntime\.2_[^\\]+_x64__8wekyb3d8bbwe\\') { throw 'UI did not load WinUI from the installed x64 Windows App Runtime package.' }
 if ($result.checks.Count -ne 5 -or @($result.checks | Where-Object { -not $_.loaded -or $_.width -le 0 }).Count) { throw 'Not all five UI surfaces realized their templates.' }
 if (-not $result.audioControls.muteButtonRoundTrip -or -not $result.audioControls.staleReplyIgnored -or -not $result.cardLifecycle.externalClickPolicy) { throw 'Audio controls or outside-click component checks did not complete.' }
-if (-not $result.weatherCardControls.providerNeutralSnapshot -or -not $result.weatherCardControls.missingModulesHidden -or
+if (-not $result.weatherCardControls.providerNeutralSnapshot -or -not $result.weatherCardControls.missingDataHidden -or
+    -not $result.weatherCardControls.allAlertsRetained -or -not $result.weatherCardControls.alertRotation -or
+    -not $result.weatherCardControls.singleAlertFixed -or
+    -not $result.weatherCardControls.zeroAlertsBlank -or -not $result.weatherCardControls.micaSurface -or
     -not $result.weatherCardControls.staleRetained -or -not $result.weatherCardControls.disabledCardWindowReleased -or
     -not $result.weatherCardControls.reenabledCardWindowRecreated) { throw 'Weather card component checks did not complete.' }
 foreach ($pointer in @($result.layoutChecks | Where-Object kind -eq 'modulePointerMessages')) {

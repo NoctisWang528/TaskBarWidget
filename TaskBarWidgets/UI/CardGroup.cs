@@ -36,8 +36,6 @@ public sealed partial class CardGroup : IDisposable
         { ["weather"] = 0, ["traffic"] = 1, ["device"] = 0, ["media"] = 1 };
     private Dictionary<string, bool> _quickCardEnabled = new(StringComparer.Ordinal)
         { ["weather"] = false, ["traffic"] = true, ["device"] = true, ["media"] = true };
-    private Dictionary<string, bool> _weatherModules = new(StringComparer.Ordinal)
-        { ["current"] = true, ["forecast"] = true, ["updatedAt"] = true };
     private bool _onDemand;
     private readonly Dictionary<string, CardSlot> _slots;
     private readonly Dictionary<string, CardWindow> _cardsById = new(StringComparer.Ordinal);
@@ -92,7 +90,6 @@ public sealed partial class CardGroup : IDisposable
     private string? _lastWeatherSnapshotKey;
     private long _lastWeatherRevision = -1;
     private bool _weatherRefreshing;
-    private readonly Dictionary<string, string> _weatherIconCache = new(StringComparer.Ordinal);
     private readonly DateTimeOffset _createdAt = DateTimeOffset.UtcNow;
     private DateTimeOffset _lastHiddenAt = DateTimeOffset.UtcNow;
     private bool _residentResourcesReleased;
@@ -216,10 +213,6 @@ public sealed partial class CardGroup : IDisposable
         {
             foreach (var glow in _glows.Values) { glow.Shadow.Mask?.Dispose(); glow.Visual.Dispose(); glow.Shadow.Dispose(); }
             _glows.Clear();
-        }
-        else if (slot.Id == "weather")
-        {
-            _weatherIconCache.Clear();
         }
     }
 
@@ -481,11 +474,6 @@ public sealed partial class CardGroup : IDisposable
         if (value.TryGetProperty("enabled", out var enabled) && enabled.ValueKind == JsonValueKind.Object) {
             foreach (var id in _slots.Keys)
                 _quickCardEnabled[id] = !enabled.TryGetProperty(id, out var flag) || flag.ValueKind != JsonValueKind.False;
-        }
-        if (value.TryGetProperty("weatherModules", out var modules) && modules.ValueKind == JsonValueKind.Object) {
-            _weatherModules.Clear();
-            foreach (var id in new[] { "current", "forecast", "humidity", "wind", "airQuality", "precipitation", "updatedAt", "alerts" })
-                _weatherModules[id] = modules.TryGetProperty(id, out var flag) && flag.ValueKind == JsonValueKind.True;
         }
         _onDemand = value.TryGetProperty("resourceMode", out var mode) && string.Equals(mode.GetString(), "OnDemand", StringComparison.OrdinalIgnoreCase);
         ReconcileCardWindows();
@@ -912,7 +900,7 @@ public sealed partial class CardGroup : IDisposable
         CardLifecycleLog.Write($"dispose visible={_visible}");
         _disposed = true; _visible = false; _generation++;
         _visibleLifetime?.Cancel(); _visibleLifetime?.Dispose(); _visibleLifetime = null;
-        _volumeTimer.Stop(); _seekTimer.Stop(); _timer.Stop(); _idleReleaseTimer.Stop(); _outsideClicks.Dispose();
+        _volumeTimer.Stop(); _seekTimer.Stop(); _timer.Stop(); _idleReleaseTimer.Stop(); _weatherAlertTimer.Stop(); _outsideClicks.Dispose();
         _connection.ConnectionChanged -= OnLyricsConnection;
         UnsubscribeMemoryNotifications();
         _lyrics.Dispose();
@@ -960,7 +948,6 @@ public sealed partial class CardGroup : IDisposable
         _sourceImageCache.Clear();
         _lastCover = null;
         _lastSourceIcon = "";
-        _weatherIconCache.Clear();
         CardLifecycleLog.Write("resident-resources-released reason=on-demand-idle");
     }
     private void RestoreResidentResources()

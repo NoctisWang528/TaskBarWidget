@@ -127,7 +127,7 @@ internal static class UiTemplateProbe
             cardLifecycle["hideThenImmediateShow"] = true;
             ValidateOutsideClickPolicy(cards);
             cardLifecycle["externalClickPolicy"] = true;
-            weatherCardControls = await CardGroup.ProbeWeatherCardAsync(cards);
+            weatherCardControls = await CardGroup.ProbeWeatherCardAsync(cards, Path.Combine(AppContext.BaseDirectory, "..", "ui-weather-check"));
             heatmapChecks = await CardGroup.ProbeTrafficCardAsync(cards, Path.Combine(AppContext.BaseDirectory, "..", "ui-heatmap-check"));
             var settingsHandle = WinRT.Interop.WindowNative.GetWindowHandle(settings);
             SendMessage(settingsHandle, 0x0010, 0, 0);

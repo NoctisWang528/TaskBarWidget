@@ -60,8 +60,6 @@ public enum QuickCardResourceMode
 public sealed class AppSettings
 {
     public static readonly string[] QuickCardIds = ["weather", "traffic", "device", "media"];
-    public static readonly string[] WeatherCardModuleIds = ["current", "forecast", "humidity", "wind", "airQuality", "precipitation", "updatedAt", "alerts"];
-
     public const int MinimumPlayerLyricOffsetMilliseconds = -5000;
     public const int MaximumPlayerLyricOffsetMilliseconds = 5000;
     public const double ExtendedFontSizeMin = 6;
@@ -152,18 +150,6 @@ public sealed class AppSettings
     };
 
     public QuickCardResourceMode QuickCardResourceMode { get; set; } = QuickCardResourceMode.Resident;
-
-    public Dictionary<string, bool> WeatherCardModules { get; set; } = new(StringComparer.Ordinal)
-    {
-        ["current"] = true,
-        ["forecast"] = true,
-        ["humidity"] = false,
-        ["wind"] = false,
-        ["airQuality"] = false,
-        ["precipitation"] = false,
-        ["updatedAt"] = true,
-        ["alerts"] = false
-    };
 
     public DateTimeOffset? LastUpdateCheckUtc { get; set; }
 
@@ -279,7 +265,6 @@ public sealed class AppSettings
         cloned.QuickCardOrder = (QuickCardOrder ?? []).ToList();
         cloned.QuickCardColumns = new Dictionary<string, int>(QuickCardColumns ?? [], StringComparer.Ordinal);
         cloned.QuickCardEnabled = new Dictionary<string, bool>(QuickCardEnabled ?? [], StringComparer.Ordinal);
-        cloned.WeatherCardModules = new Dictionary<string, bool>(WeatherCardModules ?? [], StringComparer.Ordinal);
         return cloned;
     }
 
@@ -357,11 +342,6 @@ public sealed class AppSettings
 
         if (!Enum.IsDefined(QuickCardResourceMode)) QuickCardResourceMode = QuickCardResourceMode.Resident;
 
-        WeatherCardModules ??= new Dictionary<string, bool>(StringComparer.Ordinal);
-        foreach (var id in WeatherCardModuleIds)
-            WeatherCardModules[id] = WeatherCardModules.TryGetValue(id, out var enabled) ? enabled : id is "current" or "forecast" or "updatedAt";
-        foreach (var key in WeatherCardModules.Keys.Where(key => !WeatherCardModuleIds.Contains(key, StringComparer.Ordinal)).ToArray())
-            WeatherCardModules.Remove(key);
     }
 
     public bool AddCustomPlayerSource(string? sourceId, string? displayName, string? iconDataUrl = null,

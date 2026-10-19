@@ -22,24 +22,16 @@ public sealed class SettingsStoreTests
                     ["weather"] = true,
                     ["unknown"] = true
                 },
-                QuickCardResourceMode = QuickCardResourceMode.OnDemand,
-                WeatherCardModules = new Dictionary<string, bool>(StringComparer.Ordinal)
-                {
-                    ["wind"] = true,
-                    ["unknown"] = true
-                }
+                QuickCardResourceMode = QuickCardResourceMode.OnDemand
             };
             Assert.True(new SettingsStore(filePath).Save(settings));
             var loaded = new SettingsStore(filePath).Load();
-            Assert.Equal(["media", "weather", "traffic", "device"], loaded.QuickCardOrder);
+            Assert.Equal(["media", "traffic", "weather", "device"], loaded.QuickCardOrder);
             Assert.False(loaded.QuickCardEnabled["media"]);
             Assert.True(loaded.QuickCardEnabled["weather"]);
             Assert.True(loaded.QuickCardEnabled["traffic"]);
             Assert.False(loaded.QuickCardEnabled.ContainsKey("unknown"));
             Assert.Equal(QuickCardResourceMode.OnDemand, loaded.QuickCardResourceMode);
-            Assert.True(loaded.WeatherCardModules["wind"]);
-            Assert.False(loaded.WeatherCardModules.ContainsKey("unknown"));
-            Assert.True(loaded.WeatherCardModules["current"]);
         }
         finally
         {
@@ -61,7 +53,28 @@ public sealed class SettingsStoreTests
             Assert.True(loaded.QuickCardEnabled["traffic"]);
             Assert.True(loaded.QuickCardEnabled["device"]);
             Assert.True(loaded.QuickCardEnabled["media"]);
-            Assert.Equal(["weather", "traffic", "device", "media"], loaded.QuickCardOrder);
+            Assert.Equal(["weather", "device", "traffic", "media"], loaded.QuickCardOrder);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SaveDropsLegacyWeatherModuleConfiguration()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        var filePath = Path.Combine(directory, "settings.json");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.WriteAllText(filePath, "{\"WeatherCardModules\":{\"current\":false,\"unknown\":true}}");
+            var store = new SettingsStore(filePath);
+            var loaded = store.Load();
+            Assert.True(store.Save(loaded));
+            var saved = File.ReadAllText(filePath);
+            Assert.DoesNotContain("WeatherCardModules", saved, StringComparison.Ordinal);
         }
         finally
         {
@@ -388,7 +401,7 @@ public sealed class SettingsStoreTests
             var store = new SettingsStore(filePath);
 
             var loaded = store.Load();
-            store.Save(loaded);
+            Assert.True(store.Save(loaded));
 
             Assert.Equal(SpectrumDisplayMode.Disabled, loaded.SpectrumDisplayMode);
             var saved = File.ReadAllText(filePath);
