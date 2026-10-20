@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
+using TaskBarWidgets.UI.Cards;
 using Windows.UI;
 using WinRT;
 
@@ -26,10 +27,14 @@ public sealed partial class CardGroup
             card.Root.UpdateLayout();
             card.MeasureHeight(); card.Root.UpdateLayout();
             if (card.Root.RequestedTheme != expected) throw new InvalidOperationException("A stale media poll overwrote the settings theme preview.");
+            if (card.Window.SystemBackdrop is not VividMicaBackdrop)
+                throw new InvalidOperationException("A card fell back to the default Mica backdrop.");
             var backdrop = card.Window.SystemBackdrop.GetDefaultSystemBackdropConfiguration(card.Window.As<ICompositionSupportsSystemBackdrop>(), card.Root.XamlRoot);
             var dark = card.Root.ActualTheme == ElementTheme.Dark;
             if (backdrop is not null && backdrop.Theme != SystemBackdropTheme.Default && backdrop.Theme != (dark ? SystemBackdropTheme.Dark : SystemBackdropTheme.Light))
                 throw new InvalidOperationException("Mica configuration did not follow the card's actual theme.");
+            if (card.SurfaceBackground is not SolidColorBrush surface || (dark ? surface.Color.A > 0x0A : surface.Color.A > 0x66))
+                throw new InvalidOperationException("The card surface is too opaque for the vivid Mica treatment.");
             var background = dark ? Microsoft.UI.ColorHelper.FromArgb(255, 32, 32, 32) : Microsoft.UI.ColorHelper.FromArgb(255, 243, 243, 243);
             var textChecks = new List<double>();
             foreach (var text in WalkCardTheme(card.Root).OfType<TextBlock>().Where(text => text.Text.Length > 0 && text.Visibility == Visibility.Visible && text.FontSize <= 12 && text.Foreground is SolidColorBrush))

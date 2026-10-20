@@ -1,6 +1,19 @@
 <ResourceDictionary
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ResourceDictionary.ThemeDictionaries>
+        <!-- Leave more of Mica's wallpaper color visible while keeping enough
+             neutral wash behind small text for readable contrast. -->
+        <ResourceDictionary x:Key="Default">
+            <SolidColorBrush x:Key="CardWindowSurfaceBrush" Color="#0AFFFFFF" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Light">
+            <SolidColorBrush x:Key="CardWindowSurfaceBrush" Color="#66FFFFFF" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="HighContrast">
+            <SolidColorBrush x:Key="CardWindowSurfaceBrush" Color="{ThemeResource SystemColorWindowColor}" />
+        </ResourceDictionary>
+    </ResourceDictionary.ThemeDictionaries>
     <!-- Keep ThemeResource expressions on the actual styled property, so changing
          the root theme updates existing editors without rebuilding their drafts. -->
     <!-- The default menu has a transparent fill over a separate Acrylic backdrop.
@@ -51,6 +64,6 @@
          committed; a themed fill keeps that surface from flashing the raw
          window client area, while Mica stays visible outside the card. -->
     <Style x:Key="CardWindowSurface" TargetType="Grid">
-        <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+        <Setter Property="Background" Value="{ThemeResource CardWindowSurfaceBrush}" />
     </Style>
 </ResourceDictionary>
