@@ -96,7 +96,7 @@ public sealed partial class CardGroup
         TextWrapping = TextWrapping.Wrap,
         TextTrimming = TextTrimming.CharacterEllipsis
     };
-    private readonly FontIcon _weatherIcon = CreateWeatherIcon(42);
+    private readonly PathIcon _weatherIcon = CreateWeatherIcon(42);
     private readonly Grid _weatherCurrentRow = new()
     {
         MinHeight = 58,
@@ -121,9 +121,6 @@ public sealed partial class CardGroup
     private readonly Button _weatherSettings = new() { Content = "打开天气设置", MinHeight = 32, HorizontalAlignment = HorizontalAlignment.Left };
 
     private static FontFamily WeatherFontFamily => new("Microsoft YaHei UI");
-
-    private static readonly FontFamily WeatherIconFont =
-        new("ms-appx:///Assets/QWeatherIcons/qweather-icons.ttf#qweather-icons");
 
     private FrameworkElement BuildWeather()
     {
@@ -539,19 +536,17 @@ public sealed partial class CardGroup
     private static string FirstNonEmpty(params string[] values) => values.FirstOrDefault(HasValue) ?? "";
     private static bool HasValue(string? value) => !string.IsNullOrWhiteSpace(value) && value != "--";
 
-    private static FontIcon CreateWeatherIcon(double size, string kind = "", bool night = false) => new()
+    private static PathIcon CreateWeatherIcon(double size, string kind = "", bool night = false) => new()
     {
         Width = size,
         Height = size,
-        FontFamily = WeatherIconFont,
-        FontSize = size - 4,
-        Glyph = WeatherIconGlyph(kind, night),
+        Data = WeatherIconGeometry.Get(WeatherIconGlyph(kind, night), size),
         HorizontalAlignment = HorizontalAlignment.Left,
         VerticalAlignment = VerticalAlignment.Center
     };
 
-    private static void SetWeatherIcon(FontIcon icon, string kind, bool night) =>
-        icon.Glyph = WeatherIconGlyph(kind, night);
+    private static void SetWeatherIcon(PathIcon icon, string kind, bool night) =>
+        icon.Data = WeatherIconGeometry.Get(WeatherIconGlyph(kind, night), icon.Width);
 
     private static string WeatherIconGlyph(string kind, bool night) => kind.ToLowerInvariant() switch
     {

@@ -63,8 +63,24 @@ public sealed partial class CardGroup
             throw new InvalidOperationException("Weather card did not reserve the five-row Apple-style forecast.");
         if (cards._weatherIcon.Width != 42 || cards._weatherIcon.Height != 42)
             throw new InvalidOperationException("Weather current icon is not the compact hero size.");
-        if (cards._weatherIcon.Glyph != "\uF101")
+        var expectedWeatherIconBounds = WeatherIconGeometry.Get("\uF101", cards._weatherIcon.Width).Bounds;
+        var actualWeatherIconBounds = cards._weatherIcon.Data?.Bounds ?? default;
+        if (actualWeatherIconBounds.X != expectedWeatherIconBounds.X ||
+            actualWeatherIconBounds.Y != expectedWeatherIconBounds.Y ||
+            actualWeatherIconBounds.Width != expectedWeatherIconBounds.Width ||
+            actualWeatherIconBounds.Height != expectedWeatherIconBounds.Height)
             throw new InvalidOperationException("Daytime clear weather did not use the daytime icon.");
+        if (actualWeatherIconBounds.X < 0 || actualWeatherIconBounds.Y < 0 ||
+            actualWeatherIconBounds.Right > cards._weatherIcon.Width ||
+            actualWeatherIconBounds.Bottom > cards._weatherIcon.Height)
+            throw new InvalidOperationException("Weather icon geometry is clipped by its PathIcon viewport.");
+        foreach (var glyph in WeatherIconGeometry.Glyphs)
+            foreach (var size in new[] { 28d, 42d })
+            {
+                var bounds = WeatherIconGeometry.Get(glyph, size).Bounds;
+                if (bounds.X < 0 || bounds.Y < 0 || bounds.Right > size || bounds.Bottom > size)
+                    throw new InvalidOperationException($"Weather icon {glyph} is clipped at {size} DIP.");
+            }
         if (cards._weatherTemperature.FontFamily.Source != "Microsoft YaHei UI")
             throw new InvalidOperationException("Weather text did not use the configured card font.");
         if (cards._weatherAlertsHost.MaxHeight != 54)
