@@ -4,7 +4,7 @@
 
 ## 出厂默认配置与彩色天气图标（2026-10-20）
 
-出厂默认配置改为编译期资源，不再依赖代码兜底：`Native/TrafficMonitor/defaults/` 下四个 `*.default.ini`（主配置与 Battery／PowerMon／Weather 三个内置模块）以 TEXT 资源编入 `TaskBarWidgets.exe`，`Media/Defaults/media-settings.default.json` 以嵌入资源编入媒体程序集。首次运行时只对**不存在**的目标文件逐字节写入，写入使用同目录临时文件加无覆盖改名；已有配置在启动、更新和重装路径上都不被读取、合并或覆盖，目录只读时静默回退。默认值已通用化：不写网卡描述（`connection_name`）、CPU 温度传感器名、任务栏字体、窗口位置、城市、凭据与个人路径；`cpu_core_name` 留空时按“平均温度”处理，`hard_disk_name` 为 `_Total`。同时修正 `global_cfg.ini` 首次写入只留 BOM 空文件、导致下次启动误判为非便携的问题。发布脚本、更新器和 `app-files.json` 未改动，默认值不会作为包内文件出现。
+出厂默认配置改为编译期资源，不再依赖代码兜底：`Native/TrafficMonitor/defaults/` 下四个 `*.default.ini`（主配置与 Battery／PowerMon／Weather 三个内置模块）以 TEXT 资源编入 `TaskBarWidgets.exe`，`Media/Defaults/media-settings.default.json` 以嵌入资源编入媒体程序集。首次运行时只对**不存在**的目标文件逐字节写入，写入使用同目录临时文件加无覆盖改名；已有配置在启动、更新和重装路径上都不被读取、合并或覆盖，目录只读时静默回退。默认值已通用化：不写网卡描述（`connection_name`）、CPU 温度传感器名、任务栏字体、窗口位置、凭据与个人路径；天气保留通用默认城市北京（与代码兜底一致），用户设置后以用户城市为准。`cpu_core_name` 留空时按“平均温度”处理，`hard_disk_name` 为 `_Total`。同时修正 `global_cfg.ini` 首次写入只留 BOM 空文件、导致下次启动误判为非便携的问题。发布脚本、更新器和 `app-files.json` 未改动，默认值不会作为包内文件出现。
 
 天气卡改用两套调色板的分层彩色矢量图标（`UI/Cards/WeatherIconArt.cs`，云体＋云影两层，太阳/月亮/降水按状态组合），替换 `PathIcon` 与 QWeather 字体轮廓，`qweather-icons.ttf` 不再打包；大图标 42 DIP、预报行 28 DIP，主题切换时重绘。当前温度按列宽自适应字号（48→26 DIP）并在图标前保留 6 DIP 间距，修复一位小数温度压住度数符号的问题。
 

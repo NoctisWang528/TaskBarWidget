@@ -59,12 +59,14 @@ if (-not $displayLine) { Fail "config.default.ini is missing 'tbar_display_item'
 $mask = [int]("$(($displayLine -split '=', 2)[1])".Trim())
 if ($mask -le 0 -or ($mask -band 0x1FFF) -ne $mask) { Fail "tbar_display_item '$mask' is outside the known display item bits" }
 
-# Weather credentials and personal cities must never be packaged.
+# Weather credentials must never be packaged; the only allowed city default is the generic Beijing fallback.
 $weather = Read-Text (Join-Path $defaults 'WeatherPro.default.ini')
 foreach ($key in @('AppKey', 'ApiHost', 'app_key', 'api_host')) {
     if ($weather -match "(?m)^[ \t]*$key[ \t]*=[ \t]*\S") { Fail "WeatherPro.default.ini must leave '$key' empty" }
 }
 if ($weather -notmatch '(?m)^\s*api_type\s*=') { Fail 'WeatherPro.default.ini must pin api_type explicitly' }
+if ($weather -notmatch '(?m)^\s*city_name\s*=\s*北京\s*$') { Fail 'WeatherPro.default.ini must pin the generic Beijing city name' }
+if ($weather -notmatch '(?m)^\s*city_no\s*=\s*101010100\s*$') { Fail 'WeatherPro.default.ini must pin the generic Beijing city id' }
 
 $media = Get-Content -LiteralPath $mediaDefault -Raw | ConvertFrom-Json
 foreach ($name in @('FontFamily', 'CardFontFamily')) {
