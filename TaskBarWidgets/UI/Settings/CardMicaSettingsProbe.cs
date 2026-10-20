@@ -1,7 +1,7 @@
+using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
 using System.Text.Json;
 using TaskBarWidgets.UI.Cards;
 
@@ -18,13 +18,6 @@ public sealed partial class SettingsWindow
             CardMicaTuning.MinimumLuminosityOpacity);
         var missingLuminosity = CardMicaTuning.FromJson(
             JsonSerializer.SerializeToElement(new { tintOpacity = 0.08 }));
-        var expectedPresets = new[]
-        {
-            ("柔和", CardMicaTuning.FromValues(0.12, 0.72)),
-            ("标准", CardMicaTuning.Default),
-            ("鲜艳", CardMicaTuning.FromValues(0.34, 0.50)),
-            ("极透", CardMicaTuning.FromValues(0.08, 0.30))
-        };
         if (!clampedLow.Matches(CardMicaTuning.FromValues(
                 CardMicaTuning.MinimumTintOpacity,
                 CardMicaTuning.MaximumLuminosityOpacity)) ||
@@ -37,11 +30,11 @@ public sealed partial class SettingsWindow
             Math.Abs(missingLuminosity.LuminosityOpacity - CardMicaTuning.DefaultLuminosityOpacity) > 0.0001 ||
             Math.Abs(CardMicaTuning.Default.TintOpacityFor(true) - 0.20) > 0.0001 ||
             Math.Abs(CardMicaTuning.Default.LuminosityOpacityFor(true) - 0.56) > 0.0001 ||
-            CardMicaPresets.Length != expectedPresets.Length ||
-            expectedPresets.Where((expected, index) =>
-                CardMicaPresets[index].Label != expected.Item1 ||
-                !CardMicaPresets[index].Tuning.Matches(expected.Item2)).Any())
-            throw new InvalidOperationException("Card Mica limits or JSON fallbacks were not normalized.");
+            VividMicaBackdrop.KindFor(false) != MicaKind.Base ||
+            VividMicaBackdrop.KindFor(true) != MicaKind.BaseAlt)
+            throw new InvalidOperationException("Card Mica limits, fallbacks or theme kinds were not normalized.");
+        if (window._cardMicaPreviewBackdrop.ForcesInputActive)
+            throw new InvalidOperationException("The settings-window Mica preview must retain normal input activity.");
 
         var original = window._media.Keys.ToDictionary(
             key => key,
@@ -60,24 +53,28 @@ public sealed partial class SettingsWindow
             window.NavigateTo("quickCards");
             await Task.Delay(80);
 
-            var preset = FindMicaControl<ComboBox>(window._page, "setting-cardMicaPreset");
+            var material = FindMicaControl<StackPanel>(window._page, "section-cardMica");
             var tint = FindMicaControl<Slider>(window._page, "setting-cardMicaTintOpacity");
             var transparency = FindMicaControl<Slider>(window._page, "setting-cardMicaTransparency");
+            if (WalkTheme(material).OfType<Slider>().Count() != 2 ||
+                WalkTheme(material).OfType<ComboBox>().Any() ||
+                WalkTheme(material).OfType<Viewbox>().Any())
+                throw new InvalidOperationException("The material section still contains preset or mock-preview UI.");
             if (Math.Abs(tint.Value - 34) > 0.01 || Math.Abs(transparency.Value - 50) > 0.01)
                 throw new InvalidOperationException("Mica controls did not load the persisted draft values.");
-            if (preset.Items.Count != expectedPresets.Length)
-                throw new InvalidOperationException("Mica controls did not expose all four presets.");
-            if (preset.SelectedItem is not ComboBoxItem { Tag: "鲜艳" })
-                throw new InvalidOperationException("The Mica preset did not match the persisted values.");
 
             if (!window.CanPreviewCardMica)
             {
-                if (tint.IsEnabled || transparency.IsEnabled || preset.IsEnabled)
+                if (tint.IsEnabled || transparency.IsEnabled)
                     throw new InvalidOperationException("Unavailable Mica controls remained enabled.");
                 return new
                 {
                     available = false,
                     disabled = true,
+                    noPresets = true,
+                    noMockPreview = true,
+                    themeKinds = true,
+                    settingsFocusOverride = false,
                     fixtureRoundTrip = true,
                     limitsClamped = true,
                     defaultsFallback = true
@@ -90,36 +87,29 @@ public sealed partial class SettingsWindow
             if (events.Count == 0 || events[^1].Preview is null)
                 throw new InvalidOperationException("Entering the quick-card page did not raise a Mica preview.");
 
-            preset.SelectedItem = preset.Items.OfType<ComboBoxItem>().Single(item => Equals(item.Tag, "极透"));
+            var eventCount = events.Count;
+            tint.Value = 8;
+            transparency.Value = 70;
             await Task.Delay(80);
-            if (Math.Abs(tint.Value - 8) > 0.01 || Math.Abs(transparency.Value - 70) > 0.01 ||
-                window.DraftCardMicaTuning.TintOpacity != 0.08 ||
+            if (events.Count - eventCount != 1)
+                throw new InvalidOperationException($"Rapid slider edits emitted {events.Count - eventCount} Mica updates instead of one frame-coalesced update.");
+            if (window.DraftCardMicaTuning.TintOpacity != 0.08 ||
                 Math.Abs(window.DraftCardMicaTuning.LuminosityOpacity - 0.30) > 0.0001)
-                throw new InvalidOperationException("The Mica preset did not update both the controls and draft.");
+                throw new InvalidOperationException("The Mica sliders did not update the draft values.");
             AssertCardMica(cards, CardMicaTuning.FromUserValues(8, 70));
             if (events[^1].Preview is not { TintOpacity: 0.08 } preview ||
                 Math.Abs(preview.LuminosityOpacity - 0.30) > 0.0001)
-                throw new InvalidOperationException("The Mica preset did not publish the latest preview.");
+                throw new InvalidOperationException("The Mica sliders did not publish the latest preview.");
             AssertSavedMica(window, 0.34, 0.50);
 
-            var eventCount = events.Count;
+            eventCount = events.Count;
             tint.Value = 31;
             transparency.Value = 55;
             await Task.Delay(80);
             if (events.Count - eventCount != 1)
-                throw new InvalidOperationException($"Rapid slider edits emitted {events.Count - eventCount} Mica updates instead of one frame-coalesced update.");
-            if (preset.SelectedItem is not null || preset.PlaceholderText != "自定义")
-                throw new InvalidOperationException("Manual Mica values did not switch the preset selector to custom.");
+                throw new InvalidOperationException("Consecutive Mica drags were not frame-coalesced.");
             AssertCardMica(cards, window.DraftCardMicaTuning);
             AssertSavedMica(window, 0.34, 0.50);
-
-            // A slider edit that happens to land on preset values still remains
-            // a manual "custom" selection until the preset is chosen explicitly.
-            tint.Value = 34;
-            transparency.Value = 50;
-            await Task.Delay(80);
-            if (preset.SelectedItem is not null || preset.PlaceholderText != "自定义")
-                throw new InvalidOperationException("Matching preset values did not retain the custom selection state.");
 
             // Re-read the saved values through the same draft path used by reload/discard.
             window._media.Pending.Clear();
@@ -149,8 +139,8 @@ public sealed partial class SettingsWindow
 
             window.NavigateTo("taskbar");
             await Task.Delay(40);
-            if (!window.SettingsMicaTuning.Matches(CardMicaTuning.Default))
-                throw new InvalidOperationException("Leaving the quick-card page did not restore the settings backdrop.");
+            if (!window.SettingsMicaTuning.Matches(CardMicaTuning.FromValues(0.34, 0.50)))
+                throw new InvalidOperationException("Leaving the quick-card page did not restore the saved settings backdrop.");
             AssertCardMica(cards, CardMicaTuning.FromValues(0.34, 0.50));
             if (events[^1].Preview is not null)
                 throw new InvalidOperationException("Leaving the quick-card page did not end the card Mica preview.");
@@ -159,11 +149,13 @@ public sealed partial class SettingsWindow
             {
                 available = true,
                 fixtureRoundTrip = true,
-                presets = 4,
+                noPresets = true,
+                noMockPreview = true,
+                themeKinds = true,
+                settingsFocusOverride = false,
                 frameCoalesced = true,
-                customState = true,
                 discardRestored = true,
-                previewResetOnLeave = true,
+                previewRestoredOnLeave = true,
                 reopenRearmsPreview = true,
                 limitsClamped = true,
                 defaultsFallback = true

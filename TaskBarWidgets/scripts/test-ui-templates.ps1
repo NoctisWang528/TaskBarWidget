@@ -24,12 +24,14 @@ if (-not $result.runtimeDirectory.StartsWith($runtimePrefix, [StringComparison]:
 if ($result.winUiModule -notmatch '\\WindowsApps\\Microsoft.WindowsAppRuntime\.2_[^\\]+_x64__8wekyb3d8bbwe\\') { throw 'UI did not load WinUI from the installed x64 Windows App Runtime package.' }
 if ($result.checks.Count -ne 5 -or @($result.checks | Where-Object { -not $_.loaded -or $_.width -le 0 }).Count) { throw 'Not all five UI surfaces realized their templates.' }
 if (-not $result.audioControls.muteButtonRoundTrip -or -not $result.audioControls.staleReplyIgnored -or -not $result.cardLifecycle.externalClickPolicy) { throw 'Audio controls or outside-click component checks did not complete.' }
-if (-not $result.micaControls.fixtureRoundTrip -or
+if (-not $result.micaControls.fixtureRoundTrip -or -not $result.micaControls.noPresets -or
+    -not $result.micaControls.noMockPreview -or -not $result.micaControls.themeKinds -or
     ($result.micaControls.available -and (-not $result.micaControls.frameCoalesced -or
-        -not $result.micaControls.customState -or -not $result.micaControls.discardRestored -or
-        -not $result.micaControls.previewResetOnLeave -or -not $result.micaControls.reopenRearmsPreview)) -or
+        -not $result.micaControls.discardRestored -or -not $result.micaControls.previewRestoredOnLeave -or
+        -not $result.micaControls.reopenRearmsPreview)) -or
     -not $result.micaControls.limitsClamped -or -not $result.micaControls.defaultsFallback) { throw 'Card Mica settings checks did not complete.' }
 if (-not $result.cardLifecycle.micaNewCardInherits) { throw 'A card created during Mica preview did not inherit it.' }
+if (-not $result.cardLifecycle.micaAlwaysInputActive) { throw 'Card Mica was not configured to remain input-active.' }
 if (-not $result.weatherCardControls.providerNeutralSnapshot -or -not $result.weatherCardControls.missingDataHidden -or
     -not $result.weatherCardControls.allAlertsRetained -or -not $result.weatherCardControls.alertRotation -or
     -not $result.weatherCardControls.singleAlertFixed -or

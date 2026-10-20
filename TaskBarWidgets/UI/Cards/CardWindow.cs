@@ -49,7 +49,7 @@ internal sealed class CardWindow
         _surface = surface;
         surface.Children.Add(content);
         Root.Children.Add(new Viewbox { Child = surface, Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly });
-        _micaBackdrop = new VividMicaBackdrop();
+        _micaBackdrop = new VividMicaBackdrop(alwaysInputActive: true);
         Window = new Window { Title = "TaskBarWidgets · " + title, Content = Root, SystemBackdrop = _micaBackdrop };
         Window.Closed += (_, _) => { _closed = true; _motionGeneration++; };
         Handle = WinRT.Interop.WindowNative.GetWindowHandle(Window);

@@ -13,17 +13,19 @@ internal sealed class VividMicaBackdrop : SystemBackdrop
 {
     private MicaController? _controller;
     private SystemBackdropConfiguration? _configuration;
+    private readonly bool _alwaysInputActive;
     private CardMicaTuning _tuning;
     private bool _dark;
 
-    internal VividMicaBackdrop(CardMicaTuning? tuning = null)
+    internal VividMicaBackdrop(CardMicaTuning? tuning = null, bool alwaysInputActive = false)
     {
+        _alwaysInputActive = alwaysInputActive;
         _tuning = tuning is { } value
             ? CardMicaTuning.FromValues(value.TintOpacity, value.LuminosityOpacity)
             : CardMicaTuning.Default;
     }
 
-    internal static MicaKind PreferredKind => MicaKind.BaseAlt;
+    internal static MicaKind KindFor(bool dark) => dark ? MicaKind.BaseAlt : MicaKind.Base;
     internal static bool IsSupported
     {
         get
@@ -34,6 +36,8 @@ internal sealed class VividMicaBackdrop : SystemBackdrop
         }
     }
     internal CardMicaTuning Tuning => _tuning;
+    internal bool ForcesInputActive => _alwaysInputActive;
+    internal bool HasInputActiveConfiguration => _configuration?.IsInputActive == true;
 
     internal void UpdateTuning(CardMicaTuning tuning)
     {
@@ -121,7 +125,8 @@ internal sealed class VividMicaBackdrop : SystemBackdrop
             _ => xamlRoot.Content is FrameworkElement { ActualTheme: ElementTheme.Dark }
         };
 
-        controller.Kind = PreferredKind;
+        if (_alwaysInputActive) configuration.IsInputActive = true;
+        controller.Kind = KindFor(_dark);
         controller.TintColor = _dark ? Color.FromArgb(255, 12, 20, 34) : Color.FromArgb(255, 232, 241, 255);
         ApplyTuning(controller);
         controller.FallbackColor = _dark ? Color.FromArgb(255, 22, 25, 31) : Color.FromArgb(255, 243, 245, 248);

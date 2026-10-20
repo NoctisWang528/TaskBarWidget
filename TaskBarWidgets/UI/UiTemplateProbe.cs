@@ -56,6 +56,10 @@ internal static class UiTemplateProbe
             updateCard = await CardGroup.ProbeUpdateCardStateAsync(cards);
             if (cards.CardWindows.Any(card => card.Root.RequestedTheme != ElementTheme.Dark)) throw new InvalidOperationException("Initial panel theme did not apply before Show.");
             cardLifecycle["initialThemeBeforeShow"] = true;
+            foreach (var card in cards.CardWindows.Append(cards._updateCard))
+                if (!card.MicaBackdrop.ForcesInputActive)
+                    throw new InvalidOperationException("A card window did not force active Mica rendering.");
+            cardLifecycle["micaAlwaysInputActive"] = true;
             foreach (var point in new[] { (100d, 100d), (1200d, 900d), (100d, 100d) })
             {
                 cards.Position(point.Item1, point.Item2);
@@ -163,6 +167,8 @@ internal static class UiTemplateProbe
                 card.Root.UpdateLayout();
                 if (!card.Root.IsLoaded || card.Root.ActualWidth <= 0) throw new InvalidOperationException("Card templates were not realized.");
                 if (card.SurfaceBackground is null) throw new InvalidOperationException("Card surface lost its themed fill.");
+                if (VividMicaBackdrop.IsSupported && !card.MicaBackdrop.HasInputActiveConfiguration)
+                    throw new InvalidOperationException("Connected card Mica did not stay input-active.");
                 if (ElementCompositionPreview.GetElementVisual(card.Root).Opacity < 1)
                     throw new InvalidOperationException("Card frame gate did not hand over to the fade.");
                 var bounds = card.Window.AppWindow.Position;

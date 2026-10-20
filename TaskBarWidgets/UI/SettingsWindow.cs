@@ -378,11 +378,12 @@ public sealed partial class SettingsWindow : Window
     private void DeactivateCardMicaPreview()
     {
         _micaPreviewQueued = false;
-        if (_vividSettingsBackdrop && !_cardMicaPreviewBackdrop.Tuning.Matches(CardMicaTuning.Default))
-            _cardMicaPreviewBackdrop.UpdateTuning(CardMicaTuning.Default);
+        var committed = CommittedCardMicaTuning;
+        if (_vividSettingsBackdrop && !_cardMicaPreviewBackdrop.Tuning.Matches(committed))
+            _cardMicaPreviewBackdrop.UpdateTuning(committed);
         if (!_micaPreviewActive) return;
         _micaPreviewActive = false;
-        MicaPreviewChanged?.Invoke(new CardMicaPreviewState(CommittedCardMicaTuning, null));
+        MicaPreviewChanged?.Invoke(new CardMicaPreviewState(committed, null));
     }
 
     private void RefreshCardMicaAfterReadback()
@@ -392,9 +393,10 @@ public sealed partial class SettingsWindow : Window
             ApplyCardMicaPreview(DraftCardMicaTuning);
             return;
         }
-        if (_vividSettingsBackdrop) _cardMicaPreviewBackdrop.UpdateTuning(CardMicaTuning.Default);
+        var committed = CommittedCardMicaTuning;
+        if (_vividSettingsBackdrop) _cardMicaPreviewBackdrop.UpdateTuning(committed);
         _micaPreviewActive = false;
-        MicaPreviewChanged?.Invoke(new CardMicaPreviewState(CommittedCardMicaTuning, null));
+        MicaPreviewChanged?.Invoke(new CardMicaPreviewState(committed, null));
     }
 
     private void UpdateTitleBarTheme()
