@@ -8,13 +8,16 @@ internal readonly record struct CardMicaTuning(double TintOpacity, double Lumino
     internal const double MaximumTintOpacity = 0.45;
     internal const double MinimumLuminosityOpacity = 0.15;
     internal const double MaximumLuminosityOpacity = 0.85;
-    internal const double DefaultTintOpacity = 0.22;
-    internal const double DefaultLuminosityOpacity = 0.58;
+    internal const double DefaultTintOpacity = 0.45;
+    internal const double DefaultLuminosityOpacity = 0.85;
+    internal const double DefaultDarkLuminosityOpacity = 0.50;
 
     private const double ThemeOffset = 0.02;
 
-    internal static CardMicaTuning Default { get; } =
-        new(DefaultTintOpacity, DefaultLuminosityOpacity);
+    internal static CardMicaTuning Default => DefaultFor(false);
+
+    internal static CardMicaTuning DefaultFor(bool dark) =>
+        new(DefaultTintOpacity, dark ? DefaultDarkLuminosityOpacity : DefaultLuminosityOpacity);
 
     internal double Transparency => 1 - LuminosityOpacity;
 
@@ -36,12 +39,13 @@ internal readonly record struct CardMicaTuning(double TintOpacity, double Lumino
             Math.Clamp(luminosityOpacity, MinimumLuminosityOpacity, MaximumLuminosityOpacity));
     }
 
-    internal static CardMicaTuning FromJson(JsonElement value)
+    internal static CardMicaTuning FromJson(JsonElement value, bool dark = false)
     {
-        if (value.ValueKind != JsonValueKind.Object) return Default;
+        var fallback = DefaultFor(dark);
+        if (value.ValueKind != JsonValueKind.Object) return fallback;
         return FromValues(
-            ReadNumber(value, "tintOpacity", DefaultTintOpacity),
-            ReadNumber(value, "luminosityOpacity", DefaultLuminosityOpacity));
+            ReadNumber(value, "tintOpacity", fallback.TintOpacity),
+            ReadNumber(value, "luminosityOpacity", fallback.LuminosityOpacity));
     }
 
     internal bool Matches(CardMicaTuning other) =>

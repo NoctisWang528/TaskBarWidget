@@ -324,7 +324,7 @@ public partial class SettingsWindow : System.Windows.Window
                 }
                 break;
             case "resetDefaults":
-                var defaultSettings = new AppSettings();
+                var defaultSettings = AppSettings.CreateDefault(App.IsApplicationUsingLightTheme());
                 App.ApplyStartupForegroundColor(defaultSettings);
                 CopySettings(defaultSettings, _settings);
                 await SaveSettingsAndNotifyWebAsync();

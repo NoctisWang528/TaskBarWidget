@@ -75,8 +75,9 @@ public sealed class AppSettings
     public const double DefaultLyricsLayoutScalePercent = 100;
     public const double MinimumLyricsLayoutScalePercent = 25;
     public const double MaximumLyricsLayoutScalePercent = 300;
-    public const double DefaultCardMicaTintOpacity = 0.22;
-    public const double DefaultCardMicaLuminosityOpacity = 0.58;
+    public const double DefaultCardMicaTintOpacity = 0.45;
+    public const double DefaultCardMicaLuminosityOpacity = 0.85;
+    public const double DefaultDarkCardMicaLuminosityOpacity = 0.50;
     public const double MinimumCardMicaTintOpacity = 0.05;
     public const double MaximumCardMicaTintOpacity = 0.45;
     public const double MinimumCardMicaLuminosityOpacity = 0.15;
@@ -278,6 +279,16 @@ public sealed class AppSettings
         cloned.QuickCardColumns = new Dictionary<string, int>(QuickCardColumns ?? [], StringComparer.Ordinal);
         cloned.QuickCardEnabled = new Dictionary<string, bool>(QuickCardEnabled ?? [], StringComparer.Ordinal);
         return cloned;
+    }
+
+    public static AppSettings CreateDefault(bool systemUsesLightTheme)
+    {
+        var settings = new AppSettings();
+        settings.CardMicaTintOpacity = DefaultCardMicaTintOpacity;
+        settings.CardMicaLuminosityOpacity = systemUsesLightTheme
+            ? DefaultCardMicaLuminosityOpacity
+            : DefaultDarkCardMicaLuminosityOpacity;
+        return settings;
     }
 
     public void NormalizePlayerSources()

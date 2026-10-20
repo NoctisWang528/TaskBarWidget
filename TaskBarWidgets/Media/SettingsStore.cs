@@ -19,18 +19,19 @@ public sealed class SettingsStore
         _filePath = filePath;
     }
 
-    public AppSettings Load()
+    public AppSettings Load(bool systemUsesLightTheme = true)
     {
         try
         {
             if (!File.Exists(_filePath))
             {
-                return new AppSettings();
+                return AppSettings.CreateDefault(systemUsesLightTheme);
             }
 
             var json = File.ReadAllText(_filePath);
             var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
             using var document = JsonDocument.Parse(json);
+            ApplyInitialMicaDefaults(document.RootElement, settings, systemUsesLightTheme);
             MigrateLegacySpectrumSettings(document.RootElement, settings);
             MigrateSpectrumAudioAccess(document.RootElement, settings);
             MigrateTaskbarPresentation(document.RootElement, settings);
@@ -45,7 +46,7 @@ public sealed class SettingsStore
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
         {
             Log.Warn($"Failed to load settings from '{_filePath}': {exception.Message}");
-            return new AppSettings();
+            return AppSettings.CreateDefault(systemUsesLightTheme);
         }
     }
 
@@ -134,6 +135,31 @@ public sealed class SettingsStore
         // fresh installations use AppSettings' disabled default.
         settings.QuickCardEnabled ??= new Dictionary<string, bool>(StringComparer.Ordinal);
         settings.QuickCardEnabled["weather"] = true;
+    }
+
+    private static void ApplyInitialMicaDefaults(
+        JsonElement root,
+        AppSettings settings,
+        bool systemUsesLightTheme)
+    {
+        var useLightTheme = settings.ToolWindowTheme switch
+        {
+            ToolWindowTheme.Light => true,
+            ToolWindowTheme.Dark => false,
+            _ => systemUsesLightTheme
+        };
+
+        if (!TryReadDouble(root, nameof(AppSettings.CardMicaTintOpacity), out _))
+        {
+            settings.CardMicaTintOpacity = AppSettings.DefaultCardMicaTintOpacity;
+        }
+
+        if (!TryReadDouble(root, nameof(AppSettings.CardMicaLuminosityOpacity), out _))
+        {
+            settings.CardMicaLuminosityOpacity = useLightTheme
+                ? AppSettings.DefaultCardMicaLuminosityOpacity
+                : AppSettings.DefaultDarkCardMicaLuminosityOpacity;
+        }
     }
 
     private static void MigrateSpectrumAudioAccess(JsonElement root, AppSettings settings)

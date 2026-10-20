@@ -17,7 +17,7 @@ public sealed partial class SettingsWindow
             CardMicaTuning.MinimumTintOpacity,
             CardMicaTuning.MinimumLuminosityOpacity);
         var missingLuminosity = CardMicaTuning.FromJson(
-            JsonSerializer.SerializeToElement(new { tintOpacity = 0.08 }));
+            JsonSerializer.SerializeToElement(new { tintOpacity = 0.08 }), dark: true);
         if (!clampedLow.Matches(CardMicaTuning.FromValues(
                 CardMicaTuning.MinimumTintOpacity,
                 CardMicaTuning.MaximumLuminosityOpacity)) ||
@@ -27,9 +27,11 @@ public sealed partial class SettingsWindow
             Math.Abs(darkEdge.TintOpacityFor(true) - CardMicaTuning.MinimumTintOpacity) > 0.0001 ||
             Math.Abs(darkEdge.LuminosityOpacityFor(true) - CardMicaTuning.MinimumLuminosityOpacity) > 0.0001 ||
             Math.Abs(missingLuminosity.TintOpacity - 0.08) > 0.0001 ||
-            Math.Abs(missingLuminosity.LuminosityOpacity - CardMicaTuning.DefaultLuminosityOpacity) > 0.0001 ||
-            Math.Abs(CardMicaTuning.Default.TintOpacityFor(true) - 0.20) > 0.0001 ||
-            Math.Abs(CardMicaTuning.Default.LuminosityOpacityFor(true) - 0.56) > 0.0001 ||
+            Math.Abs(missingLuminosity.LuminosityOpacity - CardMicaTuning.DefaultDarkLuminosityOpacity) > 0.0001 ||
+            Math.Abs(CardMicaTuning.DefaultFor(false).TintOpacity - 0.45) > 0.0001 ||
+            Math.Abs(CardMicaTuning.DefaultFor(false).LuminosityOpacity - 0.85) > 0.0001 ||
+            Math.Abs(CardMicaTuning.DefaultFor(true).TintOpacityFor(true) - 0.43) > 0.0001 ||
+            Math.Abs(CardMicaTuning.DefaultFor(true).LuminosityOpacityFor(true) - 0.48) > 0.0001 ||
             VividMicaBackdrop.KindFor(false) != MicaKind.Base ||
             VividMicaBackdrop.KindFor(true) != MicaKind.BaseAlt)
             throw new InvalidOperationException("Card Mica limits, fallbacks or theme kinds were not normalized.");

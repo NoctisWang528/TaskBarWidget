@@ -49,7 +49,7 @@ public partial class App : System.Windows.Application
             AppDataPaths.ConfigureForApplicationRoot(applicationRoot, _portableData);
             var settingsPath = Path.Combine(AppDataPaths.RootDirectory, "media-settings.json");
             _store = new SettingsStore(settingsPath);
-            Settings = _store.Load();
+            Settings = _store.Load(IsApplicationUsingLightTheme());
             Settings.UseFloatingWindow = false;
             Settings.StartWithWindows = false;
             Settings.AutoCheckUpdates = false;
