@@ -18,6 +18,7 @@ public partial class App : Application
     private UpdateUiState _updateState = new();
     private bool _installConfirmationOpen, _uiReadyReported, _installAfterDownload;
     private JsonElement _quickCards;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _prewarmTimer;
 
     public App()
     {
@@ -67,14 +68,53 @@ public partial class App : Application
         _connection.Start();
         _ = WatchHostAsync(hostPid);
         // User-facing windows are created only when the backend requests them.
+        // Prewarm them once the UI has settled so the first click is warm.
+        _prewarmTimer = _dispatcher.CreateTimer();
+        _prewarmTimer.Interval = TimeSpan.FromMilliseconds(300);
+        _prewarmTimer.IsRepeating = false;
+        _prewarmTimer.Tick += (_, _) => _ = PrewarmCardsAsync();
+        _prewarmTimer.Start();
+    }
+
+    // Build and render the enabled card windows while hidden. Any failure is
+    // swallowed by CardGroup and the original lazy creation path still applies.
+    private async Task PrewarmCardsAsync()
+    {
+        if (_stopping || _connection is null) return;
+        try
+        {
+            _cards ??= new CardGroup(_connection, OpenSettings);
+            if (_quickCards.ValueKind != JsonValueKind.Object)
+            {
+                // Media owns the quick-card configuration; reading it once lets
+                // prewarm build exactly the cards this user has enabled.
+                try
+                {
+                    var settings = await _connection.RequestAsync("getMediaSettings", cancellationToken: _lifetime.Token);
+                    _cards.ApplyQuickCardsFromSettings(settings);
+                }
+                catch (Exception readError) when (readError is not OutOfMemoryException)
+                {
+                    // Keep the built-in defaults; the first toggle applies the
+                    // real configuration before showing anything.
+                    CardLifecycleLog.Write($"prewarm-settings-unavailable hr=0x{readError.HResult:X8}");
+                }
+            }
+            await _cards.PrewarmAsync();
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        { CardLifecycleLog.Write($"prewarm-start-failed hr=0x{exception.HResult:X8}"); }
     }
 
     private void OnBackendEvent(JsonElement message)
     {
-        _dispatcher?.TryEnqueue(() => HandleBackendEvent(message));
+        // Timestamped on the receiving thread so the timing log separates pipe
+        // and dispatcher wait from UI-thread work.
+        var receivedAt = DateTimeOffset.Now;
+        _dispatcher?.TryEnqueue(() => HandleBackendEvent(message, receivedAt));
     }
 
-    private void HandleBackendEvent(JsonElement message)
+    private void HandleBackendEvent(JsonElement message, DateTimeOffset receivedAt)
     {
         if (_stopping || _connection is null || !message.TryGetProperty("action", out var action)) return;
         var payload = message.TryGetProperty("payload", out var value) && value.ValueKind == JsonValueKind.Object ? value : message;
@@ -97,6 +137,8 @@ public partial class App : Application
                     _cards.ApplyBackendTheme(payload);
                     var entryWindow = payload.TryGetProperty("entryWindow", out var entry) && entry.ValueKind == JsonValueKind.Number &&
                         entry.TryGetInt64(out var entryValue) && entryValue != 0 ? (nint)entryValue : 0;
+                    var gestureId = message.TryGetProperty("gestureId", out var gestureValue) && gestureValue.TryGetInt64(out var id) ? id : 0;
+                    _cards.BeginOpenTiming(gestureId, DateTimeOffset.Now - receivedAt);
                     _cards.ToggleAtPhysicalPoint(px, py, entryWindow);
                 }
                 break;
@@ -229,6 +271,8 @@ public partial class App : Application
         if (_stopping) return;
         _stopping = true;
         _lifetime.Cancel();
+        _prewarmTimer?.Stop();
+        _prewarmTimer = null;
         _cards?.Dispose();
         _settings?.Shutdown();
         _lifetimeWindow?.Close();

@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Hosting;
 using TaskBarWidgets.UI.Cards;
 using Windows.Graphics;
 
@@ -97,15 +98,57 @@ internal static class UiTemplateProbe
                 }
             }
             cardLifecycle["hiddenMeasuredPlacement"] = true;
+            // Prewarm must build exactly the cards the media settings payload
+            // enables, not a hard-coded set.
+            var settingsShaped = JsonSerializer.SerializeToElement(new
+            {
+                quickCardOrder = new[] { "traffic", "device", "media", "weather" },
+                quickCardColumns = new Dictionary<string, int> { ["traffic"] = 0, ["device"] = 0, ["media"] = 0, ["weather"] = 1 },
+                quickCardEnabled = new Dictionary<string, bool> { ["weather"] = false, ["traffic"] = true, ["device"] = true, ["media"] = true },
+                quickCardResourceMode = "OnDemand"
+            });
+            cards.ApplyQuickCardsFromSettings(settingsShaped);
+            if (cards.CardWindows.Any(card => card.Window.Title.Contains("天气", StringComparison.Ordinal)))
+                throw new InvalidOperationException("Quick-card settings did not release the disabled card.");
+            cardLifecycle["prewarmFollowsQuickCardSettings"] = true;
+            cards.SetQuickCardEnabled("weather", true);
+            // The shipped startup prewarm must render each card once with no
+            // visible window and no layout drift, so the first click only shows
+            // already-committed windows.
+            var prewarmStart = GetCardBounds(cards);
+            {
+                await cards.PrewarmAsync();
+                foreach (var card in cards.CardWindows)
+                {
+                    await card.VisibleFrame.WaitAsync(TimeSpan.FromMilliseconds(600));
+                    if (!card.Prewarmed) throw new InvalidOperationException("Card prewarm did not commit a frame.");
+                    if (IsWindowVisible(card.Handle)) throw new InvalidOperationException("Prewarm left a card visible.");
+                }
+                var prewarmEnd = GetCardBounds(cards);
+                if (prewarmStart.Length != prewarmEnd.Length) throw new InvalidOperationException("Prewarm changed the card set.");
+                for (var index = 0; index < prewarmStart.Length; index++)
+                    if (prewarmStart[index] != prewarmEnd[index])
+                        throw new InvalidOperationException("Prewarm resized or moved a hidden card.");
+            }
+            cardLifecycle["prewarmRendersHidden"] = true;
             foreach (var card in cards.CardWindows)
             {
                 TrackActivation(card.Window);
                 PositionOffscreen(card.Window, 480, 400);
                 card.Show(); // Exercise the actual first-show path, without activation.
                 AssertOffscreen(card.Window);
+                // The card must stay invisible until the frame after Show commits,
+                // so the first pixels on screen are the real surface, not a blank
+                // window: the fade has to start on a composition frame.
+                if (ElementCompositionPreview.GetElementVisual(card.Root).Opacity != 0)
+                    throw new InvalidOperationException("Card became visible before its first frame.");
+                await card.VisibleFrame.WaitAsync(TimeSpan.FromMilliseconds(600));
                 await Task.Delay(200);
                 card.Root.UpdateLayout();
                 if (!card.Root.IsLoaded || card.Root.ActualWidth <= 0) throw new InvalidOperationException("Card templates were not realized.");
+                if (card.SurfaceBackground is null) throw new InvalidOperationException("Card surface lost its themed fill.");
+                if (ElementCompositionPreview.GetElementVisual(card.Root).Opacity < 1)
+                    throw new InvalidOperationException("Card frame gate did not hand over to the fade.");
                 var bounds = card.Window.AppWindow.Position;
                 var size = card.Window.AppWindow.Size;
                 var pendingHide = card.HideAsync(animate: true);
@@ -196,6 +239,15 @@ internal static class UiTemplateProbe
         window.AppWindow.IsShownInSwitchers = false;
         window.AppWindow.MoveAndResize(new RectInt32(-30000, -30000, width, height));
     }
+
+    // Geometry snapshot used to prove prewarm never disturbs a hidden card.
+    private static (int X, int Y, int Width, int Height)[] GetCardBounds(CardGroup cards) =>
+        cards.CardWindows.Select(card =>
+        {
+            var window = card.Window.AppWindow;
+            return (window.Position.X, window.Position.Y, window.Size.Width, window.Size.Height);
+        }).ToArray();
+
     internal static void PreventProbeActivation(Window window)
     {
         var handle = WinRT.Interop.WindowNative.GetWindowHandle(window);

@@ -54,6 +54,11 @@ public sealed partial class CardGroup : IDisposable
     private readonly OutsideClickMonitor _outsideClicks;
     private readonly CardLyricsView _lyrics = new();
     private double _anchorX, _anchorY;
+    private bool _placedAnchorSet;
+    private System.Diagnostics.Stopwatch? _openTiming;
+    private TimeSpan _openQueued;
+    private bool _firstOpenAfterColdStart;
+    private bool _prewarmCompleted;
     private readonly List<MenuFlyout> _flyouts = [];
     private readonly Dictionary<string, (string Id, double Volume, int EndpointRevision)> _pendingVolumes = [];
     private readonly Dictionary<string, int> _endpointRevisions = new() { ["input"] = 0, ["output"] = 0 };
@@ -217,21 +222,66 @@ public sealed partial class CardGroup : IDisposable
         }
     }
 
+    // Create and render every enabled card while hidden so the first click does
+    // not pay for window creation, XAML realization, or the first composition
+    // pass. No weather, traffic, audio, or lyric work is started here.
+    internal async Task PrewarmAsync()
+    {
+        if (_disposed || _visible) return;
+        var timing = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            ReconcileCardWindows();
+            foreach (var slot in _slots.Values) slot.Window?.MeasureHeight();
+            var createdMs = timing.Elapsed.TotalMilliseconds;
+            var prewarmed = 0;
+            // Each card waits for its own composition frame, so the UI thread
+            // yields between cards and an early click never waits for the set.
+            // The set is snapshotted: a click during prewarm may reconcile windows.
+            foreach (var card in AllCards.ToArray())
+            {
+                await card.PrewarmAsync();
+                if (card.Prewarmed) prewarmed++;
+                if (IsWindowVisible(card.Handle)) throw new InvalidOperationException("Prewarm left a card visible.");
+            }
+            _prewarmCompleted = true;
+            CardTimingLog.Write($"prewarm-finished cards={prewarmed} createdMs={createdMs:0.0} totalMs={timing.Elapsed.TotalMilliseconds:0.0}");
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // Prewarm is an optimization only; a failure must fall back to the
+            // original lazy creation path without touching user-visible state.
+            CardLifecycleLog.Write($"prewarm-failed hr=0x{exception.HResult:X8}");
+        }
+    }
+
     public void ToggleAtPhysicalPoint(double x, double y, nint entryWindow = 0)
     {
         if (_disposed) return;
         if (_visible) { Hide("toggle"); return; }
         var cards = DisplayedCards.ToArray();
         if (cards.Length == 0) return;
+        var timing = _openTiming ??= System.Diagnostics.Stopwatch.StartNew();
+        _firstOpenAfterColdStart = !_prewarmCompleted;
         Position(x, y);
+        var anchorDpi = GetDpiForWindow((cards.FirstOrDefault() ?? _updateCard).Handle);
+        CardTimingLog.Write($"positioned cards={cards.Length} elapsedMs={timing.Elapsed.TotalMilliseconds:0.0} " +
+            $"dpi={anchorDpi} theme={_requestedTheme} prewarmed={AllCards.Count(card => card.Prewarmed)}");
         _visible = true;
         _generation++;
         _ticks = 0;
         if (_residentResourcesReleased) RestoreResidentResources();
         _visibleLifetime = new CancellationTokenSource();
         if (_quickCardEnabled.GetValueOrDefault("media")) _lyrics.Activate();
+        var openElapsed = timing.Elapsed;
+        var queuedWait = _openQueued;
+        _openTiming = null;
+        _openQueued = TimeSpan.Zero;
         foreach (var card in cards) card.Show();
+        _ = ObserveFirstFrameAsync(cards[0], timing, openElapsed, queuedWait);
+        CardTimingLog.Write($"shown cards={cards.Length} elapsedMs={openElapsed.TotalMilliseconds:0.0} firstAfterColdStart={_firstOpenAfterColdStart}");
         (EnabledCards.LastOrDefault() ?? _updateCard).Window.Activate();
+        CardTimingLog.Write($"activated elapsedMs={openElapsed.TotalMilliseconds:0.0}");
         var generation = _generation;
         _outsideClicks.Start(entryWindow, click =>
         {
@@ -245,6 +295,32 @@ public sealed partial class CardGroup : IDisposable
         _ = RefreshAsync(_quickCardEnabled.GetValueOrDefault("device"), _quickCardEnabled.GetValueOrDefault("traffic"));
         if (_quickCardEnabled.GetValueOrDefault("media")) _ = SubscribeLyricsAsync(_generation, true);
         if (_quickCardEnabled.GetValueOrDefault("weather")) _ = LoadWeatherAsync();
+    }
+
+    // Waits for the card's fade to start on a real composition frame and writes
+    // the open timing record.
+    private static async Task ObserveFirstFrameAsync(CardWindow card, System.Diagnostics.Stopwatch timing, TimeSpan openElapsed, TimeSpan queuedWait)
+    {
+        try
+        {
+            await card.VisibleFrame.WaitAsync(TimeSpan.FromMilliseconds(600));
+            CardTimingLog.Write($"first-frame openMs={openElapsed.TotalMilliseconds:0.0} " +
+                $"firstFrameMs={timing.Elapsed.TotalMilliseconds:0.0} totalMs={(queuedWait + timing.Elapsed).TotalMilliseconds:0.0}");
+        }
+        catch (TimeoutException)
+        { CardTimingLog.Write($"first-frame-timeout openMs={openElapsed.TotalMilliseconds:0.0} totalMs={(queuedWait + timing.Elapsed).TotalMilliseconds:0.0}"); }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        { CardLifecycleLog.Write($"timing-observe-failed hr=0x{exception.HResult:X8}"); }
+    }
+
+    // Called by the UI dispatcher before this toggle runs so the queued time
+    // between the backend gesture and the UI thread is part of the record.
+    internal void BeginOpenTiming(long gestureId, TimeSpan queued)
+    {
+        _openTiming = System.Diagnostics.Stopwatch.StartNew();
+        _openQueued = queued;
+        if (queued.TotalMilliseconds >= 30)
+            CardTimingLog.Write($"queued gesture={gestureId} waitMs={queued.TotalMilliseconds:0.0}");
     }
 
     public void Hide() => Hide("explicit");
@@ -488,7 +564,34 @@ public sealed partial class CardGroup : IDisposable
         _onDemand = value.TryGetProperty("resourceMode", out var mode) && string.Equals(mode.GetString(), "OnDemand", StringComparison.OrdinalIgnoreCase);
         ReconcileCardWindows();
         if (_visible) { Position(_anchorX, _anchorY); RenderWeatherModules(); }
+        else if (_placedAnchorSet) Place(_anchorX, _anchorY);
     }
+
+    // Media owns the quick-card configuration. This shape maps that settings
+    // payload onto ApplyQuickCards so startup prewarm matches the real panel.
+    internal void ApplyQuickCardsFromSettings(JsonElement settings)
+    {
+        if (_disposed || settings.ValueKind != JsonValueKind.Object) return;
+        var payload = new System.Text.Json.Nodes.JsonObject();
+        if (CopyArray(settings, "quickCardOrder") is { } order) payload["order"] = order;
+        if (CopyValue(settings, "quickCardColumns") is { } columns) payload["columns"] = columns;
+        if (CopyValue(settings, "quickCardEnabled") is { } enabled) payload["enabled"] = enabled;
+        if (settings.TryGetProperty("quickCardResourceMode", out var mode) && mode.ValueKind == JsonValueKind.String)
+            payload["resourceMode"] = mode.GetString();
+        if (settings.TryGetProperty("cardFontFamily", out var font) && font.ValueKind == JsonValueKind.String)
+            payload["font"] = font.GetString();
+        ApplyQuickCards(JsonSerializer.SerializeToElement(payload));
+    }
+
+    private static System.Text.Json.Nodes.JsonNode? CopyArray(JsonElement source, string name) =>
+        source.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Array
+            ? System.Text.Json.Nodes.JsonNode.Parse(value.GetRawText())
+            : null;
+
+    private static System.Text.Json.Nodes.JsonNode? CopyValue(JsonElement source, string name) =>
+        source.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Object
+            ? System.Text.Json.Nodes.JsonNode.Parse(value.GetRawText())
+            : null;
 
     private void ApplyCardFont(IEnumerable<FrameworkElement> roots)
     {
@@ -848,6 +951,12 @@ public sealed partial class CardGroup : IDisposable
     internal void Position(double x, double y)
     {
         _anchorX = x; _anchorY = y;
+        _placedAnchorSet = true;
+        Place(x, y);
+    }
+
+    private void Place(double x, double y)
+    {
         // Cards choose their column freely; each column keeps its saved order.
         var left = new List<CardWindow>();
         var right = new List<CardWindow>();
@@ -1072,6 +1181,28 @@ internal static class CardLifecycleLog
             lock (Gate)
             {
                 var path = Path.Combine(AppContext.BaseDirectory, "card-lifecycle.log");
+                if (File.Exists(path) && new FileInfo(path).Length >= 128 * 1024) File.Move(path, path + ".1", true);
+                File.AppendAllText(path, $"{DateTimeOffset.Now:o} pid={Environment.ProcessId} {message[..Math.Min(message.Length, 512)]}\n");
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+    }
+}
+
+// Phase timing for card opens. Bounded like the lifecycle log and never given
+// titles, lyrics, paths, or credentials; used to verify the open budget.
+internal static class CardTimingLog
+{
+    private static readonly object Gate = new();
+    private static int _records;
+    internal static void Write(string message)
+    {
+        if (Interlocked.Increment(ref _records) > 256) return;
+        try
+        {
+            lock (Gate)
+            {
+                var path = Path.Combine(AppContext.BaseDirectory, "card-timing.log");
                 if (File.Exists(path) && new FileInfo(path).Length >= 128 * 1024) File.Move(path, path + ".1", true);
                 File.AppendAllText(path, $"{DateTimeOffset.Now:o} pid={Environment.ProcessId} {message[..Math.Min(message.Length, 512)]}\n");
             }

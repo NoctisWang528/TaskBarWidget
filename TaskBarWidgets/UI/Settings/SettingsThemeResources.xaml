@@ -47,4 +47,10 @@
     <Style x:Key="SettingsInsertion" TargetType="Border">
         <Setter Property="Background" Value="{ThemeResource AccentFillColorDefaultBrush}" />
     </Style>
+    <!-- Card windows are shown before their first composition frame is
+         committed; a themed fill keeps that surface from flashing the raw
+         window client area, while Mica stays visible outside the card. -->
+    <Style x:Key="CardWindowSurface" TargetType="Grid">
+        <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+    </Style>
 </ResourceDictionary>

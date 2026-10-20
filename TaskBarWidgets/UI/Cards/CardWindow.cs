@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Media;
+using TaskBarWidgets.UI.Settings;
 using Windows.UI.ViewManagement;
 
 namespace TaskBarWidgets.UI.Cards;
@@ -13,12 +14,22 @@ internal sealed class CardWindow
 {
     private int _motionGeneration;
     private bool _closed;
+    private bool _prewarmed;
+    private TaskCompletionSource<bool>? _visibleFrame;
     internal Window Window { get; }
     internal Grid Root { get; }
     internal nint Handle { get; }
     internal double Height { get; private set; }
     internal double Width { get; }
     internal FrameworkElement Content => _content;
+    // Themed fill behind the content; the template probe asserts it never goes blank.
+    internal Brush? SurfaceBackground => _surface.Background;
+    // True once the window has rendered a frame while hidden, so the first
+    // click skips window creation and XAML realization.
+    internal bool Prewarmed => _prewarmed;
+    // Completes once the fade has started on a real composition frame for the
+    // most recent Show; used by timing and the offscreen template probe.
+    internal Task VisibleFrame => _visibleFrame?.Task ?? Task.CompletedTask;
     private readonly FrameworkElement _content;
     private readonly Grid _surface;
     private readonly bool _autoHeight;
@@ -28,7 +39,10 @@ internal sealed class CardWindow
         Height = height; Width = width;
         _content = content; _autoHeight = autoHeight;
         Root = new Grid();
+        // The surface carries the themed card fill so a composition frame can
+        // never flash the raw window background; Mica stays outside the card.
         var surface = new Grid { Width = width, Height = height, Padding = new Thickness(16) };
+        UiThemeStyles.Apply(surface, "CardWindowSurface");
         _surface = surface;
         surface.Children.Add(content);
         Root.Children.Add(new Viewbox { Child = surface, Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly });
@@ -61,20 +75,98 @@ internal sealed class CardWindow
         _surface.Width = Math.Max(Width, width);
     }
 
-    internal void Show()
+    internal void Show(bool animate = true)
     {
         if (_closed) return;
-        ++_motionGeneration;
+        var generation = ++_motionGeneration;
+        var visibleFrame = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _visibleFrame = visibleFrame;
+        var visual = RootVisual;
+        visual.StopAnimation(nameof(Visual.Opacity));
+        visual.StopAnimation(nameof(Visual.Offset));
+        visual.Opacity = 0;
+        visual.Offset = Vector3.Zero;
         // The shipped template probe exercises this non-activating initialization.
-        // The group activates only its final media card after all three are shown.
+        // The group activates only its final card after all are shown.
         Window.AppWindow.Show(false);
-        var visual = ElementCompositionPreview.GetElementVisual(Root);
+        // The group repositions and resizes the window right before showing, so
+        // wait one composition frame before the fade reveals any pixels.
+        _ = CompleteShowAsync(generation, visual, visibleFrame, animate);
+    }
+
+    // Render one invisible frame at the current position, then hide again.
+    // Called during startup prewarm so the first user click carries no cold cost.
+    internal async Task PrewarmAsync()
+    {
+        if (_closed || _prewarmed) return;
+        var generation = ++_motionGeneration;
+        var visual = RootVisual;
+        var wasVisible = IsWindowVisible(Handle);
+        visual.Opacity = 0;
+        visual.Offset = Vector3.Zero;
+        Window.AppWindow.Show(false);
+        await WaitForFrameAsync();
+        if (_closed) return;
+        if (generation != _motionGeneration)
+        {
+            // Something else owns the window now; never hide it behind its back.
+            if (!wasVisible) Window.AppWindow.Hide();
+            return;
+        }
+        _prewarmed = true;
+        Window.AppWindow.Hide();
         visual.StopAnimation(nameof(Visual.Opacity));
         visual.StopAnimation(nameof(Visual.Offset));
         visual.Opacity = 1;
         visual.Offset = Vector3.Zero;
-        if (new UISettings().AnimationsEnabled) Animate(visual, true);
+        CardLifecycleLog.Write($"prewarm-first-frame hwnd=0x{Handle:X}");
     }
+
+    private async Task CompleteShowAsync(int generation, Visual visual, TaskCompletionSource<bool> visibleFrame, bool animate)
+    {
+        await WaitForFrameAsync();
+        // The compositor animates from the value already committed on the
+        // hidden frame, so the first visible pixels are the real card surface.
+        var completed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        void Apply()
+        {
+            if (_closed || generation != _motionGeneration) { completed.TrySetResult(false); return; }
+            try
+            {
+                if (animate && new UISettings().AnimationsEnabled) Animate(visual, true);
+                else { visual.Opacity = 1; visual.Offset = Vector3.Zero; }
+            }
+            catch (Exception exception) when (exception is COMException or ObjectDisposedException)
+            {
+                // A compositor failure must never leave the card stuck invisible.
+                CardLifecycleLog.Write($"show-animate-error hwnd=0x{Handle:X} hr=0x{exception.HResult:X8}");
+                try { visual.Opacity = 1; visual.Offset = Vector3.Zero; }
+                catch (Exception fallback) when (fallback is COMException or ObjectDisposedException) { }
+            }
+            completed.TrySetResult(true);
+        }
+        // The visual must be updated on the UI thread; a frame callback can
+        // arrive on the compositor thread.
+        if (Root.DispatcherQueue.HasThreadAccess) Apply();
+        else Root.DispatcherQueue.TryEnqueue(Apply);
+        if (await completed.Task) visibleFrame.TrySetResult(true);
+    }
+
+    // One composition frame, bounded so a stalled compositor cannot leave a
+    // card permanently invisible.
+    private static async Task WaitForFrameAsync()
+    {
+        var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnRendering(object? sender, object args) { gate.TrySetResult(true); }
+        CompositionTarget.Rendering += OnRendering;
+        try { await gate.Task.WaitAsync(TimeSpan.FromMilliseconds(250)); }
+        catch (TimeoutException) { }
+        finally { CompositionTarget.Rendering -= OnRendering; }
+    }
+
+    private Visual RootVisual => ElementCompositionPreview.GetElementVisual(Root);
+
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsWindowVisible(nint window);
 
     internal async Task HideAsync(bool? animate = null)
     {
