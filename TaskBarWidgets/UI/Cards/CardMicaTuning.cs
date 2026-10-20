@@ -4,10 +4,10 @@ namespace TaskBarWidgets.UI.Cards;
 
 internal readonly record struct CardMicaTuning(double TintOpacity, double LuminosityOpacity)
 {
-    internal const double MinimumTintOpacity = 0.05;
-    internal const double MaximumTintOpacity = 0.45;
-    internal const double MinimumLuminosityOpacity = 0.15;
-    internal const double MaximumLuminosityOpacity = 0.85;
+    internal const double MinimumTintOpacity = 0;
+    internal const double MaximumTintOpacity = 1;
+    internal const double MinimumLuminosityOpacity = 0;
+    internal const double MaximumLuminosityOpacity = 1;
     internal const double DefaultTintOpacity = 0.45;
     internal const double DefaultLuminosityOpacity = 0.85;
     internal const double DefaultDarkLuminosityOpacity = 0.50;

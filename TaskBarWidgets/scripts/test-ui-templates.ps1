@@ -32,6 +32,24 @@ if (-not $result.micaControls.fixtureRoundTrip -or -not $result.micaControls.noP
     -not $result.micaControls.limitsClamped -or -not $result.micaControls.defaultsFallback) { throw 'Card Mica settings checks did not complete.' }
 if (-not $result.cardLifecycle.micaNewCardInherits) { throw 'A card created during Mica preview did not inherit it.' }
 if (-not $result.cardLifecycle.micaAlwaysInputActive) { throw 'Card Mica was not configured to remain input-active.' }
+if (-not $result.offsetSettings.bothPayloadsVisible -or $result.offsetSettings.initialFinalRenders -ne 1 -or
+    $result.offsetSettings.searchFinalRenders -ne 1 -or $result.offsetSettings.pageFinalRenders -ne 1) {
+    throw 'Track-offset page did not render each batched response exactly once.'
+}
+if (-not $result.reorderControls.sameColumn -or -not $result.reorderControls.crossColumn -or
+    -not $result.reorderControls.emptyColumn -or -not $result.reorderControls.pointerGapPresentation -or
+    -not $result.reorderControls.reducedMotionFallback -or -not $result.reorderControls.cancelRestoresRows -or
+    -not $result.reorderControls.dropCommitsOnce) {
+    throw 'Reorder interaction checks did not complete.'
+}
+foreach ($layout in @($result.layoutChecks | Where-Object { $_.kind -eq 'settingsTaskbarLayout' })) {
+    if ($layout.advancedFields -lt 1 -or -not $layout.viewport.scrollbarAtRight) {
+        throw 'Settings viewport or directly expanded advanced fields were not verified at every width.'
+    }
+}
+foreach ($spectrum in @($result.layoutChecks | Where-Object { $_.kind -eq 'settingsSpectrumAdvancedFields' })) {
+    if ($spectrum.fieldCount -lt 1) { throw 'Spectrum tuning fields were not directly realized.' }
+}
 if (-not $result.weatherCardControls.providerNeutralSnapshot -or -not $result.weatherCardControls.missingDataHidden -or
     -not $result.weatherCardControls.allAlertsRetained -or -not $result.weatherCardControls.alertRotation -or
     -not $result.weatherCardControls.singleAlertFixed -or

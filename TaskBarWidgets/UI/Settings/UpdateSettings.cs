@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using TaskBarWidgets.UI.Settings;
 
 namespace TaskBarWidgets.UI;
 
@@ -11,7 +12,7 @@ public sealed partial class SettingsWindow
     private TextBlock? _updateVersion, _updateStatus, _updateNotes, _updateBytes, _updateLastChecked;
     private ProgressBar? _updateProgress;
     private StackPanel? _updateRuntimeDownloads;
-    private CheckBox? _automaticUpdates;
+    private ToggleSwitch? _automaticUpdates;
     private Button? _checkUpdate, _downloadUpdate, _cancelUpdate, _installUpdate;
     private bool _bindingUpdates, _updateCommandBusy;
     internal event Action<JsonElement>? UpdateStateReceived;
@@ -33,11 +34,9 @@ public sealed partial class SettingsWindow
     {
         var section = Section("应用更新", "自动检查并下载更新。安装前会再次确认，配置与历史会保留。");
         _updateVersion = Copy(""); section.Children.Add(_updateVersion);
-        _automaticUpdates = new CheckBox { Content = "自动检查并下载更新", IsChecked = _updateState.AutomaticEnabled };
-        AutomationProperties.SetAutomationId(_automaticUpdates, "update-automatic");
-        _automaticUpdates.Checked += async (_, _) => { if (!_bindingUpdates) await RunUpdateCommandAsync("setAutomaticUpdates", new { enabled = true }); };
-        _automaticUpdates.Unchecked += async (_, _) => { if (!_bindingUpdates) await RunUpdateCommandAsync("setAutomaticUpdates", new { enabled = false }); };
-        section.Children.Add(_automaticUpdates);
+        _automaticUpdates = SettingsToggle.Compact(_updateState.AutomaticEnabled, "自动检查并下载更新", "update-automatic");
+        _automaticUpdates.Toggled += async (_, _) => { if (!_bindingUpdates) await RunUpdateCommandAsync("setAutomaticUpdates", new { enabled = _automaticUpdates.IsOn }); };
+        section.Children.Add(SettingsToggle.WithLabel("自动检查并下载更新", null, _automaticUpdates));
         section.Children.Add(Copy("此选项立即保存，无需点击“应用更改”。"));
         _updateStatus = Copy("", 14); section.Children.Add(_updateStatus);
         _updateProgress = new ProgressBar { Minimum = 0, Maximum = 100, Visibility = Visibility.Collapsed };
@@ -72,7 +71,7 @@ public sealed partial class SettingsWindow
         _updateVersion!.Text = "当前版本 " + (state.CurrentVersion.Length > 0 ? state.CurrentVersion : _media.Text("appVersion", "未知")) +
             (state.LatestVersion.Length > 0 ? "  ·  最新版本 " + state.LatestVersion : "");
         _bindingUpdates = true;
-        _automaticUpdates!.IsChecked = state.AutomaticEnabled;
+        _automaticUpdates!.IsOn = state.AutomaticEnabled;
         _bindingUpdates = false;
         _automaticUpdates.IsEnabled = !_updateCommandBusy && state.Phase is not ("preparing" or "installing");
         _updateStatus.Text = state.Status;

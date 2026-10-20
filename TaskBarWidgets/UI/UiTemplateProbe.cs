@@ -18,8 +18,10 @@ internal static class UiTemplateProbe
         using var connection = new UiConnection("TaskBarWidgets.UI.template-probe.disconnected");
         var before = GetForegroundWindow();
         var activated = false;
-        void TrackActivation(Window window) => window.Activated += (_, eventArgs) => {
-            if (eventArgs.WindowActivationState != WindowActivationState.Deactivated) activated = true;
+        void TrackActivation(Window window, bool allowCodeActivation = false) => window.Activated += (_, eventArgs) => {
+            if (eventArgs.WindowActivationState == WindowActivationState.PointerActivated ||
+                eventArgs.WindowActivationState == WindowActivationState.CodeActivated && !allowCodeActivation)
+                activated = true;
         };
         var checks = new List<object>();
         var cardLifecycle = new Dictionary<string, bool>();
@@ -32,13 +34,18 @@ internal static class UiTemplateProbe
         object? micaControls = null;
         object? cardLyricsControls = null;
         object? sourceSelector = null;
+        object? offsetSettings = null;
+        object? reorderControls = null;
         object? updateCard = null, updateControls = null, updateOrdering = null;
         string? error = null;
         try
         {
             updateOrdering = ((App)app).ProbeUpdateStateOrdering();
             settings = new SettingsWindow(connection);
-            TrackActivation(settings);
+            // Opening the in-process overlay drawer raises CodeActivated even for
+            // a WS_EX_NOACTIVATE probe HWND. Pointer activation and the final
+            // foreground-process check still verify that the probe stays hidden.
+            TrackActivation(settings, allowCodeActivation: true);
             settings.AppWindow.IsShownInSwitchers = false;
             ShowOffscreen(settings, 1180, 820);
             await Task.Delay(400);
@@ -49,6 +56,11 @@ internal static class UiTemplateProbe
             var fixtureIndex = Array.IndexOf(args, "--fixture");
             if (fixtureIndex >= 0 && fixtureIndex + 1 < args.Length)
                 layoutChecks = await UiLayoutProbe.RunAsync(settings, args[fixtureIndex + 1], Path.Combine(AppContext.BaseDirectory, "..", "ui-layout-check"));
+            if (layoutChecks is not null)
+            {
+                reorderControls = await SettingsWindow.ProbeReorderControlsAsync(settings);
+                offsetSettings = await OffsetSettingsProbe.RunAsync(settings);
+            }
             cardLyricsControls = await CardLyricsProbe.RunAsync();
             cards = new CardGroup(connection, _ => throw new InvalidOperationException("Probe must not invoke settings."));
             cards.SetQuickCardEnabled("weather", true);
@@ -221,7 +233,7 @@ internal static class UiTemplateProbe
             var result = resultIndex >= 0 && resultIndex + 1 < args.Length ? args[resultIndex + 1] : Path.Combine(AppContext.BaseDirectory, "template-probe.json");
             var winUiModule = System.Diagnostics.Process.GetCurrentProcess().Modules.Cast<System.Diagnostics.ProcessModule>()
                 .FirstOrDefault(module => string.Equals(module.ModuleName, "Microsoft.ui.xaml.dll", StringComparison.OrdinalIgnoreCase))?.FileName;
-            File.WriteAllText(result, JsonSerializer.Serialize(new { success = error is null, error, runtimeDirectory = RuntimeEnvironment.GetRuntimeDirectory(), winUiModule, checks, cardLifecycle, audioControls, weatherControls, weatherCardControls, themeControls, micaControls, cardLyricsControls, sourceSelector, heatmapChecks, updateCard, updateControls, updateOrdering, layoutChecks, probeActivated = activated, externalForegroundChanged = GetForegroundWindow() != before }, new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(result, JsonSerializer.Serialize(new { success = error is null, error, runtimeDirectory = RuntimeEnvironment.GetRuntimeDirectory(), winUiModule, checks, cardLifecycle, audioControls, weatherControls, weatherCardControls, themeControls, micaControls, cardLyricsControls, sourceSelector, offsetSettings, reorderControls, heatmapChecks, updateCard, updateControls, updateOrdering, layoutChecks, probeActivated = activated, externalForegroundChanged = GetForegroundWindow() != before }, new JsonSerializerOptions { WriteIndented = true }));
             Environment.ExitCode = error is null ? 0 : 1;
             app.Exit();
         }

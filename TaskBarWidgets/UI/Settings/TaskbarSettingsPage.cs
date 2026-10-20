@@ -135,10 +135,12 @@ public sealed partial class SettingsWindow
     }
     internal string[] PointerGestureEntries => _pointerReorder?.Entries ?? [];
     internal JsonObject PointerProbeLayout => new(_native.Keys.Where(key => key.StartsWith("items.") && (key.EndsWith(".show") || key.EndsWith(".row") || key.EndsWith(".order"))).Select(key => new KeyValuePair<string, JsonNode?>(key, _native.Get(key))));
+    internal PointerReorder ProbePointerReorder => _pointerReorder ?? throw new InvalidOperationException("Pointer reorder was not initialized.");
     internal void CancelPointerProbe() => _pointerReorder?.Cancel("probe-cleanup");
     private void ResetReorderFeedback()
     {
         foreach (var target in _moduleDropTargets) { target.Surface.ClearValue(Border.BorderBrushProperty); target.Surface.BorderThickness = new Thickness(1); }
+        foreach (var (cell, _, _) in _cardOrderCells) { cell.ClearValue(Border.BorderBrushProperty); cell.BorderThickness = new Thickness(1); }
         ResetSourceReorderFeedback();
         UpdateSaveStatus();
     }

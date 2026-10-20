@@ -51,7 +51,7 @@ public sealed class SettingsStoreTests
     [InlineData("{\"ToolWindowTheme\":1}", false, 0.45, 0.85)]
     [InlineData("{\"ToolWindowTheme\":2}", true, 0.45, 0.50)]
     [InlineData("{\"CardMicaTintOpacity\":0.20}", false, 0.20, 0.50)]
-    [InlineData("{\"CardMicaTintOpacity\":-1,\"CardMicaLuminosityOpacity\":2}", true, 0.05, 0.85)]
+    [InlineData("{\"CardMicaTintOpacity\":-1,\"CardMicaLuminosityOpacity\":2}", true, 0.0, 1.0)]
     public void CardMicaSettingsUseThemeDefaultsOrClamp(
         string json,
         bool systemUsesLightTheme,

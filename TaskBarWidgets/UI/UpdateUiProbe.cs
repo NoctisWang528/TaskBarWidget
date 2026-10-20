@@ -101,7 +101,7 @@ public sealed partial class SettingsWindow
             window.ShowPage("about");
             window.SetUpdateState(ready);
             window._root.UpdateLayout();
-            if (window._automaticUpdates?.IsChecked != true || window._installUpdate?.IsEnabled != true)
+            if (window._automaticUpdates?.IsOn != true || window._installUpdate?.IsEnabled != true)
                 throw new InvalidOperationException("Updater defaults and ready actions were not rendered.");
             window._native.Set("update-probe.draft", "unfinished");
             if (!window.HasPendingChanges) throw new InvalidOperationException("Pending settings did not block update installation.");

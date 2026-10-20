@@ -29,7 +29,7 @@ public sealed partial class SettingsWindow : Window
     private bool _highContrastSubscriptionAttempted, _highContrastSubscribed;
     private JsonObject _schema = new();
     private readonly NavigationView _navigation = new() { IsSettingsVisible = false, IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed, PaneDisplayMode = NavigationViewPaneDisplayMode.Auto, OpenPaneLength = 224, PaneTitle = "TaskBarWidgets" };
-    private readonly SplitView _split = new() { PanePlacement = SplitViewPanePlacement.Right, DisplayMode = SplitViewDisplayMode.Overlay, OpenPaneLength = 352 };
+    private readonly SplitView _split = new() { PanePlacement = SplitViewPanePlacement.Right, DisplayMode = SplitViewDisplayMode.Overlay, OpenPaneLength = 352, Tag = "settings-split" };
     private readonly StackPanel _page = new() { Spacing = 16, Margin = new Thickness(24, 16, 24, 28), Tag = "settings-content" };
     private readonly StackPanel _properties = new() { Spacing = 12, Margin = new Thickness(20) };
     private readonly TextBlock _heading = new() { FontSize = 26, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
@@ -49,6 +49,8 @@ public sealed partial class SettingsWindow : Window
     private bool _micaPreviewQueued;
     private CardMicaTuning _pendingMicaPreview;
     internal bool ReloadWithoutPrompt;
+    internal Func<string, JsonNode?, Task<JsonObject>>? ProbeRequestHandler;
+    internal int PageRenderCount { get; private set; }
     public event Action? Dismissed;
     internal event Action<ElementTheme>? ThemePreviewChanged;
     internal event Action<CardMicaPreviewState>? MicaPreviewChanged;
@@ -110,20 +112,47 @@ public sealed partial class SettingsWindow : Window
         ToolTipService.SetToolTip(reload, "重新读取会放弃尚未应用的草稿");
         toolbar.Children.Add(_saveStatus); Grid.SetColumn(reload, 1); toolbar.Children.Add(reload);
         Grid.SetColumn(_apply, 2); toolbar.Children.Add(_apply); _apply.Click += async (_, _) => await GuardAsync(SaveAsync);
-        var body = new Grid { MaxWidth = 1088, HorizontalAlignment = HorizontalAlignment.Stretch };
+        var body = new Grid { HorizontalAlignment = HorizontalAlignment.Stretch, Tag = "settings-page-viewport" };
         void UpdateNavigationInset(NavigationViewDisplayMode mode) => body.Margin = new Thickness(0, mode == NavigationViewDisplayMode.Minimal ? 40 : 0, 0, 0);
         _navigation.DisplayModeChanged += (_, args) => UpdateNavigationInset(args.DisplayMode);
         UpdateNavigationInset(_navigation.DisplayMode);
         body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        _heading.Margin = new Thickness(24, 20, 24, 12); body.Children.Add(_heading);
-        _notice.Margin = new Thickness(24, 0, 24, 0); Grid.SetRow(_notice, 1); body.Children.Add(_notice);
-        Grid.SetRow(toolbar, 2); body.Children.Add(toolbar);
-        var scroll = new ScrollViewer { Content = _page, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+
+        var chrome = new Grid { MaxWidth = 1088, HorizontalAlignment = HorizontalAlignment.Stretch, Tag = "settings-page-chrome" };
+        chrome.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        chrome.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        chrome.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        _heading.Margin = new Thickness(24, 20, 24, 12); chrome.Children.Add(_heading);
+        _notice.Margin = new Thickness(24, 0, 24, 0); Grid.SetRow(_notice, 1); chrome.Children.Add(_notice);
+        Grid.SetRow(toolbar, 2); chrome.Children.Add(toolbar);
+        body.Children.Add(chrome);
+
+        // ScrollViewer measures its content unconstrained on the scrolling axis.
+        // Keep the host explicitly as wide as the viewport so the 1088-DIP cap
+        // centers content instead of letting Grid settle on the left edge.
+        var pageHost = new Grid { MaxWidth = 1088, Tag = "settings-content-host" };
+        pageHost.Children.Add(_page);
+        var scroll = new ScrollViewer
+        {
+            Content = pageHost,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Tag = "settings-page-scroll"
+        };
+        // ScrollViewer measures its content unconstrained on the scrolling axis.
+        // Give the host the actual viewport width so MaxWidth only caps the
+        // content and its Grid alignment can center it at every window size.
+        void ResizeContentHost(double viewportWidth)
+        {
+            if (double.IsFinite(viewportWidth) && viewportWidth > 0)
+                pageHost.Width = viewportWidth;
+        }
+        scroll.SizeChanged += (_, _) => ResizeContentHost(scroll.ViewportWidth);
+        scroll.ViewChanged += (_, _) => ResizeContentHost(scroll.ViewportWidth);
         _pageScroll = scroll;
-        Grid.SetRow(scroll, 3); body.Children.Add(scroll);
+        Grid.SetRow(scroll, 1); body.Children.Add(scroll);
         _split.Content = body;
         _split.Pane = UiThemeStyles.Apply(new ScrollViewer { Content = _properties, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled }, "SettingsPane");
         _navigation.Content = _split; Content = _navigation;
@@ -251,6 +280,8 @@ public sealed partial class SettingsWindow : Window
     }
     private async Task<JsonObject> RequestAsync(string action, object? payload = null)
     {
+        if (ProbeRequestHandler is not null)
+            return await ProbeRequestHandler(action, System.Text.Json.JsonSerializer.SerializeToNode(payload));
         var result = await _connection.RequestAsync(action, payload, _lifetime.Token);
         return JsonNode.Parse(result.GetRawText()) as JsonObject ?? new JsonObject();
     }
@@ -466,6 +497,7 @@ public sealed partial class SettingsWindow : Window
     private void Changed() { if (_notice.Severity == InfoBarSeverity.Success) _notice.IsOpen = false; UpdateSaveStatus(); RenderPreview(); }
     private void RenderPage()
     {
+        PageRenderCount++;
         CancelModulePointerDrag();
         if (_currentPage != "quickCardsWeather") CancelWeatherPage();
         _page.Children.Clear(); _preview = null; _split.IsPaneOpen = false;
@@ -485,11 +517,7 @@ public sealed partial class SettingsWindow : Window
             if (fields.Count == 0) continue;
             if (Text(group["id"]) == "appearance") { RenderAppearanceGroup(fields); continue; }
             var content = Section(Text(group["label"]));
-            content.Children.Add(ResponsiveFields(fields.Where(field => field["advanced"]?.ToString() != "true").Select(field => FieldEditor(field, _native))));
-            var advanced = fields.Where(field => field["advanced"]?.ToString() == "true").ToList();
-            if (advanced.Count > 0) {
-                content.Children.Add(new Expander { Header = "高级选项", Content = ResponsiveFields(advanced.Select(field => FieldEditor(field, _native))), HorizontalAlignment = HorizontalAlignment.Stretch });
-            }
+            content.Children.Add(ResponsiveFields(fields.Select(field => FieldEditor(field, _native))));
         }
     }
     private IEnumerable<JsonObject> NativeFields() => (_schema["fields"] as JsonArray)?.OfType<JsonObject>() ?? [];
@@ -498,13 +526,8 @@ public sealed partial class SettingsWindow : Window
         var key = Text(field["key"]); var label = Text(field["label"]); var type = Text(field["type"]);
         void Change(object? value) { draft.Set(key, value); Changed(); after?.Invoke(); if (key == "taskbar.horizontal_arrange") RenderPage(); }
         if (type == "boolean") {
-            // The native template's padding aligns text with the glyph and supplies its 8 DIP gap.
-            var check = new CheckBox { Content = label, IsChecked = draft.Bool(key), MinHeight = 32, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Stretch, Margin = new Thickness(0, 2, 0, 2) };
-            AutomationProperties.SetAutomationId(check, "setting-" + key);
-            check.Checked += (_, _) => Change(true); check.Unchecked += (_, _) => Change(false);
             var description = Text(field["description"]); if (field["restartRequired"]?.ToString() == "true") description += " 重启后生效";
-            if (description.Length > 0) ToolTipService.SetToolTip(check, description);
-            return check;
+            return SettingsToggle.Row(label, description.Length > 0 ? description : null, draft.Bool(key), label, "setting-" + key, value => Change(value));
         }
         var row = new Grid { ColumnSpacing = 16, RowSpacing = 6, MinHeight = 40, Margin = new Thickness(0, 2, 0, 2) };
         var labels = new StackPanel { VerticalAlignment = VerticalAlignment.Center };

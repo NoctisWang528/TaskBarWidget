@@ -2,12 +2,14 @@ using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Foundation;
 using Windows.Graphics;
 using Windows.Graphics.Imaging;
 using Windows.Storage.Streams;
+using TaskBarWidgets.UI.Settings;
 
 namespace TaskBarWidgets.UI;
 
@@ -22,38 +24,47 @@ internal static class UiLayoutProbe
         foreach (var panel in Walk(content).OfType<Panel>().Where(panel => Equals(panel.Tag, "settings-content"))) panel.ChildrenTransitions = null;
         var fixture = JsonNode.Parse(await File.ReadAllTextAsync(fixturePath))!.AsObject();
         window.LoadValidationData(fixture["native"]!.AsObject(), fixture["media"]!.AsObject());
+        var advancedKeys = (fixture["native"]?["fields"] as JsonArray)?.OfType<JsonObject>()
+            .Where(field => field["advanced"]?.ToString() == "true")
+            .Select(field => field["key"]?.ToString() ?? "")
+            .Where(key => key.Length > 0)
+            .ToArray() ?? [];
+        var spectrumKeys = (fixture["media"]?["spectrumTuning"] as JsonObject)?.Select(pair => pair.Key).ToArray() ?? [];
         var checks = new List<object>();
-        foreach (var width in new[] { 720, 1440 })
+        foreach (var width in new[] { 720, 1440, 1920, 2560 })
         {
             window.AppWindow.Resize(new SizeInt32(width, 1000));
             var windowPosition = window.AppWindow.Position;
-            if (windowPosition.X + width >= -20000 || windowPosition.Y + 1000 >= -20000) { window.AppWindow.Hide(); throw new InvalidOperationException("Layout probe must remain strictly offscreen."); }
+            if (windowPosition.X + window.AppWindow.Size.Width >= -20000 || windowPosition.Y + window.AppWindow.Size.Height >= -20000) { window.AppWindow.Hide(); throw new InvalidOperationException("Layout probe must remain strictly offscreen."); }
             window.ShowPage("taskbar");
             await SettleAsync(content);
             var pageScroll = PageScroll(content);
             pageScroll.ChangeView(null, 0, null, true);
             await SettleAsync(content);
+            var viewport = AssertSettingsViewport(window, content, pageScroll, width);
+            AssertAdvancedFieldsDirect(content, advancedKeys);
             var preview = Walk(content).OfType<FrameworkElement>().FirstOrDefault(element => Equals(element.Tag, "TaskbarPreview"));
             if (preview is null || preview.ActualWidth <= 0 || preview.ActualHeight <= 0 || !Walk(preview).OfType<TextBlock>().Any(text => !string.IsNullOrEmpty(text.Text) || text.Inlines.OfType<Microsoft.UI.Xaml.Documents.Run>().Any(run => !string.IsNullOrEmpty(run.Text)))) throw new InvalidOperationException("Taskbar preview has no realized sample content.");
             var previewColumns = PreviewColumns(content, rightAligned: true);
             var columns = Walk(content).OfType<Grid>().Where(grid => Equals(grid.Tag, "settings-responsive-fields")).Select(grid => new { width = grid.ActualWidth, columns = grid.ColumnDefinitions.Count }).ToArray();
             if (columns.Length == 0 || columns.Any(grid => grid.width <= 0 || grid.columns != (grid.width >= 820 ? 2 : 1))) throw new InvalidOperationException("Settings field columns did not adapt to the actual content width.");
-            var boxes = CheckBoxes(content);
+            var boxes = Toggles(content);
             var top = Path.Combine(outputDirectory, $"settings-taskbar-{width}.png");
             await CaptureAsync(content, top);
-            checks.Add(new { kind = "settingsTaskbarLayout", requestedPhysicalWidth = width, actualWidth = content.ActualWidth, previewWidth = preview.ActualWidth, previewHeight = preview.ActualHeight, previewColumns, columns, boxes, png = top, systemBackdropCaptured = false });
+            checks.Add(new { kind = "settingsTaskbarLayout", requestedPhysicalWidth = width, actualWidth = content.ActualWidth, viewport, advancedFields = advancedKeys.Length, previewWidth = preview.ActualWidth, previewHeight = preview.ActualHeight, previewColumns, columns, boxes, png = top, systemBackdropCaptured = false });
 
-            if (width == 1440) {
+            if (width == 1920) {
+                var drawer = await AssertOverlayDrawerAsync(window, content, pageScroll);
                 var before = Walk(content).OfType<Grid>().Single(grid => Equals(grid.Tag, "TaskbarPreviewColumns")).ActualWidth;
                 var fontSize = Walk(content).OfType<NumberBox>().Single(box => AutomationProperties.GetAutomationId(box) == "setting-taskbar.fontSize");
                 var spacing = Walk(content).OfType<NumberBox>().Single(box => AutomationProperties.GetAutomationId(box) == "setting-taskbar.item_space");
-                var alignment = Walk(content).OfType<CheckBox>().Single(box => AutomationProperties.GetAutomationId(box) == "setting-taskbar.value_right_align");
-                fontSize.Value += 2; spacing.Value += 5; alignment.IsChecked = false;
+                var alignment = Walk(content).OfType<ToggleSwitch>().Single(toggle => AutomationProperties.GetAutomationId(toggle) == "setting-taskbar.value_right_align");
+                fontSize.Value += 2; spacing.Value += 5; alignment.IsOn = false;
                 await SettleAsync(content);
                 var changed = Walk(content).OfType<Grid>().Single(grid => Equals(grid.Tag, "TaskbarPreviewColumns"));
                 var editedColumns = PreviewColumns(content, rightAligned: false);
                 if (changed.ActualWidth <= before || Math.Abs(changed.ColumnSpacing - spacing.Value) > .01) throw new InvalidOperationException("Font/spacing edits did not immediately resize shared preview columns.");
-                checks.Add(new { kind = "previewSharedColumnEdits", widthBefore = before, widthAfter = changed.ActualWidth, fontSize = fontSize.Value, itemSpace = changed.ColumnSpacing, columns = editedColumns });
+                checks.Add(new { kind = "previewSharedColumnEdits", widthBefore = before, widthAfter = changed.ActualWidth, fontSize = fontSize.Value, itemSpace = changed.ColumnSpacing, columns = editedColumns, drawer });
                 window.LoadValidationData(fixture["native"]!.AsObject(), fixture["media"]!.AsObject());
                 window.ShowPage("taskbar"); await SettleAsync(content);
                 checks.Add(await UiPointerProbe.RunAsync(window));
@@ -69,13 +80,24 @@ internal static class UiLayoutProbe
             await CaptureAsync(content, appearance);
             checks.Add(new { kind = "settingsAppearanceLayout", requestedPhysicalWidth = width, toolbarWidth = typography.ActualWidth, toolbarRows = typography.RowDefinitions.Count, png = appearance, systemBackdropCaptured = false });
 
+            window.ShowPage("lyrics");
+            await SettleAsync(content);
+            pageScroll.ChangeView(null, 0, null, true);
+            await SettleAsync(content);
+            var spectrumCount = AssertSpectrumFieldsDirect(content, spectrumKeys);
+            checks.Add(new { kind = "settingsSpectrumAdvancedFields", requestedPhysicalWidth = width, fieldCount = spectrumCount });
+
             window.ShowPage("sources");
             await SettleAsync(content);
             pageScroll.ChangeView(null, 0, null, true);
             await SettleAsync(content);
             var sources = Walk(content).OfType<Border>().Where(border => Equals(border.Tag, "SourcePriorityRow")).ToList();
             if (sources.Count < 5 || sources.Any(row => row.ActualWidth <= 0 || Math.Abs(row.ActualWidth - sources[0].ActualWidth) > 1)) throw new InvalidOperationException("Player source rows are not equal-width realized list rows.");
-            var sourceBoxes = CheckBoxes(content);
+            var sourceBoxes = Toggles(content);
+            if (sources.SelectMany(source => Walk(source).OfType<ToggleSwitch>()).Any(toggle =>
+                    !AutomationProperties.GetAutomationId(toggle).StartsWith("source-enabled-", StringComparison.Ordinal)))
+                throw new InvalidOperationException("Every player-source switch must expose a stable source-enabled AutomationId.");
+            var sourceMetrics = AssertReorderRows(sources);
             var sourcePng = Path.Combine(outputDirectory, $"settings-sources-{width}.png");
             await CaptureAsync(content, sourcePng);
             checks.Add(new { kind = "settingsSourcesLayout", requestedPhysicalWidth = width, rowCount = sources.Count, rowWidth = sources[0].ActualWidth, boxes = sourceBoxes, png = sourcePng, systemBackdropCaptured = false });
@@ -87,8 +109,9 @@ internal static class UiLayoutProbe
             var cardIds = new[] { "weather", "traffic", "device", "media" };
             var cells = Walk(content).OfType<Border>().Where(border => border.Tag is string tag && cardIds.Contains(tag)).ToList();
             if (cells.Count < 2) throw new InvalidOperationException("Quick-card reorder grid did not realize its cells.");
-            if (cells.Select(cell => Math.Round(cell.ActualHeight)).Distinct().Count() != 1)
-                throw new InvalidOperationException("Quick-card reorder cells are not equal height.");
+            var heights = cells.Select(cell => (id: cell.Tag, height: Math.Round(cell.ActualHeight, 2))).ToArray();
+            if (heights.Select(cell => cell.height).Distinct().Count() != 1)
+                throw new InvalidOperationException("Quick-card reorder cells are not equal height: " + string.Join(", ", cells.Select(DescribeCardCell)) + ".");
             // Each column is an independent drop zone, so group the cells by the
             // X they ended up at instead of assuming a balanced two-row table.
             var cardColumns = cells
@@ -98,7 +121,11 @@ internal static class UiLayoutProbe
             if (cardColumns.Length > 2) throw new InvalidOperationException("Quick-card reorder cells exceed the two available columns.");
             if (cardColumns.Any(column => column.Select(cell => Math.Round(cell.ActualWidth)).Distinct().Count() != 1))
                 throw new InvalidOperationException("Quick-card reorder cells are not equal width.");
-            checks.Add(new { kind = "settingsQuickCardsGrid", requestedPhysicalWidth = width, cells = cells.Count, columns = cardColumns.Length, cellHeight = cells[0].ActualHeight });
+            var cardRows = cells.Select(cell => Walk(cell).OfType<ToggleSwitch>().FirstOrDefault()).ToArray();
+            if (cardRows.Any(toggle => toggle is null) || cells.Any(cell => Walk(cell).OfType<Button>().All(button => button.Flyout is null)))
+                throw new InvalidOperationException("Quick-card rows must expose a standard toggle and a menu action.");
+            var rowStyle = AssertUnifiedReorderRows(cells, sourceMetrics);
+            checks.Add(new { kind = "settingsQuickCardsGrid", requestedPhysicalWidth = width, cells = cells.Count, columns = cardColumns.Length, cellHeight = cells[0].ActualHeight, rowStyle });
         }
         return checks;
     }
@@ -151,31 +178,177 @@ internal static class UiLayoutProbe
         if (!content.IsLoaded || content.ActualWidth <= 0 || content.ActualHeight <= 0) throw new InvalidOperationException("Offscreen settings did not realize a nonzero layout.");
     }
     private static ScrollViewer PageScroll(DependencyObject root) => Walk(root).OfType<Panel>().Where(panel => Equals(panel.Tag, "settings-content")).Select(panel => Ancestor<ScrollViewer>(panel)).First(viewer => viewer is not null)!;
+    private static object AssertSettingsViewport(SettingsWindow window, FrameworkElement content, ScrollViewer scroll, int requestedPhysicalWidth)
+    {
+        var pageHost = Walk(content).OfType<Grid>().Single(grid => Equals(grid.Tag, "settings-content-host"));
+        var chrome = Walk(content).OfType<Grid>().Single(grid => Equals(grid.Tag, "settings-page-chrome"));
+        var viewportWidth = scroll.ViewportWidth > 0 ? scroll.ViewportWidth : scroll.ActualWidth;
+        var expectedWidth = Math.Min(1088, viewportWidth);
+        var tolerance = 2 / (content.XamlRoot?.RasterizationScale ?? 1);
+        if (viewportWidth <= 0 || pageHost.ActualWidth <= 0 || chrome.ActualWidth <= 0 ||
+            Math.Abs(pageHost.ActualWidth - expectedWidth) > tolerance ||
+            Math.Abs(chrome.ActualWidth - expectedWidth) > tolerance)
+            throw new InvalidOperationException("Settings content did not fill its centered 1088-DIP column.");
+        var hostOrigin = pageHost.TransformToVisual(scroll).TransformPoint(new Point(0, 0));
+        var chromeOrigin = chrome.TransformToVisual(scroll).TransformPoint(new Point(0, 0));
+        if (Math.Abs(hostOrigin.X + pageHost.ActualWidth / 2 - viewportWidth / 2) > tolerance + 1 ||
+            Math.Abs(chromeOrigin.X + chrome.ActualWidth / 2 - viewportWidth / 2) > tolerance + 1)
+            throw new InvalidOperationException("Settings heading and body are not horizontally centered in the scroll viewport.");
+        var bar = VerticalBar(scroll);
+        var barOrigin = bar?.TransformToVisual(scroll).TransformPoint(new Point(0, 0));
+        var barRight = barOrigin is null ? double.NaN : barOrigin.Value.X + (bar?.ActualWidth ?? 0);
+        if (bar is null || bar.ActualHeight <= 0 || Math.Abs(barRight - scroll.ActualWidth) > 4)
+            throw new InvalidOperationException("The native settings scrollbar is not anchored to the right edge of the content viewport.");
+        if (Math.Abs(hostOrigin.X - chromeOrigin.X) > tolerance + 1)
+            throw new InvalidOperationException("Settings heading and body do not share the same centered column.");
+        if (window.PageRenderCount <= 0) throw new InvalidOperationException("Settings page rendering was not tracked.");
+        return new
+        {
+            requestedPhysicalWidth,
+            viewportWidth,
+            contentColumnWidth = pageHost.ActualWidth,
+            chromeWidth = chrome.ActualWidth,
+            scrollbarX = barOrigin!.Value.X,
+            scrollbarWidth = bar.ActualWidth,
+            scrollbarAtRight = true
+        };
+    }
+    private static ScrollBar? VerticalBar(ScrollViewer scroll) => Walk(scroll).OfType<ScrollBar>()
+        .FirstOrDefault(bar => bar.Orientation == Orientation.Vertical && bar.Visibility == Visibility.Visible &&
+            bar.ActualHeight > 0 && bar.ActualWidth > 0);
+    private static void AssertAdvancedFieldsDirect(FrameworkElement content, string[] advancedKeys)
+    {
+        if (advancedKeys.Length == 0) throw new InvalidOperationException("The settings fixture must exercise at least one advanced native field.");
+        if (Walk(content).OfType<Expander>().Any(expander => HeaderText(expander).Contains("高级选项", StringComparison.Ordinal)))
+            throw new InvalidOperationException("Native advanced fields are still hidden inside an advanced-options Expander.");
+        foreach (var key in advancedKeys)
+        {
+            var field = Walk(content).OfType<FrameworkElement>().OfType<Control>()
+                .SingleOrDefault(control => AutomationProperties.GetAutomationId(control) == "setting-" + key);
+            if (field is null || field.ActualWidth <= 0 || field.ActualHeight <= 0)
+                throw new InvalidOperationException($"Advanced setting is not directly realized: {key}.");
+            if (Ancestor<Expander>(field) is not null)
+                throw new InvalidOperationException($"Advanced setting remained folded: {key}.");
+        }
+    }
+    private static int AssertSpectrumFieldsDirect(FrameworkElement content, string[] spectrumKeys)
+    {
+        if (spectrumKeys.Length == 0) throw new InvalidOperationException("The settings fixture must include spectrum tuning fields.");
+        if (Walk(content).OfType<Expander>().Any(expander => HeaderText(expander).Contains("频谱高级调节", StringComparison.Ordinal)))
+            throw new InvalidOperationException("Spectrum tuning fields are still hidden inside an Expander.");
+        var realized = 0;
+        foreach (var key in spectrumKeys)
+        {
+            var field = Walk(content).OfType<NumberBox>()
+                .SingleOrDefault(control => AutomationProperties.GetAutomationId(control) == "setting-" + key);
+            if (field is null || field.ActualWidth <= 0 || field.ActualHeight <= 0 || Ancestor<Expander>(field) is not null)
+                throw new InvalidOperationException($"Spectrum field is not directly realized: {key}.");
+            realized++;
+        }
+        return realized;
+    }
+    private static async Task<object> AssertOverlayDrawerAsync(SettingsWindow window, FrameworkElement content, ScrollViewer scroll)
+    {
+        var split = Walk(content).OfType<SplitView>().Single(item => Equals(item.Tag, "settings-split"));
+        var host = Walk(content).OfType<Grid>().Single(grid => Equals(grid.Tag, "settings-content-host"));
+        var widthBefore = host.ActualWidth;
+        window.OpenModuleProperties("native_0");
+        await SettleAsync(content);
+        var pane = split.Pane as FrameworkElement;
+        if (!split.IsPaneOpen || pane is null || pane.ActualWidth <= 0 || pane.ActualHeight <= 0)
+            throw new InvalidOperationException("Opening a module did not realize the overlay property drawer.");
+        var paneOrigin = pane.TransformToVisual(scroll).TransformPoint(new Point(0, 0));
+        var bar = VerticalBar(scroll);
+        var barOrigin = bar?.TransformToVisual(scroll).TransformPoint(new Point(0, 0));
+        if (barOrigin is not null && paneOrigin.X > barOrigin.Value.X + 1)
+            throw new InvalidOperationException("The property drawer does not cover the right-edge scrollbar.");
+        if (Math.Abs(host.ActualWidth - widthBefore) > 1)
+            throw new InvalidOperationException("Opening the overlay property drawer shifted the main content width.");
+        window.ShowPage("taskbar");
+        await SettleAsync(content);
+        return new
+        {
+            overlay = true,
+            paneWidth = pane.ActualWidth,
+            paneX = paneOrigin.X,
+            contentWidthBefore = widthBefore,
+            contentWidthAfter = host.ActualWidth,
+            scrollbarCovered = true
+        };
+    }
+    private sealed record ReorderRowMetrics(Thickness Padding, double ColumnSpacing, double MinHeight, string Handle, string Menu);
+    private static ReorderRowMetrics AssertReorderRows(IReadOnlyList<Border> rows)
+    {
+        if (rows.Count == 0) throw new InvalidOperationException("The reorder list has no realized rows.");
+        var metrics = rows.Select(AssertReorderRow).ToArray();
+        if (metrics.Any(item => item.Padding != metrics[0].Padding || Math.Abs(item.ColumnSpacing - metrics[0].ColumnSpacing) > .01 ||
+            Math.Abs(item.MinHeight - metrics[0].MinHeight) > .01 || item.Handle != metrics[0].Handle || item.Menu != metrics[0].Menu))
+            throw new InvalidOperationException("Reorder rows do not share consistent row metrics and compact controls.");
+        return metrics[0];
+    }
+    private static ReorderRowMetrics AssertReorderRow(Border surface)
+    {
+        var row = Walk(surface).OfType<Grid>().Single(grid => Equals(grid.Tag, "SourcePriorityRowContent") || Equals(grid.Tag, "CardPriorityRowContent"));
+        var handle = Walk(surface).OfType<PointerDragButton>().Single();
+        var toggle = Walk(surface).OfType<ToggleSwitch>().Single();
+        var more = Walk(surface).OfType<Button>().Single(button => button.Flyout is not null);
+        var labels = Walk(surface).OfType<StackPanel>().FirstOrDefault(panel => Walk(panel).OfType<TextBlock>().Count() >= 2);
+        if (Math.Abs(handle.Width - 32) > .01 || Math.Abs(handle.Height - 36) > .01 ||
+            Walk(handle).OfType<Microsoft.UI.Xaml.Shapes.Ellipse>().Count() != 6 ||
+            toggle.ActualWidth <= 0 || labels is null || labels.ActualWidth <= 0 ||
+            Math.Abs(more.Width - 36) > .01 || Math.Abs(more.Height - 36) > .01)
+            throw new InvalidOperationException($"A reorder row is missing its six-dot handle, labels, switch or compact menu: tag={surface.Tag}, handle={handle.Width:F1}x{handle.Height:F1}, dots={Walk(handle).OfType<Microsoft.UI.Xaml.Shapes.Ellipse>().Count()}, toggle={toggle.ActualWidth:F1}x{toggle.ActualHeight:F1}, labels={(labels is null ? "null" : $"{labels.ActualWidth:F1}x{labels.ActualHeight:F1}")}, menu={more.Width:F1}x{more.Height:F1}.");
+        return new ReorderRowMetrics(row.Padding, row.ColumnSpacing, row.MinHeight, $"{handle.Width:0}x{handle.Height:0}", $"{more.Width:0}x{more.Height:0}");
+    }
+    private static object AssertUnifiedReorderRows(IReadOnlyList<Border> cards, ReorderRowMetrics sourceMetrics)
+    {
+        if (cards.Count == 0) throw new InvalidOperationException("The quick-card reorder list has no realized rows.");
+        var cardMetrics = AssertReorderRows(cards);
+        if (sourceMetrics.Padding != cardMetrics.Padding || Math.Abs(sourceMetrics.ColumnSpacing - cardMetrics.ColumnSpacing) > .01 ||
+            Math.Abs(sourceMetrics.MinHeight - cardMetrics.MinHeight) > .01)
+            throw new InvalidOperationException("Quick-card and source rows do not share the same spacing and row metrics.");
+        return new
+        {
+            padding = cardMetrics.Padding.ToString(),
+            columnSpacing = cardMetrics.ColumnSpacing,
+            minHeight = cardMetrics.MinHeight,
+            handle = cardMetrics.Handle,
+            menu = cardMetrics.Menu,
+            unified = true
+        };
+    }
+    private static string DescribeCardCell(Border cell)
+    {
+        var row = Walk(cell).OfType<Grid>().FirstOrDefault(grid => Equals(grid.Tag, "CardPriorityRowContent"));
+        var labels = row is null ? null : Walk(row).OfType<StackPanel>().FirstOrDefault(panel => Walk(panel).OfType<TextBlock>().Count() >= 2);
+        var toggle = Walk(cell).OfType<ToggleSwitch>().FirstOrDefault();
+        var more = Walk(cell).OfType<Button>().FirstOrDefault(button => button.Flyout is not null);
+        var text = labels is null ? "" : string.Join("/", Walk(labels).OfType<TextBlock>().Select(item => $"{item.Text}:{item.ActualWidth:F1}x{item.ActualHeight:F1}"));
+        return $"{cell.Tag}={cell.ActualHeight:F2} w={cell.ActualWidth:F1} row={(row?.ActualWidth ?? 0):F1}x{(row?.ActualHeight ?? 0):F1} " +
+            $"labels={(labels?.ActualWidth ?? 0):F1}x{(labels?.ActualHeight ?? 0):F1} text=[{text}] toggle={(toggle?.ActualWidth ?? 0):F1}x{(toggle?.ActualHeight ?? 0):F1} menu={(more?.ActualWidth ?? 0):F1}x{(more?.ActualHeight ?? 0):F1}";
+    }
+    private static string HeaderText(Expander expander) => expander.Header switch
+    {
+        string text => text,
+        TextBlock block => block.Text,
+        _ => expander.Header?.ToString() ?? ""
+    };
     private static T? Ancestor<T>(DependencyObject item) where T : DependencyObject
     {
         for (var parent = VisualTreeHelper.GetParent(item); parent is not null; parent = VisualTreeHelper.GetParent(parent)) if (parent is T match) return match;
         return null;
     }
-    private static object[] CheckBoxes(DependencyObject root)
+    private static object[] Toggles(DependencyObject root)
     {
         var checks = new List<object>();
-        foreach (var box in Walk(root).OfType<CheckBox>().Where(box => box.ActualWidth > 0 && box.ActualHeight > 0 && box.Content is string))
+        foreach (var toggle in Walk(root).OfType<ToggleSwitch>().Where(toggle => toggle.ActualWidth > 0 && toggle.ActualHeight > 0))
         {
-            if (box.ActualHeight < 32 || box.Padding.Left < 6) throw new InvalidOperationException("Checkbox native spacing is compressed.");
-            var glyph = Walk(box).OfType<FrameworkElement>().FirstOrDefault(element => element.Name == "NormalRectangle");
-            var text = Walk(box).OfType<ContentPresenter>().FirstOrDefault(element => element.Name == "ContentPresenter");
-            double? gap = null, centerDifference = null;
-            if (glyph is not null && text is not null && glyph.ActualWidth > 0 && text.ActualWidth > 0)
-            {
-                var glyphPoint = glyph.TransformToVisual(box).TransformPoint(new Point(0, 0));
-                var textPoint = text.TransformToVisual(box).TransformPoint(new Point(0, 0));
-                gap = textPoint.X - glyphPoint.X - glyph.ActualWidth;
-                centerDifference = Math.Abs(textPoint.Y + text.ActualHeight / 2 - glyphPoint.Y - glyph.ActualHeight / 2);
-                if (gap < 6 || centerDifference > 4) throw new InvalidOperationException("Checkbox glyph and caption are not aligned with native spacing.");
-            }
-            checks.Add(new { label = box.Content.ToString(), id = AutomationProperties.GetAutomationId(box), width = box.ActualWidth, height = box.ActualHeight, gap, centerDifference });
+            if (toggle.ActualHeight < 32) throw new InvalidOperationException("ToggleSwitch native spacing is compressed.");
+            checks.Add(new { label = AutomationProperties.GetName(toggle), id = AutomationProperties.GetAutomationId(toggle), width = toggle.ActualWidth, height = toggle.ActualHeight });
         }
-        if (checks.Count == 0) throw new InvalidOperationException("No realized settings checkbox was found.");
+        if (Walk(root).OfType<CheckBox>().Any(box => box.ActualWidth > 0 && box.ActualHeight > 0))
+            throw new InvalidOperationException("Settings must not expose visible CheckBox controls.");
+        if (checks.Count == 0) throw new InvalidOperationException("No realized settings ToggleSwitch was found.");
         return checks.ToArray();
     }
     private static IEnumerable<DependencyObject> Walk(DependencyObject root)

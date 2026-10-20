@@ -60,6 +60,10 @@
     <Style x:Key="SettingsInsertion" TargetType="Border">
         <Setter Property="Background" Value="{ThemeResource AccentFillColorDefaultBrush}" />
     </Style>
+    <Style x:Key="SettingsDropPlaceholder" TargetType="Border" BasedOn="{StaticResource SettingsStroke}">
+        <Setter Property="Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource ControlStrokeColorSecondaryBrush}" />
+    </Style>
     <!-- Card windows are shown before their first composition frame is
          committed; a themed fill keeps that surface from flashing the raw
          window client area, while Mica stays visible outside the card. -->

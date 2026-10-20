@@ -111,7 +111,7 @@ GitHub 的干净 ZIP 不带任何个人配置或历史。本地个人 build 已�
 .\scripts\test-ui-templates.ps1
 ```
 
-`test-ui-templates.ps1` 要求正式包中的应用 PRI 与 App.xbf 存在；每次发布也会校验其与本次生成资源的哈希。它使用模拟配置检查宽窄布局、预览和复选框间距，将不含系统 Mica 的控件图写入包内 `ui-layout-check/`，并验证卡片隐藏／重开／销毁竞态。构造成功或无参数启动成功都不能替代模板加载检查。
+`test-ui-templates.ps1` 要求正式包中的应用 PRI 与 App.xbf 存在；每次发布也会校验其与本次生成资源的哈希。它使用模拟配置检查宽窄布局、预览和标准开关，将不含系统 Mica 的控件图写入包内 `ui-layout-check/`，并验证卡片隐藏／重开／销毁竞态。构造成功或无参数启动成功都不能替代模板加载检查。
 
 `scripts/package-release.ps1` 从完整构建制作干净 ZIP、`SHA256SUMS.txt` 和 `update.json`，ZIP 内含逐文件 `app-files.json`。正式上传必须使用已提交的源代码状态，保留第三方许可证并排除个人配置、历史和检查产物。发布先创建 draft、上传全部附件，再下载核对大小、ZIP SHA-256 与清单哈希，确认一致后才公开为正式 Release；缺少更新元数据的附件不能供应用内安装。`-AllowDirtyLocal` 仅用于明确标记的本地交付，不作为正式发布替代。具体步骤见[更新协议的发布流程](docs/更新协议.md#发布流程)。
 

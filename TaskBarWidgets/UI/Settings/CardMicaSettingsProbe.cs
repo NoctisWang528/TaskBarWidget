@@ -13,6 +13,8 @@ public sealed partial class SettingsWindow
     {
         var clampedLow = CardMicaTuning.FromUserValues(-10, -10);
         var clampedHigh = CardMicaTuning.FromUserValues(110, 110);
+        var endpoints = (CardMicaTuning.FromUserValues(0, 100), CardMicaTuning.FromUserValues(100, 0));
+        var nonFinite = CardMicaTuning.FromValues(double.NaN, double.PositiveInfinity);
         var darkEdge = CardMicaTuning.FromValues(
             CardMicaTuning.MinimumTintOpacity,
             CardMicaTuning.MinimumLuminosityOpacity);
@@ -28,6 +30,9 @@ public sealed partial class SettingsWindow
             Math.Abs(darkEdge.LuminosityOpacityFor(true) - CardMicaTuning.MinimumLuminosityOpacity) > 0.0001 ||
             Math.Abs(missingLuminosity.TintOpacity - 0.08) > 0.0001 ||
             Math.Abs(missingLuminosity.LuminosityOpacity - CardMicaTuning.DefaultDarkLuminosityOpacity) > 0.0001 ||
+            !endpoints.Item1.Matches(CardMicaTuning.FromValues(0, 0)) ||
+            !endpoints.Item2.Matches(CardMicaTuning.FromValues(1, 1)) ||
+            !nonFinite.Matches(CardMicaTuning.FromValues(CardMicaTuning.DefaultTintOpacity, CardMicaTuning.DefaultLuminosityOpacity)) ||
             Math.Abs(CardMicaTuning.DefaultFor(false).TintOpacity - 0.45) > 0.0001 ||
             Math.Abs(CardMicaTuning.DefaultFor(false).LuminosityOpacity - 0.85) > 0.0001 ||
             Math.Abs(CardMicaTuning.DefaultFor(true).TintOpacityFor(true) - 0.43) > 0.0001 ||
@@ -62,6 +67,8 @@ public sealed partial class SettingsWindow
                 WalkTheme(material).OfType<ComboBox>().Any() ||
                 WalkTheme(material).OfType<Viewbox>().Any())
                 throw new InvalidOperationException("The material section still contains preset or mock-preview UI.");
+            if (tint.Minimum != 0 || tint.Maximum != 100 || transparency.Minimum != 0 || transparency.Maximum != 100)
+                throw new InvalidOperationException("Card Mica sliders do not expose the full 0-100% range.");
             if (Math.Abs(tint.Value - 34) > 0.01 || Math.Abs(transparency.Value - 50) > 0.01)
                 throw new InvalidOperationException("Mica controls did not load the persisted draft values.");
 
@@ -88,6 +95,17 @@ public sealed partial class SettingsWindow
                 throw new InvalidOperationException("The settings window did not enter the saved Mica preview.");
             if (events.Count == 0 || events[^1].Preview is null)
                 throw new InvalidOperationException("Entering the quick-card page did not raise a Mica preview.");
+
+            tint.Value = 0;
+            transparency.Value = 100;
+            await Task.Delay(80);
+            if (!window.DraftCardMicaTuning.Matches(CardMicaTuning.FromValues(0, 0)))
+                throw new InvalidOperationException("The Mica lower endpoints were not accepted.");
+            tint.Value = 100;
+            transparency.Value = 0;
+            await Task.Delay(80);
+            if (!window.DraftCardMicaTuning.Matches(CardMicaTuning.FromValues(1, 1)))
+                throw new InvalidOperationException("The Mica upper endpoints were not accepted.");
 
             var eventCount = events.Count;
             tint.Value = 8;

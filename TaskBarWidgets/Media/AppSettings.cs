@@ -78,10 +78,10 @@ public sealed class AppSettings
     public const double DefaultCardMicaTintOpacity = 0.45;
     public const double DefaultCardMicaLuminosityOpacity = 0.85;
     public const double DefaultDarkCardMicaLuminosityOpacity = 0.50;
-    public const double MinimumCardMicaTintOpacity = 0.05;
-    public const double MaximumCardMicaTintOpacity = 0.45;
-    public const double MinimumCardMicaLuminosityOpacity = 0.15;
-    public const double MaximumCardMicaLuminosityOpacity = 0.85;
+    public const double MinimumCardMicaTintOpacity = 0;
+    public const double MaximumCardMicaTintOpacity = 1;
+    public const double MinimumCardMicaLuminosityOpacity = 0;
+    public const double MaximumCardMicaLuminosityOpacity = 1;
 
     public const double DefaultWindowWidth = 420;
     public const double MinimumWindowWidth = 100;
