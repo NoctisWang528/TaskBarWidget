@@ -14,6 +14,10 @@ public sealed partial class CardGroup
     private const double WeatherCardDesignHeight = 176;
     private const double WeatherAlertMaxHeight = 54;
     private const int WeatherForecastRows = 5;
+    private const double WeatherTemperatureMaxFont = 48;
+    private const double WeatherTemperatureMinFont = 26;
+    private const double WeatherIconSize = 42;
+    private const double WeatherIconGap = 6;
     private static readonly string[] WeatherDayLabels = ["今天", "明天", "后天", "周四", "周五"];
 
     internal Button _weatherRefresh = CreateWeatherRefreshButton();
@@ -27,10 +31,12 @@ public sealed partial class CardGroup
     internal TextBlock _weatherTemperature = new()
     {
         FontFamily = WeatherFontFamily,
-        FontSize = 48,
+        FontSize = WeatherTemperatureMaxFont,
         FontWeight = Microsoft.UI.Text.FontWeights.Light,
         LineHeight = 52,
-        MaxLines = 1
+        MaxLines = 1,
+        HorizontalAlignment = HorizontalAlignment.Left,
+        VerticalAlignment = VerticalAlignment.Center
     };
     internal TextBlock _weatherCity = new()
     {
@@ -96,7 +102,10 @@ public sealed partial class CardGroup
         TextWrapping = TextWrapping.Wrap,
         TextTrimming = TextTrimming.CharacterEllipsis
     };
-    private readonly PathIcon _weatherIcon = CreateWeatherIcon(42);
+    private FrameworkElement _weatherIcon = WeatherIconArt.Build("unknown", false, WeatherIconSize, true);
+    private string _weatherIconKind = "unknown";
+    private bool _weatherIconNight;
+    private readonly ColumnDefinition _weatherTemperatureColumn = new() { Width = new GridLength(1, GridUnitType.Star) };
     private readonly Grid _weatherCurrentRow = new()
     {
         MinHeight = 58,
@@ -105,8 +114,9 @@ public sealed partial class CardGroup
     private readonly StackPanel _weatherSummary = new() { Spacing = 1, HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly Grid _weatherIconHost = new()
     {
-        Width = 42,
-        Height = 42,
+        Width = WeatherIconSize,
+        Height = WeatherIconSize,
+        Margin = new Thickness(WeatherIconGap, 0, 0, 0),
         HorizontalAlignment = HorizontalAlignment.Left,
         VerticalAlignment = VerticalAlignment.Center
     };
@@ -137,7 +147,12 @@ public sealed partial class CardGroup
             ShowWeatherAlert((_weatherAlertIndex + 1) % _weatherAlerts.Children.Count);
         };
         _weatherSettings.Visibility = Visibility.Collapsed;
-        _weatherContent.ActualThemeChanged += (_, _) => RenderWeatherModules();
+        _weatherContent.ActualThemeChanged += (_, _) =>
+        {
+            RenderWeatherIcon();
+            FitWeatherTemperature();
+            RenderWeatherModules();
+        };
         AutomationProperties.SetName(_weatherRefresh, "刷新天气");
         AutomationProperties.SetName(_weatherSettings, "打开天气设置");
 
@@ -172,11 +187,12 @@ public sealed partial class CardGroup
         Grid.SetRow(_weatherLocationRow, 0);
         _weatherLeft.Children.Add(_weatherLocationRow);
 
-        _weatherCurrentRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        _weatherCurrentRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(42) });
+        _weatherCurrentRow.ColumnDefinitions.Add(_weatherTemperatureColumn);
+        _weatherCurrentRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(WeatherIconSize + WeatherIconGap) });
         Add(_weatherCurrentRow, _weatherTemperature, 0);
         _weatherIconHost.Children.Add(_weatherIcon);
         Add(_weatherCurrentRow, _weatherIconHost, 1);
+        _weatherCurrentRow.SizeChanged += (_, _) => FitWeatherTemperature();
         Grid.SetRow(_weatherCurrentRow, 1);
         _weatherLeft.Children.Add(_weatherCurrentRow);
 
@@ -294,11 +310,14 @@ public sealed partial class CardGroup
         var currentTemperature = String(current, "temperature");
         var temperature = FirstNonEmpty(currentTemperature, String(status, "temperature"));
         _weatherTemperature.Text = NormalizeTemperature(temperature);
+        FitWeatherTemperature();
+        // The first render runs before the row has a width; re-fit once layout has settled.
+        _weatherContent.DispatcherQueue?.TryEnqueue(FitWeatherTemperature);
         _weatherCondition.Text = FirstNonEmpty(String(current, "weather"), String(status, "message"), "天气");
         var observedAt = String(current, "observedAt");
         var isNight = DateTime.TryParse(observedAt, CultureInfo.InvariantCulture, DateTimeStyles.None, out var observedTime) &&
             (observedTime.Hour >= 20 || observedTime.Hour < 6);
-        SetWeatherIcon(_weatherIcon, String(current, "conditionKind", "unknown"), isNight);
+        SetWeatherIcon(String(current, "conditionKind", "unknown"), isNight);
         _weatherStatus.Text = WeatherStatus(status);
         _weatherStatus.Visibility = HasValue(_weatherStatus.Text) ? Visibility.Visible : Visibility.Collapsed;
 
@@ -363,7 +382,7 @@ public sealed partial class CardGroup
             label.VerticalAlignment = VerticalAlignment.Center;
             Add(rowGrid, label, 0);
 
-            var icon = CreateWeatherIcon(28, String(day, "conditionDayKind", "unknown"));
+            var icon = WeatherIconArt.Build(String(day, "conditionDayKind", "unknown"), false, 28, IsLightTheme);
             Add(rowGrid, icon, 1);
 
             var min = Text(NormalizeTemperature(String(day, "min")), 11);
@@ -536,32 +555,47 @@ public sealed partial class CardGroup
     private static string FirstNonEmpty(params string[] values) => values.FirstOrDefault(HasValue) ?? "";
     private static bool HasValue(string? value) => !string.IsNullOrWhiteSpace(value) && value != "--";
 
-    private static PathIcon CreateWeatherIcon(double size, string kind = "", bool night = false) => new()
-    {
-        Width = size,
-        Height = size,
-        Data = WeatherIconGeometry.Get(WeatherIconGlyph(kind, night), size),
-        HorizontalAlignment = HorizontalAlignment.Left,
-        VerticalAlignment = VerticalAlignment.Center
-    };
+    private bool IsLightTheme => _weatherContent.ActualTheme != ElementTheme.Dark;
 
-    private static void SetWeatherIcon(PathIcon icon, string kind, bool night) =>
-        icon.Data = WeatherIconGeometry.Get(WeatherIconGlyph(kind, night), icon.Width);
-
-    private static string WeatherIconGlyph(string kind, bool night) => kind.ToLowerInvariant() switch
+    private void SetWeatherIcon(string kind, bool night)
     {
-        "clear" => night ? "\uF106" : "\uF101",
-        "partly-cloudy" => night ? "\uF108" : "\uF103",
-        "overcast" => "\uF105",
-        "rain" => "\uF10F",
-        "drizzle" => "\uF110",
-        "snow" => "\uF120",
-        "sleet" => "\uF124",
-        "fog" => "\uF12F",
-        "haze" => "\uF130",
-        "dust" => "\uF131",
-        "thunder" => "\uF10C",
-        "wind" => "\uF146",
-        _ => "\uF102"
-    };
+        var normalized = WeatherIconArt.Normalize(kind);
+        if (normalized == _weatherIconKind && night == _weatherIconNight && _weatherIconHost.Children.Count > 0) return;
+        _weatherIconKind = normalized;
+        _weatherIconNight = night;
+        RenderWeatherIcon();
+    }
+
+    private void RenderWeatherIcon()
+    {
+        var icon = WeatherIconArt.Build(_weatherIconKind, _weatherIconNight, WeatherIconSize, IsLightTheme);
+        _weatherIconHost.Children.Clear();
+        _weatherIconHost.Children.Add(icon);
+        _weatherIcon = icon;
+    }
+
+    // The hero temperature keeps the 48 DIP emphasis whenever it fits, but a one-decimal
+    // value such as "18.3°" is wider than its column at full size. Shrinking to the measured
+    // width guarantees the number never runs under the icon, which used to overlap the
+    // degree symbol because the icon is painted after the text in the same Grid.
+    private void FitWeatherTemperature()
+    {
+        if (_disposed) return;
+        var available = _weatherTemperatureColumn.ActualWidth;
+        if (available <= 0 || string.IsNullOrEmpty(_weatherTemperature.Text)) return;
+        ApplyTemperatureFont(WeatherTemperatureMaxFont);
+        _weatherTemperature.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+        var width = _weatherTemperature.DesiredSize.Width;
+        if (width <= available || width <= 0) return;
+        ApplyTemperatureFont(Math.Max(WeatherTemperatureMinFont,
+            Math.Floor(WeatherTemperatureMaxFont * available / width)));
+    }
+
+    // The line height follows the font so a shrunk value keeps the same vertical rhythm
+    // instead of floating at the top of a 52 DIP line box.
+    private void ApplyTemperatureFont(double size)
+    {
+        _weatherTemperature.FontSize = size;
+        _weatherTemperature.LineHeight = Math.Round(size * 52 / WeatherTemperatureMaxFont, 1);
+    }
 }

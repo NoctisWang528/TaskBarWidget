@@ -980,10 +980,15 @@
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="TrafficMonitor.rc" />
+    <ResourceCompile Include="defaults.rc" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\LICENSE" />
     <None Include="..\LICENSE_CN" />
+    <None Include="defaults\config.default.ini" />
+    <None Include="defaults\Battery.dll.default.ini" />
+    <None Include="defaults\PowerMonPlugin.dll.default.ini" />
+    <None Include="defaults\WeatherPro.default.ini" />
     <None Include="language\English.ini" />
     <None Include="language\Simplified_Chinese.ini" />
     <None Include="language\Traditional_Chinese.ini" />
@@ -1043,6 +1048,14 @@
       <AdditionalIncludeDirectories>$(ProjectDir)..\Obj\ProductVersion;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
   </ItemDefinitionGroup>
+  <!-- The resource compiler only tracks the .rc file, so a changed factory default
+       would otherwise be missed by an incremental build. Touch the .rc when a
+       default changes so the embedded resource bytes stay in sync. -->
+  <Target Name="TouchDefaultConfigResource" BeforeTargets="ResourceCompile"
+          Inputs="defaults\config.default.ini;defaults\Battery.dll.default.ini;defaults\PowerMonPlugin.dll.default.ini;defaults\WeatherPro.default.ini"
+          Outputs="defaults.rc">
+    <Touch Files="defaults.rc" AlwaysCreate="false" />
+  </Target>
   <Import Project="..\Builtins\Builtins.props" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

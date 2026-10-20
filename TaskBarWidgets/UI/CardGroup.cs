@@ -572,6 +572,8 @@ public sealed partial class CardGroup : IDisposable
             {
                 _cardFontFamily = new FontFamily(family);
                 ApplyCardFont(_slots.Values.Select(slot => slot.Content).Append(_updateCard.Content));
+                FitWeatherTemperature();
+                RefreshWeatherLayout();
             }
         }
         _onDemand = value.TryGetProperty("resourceMode", out var mode) && string.Equals(mode.GetString(), "OnDemand", StringComparison.OrdinalIgnoreCase);

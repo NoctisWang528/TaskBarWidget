@@ -1,0 +1,209 @@
+{
+  "UseFloatingWindow": false,
+  "SourceRecognitionOrder": [
+    "QQMusic",
+    "Netease",
+    "Kugou",
+    "Spotify",
+    "Browser"
+  ],
+  "EnableNetease": true,
+  "EnableQQMusic": true,
+  "EnableKugou": true,
+  "EnableSpotify": true,
+  "EnableBrowser": true,
+  "PlayerSources": {
+    "QQMusic": {
+      "LyricOffsetMilliseconds": 0,
+      "LyricProviders": [
+        {
+          "ProviderId": "QQMusic",
+          "Enabled": true
+        },
+        {
+          "ProviderId": "Kugou",
+          "Enabled": true
+        },
+        {
+          "ProviderId": "Netease",
+          "Enabled": true
+        },
+        {
+          "ProviderId": "LRCLIB",
+          "Enabled": true
+        }
+      ]
+    },
+    "Netease": {
+      "LyricOffsetMilliseconds": 0,
+      "LyricProviders": [
+        {
+          "ProviderId": "QQMusic",
+          "Enabled": true
+        },
+        {
+          "ProviderId": "Kugou",
+          "Enabled": true
+        },
+        {
+          "ProviderId": "Netease",
+          "Enabled": true
+        },
+        {
+          "ProviderId": "LRCLIB",
+          "Enabled": true
+        }
+      ]
+    },
+    "Kugou": {
+      "LyricOffsetMilliseconds": 0,
+      "LyricProviders": [
+        {
+          "ProviderId": "QQMusic",
+          "Enabled": true
+        },
+        {
+          "ProviderId": "Kugou",
+          "Enabled": true
+        },
+        {
+          "ProviderId": "Netease",
+          "Enabled": true
+        },
+        {
+          "ProviderId": "LRCLIB",
+          "Enabled": true
+        }
+      ]
+    },
+    "Spotify": {
+      "LyricOffsetMilliseconds": 0,
+      "LyricProviders": [
+        {
+          "ProviderId": "QQMusic",
+          "Enabled": true
+        },
+        {
+          "ProviderId": "Kugou",
+          "Enabled": true
+        },
+        {
+          "ProviderId": "Netease",
+          "Enabled": true
+        },
+        {
+          "ProviderId": "LRCLIB",
+          "Enabled": true
+        }
+      ]
+    },
+    "Browser": {
+      "LyricOffsetMilliseconds": 0,
+      "LyricProviders": [
+        {
+          "ProviderId": "QQMusic",
+          "Enabled": true
+        },
+        {
+          "ProviderId": "Kugou",
+          "Enabled": true
+        },
+        {
+          "ProviderId": "Netease",
+          "Enabled": true
+        },
+        {
+          "ProviderId": "LRCLIB",
+          "Enabled": true
+        }
+      ]
+    }
+  },
+  "CustomPlayerSources": [],
+  "EnableLocalLyrics": true,
+  "LocalMusicFolders": [],
+  "ShowLyricsOnStartup": true,
+  "AutoHideWhenNoPlayback": true,
+  "StartWithWindows": false,
+  "AutoCheckUpdates": false,
+  "ProductAutomaticUpdatesEnabled": true,
+  "QuickCardOrder": [
+    "traffic",
+    "device",
+    "media",
+    "weather"
+  ],
+  "QuickCardColumns": {
+    "traffic": 0,
+    "device": 0,
+    "media": 0,
+    "weather": 1
+  },
+  "QuickCardEnabled": {
+    "weather": true,
+    "traffic": true,
+    "device": true,
+    "media": true
+  },
+  "QuickCardResourceMode": 0,
+  "CardFontFamily": "Microsoft YaHei UI",
+  "CardMicaTintOpacity": 1,
+  "CardMicaLuminosityOpacity": 1,
+  "LastUpdateCheckUtc": null,
+  "LastNotifiedUpdateVersion": "",
+  "ShowLyricTranslation": true,
+  "EnableWordScanning": true,
+  "ToolWindowTheme": 0,
+  "SpectrumDisplayMode": 0,
+  "SpectrumAudioAccessGranted": false,
+  "SpectrumTuning": {
+    "SampleWindow": 2048,
+    "UpdateIntervalMs": 16,
+    "BarCount": 32,
+    "MinFrequency": 28,
+    "MaxFrequency": 4000,
+    "FrequencyDistributionBias": 0,
+    "PeakInitial": 0.06,
+    "PeakDecay": 0.85,
+    "PeakFloor": 0.012,
+    "PeakCeiling": 0.8,
+    "NoiseFloor": 0,
+    "OutputCurve": 1.5,
+    "LowBandGain": 1.2,
+    "BandGainStep": 0.05,
+    "FrequencyWeightBase": 0.92,
+    "FrequencyWeightSlope": 0.01,
+    "BackendAttack": 0.86,
+    "BackendRelease": 0.48,
+    "FrontendRise": 0.7,
+    "FrontendFall": 0.35,
+    "MinBarHeight": 6,
+    "BarHeightRange": 26,
+    "BarOpacity": 0.8
+  },
+  "UseSafeFontSizeRange": true,
+  "FontSize": 14,
+  "UseSafeCoverSizeRange": true,
+  "CoverSize": 34,
+  "CoverGap": 8,
+  "CoverCornerRadius": 6,
+  "ShowCover": true,
+  "LyricsLayoutScalePercent": 100,
+  "FontFamily": "Microsoft YaHei UI",
+  "FontWeight": "Medium",
+  "ForegroundColorMode": 3,
+  "ForegroundColor": "#FFFFFFFF",
+  "ShowBackground": false,
+  "BackgroundOpacity": 0.55,
+  "ShowBorder": false,
+  "ShowTextShadow": false,
+  "WindowWidth": 420,
+  "HorizontalAnchor": 0,
+  "LyricsTextAlignment": 0,
+  "CoverPosition": 0,
+  "XOffset": 0,
+  "YOffset": 0,
+  "ForceAlwaysOnTop": true,
+  "LyricsDisplayMode": 0,
+  "SelectedDisplayIds": []
+}

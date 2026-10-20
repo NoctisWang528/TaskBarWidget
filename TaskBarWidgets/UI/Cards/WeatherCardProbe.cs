@@ -18,12 +18,12 @@ public sealed partial class CardGroup
             updating = false,
             state = "ready",
             message = "",
-            temperature = "23",
+            temperature = "18.3",
             city = new { id = "101190101", name = "南京", region = "南京-江苏" },
             lastSuccessCity = new { id = "101190101", name = "南京" },
             details = new
             {
-                current = new { temperature = "23", feelsLike = "22", weather = "晴", conditionKind = "clear", humidity = "55", windDirection = "东北", windScale = "3", windSpeed = "12", observedAt = "2026-10-19 17:00" },
+                current = new { temperature = "18.3", feelsLike = "22", weather = "多云", conditionKind = "partly-cloudy", humidity = "55", windDirection = "东北", windScale = "3", windSpeed = "12", observedAt = "2026-10-19 17:00" },
                 forecast = new[]
                 {
                     new { min = "19", max = "25", weatherDay = "晴", weatherNight = "多云", conditionDayKind = "clear", conditionNightKind = "partly-cloudy" },
@@ -57,30 +57,38 @@ public sealed partial class CardGroup
             await UiLayoutProbe.CaptureAsync(card.Root, imagePath);
             images.Add(new { theme = theme.ToString(), imagePath });
         }
-        if (cards._weatherTemperature.Text != "23°" || cards._weatherCity.Text != "南京")
+        if (cards._weatherTemperature.Text != "18.3°" || cards._weatherCity.Text != "南京")
             throw new InvalidOperationException("Weather card did not render the normalized current snapshot.");
         if (cards._weatherForecast.Children.Count != 5 || cards._weatherForecast.RowDefinitions.Count != 5)
             throw new InvalidOperationException("Weather card did not reserve the five-row Apple-style forecast.");
-        if (cards._weatherIcon.Width != 42 || cards._weatherIcon.Height != 42)
+        if (cards._weatherIcon is not Viewbox { Width: 42, Height: 42 })
             throw new InvalidOperationException("Weather current icon is not the compact hero size.");
-        var expectedWeatherIconBounds = WeatherIconGeometry.Get("\uF101", cards._weatherIcon.Width).Bounds;
-        var actualWeatherIconBounds = cards._weatherIcon.Data?.Bounds ?? default;
-        if (actualWeatherIconBounds.X != expectedWeatherIconBounds.X ||
-            actualWeatherIconBounds.Y != expectedWeatherIconBounds.Y ||
-            actualWeatherIconBounds.Width != expectedWeatherIconBounds.Width ||
-            actualWeatherIconBounds.Height != expectedWeatherIconBounds.Height)
-            throw new InvalidOperationException("Daytime clear weather did not use the daytime icon.");
-        if (actualWeatherIconBounds.X < 0 || actualWeatherIconBounds.Y < 0 ||
-            actualWeatherIconBounds.Right > cards._weatherIcon.Width ||
-            actualWeatherIconBounds.Bottom > cards._weatherIcon.Height)
-            throw new InvalidOperationException("Weather icon geometry is clipped by its PathIcon viewport.");
-        foreach (var glyph in WeatherIconGeometry.Glyphs)
-            foreach (var size in new[] { 28d, 42d })
-            {
-                var bounds = WeatherIconGeometry.Get(glyph, size).Bounds;
-                if (bounds.X < 0 || bounds.Y < 0 || bounds.Right > size || bounds.Bottom > size)
-                    throw new InvalidOperationException($"Weather icon {glyph} is clipped at {size} DIP.");
-            }
+        var lightColors = IconColors(cards._weatherIcon);
+        if (lightColors.Count < 3)
+            throw new InvalidOperationException("Weather icon is not a multi-color symbol.");
+        AssertTemperatureFitsColumn(cards, "A one-decimal temperature does not fit its column.");
+
+        card.Root.RequestedTheme = ElementTheme.Dark;
+        await Task.Delay(120);
+        card.Root.UpdateLayout();
+        var darkColors = IconColors(cards._weatherIcon);
+        if (darkColors.Count < 3 || darkColors.SetEquals(lightColors))
+            throw new InvalidOperationException("The weather icon did not switch to the dark palette.");
+        card.Root.RequestedTheme = ElementTheme.Light;
+        await Task.Delay(120);
+        card.Root.UpdateLayout();
+        AssertTemperatureFitsColumn(cards, "The weather temperature stopped fitting after a theme change.");
+
+        var integerStatus = JsonNode.Parse(status.GetRawText())!.AsObject();
+        integerStatus["revision"] = 43;
+        integerStatus["details"]!["current"]!["temperature"] = "23";
+        cards.RenderWeather(JsonSerializer.SerializeToElement(integerStatus));
+        await Task.Delay(60);
+        card.Root.UpdateLayout();
+        if (cards._weatherTemperature.Text != "23°" || cards._weatherTemperature.FontSize != 48)
+            throw new InvalidOperationException("A short temperature did not keep the full hero size.");
+        AssertTemperatureFitsColumn(cards, "A short temperature does not fit its column.");
+
         if (cards._weatherTemperature.FontFamily.Source != "Microsoft YaHei UI")
             throw new InvalidOperationException("Weather text did not use the configured card font.");
         if (cards._weatherAlertsHost.MaxHeight != 54)
@@ -155,5 +163,51 @@ public sealed partial class CardGroup
             reenabledCardWindowRecreated = true,
             realNetworkTouched = false
         };
+    }
+
+    private static HashSet<string> IconColors(FrameworkElement icon)
+    {
+        var colors = new HashSet<string>(StringComparer.Ordinal);
+        void Walk(DependencyObject node)
+        {
+            switch (node)
+            {
+                case Microsoft.UI.Xaml.Shapes.Path path:
+                    if (path.Fill is SolidColorBrush fill) colors.Add(fill.Color.ToString());
+                    if (path.Stroke is SolidColorBrush stroke) colors.Add(stroke.Color.ToString());
+                    break;
+                case Microsoft.UI.Xaml.Shapes.Ellipse ellipse when ellipse.Fill is SolidColorBrush ellipseFill:
+                    colors.Add(ellipseFill.Color.ToString());
+                    break;
+                case Microsoft.UI.Xaml.Shapes.Rectangle rectangle when rectangle.Fill is SolidColorBrush rectangleFill:
+                    colors.Add(rectangleFill.Color.ToString());
+                    break;
+            }
+            for (var index = 0; index < VisualTreeHelper.GetChildrenCount(node); index++)
+                Walk(VisualTreeHelper.GetChild(node, index));
+        }
+        Walk(icon);
+        return colors;
+    }
+
+    // TextBlock reports its layout slot, not the width of the glyphs, so the rendered width
+    // is measured with a detached copy that mirrors the live font and text.
+    private static void AssertTemperatureFitsColumn(CardGroup cards, string message)
+    {
+        var live = cards._weatherTemperature;
+        var available = cards._weatherTemperatureColumn.ActualWidth;
+        if (available <= 0) throw new InvalidOperationException("The temperature column has no width.");
+        var probe = new TextBlock
+        {
+            FontFamily = live.FontFamily,
+            FontSize = live.FontSize,
+            FontWeight = live.FontWeight,
+            MaxLines = 1,
+            Text = live.Text
+        };
+        probe.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+        if (probe.DesiredSize.Width > available + 0.5) throw new InvalidOperationException(message);
+        if (live.FontSize < 26 || live.FontSize > 48)
+            throw new InvalidOperationException("The temperature font size left its supported range.");
     }
 }

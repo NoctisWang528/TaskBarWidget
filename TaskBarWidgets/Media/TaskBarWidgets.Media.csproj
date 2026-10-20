@@ -25,6 +25,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Defaults\media-settings.default.json">
+      <LogicalName>media-defaults.json</LogicalName>
+    </EmbeddedResource>
+    <None Remove="Defaults\media-settings.default.json" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Update="Web\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

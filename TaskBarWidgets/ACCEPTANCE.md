@@ -2,6 +2,14 @@
 
 更新：2026-10-20。最近成功完整构建的路径由本机 `artifacts/latest-build.txt` 提供；构建产物、布局检查图、日志和用户配置不提交到仓库。
 
+## 出厂默认配置与彩色天气图标（2026-10-20）
+
+出厂默认配置改为编译期资源，不再依赖代码兜底：`Native/TrafficMonitor/defaults/` 下四个 `*.default.ini`（主配置与 Battery／PowerMon／Weather 三个内置模块）以 TEXT 资源编入 `TaskBarWidgets.exe`，`Media/Defaults/media-settings.default.json` 以嵌入资源编入媒体程序集。首次运行时只对**不存在**的目标文件逐字节写入，写入使用同目录临时文件加无覆盖改名；已有配置在启动、更新和重装路径上都不被读取、合并或覆盖，目录只读时静默回退。默认值已通用化：不写网卡描述（`connection_name`）、CPU 温度传感器名、任务栏字体、窗口位置、城市、凭据与个人路径；`cpu_core_name` 留空时按“平均温度”处理，`hard_disk_name` 为 `_Total`。同时修正 `global_cfg.ini` 首次写入只留 BOM 空文件、导致下次启动误判为非便携的问题。发布脚本、更新器和 `app-files.json` 未改动，默认值不会作为包内文件出现。
+
+天气卡改用两套调色板的分层彩色矢量图标（`UI/Cards/WeatherIconArt.cs`，云体＋云影两层，太阳/月亮/降水按状态组合），替换 `PathIcon` 与 QWeather 字体轮廓，`qweather-icons.ttf` 不再打包；大图标 42 DIP、预报行 28 DIP，主题切换时重绘。当前温度按列宽自适应字号（48→26 DIP）并在图标前保留 6 DIP 间距，修复一位小数温度压住度数符号的问题。
+
+自动验证：`check-factory-defaults.ps1`（编码、禁用键与个人串检查）、`test-default-seeding.ps1`（以数据文件方式打开发布 EXE，验证资源存在、与源文件哈希一致、只创建缺失文件、已修改配置不被覆盖、无临时残留）、`FactoryDefaultsTests`（媒体侧三例）与 `verify.ps1`（含 27 个 Core、158 个 Media、28 个 Web 用例）全部通过；`DefaultSeedingTests.exe` 对新构建 EXE 运行确认 349–352 四个 TEXT 资源已嵌入且与源文件逐字节一致。完整硬件 Release 构建为 `20261020-201506`、版本 `261020-2015`（原生、Media、UI、独立更新器与共享运行库全部通过），`package-release.ps1` 零改动产出干净 ZIP，`app-files.json` 中不含任何 `*.default.ini`、`config.ini`、`media-settings.json` 或 `qweather-icons.ttf`。屏外模板探针本轮未执行：本机日用版本正在运行并占用共享的 `CardWebView2` 配置目录，需先退出日用版本才能完成歌词卡片阶段；因此彩色图标与温度自适应目前为编译与探针断言级证据，卡片观感、混合 DPI 与真实天气数据仍需桌面验收。
+
 ## 天气图标方框修复（2026-10-20）
 
 针对天气卡 QWeather 图标在部分实际合成路径中显示为方框的问题，图标不再通过私有区字体字形渲染，而是使用 QWeather Icons 字体轮廓生成独立矢量路径。当前与五天预报的全部 15 个图标映射保留；几何按 28/42 DIP 目标视口缩放并保留 2 DIP 内边距，避免 `PathIcon` 按原始字体坐标裁切。浅色与深色主题均由 `PathIcon` 自动继承前景色，不依赖运行时字体回退或字形缓存。回归探针检查全部字形在两个目标尺寸下均不越界，并生成当前天气和五天预报的明暗主题截图。完整硬件 Release 构建为 `20261020-135915`、版本 `261020-1359`；原生、Core、Media、Web、更新器、共享运行库和 WinUI 屏外模板探针全部通过，隔离 `CardWindow` 的 `PrintWindow` 捕获也确认图标实际显示。真实桌面天气请求和用户卡片验收仍待完成。

@@ -1,0 +1,8 @@
+// Factory defaults. The native host copies these byte-for-byte only when the
+// target user file does not exist; an existing configuration is never touched.
+#include "resource.h"
+
+IDR_DEFAULT_CONFIG          TEXT  "defaults\\config.default.ini"
+IDR_DEFAULT_BATTERY_INI     TEXT  "defaults\\Battery.dll.default.ini"
+IDR_DEFAULT_POWERMON_INI    TEXT  "defaults\\PowerMonPlugin.dll.default.ini"
+IDR_DEFAULT_WEATHER_INI     TEXT  "defaults\\WeatherPro.default.ini"

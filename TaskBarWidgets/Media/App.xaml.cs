@@ -48,6 +48,7 @@ public partial class App : System.Windows.Application
             var applicationRoot = Directory.GetParent(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar))!.FullName;
             AppDataPaths.ConfigureForApplicationRoot(applicationRoot, _portableData);
             var settingsPath = Path.Combine(AppDataPaths.RootDirectory, "media-settings.json");
+            FactoryDefaults.EnsureSeeded(settingsPath);
             _store = new SettingsStore(settingsPath);
             Settings = _store.Load(IsApplicationUsingLightTheme());
             Settings.UseFloatingWindow = false;

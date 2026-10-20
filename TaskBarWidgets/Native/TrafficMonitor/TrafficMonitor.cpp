@@ -18,6 +18,7 @@
 #include "WindowsSettingHelper.h"
 
 #include "SettingsHelper.h"
+#include "DefaultConfigSeeder.h"
 #include <gdiplus.h>
 
 #ifdef _DEBUG
@@ -78,7 +79,7 @@ void CTrafficMonitorApp::LoadConfig()
     if (m_general_data.monitor_time_span < MONITOR_TIME_SPAN_MIN || m_general_data.monitor_time_span > MONITOR_TIME_SPAN_MAX)
         m_general_data.monitor_time_span = 1000;
     m_general_data.hard_disk_name = ini.GetString(L"general", L"hard_disk_name", L"");
-    m_general_data.cpu_core_name = ini.GetString(L"general", L"cpu_core_name", L"Core Average");
+    m_general_data.cpu_core_name = ini.GetString(L"general", L"cpu_core_name", L"");     //空值表示使用平均温度，与界面语言无关
     m_general_data.hardware_monitor_item = ini.GetInt(L"general", L"hardware_monitor_item", 0);
     std::vector<std::wstring> connections_hide;
     ini.GetStringList(L"general", L"connections_hide", connections_hide, std::vector<std::wstring>{});
@@ -488,6 +489,9 @@ void CTrafficMonitorApp::LoadGlobalConfig()
 
     CIniHelper ini{ global_cfg_path };
     m_general_data.portable_mode = ini.GetBool(L"config", L"portable_mode", portable_mode_default);
+    //写出推导结果，避免首次运行时 ini.Save() 只创建了一个只有 BOM 的空文件，
+    //导致下次启动因“文件已存在”而把 portable_mode 误判为 false。
+    ini.WriteBool(L"config", L"portable_mode", m_general_data.portable_mode);
 
     //执行一次保存操作，以检查当前目录是否有写入权限
     m_module_dir_writable = ini.Save();
@@ -843,6 +847,9 @@ BOOL CTrafficMonitorApp::InitInstance()
     m_config_path = m_config_dir + L"config.ini";
     m_history_traffic_path = m_config_dir + L"history_traffic.dat";
     m_log_path = m_config_dir + L"error.log";
+
+    //首次运行时播种出厂默认配置（含三个内置模块的 INI）。已有配置文件不会被改动。
+    DefaultConfigSeeder::SeedMissingDefaults(m_config_dir);
 
     //#ifndef _DEBUG
     //  //原来的、程序所在目录下的配置文件的路径

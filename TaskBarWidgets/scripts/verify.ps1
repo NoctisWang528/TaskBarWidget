@@ -7,6 +7,7 @@ New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
 Push-Location $productRoot
 try {
     & (Join-Path $PSScriptRoot 'check-boundaries.ps1')
+    & (Join-Path $PSScriptRoot 'check-factory-defaults.ps1')
     & (Join-Path $PSScriptRoot 'import-traffic-history.tests.ps1') *> (Join-Path $logDirectory 'history-import-tests.log')
     Get-Content (Join-Path $logDirectory 'history-import-tests.log') -Tail 1 | Write-Host
     & (Join-Path $productRoot 'Native\tests\run-native-tests.ps1') *> (Join-Path $logDirectory 'native-state-tests.log')
