@@ -76,8 +76,9 @@ public sealed class AppSettings
     public const double MinimumLyricsLayoutScalePercent = 25;
     public const double MaximumLyricsLayoutScalePercent = 300;
     public const double DefaultCardMicaTintOpacity = 0.45;
-    public const double DefaultCardMicaLuminosityOpacity = 0.85;
-    public const double DefaultDarkCardMicaLuminosityOpacity = 0.50;
+    public const double DefaultCardMicaLuminosityOpacity = 0.95;
+    public const double DefaultCardMicaDarkTintOpacity = 0.45;
+    public const double DefaultCardMicaDarkLuminosityOpacity = 0.50;
     public const double MinimumCardMicaTintOpacity = 0;
     public const double MaximumCardMicaTintOpacity = 1;
     public const double MinimumCardMicaLuminosityOpacity = 0;
@@ -163,6 +164,10 @@ public sealed class AppSettings
     public double CardMicaTintOpacity { get; set; } = DefaultCardMicaTintOpacity;
 
     public double CardMicaLuminosityOpacity { get; set; } = DefaultCardMicaLuminosityOpacity;
+
+    public double CardMicaDarkTintOpacity { get; set; } = DefaultCardMicaDarkTintOpacity;
+
+    public double CardMicaDarkLuminosityOpacity { get; set; } = DefaultCardMicaDarkLuminosityOpacity;
 
     public DateTimeOffset? LastUpdateCheckUtc { get; set; }
 
@@ -285,9 +290,9 @@ public sealed class AppSettings
     {
         var settings = new AppSettings();
         settings.CardMicaTintOpacity = DefaultCardMicaTintOpacity;
-        settings.CardMicaLuminosityOpacity = systemUsesLightTheme
-            ? DefaultCardMicaLuminosityOpacity
-            : DefaultDarkCardMicaLuminosityOpacity;
+        settings.CardMicaLuminosityOpacity = DefaultCardMicaLuminosityOpacity;
+        settings.CardMicaDarkTintOpacity = DefaultCardMicaDarkTintOpacity;
+        settings.CardMicaDarkLuminosityOpacity = DefaultCardMicaDarkLuminosityOpacity;
         return settings;
     }
 
@@ -374,6 +379,16 @@ public sealed class AppSettings
         CardMicaLuminosityOpacity = NormalizeMicaOpacity(
             CardMicaLuminosityOpacity,
             DefaultCardMicaLuminosityOpacity,
+            MinimumCardMicaLuminosityOpacity,
+            MaximumCardMicaLuminosityOpacity);
+        CardMicaDarkTintOpacity = NormalizeMicaOpacity(
+            CardMicaDarkTintOpacity,
+            DefaultCardMicaDarkTintOpacity,
+            MinimumCardMicaTintOpacity,
+            MaximumCardMicaTintOpacity);
+        CardMicaDarkLuminosityOpacity = NormalizeMicaOpacity(
+            CardMicaDarkLuminosityOpacity,
+            DefaultCardMicaDarkLuminosityOpacity,
             MinimumCardMicaLuminosityOpacity,
             MaximumCardMicaLuminosityOpacity);
     }

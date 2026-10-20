@@ -52,20 +52,22 @@ public sealed partial class SettingsWindow : Window
     private bool _closeDialogOpen;
     private bool _micaPreviewActive;
     private bool _micaPreviewQueued;
+    private bool _updatingNavigationSelection;
+    private bool _offsetEntryPending;
+    private int _pageGeneration;
     private CardMicaTuning _pendingMicaPreview;
     internal bool ReloadWithoutPrompt;
     internal Func<string, JsonNode?, Task<JsonObject>>? ProbeRequestHandler;
     internal int PageRenderCount { get; private set; }
+    internal void ProbeRenderPage() => RenderPage();
     public event Action? Dismissed;
     internal event Action<ElementTheme>? ThemePreviewChanged;
     internal event Action<CardMicaPreviewState>? MicaPreviewChanged;
     internal ElementTheme? ThemePreview => _loaded ? _root.RequestedTheme : null;
-    internal CardMicaTuning DraftCardMicaTuning => CardMicaTuning.FromValues(
-        _media.Number("cardMicaTintOpacity", CardMicaTuning.DefaultTintOpacity),
-        _media.Number("cardMicaLuminosityOpacity", CardMicaTuning.DefaultLuminosityOpacity));
-    internal CardMicaTuning CommittedCardMicaTuning => CardMicaTuning.FromValues(
-        _media.SavedNumber("cardMicaTintOpacity", CardMicaTuning.DefaultTintOpacity),
-        _media.SavedNumber("cardMicaLuminosityOpacity", CardMicaTuning.DefaultLuminosityOpacity));
+    internal CardMicaTuning DraftCardMicaTuning => ReadCardMicaTuning(
+        key => _media.Number(key, DefaultMicaValue(key)));
+    internal CardMicaTuning CommittedCardMicaTuning => ReadCardMicaTuning(
+        key => _media.SavedNumber(key, DefaultMicaValue(key)));
     internal bool CanPreviewCardMica => !_accessibility.HighContrast && VividMicaBackdrop.IsSupported;
     internal bool UsesVividSettingsBackdrop => _vividSettingsBackdrop;
     internal CardMicaTuning SettingsMicaTuning => _cardMicaPreviewBackdrop.Tuning;
@@ -110,7 +112,9 @@ public sealed partial class SettingsWindow : Window
             _navigation.MenuItems.Add(item);
         }
         _navigation.SelectionChanged += (_, args) => {
-            if (args.SelectedItem is NavigationViewItem item && item.Tag is string id) { _currentPage = id; RenderPage(); }
+            if (_updatingNavigationSelection) return;
+            if (args.SelectedItem is NavigationViewItem item && item.Tag is string id)
+                EnterPage(id, explicitEntry: true);
         };
         var toolbar = new Grid { ColumnSpacing = 12, Margin = new Thickness(24, 8, 24, 8) };
         toolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -170,7 +174,7 @@ public sealed partial class SettingsWindow : Window
         _root.Loaded += (_, _) => { TrySubscribeSettingsHighContrast(); UpdateTitleBarTheme(); };
         Activated += (_, _) => { if (!_closed) UpdateTitleBarTheme(); };
         _navigation.Loaded += async (_, _) => {
-            _navigation.SelectedItem = NavigationPages().FirstOrDefault(item => (string)item.Tag == _currentPage);
+            SelectNavigationItem(NavigationPages().FirstOrDefault(item => (string)item.Tag == _currentPage));
             if (!_loaded && _connection.IsConnected) await GuardAsync(() => ReloadAsync());
         };
         _connection.ConnectionChanged += OnConnectionChanged;
@@ -234,17 +238,46 @@ public sealed partial class SettingsWindow : Window
         if (page is "weather") page = "quickCardsWeather";
         var item = NavigationPages().FirstOrDefault(item => (string)item.Tag == page)
             ?? NavigationPages().First();
-        var samePage = string.Equals(_currentPage, (string)item.Tag, StringComparison.Ordinal);
-        _currentPage = (string)item.Tag;
         foreach (var parent in _navigation.MenuItems.OfType<NavigationViewItem>())
             if (parent.MenuItems.Contains(item)) parent.IsExpanded = true;
-        if (_navigation.IsLoaded) { _navigation.SelectedItem = item; if (_currentPage == "hardware" && _weatherPage is null) RenderPage(); }
-        else RenderPage();
+        if (_navigation.IsLoaded) SelectNavigationItem(item);
+        EnterPage((string)item.Tag, explicitEntry: true);
         _split.IsPaneOpen = false;
-        // The window is reused via AppWindow.Hide. Reopening the same page does
-        // not raise NavigationView.SelectionChanged, so re-arm its live preview.
-        if (_loaded && samePage && _currentPage == "quickCards") UpdateCardMicaPreviewSurface();
     }
+
+    private void SelectNavigationItem(NavigationViewItem? item)
+    {
+        if (item is null) return;
+        _updatingNavigationSelection = true;
+        try { _navigation.SelectedItem = item; }
+        finally { _updatingNavigationSelection = false; }
+    }
+
+    private void EnterPage(string page, bool explicitEntry)
+    {
+        if (_currentPage == "trackOffsets" && page != "trackOffsets")
+            LeaveOffsetsPage();
+        if (page != "trackOffsets")
+            CancelPendingOffsetEntry();
+        _currentPage = page;
+        _pageGeneration++;
+        RenderPage();
+        if (!explicitEntry || page != "trackOffsets") return;
+        if (_loaded) BeginOffsetsPageEntry(_pageGeneration);
+        else _offsetEntryPending = true;
+    }
+
+    private void CompletePendingOffsetsEntry()
+    {
+        if (!_offsetEntryPending) return;
+        if (_currentPage != "trackOffsets") { CancelPendingOffsetEntry(); return; }
+        if (!_loaded) return;
+        _offsetEntryPending = false;
+        BeginOffsetsPageEntry(_pageGeneration);
+    }
+
+    private void CancelPendingOffsetEntry() => _offsetEntryPending = false;
+
     public void Shutdown() { _shutdown = true; Close(); }
     private void CloseDeferred() => BeginCloseConfirmation();
     private async void BeginCloseConfirmation()
@@ -306,7 +339,7 @@ public sealed partial class SettingsWindow : Window
     internal void LoadValidationData(JsonObject native, JsonObject media)
     {
         SetNativeReadback(native); _media.Readback(MediaValues(media)); _loaded = true;
-        _notice.IsOpen = false; ApplyTheme(); RenderPage(); UpdateSaveStatus();
+        _notice.IsOpen = false; ApplyTheme(); RenderPage(); CompletePendingOffsetsEntry(); UpdateSaveStatus();
     }
     internal void OpenModuleProperties(string id) => OpenModule(id);
     private void OnConnectionChanged(bool connected) => DispatcherQueue.TryEnqueue(async () => {
@@ -358,6 +391,7 @@ public sealed partial class SettingsWindow : Window
             await LoadFontsAsync();
             SetNativeReadback(native, nativeRevision); _media.Readback(MediaValues(media), mediaRevision);
             _loaded = true; ApplyTheme(); RefreshCardMicaAfterReadback(); RenderPage();
+            CompletePendingOffsetsEntry();
             _notice.IsOpen = false;
         }
         finally { _busy = false; UpdateSaveStatus(); }
@@ -385,7 +419,10 @@ public sealed partial class SettingsWindow : Window
             }
             if (media.Values.Count > 0) _media.Readback(MediaValues(await RequestAsync("applyMediaSettings", media.Values)), media);
             ApplyTheme();
-            if (media.Values.ContainsKey("cardMicaTintOpacity") || media.Values.ContainsKey("cardMicaLuminosityOpacity"))
+            if (media.Values.ContainsKey("cardMicaTintOpacity") ||
+                media.Values.ContainsKey("cardMicaLuminosityOpacity") ||
+                media.Values.ContainsKey("cardMicaDarkTintOpacity") ||
+                media.Values.ContainsKey("cardMicaDarkLuminosityOpacity"))
                 RefreshCardMicaAfterReadback();
             _notice.Severity = InfoBarSeverity.Success; _notice.Message = "已保存并读回主程序配置。"; _notice.IsOpen = true;
         }
@@ -471,6 +508,22 @@ public sealed partial class SettingsWindow : Window
         _micaPreviewActive = false;
         MicaPreviewChanged?.Invoke(new CardMicaPreviewState(committed, null));
     }
+
+    private static CardMicaTuning ReadCardMicaTuning(Func<string, double> read) =>
+        CardMicaTuning.FromThemeValues(
+            read("cardMicaTintOpacity"),
+            read("cardMicaLuminosityOpacity"),
+            read("cardMicaDarkTintOpacity"),
+            read("cardMicaDarkLuminosityOpacity"));
+
+    private static double DefaultMicaValue(string key) => key switch
+    {
+        "cardMicaTintOpacity" => CardMicaTuning.DefaultLightTintOpacity,
+        "cardMicaLuminosityOpacity" => CardMicaTuning.DefaultLightLuminosityOpacity,
+        "cardMicaDarkTintOpacity" => CardMicaTuning.DefaultDarkTintOpacity,
+        "cardMicaDarkLuminosityOpacity" => CardMicaTuning.DefaultDarkLuminosityOpacity,
+        _ => 0
+    };
 
     private void UpdateTitleBarTheme()
     {

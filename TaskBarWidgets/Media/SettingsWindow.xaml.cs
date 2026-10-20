@@ -1318,6 +1318,8 @@ public partial class SettingsWindow : System.Windows.Window
             CardFontFamily = _settings.CardFontFamily,
             CardMicaTintOpacity = _settings.CardMicaTintOpacity,
             CardMicaLuminosityOpacity = _settings.CardMicaLuminosityOpacity,
+            CardMicaDarkTintOpacity = _settings.CardMicaDarkTintOpacity,
+            CardMicaDarkLuminosityOpacity = _settings.CardMicaDarkLuminosityOpacity,
             SpectrumDisplayMode = _settings.SpectrumDisplayMode.ToString(),
             SpectrumAudioAccessGranted = _settings.SpectrumAudioAccessGranted,
             SpectrumTuning = _settings.SpectrumTuning.Clone(),
@@ -1625,6 +1627,18 @@ public partial class SettingsWindow : System.Windows.Window
             case "cardMicaLuminosityOpacity":
                 _settings.CardMicaLuminosityOpacity = Math.Clamp(
                     ReadDouble(element, _settings.CardMicaLuminosityOpacity),
+                    AppSettings.MinimumCardMicaLuminosityOpacity,
+                    AppSettings.MaximumCardMicaLuminosityOpacity);
+                break;
+            case "cardMicaDarkTintOpacity":
+                _settings.CardMicaDarkTintOpacity = Math.Clamp(
+                    ReadDouble(element, _settings.CardMicaDarkTintOpacity),
+                    AppSettings.MinimumCardMicaTintOpacity,
+                    AppSettings.MaximumCardMicaTintOpacity);
+                break;
+            case "cardMicaDarkLuminosityOpacity":
+                _settings.CardMicaDarkLuminosityOpacity = Math.Clamp(
+                    ReadDouble(element, _settings.CardMicaDarkLuminosityOpacity),
                     AppSettings.MinimumCardMicaLuminosityOpacity,
                     AppSettings.MaximumCardMicaLuminosityOpacity);
                 break;
@@ -2133,6 +2147,8 @@ public partial class SettingsWindow : System.Windows.Window
         target.CardFontFamily = source.CardFontFamily;
         target.CardMicaTintOpacity = source.CardMicaTintOpacity;
         target.CardMicaLuminosityOpacity = source.CardMicaLuminosityOpacity;
+        target.CardMicaDarkTintOpacity = source.CardMicaDarkTintOpacity;
+        target.CardMicaDarkLuminosityOpacity = source.CardMicaDarkLuminosityOpacity;
         target.SpectrumDisplayMode = source.SpectrumDisplayMode;
         target.SpectrumAudioAccessGranted = source.SpectrumAudioAccessGranted;
         target.UseSafeFontSizeRange = source.UseSafeFontSizeRange;
@@ -2266,6 +2282,8 @@ public partial class SettingsWindow : System.Windows.Window
         public string CardFontFamily { get; set; } = AppSettings.DefaultFontFamily;
         public double CardMicaTintOpacity { get; set; } = AppSettings.DefaultCardMicaTintOpacity;
         public double CardMicaLuminosityOpacity { get; set; } = AppSettings.DefaultCardMicaLuminosityOpacity;
+        public double CardMicaDarkTintOpacity { get; set; } = AppSettings.DefaultCardMicaDarkTintOpacity;
+        public double CardMicaDarkLuminosityOpacity { get; set; } = AppSettings.DefaultCardMicaDarkLuminosityOpacity;
         public string SpectrumDisplayMode { get; set; } = TaskbarLyrics.App.SpectrumDisplayMode.Disabled.ToString();
         public bool SpectrumAudioAccessGranted { get; set; }
         public SpectrumTuningSettings SpectrumTuning { get; set; } = new();

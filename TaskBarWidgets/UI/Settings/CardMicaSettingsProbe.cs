@@ -11,38 +11,44 @@ public sealed partial class SettingsWindow
 {
     internal static async Task<object> ProbeMicaControlsAsync(SettingsWindow window, CardGroup cards)
     {
-        var clampedLow = CardMicaTuning.FromUserValues(-10, -10);
-        var clampedHigh = CardMicaTuning.FromUserValues(110, 110);
-        var endpoints = (CardMicaTuning.FromUserValues(0, 100), CardMicaTuning.FromUserValues(100, 0));
-        var nonFinite = CardMicaTuning.FromValues(double.NaN, double.PositiveInfinity);
-        var darkEdge = CardMicaTuning.FromValues(
-            CardMicaTuning.MinimumTintOpacity,
-            CardMicaTuning.MinimumLuminosityOpacity);
-        var missingLuminosity = CardMicaTuning.FromJson(
-            JsonSerializer.SerializeToElement(new { tintOpacity = 0.08 }), dark: true);
-        if (!clampedLow.Matches(CardMicaTuning.FromValues(
-                CardMicaTuning.MinimumTintOpacity,
-                CardMicaTuning.MaximumLuminosityOpacity)) ||
-            !clampedHigh.Matches(CardMicaTuning.FromValues(
-                CardMicaTuning.MaximumTintOpacity,
-                CardMicaTuning.MinimumLuminosityOpacity)) ||
-            Math.Abs(darkEdge.TintOpacityFor(true) - CardMicaTuning.MinimumTintOpacity) > 0.0001 ||
-            Math.Abs(darkEdge.LuminosityOpacityFor(true) - CardMicaTuning.MinimumLuminosityOpacity) > 0.0001 ||
-            Math.Abs(missingLuminosity.TintOpacity - 0.08) > 0.0001 ||
-            Math.Abs(missingLuminosity.LuminosityOpacity - CardMicaTuning.DefaultDarkLuminosityOpacity) > 0.0001 ||
-            !endpoints.Item1.Matches(CardMicaTuning.FromValues(0, 0)) ||
-            !endpoints.Item2.Matches(CardMicaTuning.FromValues(1, 1)) ||
-            !nonFinite.Matches(CardMicaTuning.FromValues(CardMicaTuning.DefaultTintOpacity, CardMicaTuning.DefaultLuminosityOpacity)) ||
-            Math.Abs(CardMicaTuning.DefaultFor(false).TintOpacity - 0.45) > 0.0001 ||
-            Math.Abs(CardMicaTuning.DefaultFor(false).LuminosityOpacity - 0.85) > 0.0001 ||
-            Math.Abs(CardMicaTuning.DefaultFor(true).TintOpacityFor(true) - 0.43) > 0.0001 ||
-            Math.Abs(CardMicaTuning.DefaultFor(true).LuminosityOpacityFor(true) - 0.48) > 0.0001 ||
+        var defaults = CardMicaTuning.Default;
+        var clampedLow = CardMicaTuning.FromUserValues(-10, -10, -10, -10);
+        var clampedHigh = CardMicaTuning.FromUserValues(110, 110, 110, 110);
+        var lowerEndpoints = CardMicaTuning.FromUserValues(0, 100, 0, 100);
+        var upperEndpoints = CardMicaTuning.FromUserValues(100, 0, 100, 0);
+        var nonFinite = CardMicaTuning.FromThemeValues(
+            double.NaN,
+            double.PositiveInfinity,
+            double.NegativeInfinity,
+            double.NaN);
+        var legacyPayload = CardMicaTuning.FromJson(
+            JsonSerializer.SerializeToElement(new { tintOpacity = 0.08, luminosityOpacity = 0.30 }));
+        var mixedPayload = CardMicaTuning.FromJson(
+            JsonSerializer.SerializeToElement(new { tintOpacity = 0.08, darkTintOpacity = 0.22 }));
+        var explicitDarkPayload = CardMicaTuning.FromJson(
+            JsonSerializer.SerializeToElement(new
+            {
+                tintOpacity = 0.08,
+                luminosityOpacity = 0.30,
+                darkTintOpacity = 0.22,
+                darkLuminosityOpacity = 0.44
+            }));
+        if (!clampedLow.Matches(CardMicaTuning.FromThemeValues(0, 1, 0, 1)) ||
+            !clampedHigh.Matches(CardMicaTuning.FromThemeValues(1, 0, 1, 0)) ||
+            !lowerEndpoints.Matches(CardMicaTuning.FromThemeValues(0, 0, 0, 0)) ||
+            !upperEndpoints.Matches(CardMicaTuning.FromThemeValues(1, 1, 1, 1)) ||
+            !nonFinite.Matches(defaults) ||
+            !defaults.Matches(CardMicaTuning.FromThemeValues(0.45, 0.95, 0.45, 0.50)) ||
+            !legacyPayload.Matches(CardMicaTuning.FromThemeValues(0.08, 0.30, 0.06, 0.28)) ||
+            !mixedPayload.Matches(CardMicaTuning.FromThemeValues(0.08, 0.95, 0.22, 0.50)) ||
+            !explicitDarkPayload.Matches(CardMicaTuning.FromThemeValues(0.08, 0.30, 0.22, 0.44)) ||
             VividMicaBackdrop.KindFor(false) != MicaKind.Base ||
             VividMicaBackdrop.KindFor(true) != MicaKind.BaseAlt)
-            throw new InvalidOperationException("Card Mica limits, fallbacks or theme kinds were not normalized.");
+            throw new InvalidOperationException("Card Mica limits, legacy compatibility, defaults or theme kinds were not normalized.");
         if (window._cardMicaPreviewBackdrop.ForcesInputActive)
             throw new InvalidOperationException("The settings-window Mica preview must retain normal input activity.");
 
+        var fixture = CardMicaTuning.FromThemeValues(0.34, 0.50, 0.22, 0.40);
         var original = window._media.Keys.ToDictionary(
             key => key,
             key => window._media.Get(key),
@@ -61,86 +67,102 @@ public sealed partial class SettingsWindow
             await Task.Delay(80);
 
             var material = FindMicaControl<StackPanel>(window._page, "section-cardMica");
-            var tint = FindMicaControl<Slider>(window._page, "setting-cardMicaTintOpacity");
-            var transparency = FindMicaControl<Slider>(window._page, "setting-cardMicaTransparency");
-            if (WalkTheme(material).OfType<Slider>().Count() != 2 ||
+            var sliders = WalkTheme(material).OfType<Slider>().ToArray();
+            if (sliders.Length != 4 ||
                 WalkTheme(material).OfType<ComboBox>().Any() ||
                 WalkTheme(material).OfType<Viewbox>().Any())
-                throw new InvalidOperationException("The material section still contains preset or mock-preview UI.");
-            if (tint.Minimum != 0 || tint.Maximum != 100 || transparency.Minimum != 0 || transparency.Maximum != 100)
+                throw new InvalidOperationException("The material section does not expose exactly the four light/dark sliders.");
+            if (sliders.Any(slider => slider.Minimum != 0 || slider.Maximum != 100))
                 throw new InvalidOperationException("Card Mica sliders do not expose the full 0-100% range.");
-            if (Math.Abs(tint.Value - 34) > 0.01 || Math.Abs(transparency.Value - 50) > 0.01)
-                throw new InvalidOperationException("Mica controls did not load the persisted draft values.");
+
+            var lightTint = FindMicaControl<Slider>(window._page, "setting-cardMicaTintOpacity");
+            var lightTransparency = FindMicaControl<Slider>(window._page, "setting-cardMicaTransparency");
+            var darkTint = FindMicaControl<Slider>(window._page, "setting-cardMicaDarkTintOpacity");
+            var darkTransparency = FindMicaControl<Slider>(window._page, "setting-cardMicaDarkTransparency");
+            if (Math.Abs(lightTint.Value - 34) > 0.01 ||
+                Math.Abs(lightTransparency.Value - 50) > 0.01 ||
+                Math.Abs(darkTint.Value - 22) > 0.01 ||
+                Math.Abs(darkTransparency.Value - 60) > 0.01)
+                throw new InvalidOperationException("Mica controls did not load the persisted four-value draft.");
 
             if (!window.CanPreviewCardMica)
             {
-                if (tint.IsEnabled || transparency.IsEnabled)
+                if (sliders.Any(slider => slider.IsEnabled))
                     throw new InvalidOperationException("Unavailable Mica controls remained enabled.");
                 return new
                 {
                     available = false,
                     disabled = true,
+                    fourSliders = true,
                     noPresets = true,
                     noMockPreview = true,
                     themeKinds = true,
                     settingsFocusOverride = false,
                     fixtureRoundTrip = true,
                     limitsClamped = true,
-                    defaultsFallback = true
+                    defaultsFallback = true,
+                    legacyCompatible = true
                 };
             }
 
-            if (!window.UsesVividSettingsBackdrop ||
-                !window.SettingsMicaTuning.Matches(CardMicaTuning.FromValues(0.34, 0.50)))
-                throw new InvalidOperationException("The settings window did not enter the saved Mica preview.");
+            if (!window.UsesVividSettingsBackdrop || !window.SettingsMicaTuning.Matches(fixture))
+                throw new InvalidOperationException("The settings window did not enter the saved four-value Mica preview.");
             if (events.Count == 0 || events[^1].Preview is null)
                 throw new InvalidOperationException("Entering the quick-card page did not raise a Mica preview.");
 
-            tint.Value = 0;
-            transparency.Value = 100;
+            SetMicaSliders(lightTint, lightTransparency, darkTint, darkTransparency, 0, 100, 0, 100);
             await Task.Delay(80);
-            if (!window.DraftCardMicaTuning.Matches(CardMicaTuning.FromValues(0, 0)))
+            if (!window.DraftCardMicaTuning.Matches(CardMicaTuning.FromUserValues(0, 100, 0, 100)))
                 throw new InvalidOperationException("The Mica lower endpoints were not accepted.");
-            tint.Value = 100;
-            transparency.Value = 0;
+            SetMicaSliders(lightTint, lightTransparency, darkTint, darkTransparency, 100, 0, 100, 0);
             await Task.Delay(80);
-            if (!window.DraftCardMicaTuning.Matches(CardMicaTuning.FromValues(1, 1)))
+            if (!window.DraftCardMicaTuning.Matches(CardMicaTuning.FromUserValues(100, 0, 100, 0)))
                 throw new InvalidOperationException("The Mica upper endpoints were not accepted.");
 
+            SetMicaSliders(lightTint, lightTransparency, darkTint, darkTransparency, 34, 50, 22, 60);
+            await Task.Delay(80);
             var eventCount = events.Count;
-            tint.Value = 8;
-            transparency.Value = 70;
+            lightTint.Value = 8;
+            lightTransparency.Value = 70;
             await Task.Delay(80);
             if (events.Count - eventCount != 1)
                 throw new InvalidOperationException($"Rapid slider edits emitted {events.Count - eventCount} Mica updates instead of one frame-coalesced update.");
-            if (window.DraftCardMicaTuning.TintOpacity != 0.08 ||
-                Math.Abs(window.DraftCardMicaTuning.LuminosityOpacity - 0.30) > 0.0001)
-                throw new InvalidOperationException("The Mica sliders did not update the draft values.");
-            AssertCardMica(cards, CardMicaTuning.FromUserValues(8, 70));
-            if (events[^1].Preview is not { TintOpacity: 0.08 } preview ||
-                Math.Abs(preview.LuminosityOpacity - 0.30) > 0.0001)
-                throw new InvalidOperationException("The Mica sliders did not publish the latest preview.");
-            AssertSavedMica(window, 0.34, 0.50);
+            if (!window.DraftCardMicaTuning.Matches(CardMicaTuning.FromThemeValues(0.08, 0.30, 0.22, 0.40)))
+                throw new InvalidOperationException("The light Mica sliders did not leave the dark pair untouched.");
+            AssertCardMica(cards, CardMicaTuning.FromThemeValues(0.08, 0.30, 0.22, 0.40));
+            if (events[^1].Preview is not { LightTintOpacity: 0.08, DarkTintOpacity: 0.22 } preview ||
+                Math.Abs(preview.LightLuminosityOpacity - 0.30) > 0.0001 ||
+                Math.Abs(preview.DarkLuminosityOpacity - 0.40) > 0.0001)
+                throw new InvalidOperationException("The Mica sliders did not publish the latest four-value preview.");
+            AssertSavedMica(window, fixture);
 
             eventCount = events.Count;
-            tint.Value = 31;
-            transparency.Value = 55;
+            darkTint.Value = 31;
+            darkTransparency.Value = 55;
             await Task.Delay(80);
             if (events.Count - eventCount != 1)
                 throw new InvalidOperationException("Consecutive Mica drags were not frame-coalesced.");
+            if (!window.DraftCardMicaTuning.Matches(CardMicaTuning.FromThemeValues(0.08, 0.30, 0.31, 0.45)))
+                throw new InvalidOperationException("The dark Mica sliders changed the light pair.");
             AssertCardMica(cards, window.DraftCardMicaTuning);
-            AssertSavedMica(window, 0.34, 0.50);
+            AssertSavedMica(window, fixture);
 
             // Re-read the saved values through the same draft path used by reload/discard.
             window._media.Pending.Clear();
             window._media.Readback(original);
             window.RenderPage();
             await Task.Delay(80);
-            tint = FindMicaControl<Slider>(window._page, "setting-cardMicaTintOpacity");
-            transparency = FindMicaControl<Slider>(window._page, "setting-cardMicaTransparency");
-            if (Math.Abs(tint.Value - 34) > 0.01 || Math.Abs(transparency.Value - 50) > 0.01)
-                throw new InvalidOperationException("Discarding the Mica draft did not restore the saved sliders.");
-            AssertCardMica(cards, CardMicaTuning.FromValues(0.34, 0.50));
+            lightTint = FindMicaControl<Slider>(window._page, "setting-cardMicaTintOpacity");
+            lightTransparency = FindMicaControl<Slider>(window._page, "setting-cardMicaTransparency");
+            darkTint = FindMicaControl<Slider>(window._page, "setting-cardMicaDarkTintOpacity");
+            darkTransparency = FindMicaControl<Slider>(window._page, "setting-cardMicaDarkTransparency");
+            if (Math.Abs(lightTint.Value - 34) > 0.01 ||
+                Math.Abs(lightTransparency.Value - 50) > 0.01 ||
+                Math.Abs(darkTint.Value - 22) > 0.01 ||
+                Math.Abs(darkTransparency.Value - 60) > 0.01)
+                throw new InvalidOperationException("Discarding the Mica draft did not restore all four saved sliders.");
+            AssertCardMica(cards, fixture);
+            AssertSavedMica(window, fixture);
 
             // AppWindow.Hide leaves the page loaded. Reopening the same page must
             // re-arm preview even though NavigationView raises no selection change.
@@ -149,9 +171,9 @@ public sealed partial class SettingsWindow
             await Task.Delay(40);
             if (events[^1].Preview is null)
                 throw new InvalidOperationException("Reopening the quick-card page did not restore its Mica preview.");
-            AssertCardMica(cards, CardMicaTuning.FromValues(0.34, 0.50));
+            AssertCardMica(cards, fixture);
             var reopenedEventCount = events.Count;
-            tint.Value = 27;
+            lightTint.Value = 27;
             await Task.Delay(80);
             if (events.Count - reopenedEventCount != 1)
                 throw new InvalidOperationException("Mica preview did not resume after reopening the quick-card page.");
@@ -159,9 +181,9 @@ public sealed partial class SettingsWindow
 
             window.NavigateTo("taskbar");
             await Task.Delay(40);
-            if (!window.SettingsMicaTuning.Matches(CardMicaTuning.FromValues(0.34, 0.50)))
+            if (!window.SettingsMicaTuning.Matches(fixture))
                 throw new InvalidOperationException("Leaving the quick-card page did not restore the saved settings backdrop.");
-            AssertCardMica(cards, CardMicaTuning.FromValues(0.34, 0.50));
+            AssertCardMica(cards, fixture);
             if (events[^1].Preview is not null)
                 throw new InvalidOperationException("Leaving the quick-card page did not end the card Mica preview.");
 
@@ -169,6 +191,8 @@ public sealed partial class SettingsWindow
             {
                 available = true,
                 fixtureRoundTrip = true,
+                fourSliders = true,
+                independentThemes = true,
                 noPresets = true,
                 noMockPreview = true,
                 themeKinds = true,
@@ -178,7 +202,8 @@ public sealed partial class SettingsWindow
                 previewRestoredOnLeave = true,
                 reopenRearmsPreview = true,
                 limitsClamped = true,
-                defaultsFallback = true
+                defaultsFallback = true,
+                legacyCompatible = true
             };
         }
         finally
@@ -190,6 +215,22 @@ public sealed partial class SettingsWindow
         }
     }
 
+    private static void SetMicaSliders(
+        Slider lightTint,
+        Slider lightTransparency,
+        Slider darkTint,
+        Slider darkTransparency,
+        double lightTintValue,
+        double lightTransparencyValue,
+        double darkTintValue,
+        double darkTransparencyValue)
+    {
+        lightTint.Value = lightTintValue;
+        lightTransparency.Value = lightTransparencyValue;
+        darkTint.Value = darkTintValue;
+        darkTransparency.Value = darkTransparencyValue;
+    }
+
     private static void AssertCardMica(CardGroup cards, CardMicaTuning expected)
     {
         foreach (var card in cards.CardWindows)
@@ -199,11 +240,13 @@ public sealed partial class SettingsWindow
         }
     }
 
-    private static void AssertSavedMica(SettingsWindow window, double tint, double luminosity)
+    private static void AssertSavedMica(SettingsWindow window, CardMicaTuning expected)
     {
-        if (Math.Abs(window._media.SavedNumber("cardMicaTintOpacity", -1) - tint) > 0.0001 ||
-            Math.Abs(window._media.SavedNumber("cardMicaLuminosityOpacity", -1) - luminosity) > 0.0001)
-            throw new InvalidOperationException("A Mica preview changed the saved settings before Apply.");
+        if (Math.Abs(window._media.SavedNumber("cardMicaTintOpacity", -1) - expected.LightTintOpacity) > 0.0001 ||
+            Math.Abs(window._media.SavedNumber("cardMicaLuminosityOpacity", -1) - expected.LightLuminosityOpacity) > 0.0001 ||
+            Math.Abs(window._media.SavedNumber("cardMicaDarkTintOpacity", -1) - expected.DarkTintOpacity) > 0.0001 ||
+            Math.Abs(window._media.SavedNumber("cardMicaDarkLuminosityOpacity", -1) - expected.DarkLuminosityOpacity) > 0.0001)
+            throw new InvalidOperationException("A Mica preview changed the saved four-value settings before Apply.");
     }
 
     private static T FindMicaControl<T>(DependencyObject root, string automationId) where T : FrameworkElement =>

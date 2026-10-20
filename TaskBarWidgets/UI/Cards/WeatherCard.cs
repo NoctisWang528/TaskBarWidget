@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using TaskBarWidgets.UI.Cards;
 using Windows.UI;
 
 namespace TaskBarWidgets.UI;
@@ -105,6 +106,7 @@ public sealed partial class CardGroup
     private FrameworkElement _weatherIcon = WeatherIconArt.Build("unknown", false, WeatherIconSize, true);
     private string _weatherIconKind = "unknown";
     private bool _weatherIconNight;
+    private bool _weatherLightTheme = true;
     private readonly ColumnDefinition _weatherTemperatureColumn = new() { Width = new GridLength(1, GridUnitType.Star) };
     private readonly Grid _weatherCurrentRow = new()
     {
@@ -147,12 +149,6 @@ public sealed partial class CardGroup
             ShowWeatherAlert((_weatherAlertIndex + 1) % _weatherAlerts.Children.Count);
         };
         _weatherSettings.Visibility = Visibility.Collapsed;
-        _weatherContent.ActualThemeChanged += (_, _) =>
-        {
-            RenderWeatherIcon();
-            FitWeatherTemperature();
-            RenderWeatherModules();
-        };
         AutomationProperties.SetName(_weatherRefresh, "刷新天气");
         AutomationProperties.SetName(_weatherSettings, "打开天气设置");
 
@@ -163,6 +159,16 @@ public sealed partial class CardGroup
         _weatherEmpty.Text = "打开天气卡后读取天气。";
         ShowWeatherEmpty(true);
         return root;
+    }
+
+    internal void ApplyWeatherTheme(ElementTheme theme)
+    {
+        if (_disposed) return;
+        var light = theme != ElementTheme.Dark;
+        if (_weatherLightTheme == light && _weatherIconHost.Children.Count > 0) return;
+        _weatherLightTheme = light;
+        RenderWeatherIcon();
+        RenderWeatherModules();
     }
 
     private void BuildWeatherContent()
@@ -382,7 +388,7 @@ public sealed partial class CardGroup
             label.VerticalAlignment = VerticalAlignment.Center;
             Add(rowGrid, label, 0);
 
-            var icon = WeatherIconArt.Build(String(day, "conditionDayKind", "unknown"), false, 28, IsLightTheme);
+            var icon = WeatherIconArt.Build(String(day, "conditionDayKind", "unknown"), false, 28, _weatherLightTheme);
             Add(rowGrid, icon, 1);
 
             var min = Text(NormalizeTemperature(String(day, "min")), 11);
@@ -500,15 +506,8 @@ public sealed partial class CardGroup
         _openSettings("quickCardsWeather");
     }
 
-    private static Button CreateWeatherRefreshButton() => new()
-    {
-        Width = 32,
-        Height = 32,
-        MinWidth = 0,
-        Padding = new Thickness(4),
-        CornerRadius = new CornerRadius(16),
-        Content = new FontIcon { Glyph = "\uE72C", FontSize = 16 }
-    };
+    private static Button CreateWeatherRefreshButton() =>
+        CardIconArt.CreateButton(CardIconKind.Refresh, "刷新天气");
 
     private static JsonElement Object(JsonElement value, string name) =>
         value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var item) && item.ValueKind == JsonValueKind.Object ? item : default;
@@ -555,8 +554,6 @@ public sealed partial class CardGroup
     private static string FirstNonEmpty(params string[] values) => values.FirstOrDefault(HasValue) ?? "";
     private static bool HasValue(string? value) => !string.IsNullOrWhiteSpace(value) && value != "--";
 
-    private bool IsLightTheme => _weatherContent.ActualTheme != ElementTheme.Dark;
-
     private void SetWeatherIcon(string kind, bool night)
     {
         var normalized = WeatherIconArt.Normalize(kind);
@@ -568,7 +565,7 @@ public sealed partial class CardGroup
 
     private void RenderWeatherIcon()
     {
-        var icon = WeatherIconArt.Build(_weatherIconKind, _weatherIconNight, WeatherIconSize, IsLightTheme);
+        var icon = WeatherIconArt.Build(_weatherIconKind, _weatherIconNight, WeatherIconSize, _weatherLightTheme);
         _weatherIconHost.Children.Clear();
         _weatherIconHost.Children.Add(icon);
         _weatherIcon = icon;

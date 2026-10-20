@@ -278,7 +278,13 @@ public partial class App : System.Windows.Application
     }
     private object QuickCards() => new { order = Settings.QuickCardOrder, columns = Settings.QuickCardColumns, enabled = Settings.QuickCardEnabled,
         resourceMode = Settings.QuickCardResourceMode.ToString(), font = Settings.CardFontFamily,
-        mica = new { tintOpacity = Settings.CardMicaTintOpacity, luminosityOpacity = Settings.CardMicaLuminosityOpacity } };
+        mica = new
+        {
+            tintOpacity = Settings.CardMicaTintOpacity,
+            luminosityOpacity = Settings.CardMicaLuminosityOpacity,
+            darkTintOpacity = Settings.CardMicaDarkTintOpacity,
+            darkLuminosityOpacity = Settings.CardMicaDarkLuminosityOpacity
+        } };
     internal void ShowLyricsWindow() => SendNativeCommand("showMedia");
     private void SendNativeCommand(string action)
     {

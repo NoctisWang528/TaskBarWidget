@@ -2,55 +2,105 @@ using System.Text.Json;
 
 namespace TaskBarWidgets.UI.Cards;
 
-internal readonly record struct CardMicaTuning(double TintOpacity, double LuminosityOpacity)
+internal readonly record struct CardMicaTuning(
+    double LightTintOpacity,
+    double LightLuminosityOpacity,
+    double DarkTintOpacity,
+    double DarkLuminosityOpacity)
 {
     internal const double MinimumTintOpacity = 0;
     internal const double MaximumTintOpacity = 1;
     internal const double MinimumLuminosityOpacity = 0;
     internal const double MaximumLuminosityOpacity = 1;
-    internal const double DefaultTintOpacity = 0.45;
-    internal const double DefaultLuminosityOpacity = 0.85;
+    internal const double DefaultLightTintOpacity = 0.45;
+    internal const double DefaultLightLuminosityOpacity = 0.95;
+    internal const double DefaultDarkTintOpacity = 0.45;
     internal const double DefaultDarkLuminosityOpacity = 0.50;
 
-    private const double ThemeOffset = 0.02;
+    private const double LegacyThemeOffset = 0.02;
 
-    internal static CardMicaTuning Default => DefaultFor(false);
+    internal static CardMicaTuning Default => new(
+        DefaultLightTintOpacity,
+        DefaultLightLuminosityOpacity,
+        DefaultDarkTintOpacity,
+        DefaultDarkLuminosityOpacity);
 
-    internal static CardMicaTuning DefaultFor(bool dark) =>
-        new(DefaultTintOpacity, dark ? DefaultDarkLuminosityOpacity : DefaultLuminosityOpacity);
+    internal double LightTransparency => 1 - LightLuminosityOpacity;
 
-    internal double Transparency => 1 - LuminosityOpacity;
+    internal double DarkTransparency => 1 - DarkLuminosityOpacity;
 
-    internal double TintOpacityFor(bool dark) =>
-        dark ? Math.Clamp(TintOpacity - ThemeOffset, MinimumTintOpacity, MaximumTintOpacity) : TintOpacity;
+    internal double TintOpacityFor(bool dark) => dark ? DarkTintOpacity : LightTintOpacity;
 
-    internal double LuminosityOpacityFor(bool dark) =>
-        dark ? Math.Clamp(LuminosityOpacity - ThemeOffset, MinimumLuminosityOpacity, MaximumLuminosityOpacity) : LuminosityOpacity;
+    internal double LuminosityOpacityFor(bool dark) => dark ? DarkLuminosityOpacity : LightLuminosityOpacity;
+
+    internal CardMicaTuning Normalized() => new(
+        Normalize(LightTintOpacity, DefaultLightTintOpacity),
+        Normalize(LightLuminosityOpacity, DefaultLightLuminosityOpacity),
+        Normalize(DarkTintOpacity, DefaultDarkTintOpacity),
+        Normalize(DarkLuminosityOpacity, DefaultDarkLuminosityOpacity));
+
+    internal static CardMicaTuning FromUserValues(
+        double lightTintPercent,
+        double lightTransparencyPercent,
+        double darkTintPercent,
+        double darkTransparencyPercent) =>
+        FromThemeValues(
+            lightTintPercent / 100,
+            1 - lightTransparencyPercent / 100,
+            darkTintPercent / 100,
+            1 - darkTransparencyPercent / 100);
 
     internal static CardMicaTuning FromUserValues(double tintPercent, double transparencyPercent) =>
         FromValues(tintPercent / 100, 1 - transparencyPercent / 100);
 
     internal static CardMicaTuning FromValues(double tintOpacity, double luminosityOpacity)
+        => FromThemeValues(tintOpacity, luminosityOpacity, tintOpacity, luminosityOpacity);
+
+    internal static CardMicaTuning FromThemeValues(
+        double lightTintOpacity,
+        double lightLuminosityOpacity,
+        double darkTintOpacity,
+        double darkLuminosityOpacity) =>
+        new(
+            Normalize(lightTintOpacity, DefaultLightTintOpacity),
+            Normalize(lightLuminosityOpacity, DefaultLightLuminosityOpacity),
+            Normalize(darkTintOpacity, DefaultDarkTintOpacity),
+            Normalize(darkLuminosityOpacity, DefaultDarkLuminosityOpacity));
+
+    private static double Normalize(double value, double fallback)
     {
-        tintOpacity = double.IsFinite(tintOpacity) ? tintOpacity : DefaultTintOpacity;
-        luminosityOpacity = double.IsFinite(luminosityOpacity) ? luminosityOpacity : DefaultLuminosityOpacity;
-        return new CardMicaTuning(
-            Math.Clamp(tintOpacity, MinimumTintOpacity, MaximumTintOpacity),
-            Math.Clamp(luminosityOpacity, MinimumLuminosityOpacity, MaximumLuminosityOpacity));
+        if (!double.IsFinite(value)) return fallback;
+        return Math.Clamp(value, 0, 1);
     }
 
     internal static CardMicaTuning FromJson(JsonElement value, bool dark = false)
     {
-        var fallback = DefaultFor(dark);
-        if (value.ValueKind != JsonValueKind.Object) return fallback;
-        return FromValues(
-            ReadNumber(value, "tintOpacity", fallback.TintOpacity),
-            ReadNumber(value, "luminosityOpacity", fallback.LuminosityOpacity));
+        if (value.ValueKind != JsonValueKind.Object) return Default;
+        var lightTint = ReadNumber(value, "tintOpacity", DefaultLightTintOpacity);
+        var lightLuminosity = ReadNumber(value, "luminosityOpacity", DefaultLightLuminosityOpacity);
+        double darkTint;
+        double darkLuminosity;
+        if (value.TryGetProperty("darkTintOpacity", out _) ||
+            value.TryGetProperty("darkLuminosityOpacity", out _))
+        {
+            darkTint = ReadNumber(value, "darkTintOpacity", DefaultDarkTintOpacity);
+            darkLuminosity = ReadNumber(value, "darkLuminosityOpacity", DefaultDarkLuminosityOpacity);
+        }
+        else
+        {
+            // Payloads from before split light/dark tuning inherited the old
+            // implicit dark-theme offset from their two light values.
+            darkTint = lightTint - LegacyThemeOffset;
+            darkLuminosity = lightLuminosity - LegacyThemeOffset;
+        }
+        return FromThemeValues(lightTint, lightLuminosity, darkTint, darkLuminosity);
     }
 
     internal bool Matches(CardMicaTuning other) =>
-        Math.Abs(TintOpacity - other.TintOpacity) < 0.0005 &&
-        Math.Abs(LuminosityOpacity - other.LuminosityOpacity) < 0.0005;
+        Math.Abs(LightTintOpacity - other.LightTintOpacity) < 0.0005 &&
+        Math.Abs(LightLuminosityOpacity - other.LightLuminosityOpacity) < 0.0005 &&
+        Math.Abs(DarkTintOpacity - other.DarkTintOpacity) < 0.0005 &&
+        Math.Abs(DarkLuminosityOpacity - other.DarkLuminosityOpacity) < 0.0005;
 
     private static double ReadNumber(JsonElement value, string name, double fallback) =>
         value.TryGetProperty(name, out var item) &&

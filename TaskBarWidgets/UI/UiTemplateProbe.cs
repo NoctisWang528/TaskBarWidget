@@ -140,7 +140,7 @@ internal static class UiTemplateProbe
             if (cards.CardWindows.Any(card => card.Window.Title.Contains("天气", StringComparison.Ordinal)))
                 throw new InvalidOperationException("Quick-card settings did not release the disabled card.");
             foreach (var card in cards.CardWindows)
-                if (!card.MicaTuning.Matches(CardMicaTuning.FromValues(0.08, 0.30)))
+                if (!card.MicaTuning.Matches(CardMicaTuning.FromThemeValues(0.08, 0.30, 0.06, 0.28)))
                     throw new InvalidOperationException("Quick-card settings did not apply the persisted Mica tuning.");
             cardLifecycle["prewarmFollowsQuickCardSettings"] = true;
             cards.SetQuickCardEnabled("weather", true);

@@ -14,9 +14,20 @@ namespace TaskBarWidgets.UI;
 public sealed partial class SettingsWindow
 {
     private readonly Dictionary<string, JsonNode?> _serviceEvents = new(StringComparer.Ordinal);
-    private bool _queryingOffsets;
+    private int _offsetRequestSequence;
+    private int _offsetLatestRequestId;
+    private bool _offsetPumpScheduled;
+    private bool _offsetPumpRunning;
+    private OffsetPageRequest? _offsetPendingRequest;
     private string _offsetSearch = "";
     private int _offsetPage = 1;
+    private sealed record OffsetPageRequest(
+        int RequestId,
+        int Generation,
+        int Page,
+        string Search,
+        bool Activate,
+        TaskCompletionSource<bool> Completion);
     private static readonly (string Id, string Label, string Key)[] Players = [
         ("QQMusic", "QQ 音乐", "enableQQMusic"), ("Netease", "网易云音乐", "enableNetease"),
         ("Kugou", "酷狗音乐", "enableKugou"), ("Spotify", "Spotify", "enableSpotify"), ("Browser", "浏览器", "enableBrowser") ];
@@ -360,7 +371,12 @@ public sealed partial class SettingsWindow
         } else current.Children.Add(Copy("尚无确定歌词源的歌曲。"));
         var history = Section("已保存偏移");
         var search = new TextBox { PlaceholderText = "搜索歌曲或歌手", Text = _offsetSearch }; history.Children.Add(search);
-        history.Children.Add(ActionButton("搜索 / 刷新", async () => { _offsetSearch = search.Text; _offsetPage = 1; await LoadOffsetsAsync(); }));
+        history.Children.Add(ActionButton("搜索 / 刷新", async () =>
+        {
+            _offsetSearch = search.Text;
+            _offsetPage = 1;
+            await QueueOffsetQuery(_pageGeneration, activate: false);
+        }));
         if (_serviceEvents.GetValueOrDefault("trackOffsetEntries") is JsonObject page && page["entries"] is JsonArray entries) {
             foreach (var entry in entries.OfType<JsonObject>()) {
                 var content = new StackPanel { Spacing = 6 };
@@ -372,26 +388,178 @@ public sealed partial class SettingsWindow
                 history.Children.Add(new Expander { Header = Text(entry["title"]) + " — " + Text(entry["artist"]) + $"  {Number(entry["offsetMilliseconds"]):+0;-0;0} ms", Content = content, HorizontalAlignment = HorizontalAlignment.Stretch });
             }
             var paging = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            var previous = ActionButton("上一页", async () => { _offsetPage--; await LoadOffsetsAsync(); }); previous.IsEnabled = _offsetPage > 1; paging.Children.Add(previous);
+            var previous = ActionButton("上一页", async () =>
+            {
+                _offsetPage--;
+                await QueueOffsetQuery(_pageGeneration, activate: false);
+            });
+            previous.IsEnabled = _offsetPage > 1; paging.Children.Add(previous);
             paging.Children.Add(Copy($"{_offsetPage} / {Number(page["pageCount"], 1):0} 页，共 {Number(page["totalCount"]):0} 条"));
-            var next = ActionButton("下一页", async () => { _offsetPage++; await LoadOffsetsAsync(); }); next.IsEnabled = _offsetPage < Number(page["pageCount"], 1); paging.Children.Add(next); history.Children.Add(paging);
+            var next = ActionButton("下一页", async () =>
+            {
+                _offsetPage++;
+                await QueueOffsetQuery(_pageGeneration, activate: false);
+            });
+            next.IsEnabled = _offsetPage < Number(page["pageCount"], 1); paging.Children.Add(next); history.Children.Add(paging);
         }
-        if (!_queryingOffsets && !_serviceEvents.ContainsKey("trackOffsetEntries")) _ = GuardAsync(LoadOffsetsAsync);
+        else history.Children.Add(Copy("尚未载入偏移列表。"));
     }
-    private async Task LoadOffsetsAsync()
+
+    private void BeginOffsetsPageEntry(int generation) => _ = QueueOffsetQuery(generation, activate: true);
+
+    private void LeaveOffsetsPage()
     {
-        if (_queryingOffsets) return;
-        _queryingOffsets = true;
-        try { await ServiceCommandBatchAsync(
-            ("trackOffsetsPageActivated", null),
-            ("queryTrackOffsets", new JsonObject { ["page"] = _offsetPage, ["pageSize"] = 25, ["search"] = _offsetSearch, ["lyricSource"] = "All", ["sort"] = "updated" })); }
-        finally { _queryingOffsets = false; }
+        _offsetLatestRequestId = ++_offsetRequestSequence;
+        CancelPendingOffsetQuery();
     }
-    internal Task ProbeLoadOffsetsAsync(string search, int page)
+
+    private void CancelPendingOffsetQuery()
+    {
+        var pending = _offsetPendingRequest;
+        _offsetPendingRequest = null;
+        pending?.Completion.TrySetResult(false);
+    }
+
+    private Task<bool> QueueOffsetQuery(int generation, bool activate)
+    {
+        if (_currentPage != "trackOffsets" || generation != _pageGeneration)
+            return Task.FromResult(false);
+        var requestId = ++_offsetRequestSequence;
+        _offsetLatestRequestId = requestId;
+        CancelPendingOffsetQuery();
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _offsetPendingRequest = new OffsetPageRequest(
+            requestId,
+            generation,
+            _offsetPage,
+            _offsetSearch,
+            activate,
+            completion);
+        ScheduleOffsetPump();
+        return completion.Task;
+    }
+
+    private void ScheduleOffsetPump()
+    {
+        if (_offsetPumpScheduled) return;
+        _offsetPumpScheduled = true;
+        if (!DispatcherQueue.TryEnqueue(() =>
+            {
+                _offsetPumpScheduled = false;
+                _ = PumpOffsetRequestsAsync();
+            }))
+        {
+            _offsetPumpScheduled = false;
+            _ = PumpOffsetRequestsAsync();
+        }
+    }
+
+    private async Task PumpOffsetRequestsAsync()
+    {
+        if (_offsetPumpRunning) return;
+        _offsetPumpRunning = true;
+        try
+        {
+            while (_offsetPendingRequest is { } request)
+            {
+                _offsetPendingRequest = null;
+                if (!IsOffsetRequestCurrent(request))
+                {
+                    request.Completion.TrySetResult(false);
+                    continue;
+                }
+
+                var commands = new List<(string Action, JsonNode? Value)>(request.Activate ? 2 : 1);
+                if (request.Activate) commands.Add(("trackOffsetsPageActivated", null));
+                commands.Add(("queryTrackOffsets", new JsonObject
+                {
+                    ["requestId"] = request.RequestId,
+                    ["page"] = request.Page,
+                    ["pageSize"] = 25,
+                    ["search"] = request.Search,
+                    ["lyricSource"] = "All",
+                    ["sort"] = "updated"
+                }));
+
+                var snapshot = _media.Capture();
+                var responses = new List<JsonObject>(commands.Count);
+                var valid = true;
+                foreach (var (action, value) in commands)
+                {
+                    try
+                    {
+                        var response = await RequestAsync("settingsCommand", new { action, value });
+                        if (!IsOffsetRequestCurrent(request)) { valid = false; break; }
+                        responses.Add(response);
+                    }
+                    catch (OperationCanceledException) when (_closed)
+                    {
+                        valid = false;
+                        break;
+                    }
+                    catch (Exception error) when (error is not OutOfMemoryException)
+                    {
+                        if (IsOffsetRequestCurrent(request)) ShowError(error.Message);
+                        valid = false;
+                        break;
+                    }
+                }
+
+                if (!valid || !IsOffsetRequestCurrent(request))
+                {
+                    request.Completion.TrySetResult(false);
+                    continue;
+                }
+                foreach (var response in responses)
+                    ApplyServiceResponse(response, snapshot);
+                RenderPage();
+                UpdateSaveStatus();
+                request.Completion.TrySetResult(true);
+            }
+        }
+        finally
+        {
+            _offsetPumpRunning = false;
+            if (_offsetPendingRequest is not null) ScheduleOffsetPump();
+        }
+    }
+
+    private bool IsOffsetRequestCurrent(OffsetPageRequest request) =>
+        !_closed &&
+        _currentPage == "trackOffsets" &&
+        request.Generation == _pageGeneration &&
+        request.RequestId == _offsetLatestRequestId;
+
+    internal string ProbeOffsetState => string.Join(" ", new[]
+    {
+        $"page={_currentPage}",
+        $"generation={_pageGeneration}",
+        $"latest={_offsetLatestRequestId}",
+        $"sequence={_offsetRequestSequence}",
+        $"pending={( _offsetPendingRequest is { } pending ? pending.RequestId.ToString() : "none")}",
+        $"running={_offsetPumpRunning}",
+        $"search={_offsetSearch}",
+        $"offsetPage={_offsetPage}",
+        $"entries={( _serviceEvents.GetValueOrDefault("trackOffsetEntries") is JsonObject entries ? Text(entries["entries"]?[0]?["title"]) : "none")}"
+    });
+
+    internal Task<bool> ProbeQueueOffsetsAsync(string search, int page)
     {
         _offsetSearch = search;
         _offsetPage = page;
-        return LoadOffsetsAsync();
+        return QueueOffsetQuery(_pageGeneration, activate: false);
+    }
+
+    internal void ProbeSetOffsetState(string search, int page)
+    {
+        _offsetSearch = search;
+        _offsetPage = page;
+    }
+
+    internal async Task ProbeLoadOffsetsAsync(string search, int page)
+    {
+        if (!await ProbeQueueOffsetsAsync(search, page))
+            throw new InvalidOperationException("The probe offset query was superseded before it could apply.");
     }
     private void RenderDiagnostics()
     {

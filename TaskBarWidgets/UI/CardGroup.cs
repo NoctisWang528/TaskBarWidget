@@ -68,7 +68,10 @@ public sealed partial class CardGroup : IDisposable
     private readonly Image _cover = new() { Width = 64, Height = 64, Stretch = Stretch.UniformToFill };
     private readonly TextBlock _position = Text("0:00", 10), _duration = Text("0:00", 10), _status = Text("", 10);
     private readonly Slider _seek = new() { Minimum = 0, Maximum = 1, HorizontalAlignment = HorizontalAlignment.Stretch };
-    private readonly Button _previous = Icon("\uE892", "上一首"), _play = Icon("\uE768", "播放 / 暂停", 42), _next = Icon("\uE893", "下一首");
+    private readonly Button _previous = CardIconArt.CreateButton(CardIconKind.Previous, "上一首"),
+        _play = CardIconArt.CreateButton(CardIconKind.Play, "播放 / 暂停", 42),
+        _next = CardIconArt.CreateButton(CardIconKind.Next, "下一首"),
+        _settingsButton = CardIconArt.CreateButton(CardIconKind.Settings, "打开设置");
     private readonly Button _source = new() { HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
         Padding = new Thickness(8, 4, 8, 4), MinHeight = 34, Margin = new Thickness(0, 4, 0, 0) };
     private readonly Image _sourceImage = new() { Width = 20, Height = 20, Stretch = Stretch.Uniform };
@@ -79,7 +82,8 @@ public sealed partial class CardGroup : IDisposable
         _input = new() { HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
     private readonly TextBlock _outputName = Text("读取输出设备…", 12), _inputName = Text("读取输入设备…", 12),
         _outputPercent = Text("0", 11), _inputPercent = Text("0", 11);
-    private readonly Button _outputMute = Icon("\uE767", "输出静音"), _inputMute = Icon("\uE720", "输入静音");
+    private readonly Button _outputMute = CardIconArt.CreateButton(CardIconKind.Speaker, "输出静音"),
+        _inputMute = CardIconArt.CreateButton(CardIconKind.Microphone, "输入静音");
     private readonly Slider _outputVolume = new() { Minimum = 0, Maximum = 100 }, _inputVolume = new() { Minimum = 0, Maximum = 100 };
     private AudioChoice[] _outputs = [], _inputs = [];
     private SourceChoice[] _sources = [];
@@ -197,11 +201,21 @@ public sealed partial class CardGroup : IDisposable
         };
         if (slot.Id == "traffic")
             card.Root.ActualThemeChanged += (_, _) => RenderTraffic(_traffic);
+        if (slot.Id == "weather")
+            card.Root.ActualThemeChanged += (_, _) => ApplyWeatherTheme(ResolveWeatherTheme(card));
         if (slot.Id == "device")
             card.Root.Loaded += (_, _) => { if (_visible) Position(_anchorX, _anchorY); };
         if (_themePreview is { } preview) card.Root.RequestedTheme = preview;
         else if (_requestedTheme != ElementTheme.Default) card.Root.RequestedTheme = _requestedTheme;
+        if (slot.Id == "weather") ApplyWeatherTheme(ResolveWeatherTheme(card));
     }
+
+    private static ElementTheme ResolveWeatherTheme(CardWindow card) => card.Root.RequestedTheme switch
+    {
+        ElementTheme.Light => ElementTheme.Light,
+        ElementTheme.Dark => ElementTheme.Dark,
+        _ => card.Root.ActualTheme
+    };
 
     private void DestroyCardWindow(CardSlot slot)
     {
@@ -452,10 +466,9 @@ public sealed partial class CardGroup : IDisposable
         _source.Flyout = sources;
         metadata.Children.Add(_source);
         Add(summary, metadata, 1);
-        var settings = Icon("\uE713", "打开设置");
-        settings.VerticalAlignment = VerticalAlignment.Top;
-        settings.Click += (_, _) => { Hide("settings"); _openSettings("quickCards"); };
-        Add(summary, settings, 2);
+        _settingsButton.VerticalAlignment = VerticalAlignment.Top;
+        _settingsButton.Click += (_, _) => { Hide("settings"); _openSettings("quickCards"); };
+        Add(summary, _settingsButton, 2);
         content.Children.Add(summary);
         Add(content, _lyrics, 0, 1);
         var controls = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 18, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 10) };
@@ -605,11 +618,18 @@ public sealed partial class CardGroup : IDisposable
             settings.TryGetProperty("cardMicaLuminosityOpacity", out var luminosity) &&
             luminosity.ValueKind == JsonValueKind.Number && luminosity.TryGetDouble(out var luminosityOpacity))
         {
-            payload["mica"] = new System.Text.Json.Nodes.JsonObject
+            var mica = new System.Text.Json.Nodes.JsonObject
             {
                 ["tintOpacity"] = tintOpacity,
                 ["luminosityOpacity"] = luminosityOpacity
             };
+            if (settings.TryGetProperty("cardMicaDarkTintOpacity", out var darkTint) &&
+                darkTint.ValueKind == JsonValueKind.Number && darkTint.TryGetDouble(out var darkTintOpacity))
+                mica["darkTintOpacity"] = darkTintOpacity;
+            if (settings.TryGetProperty("cardMicaDarkLuminosityOpacity", out var darkLuminosity) &&
+                darkLuminosity.ValueKind == JsonValueKind.Number && darkLuminosity.TryGetDouble(out var darkLuminosityOpacity))
+                mica["darkLuminosityOpacity"] = darkLuminosityOpacity;
+            payload["mica"] = mica;
         }
         ApplyQuickCards(JsonSerializer.SerializeToElement(payload));
     }
@@ -654,7 +674,12 @@ public sealed partial class CardGroup : IDisposable
     {
         if (_disposed) return;
         _requestedTheme = theme;
-        foreach (var card in AllCards) card.Root.RequestedTheme = theme;
+        foreach (var card in AllCards)
+        {
+            card.Root.RequestedTheme = theme;
+            if (ReferenceEquals(card, _cardsById.GetValueOrDefault("weather")))
+                ApplyWeatherTheme(ResolveWeatherTheme(card));
+        }
         foreach (var flyout in _flyouts) ThemeFlyout(flyout);
         foreach (var card in AllCards)
             if (card.Root.XamlRoot is { } root)
@@ -742,7 +767,7 @@ public sealed partial class CardGroup : IDisposable
             _source.IsEnabled = _sources.Length > 1;
             _previous.IsEnabled = Bool(state, "canPrevious"); _next.IsEnabled = Bool(state, "canNext");
             _play.IsEnabled = Bool(state, "canPlayPause");
-            ((FontIcon)_play.Content).Glyph = Bool(state, "isPlaying") ? "\uE769" : "\uE768";
+            CardIconArt.SetKind(_play, Bool(state, "isPlaying") ? CardIconKind.Pause : CardIconKind.Play);
             var duration = Number(state, "durationSeconds");
             _seek.IsEnabled = Bool(state, "canSeek") && duration > 0;
             if (!_seekPending) { _seek.Maximum = Math.Max(1, duration); _seek.Value = Math.Clamp(Number(state, "positionSeconds"), 0, _seek.Maximum); }
@@ -861,7 +886,9 @@ public sealed partial class CardGroup : IDisposable
             (input ? _inputPercent : _outputPercent).Text = "—";
             _status.Text = (input ? "输入" : "输出") + "设备音量暂不可用，仍可选择其他设备。";
         }
-        ((FontIcon)mute.Content).Glyph = current?.IsMuted == true ? "\uE74F" : input ? "\uE720" : "\uE767";
+        CardIconArt.SetKind(mute, current?.IsMuted == true
+            ? input ? CardIconKind.MicrophoneMuted : CardIconKind.SpeakerMuted
+            : input ? CardIconKind.Microphone : CardIconKind.Speaker);
         AutomationProperties.SetName(mute, (input ? "输入" : "输出") + (current?.IsMuted == true ? "取消静音" : "静音"));
         ToolTipService.SetToolTip(mute, current?.IsMuted == true ? "取消静音" : "静音");
         if (input) { _inputId = current?.Id; _inputMuted = current?.IsMuted ?? false; }
@@ -1175,11 +1202,6 @@ public sealed partial class CardGroup : IDisposable
     private static string Time(double seconds) => TimeSpan.FromSeconds(Math.Clamp(seconds, 0, 359999)).ToString(seconds >= 3600 ? @"h\:mm\:ss" : @"m\:ss");
     private static TextBlock Text(string value, double size = 12) => UiThemeStyles.Apply(new TextBlock { Text = value, FontSize = size, TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1 }, "CardTextPrimary");
     private static void Secondary(TextBlock text) => UiThemeStyles.Apply(text, "CardTextSecondary");
-    private static Button Icon(string glyph, string name, double size = 32)
-    {
-        var button = new Button { Width = size, Height = size, MinWidth = 0, Padding = new Thickness(4), CornerRadius = new CornerRadius(size / 2), Content = new FontIcon { Glyph = glyph, FontSize = size > 32 ? 20 : 16 } };
-        AutomationProperties.SetName(button, name); ToolTipService.SetToolTip(button, name); return button;
-    }
     private static Grid Columns(params GridLength[] widths)
     {
         var grid = new Grid(); foreach (var width in widths) grid.ColumnDefinitions.Add(new ColumnDefinition { Width = width }); return grid;

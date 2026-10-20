@@ -27,11 +27,15 @@ public sealed class WinUiServiceAdapterTests
                 {
                     ShowLyricTranslation = true,
                     CardMicaTintOpacity = 0.08,
-                    CardMicaLuminosityOpacity = 0.30
+                    CardMicaLuminosityOpacity = 0.30,
+                    CardMicaDarkTintOpacity = 0.06,
+                    CardMicaDarkLuminosityOpacity = 0.28
                 });
                 Assert.True(payload.GetProperty("showLyricTranslation").GetBoolean());
                 Assert.Equal(0.08, payload.GetProperty("cardMicaTintOpacity").GetDouble());
                 Assert.Equal(0.30, payload.GetProperty("cardMicaLuminosityOpacity").GetDouble());
+                Assert.Equal(0.06, payload.GetProperty("cardMicaDarkTintOpacity").GetDouble());
+                Assert.Equal(0.28, payload.GetProperty("cardMicaDarkLuminosityOpacity").GetDouble());
                 Assert.True(payload.TryGetProperty("spectrumTuning", out _));
                 Assert.False(payload.TryGetProperty("mediaHotkeys", out _));
                 Assert.False(payload.TryGetProperty("enableGlobalMediaHotkeys", out _));

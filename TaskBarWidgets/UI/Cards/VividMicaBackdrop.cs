@@ -21,7 +21,7 @@ internal sealed class VividMicaBackdrop : SystemBackdrop
     {
         _alwaysInputActive = alwaysInputActive;
         _tuning = tuning is { } value
-            ? CardMicaTuning.FromValues(value.TintOpacity, value.LuminosityOpacity)
+            ? value.Normalized()
             : CardMicaTuning.Default;
     }
 
@@ -41,7 +41,7 @@ internal sealed class VividMicaBackdrop : SystemBackdrop
 
     internal void UpdateTuning(CardMicaTuning tuning)
     {
-        _tuning = CardMicaTuning.FromValues(tuning.TintOpacity, tuning.LuminosityOpacity);
+        _tuning = tuning.Normalized();
         var controller = _controller;
         if (controller is null) return;
         try { ApplyTuning(controller); }
@@ -127,9 +127,12 @@ internal sealed class VividMicaBackdrop : SystemBackdrop
 
         if (_alwaysInputActive) configuration.IsInputActive = true;
         controller.Kind = KindFor(_dark);
-        controller.TintColor = _dark ? Color.FromArgb(255, 12, 20, 34) : Color.FromArgb(255, 232, 241, 255);
+        // MicaTabless keeps the system material unobstructed. A neutral tint
+        // avoids the old blue wash while the user-tuned opacity controls how
+        // strongly the material sits over the wallpaper.
+        controller.TintColor = _dark ? Color.FromArgb(255, 32, 32, 32) : Color.FromArgb(255, 243, 243, 243);
         ApplyTuning(controller);
-        controller.FallbackColor = _dark ? Color.FromArgb(255, 22, 25, 31) : Color.FromArgb(255, 243, 245, 248);
+        controller.FallbackColor = _dark ? Color.FromArgb(255, 32, 32, 32) : Color.FromArgb(255, 243, 243, 243);
     }
 
     private void ApplyTuning(MicaController controller)

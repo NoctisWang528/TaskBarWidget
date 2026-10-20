@@ -31,7 +31,7 @@ public sealed class SettingsStore
             var json = File.ReadAllText(_filePath);
             var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
             using var document = JsonDocument.Parse(json);
-            ApplyInitialMicaDefaults(document.RootElement, settings, systemUsesLightTheme);
+            ApplyMicaSettings(document.RootElement, settings);
             MigrateLegacySpectrumSettings(document.RootElement, settings);
             MigrateSpectrumAudioAccess(document.RootElement, settings);
             MigrateTaskbarPresentation(document.RootElement, settings);
@@ -137,30 +137,56 @@ public sealed class SettingsStore
         settings.QuickCardEnabled["weather"] = true;
     }
 
-    private static void ApplyInitialMicaDefaults(
-        JsonElement root,
-        AppSettings settings,
-        bool systemUsesLightTheme)
+    private static void ApplyMicaSettings(JsonElement root, AppSettings settings)
     {
-        var useLightTheme = settings.ToolWindowTheme switch
-        {
-            ToolWindowTheme.Light => true,
-            ToolWindowTheme.Dark => false,
-            _ => systemUsesLightTheme
-        };
+        var hasLegacyTint = TryReadDouble(
+            root, nameof(AppSettings.CardMicaTintOpacity), out var legacyTint);
+        var hasLegacyLuminosity = TryReadDouble(
+            root, nameof(AppSettings.CardMicaLuminosityOpacity), out var legacyLuminosity);
 
-        if (!TryReadDouble(root, nameof(AppSettings.CardMicaTintOpacity), out _))
+        if (hasLegacyTint && hasLegacyLuminosity)
+        {
+            if (legacyTint == 1.0 && legacyLuminosity == 1.0)
+            {
+                settings.CardMicaTintOpacity = AppSettings.DefaultCardMicaTintOpacity;
+                settings.CardMicaLuminosityOpacity = AppSettings.DefaultCardMicaLuminosityOpacity;
+                settings.CardMicaDarkTintOpacity = AppSettings.DefaultCardMicaDarkTintOpacity;
+                settings.CardMicaDarkLuminosityOpacity = AppSettings.DefaultCardMicaDarkLuminosityOpacity;
+            }
+            else
+            {
+                settings.CardMicaTintOpacity = ClampMicaTint(legacyTint);
+                settings.CardMicaLuminosityOpacity = ClampMicaLuminosity(legacyLuminosity);
+                // These were the colors the old implicit dark offset produced.
+                settings.CardMicaDarkTintOpacity = ClampMicaTint(legacyTint - 0.02);
+                settings.CardMicaDarkLuminosityOpacity = ClampMicaLuminosity(legacyLuminosity - 0.02);
+            }
+        }
+        else
         {
             settings.CardMicaTintOpacity = AppSettings.DefaultCardMicaTintOpacity;
+            settings.CardMicaLuminosityOpacity = AppSettings.DefaultCardMicaLuminosityOpacity;
+            settings.CardMicaDarkTintOpacity = AppSettings.DefaultCardMicaDarkTintOpacity;
+            settings.CardMicaDarkLuminosityOpacity = AppSettings.DefaultCardMicaDarkLuminosityOpacity;
         }
 
-        if (!TryReadDouble(root, nameof(AppSettings.CardMicaLuminosityOpacity), out _))
-        {
-            settings.CardMicaLuminosityOpacity = useLightTheme
-                ? AppSettings.DefaultCardMicaLuminosityOpacity
-                : AppSettings.DefaultDarkCardMicaLuminosityOpacity;
-        }
+        // Explicit split-theme fields always win over both defaults and the
+        // legacy two-field migration. They are only written on the next save.
+        if (TryReadDouble(root, nameof(AppSettings.CardMicaDarkTintOpacity), out var darkTint))
+            settings.CardMicaDarkTintOpacity = ClampMicaTint(darkTint);
+        if (TryReadDouble(root, nameof(AppSettings.CardMicaDarkLuminosityOpacity), out var darkLuminosity))
+            settings.CardMicaDarkLuminosityOpacity = ClampMicaLuminosity(darkLuminosity);
     }
+
+    private static double ClampMicaTint(double value) =>
+        double.IsFinite(value)
+            ? Math.Clamp(value, AppSettings.MinimumCardMicaTintOpacity, AppSettings.MaximumCardMicaTintOpacity)
+            : AppSettings.DefaultCardMicaTintOpacity;
+
+    private static double ClampMicaLuminosity(double value) =>
+        double.IsFinite(value)
+            ? Math.Clamp(value, AppSettings.MinimumCardMicaLuminosityOpacity, AppSettings.MaximumCardMicaLuminosityOpacity)
+            : AppSettings.DefaultCardMicaLuminosityOpacity;
 
     private static void MigrateSpectrumAudioAccess(JsonElement root, AppSettings settings)
     {

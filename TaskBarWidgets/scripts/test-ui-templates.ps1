@@ -23,18 +23,27 @@ $runtimePrefix = (Get-SystemDotnetRoot).TrimEnd('\') + '\'
 if (-not $result.runtimeDirectory.StartsWith($runtimePrefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'UI did not use the installed shared .NET runtime.' }
 if ($result.winUiModule -notmatch '\\WindowsApps\\Microsoft.WindowsAppRuntime\.2_[^\\]+_x64__8wekyb3d8bbwe\\') { throw 'UI did not load WinUI from the installed x64 Windows App Runtime package.' }
 if ($result.checks.Count -ne 5 -or @($result.checks | Where-Object { -not $_.loaded -or $_.width -le 0 }).Count) { throw 'Not all five UI surfaces realized their templates.' }
-if (-not $result.audioControls.muteButtonRoundTrip -or -not $result.audioControls.staleReplyIgnored -or -not $result.cardLifecycle.externalClickPolicy) { throw 'Audio controls or outside-click component checks did not complete.' }
+if (-not $result.audioControls.muteButtonRoundTrip -or -not $result.audioControls.inputMuteButtonRoundTrip -or
+    -not $result.audioControls.volumePreserved -or -not $result.audioControls.staleReplyIgnored -or
+    $result.audioControls.centeredIconHosts -lt 6 -or $result.audioControls.maximumCenterError -gt 0.5 -or
+    -not $result.cardLifecycle.externalClickPolicy) { throw 'Audio controls, icon centering or outside-click component checks did not complete.' }
 if (-not $result.micaControls.fixtureRoundTrip -or -not $result.micaControls.noPresets -or
     -not $result.micaControls.noMockPreview -or -not $result.micaControls.themeKinds -or
+    -not $result.micaControls.fourSliders -or -not $result.micaControls.legacyCompatible -or
     ($result.micaControls.available -and (-not $result.micaControls.frameCoalesced -or
         -not $result.micaControls.discardRestored -or -not $result.micaControls.previewRestoredOnLeave -or
-        -not $result.micaControls.reopenRearmsPreview)) -or
+        -not $result.micaControls.independentThemes -or -not $result.micaControls.reopenRearmsPreview)) -or
     -not $result.micaControls.limitsClamped -or -not $result.micaControls.defaultsFallback) { throw 'Card Mica settings checks did not complete.' }
 if (-not $result.cardLifecycle.micaNewCardInherits) { throw 'A card created during Mica preview did not inherit it.' }
 if (-not $result.cardLifecycle.micaAlwaysInputActive) { throw 'Card Mica was not configured to remain input-active.' }
-if (-not $result.offsetSettings.bothPayloadsVisible -or $result.offsetSettings.initialFinalRenders -ne 1 -or
-    $result.offsetSettings.searchFinalRenders -ne 1 -or $result.offsetSettings.pageFinalRenders -ne 1) {
-    throw 'Track-offset page did not render each batched response exactly once.'
+if (-not $result.offsetSettings.bothPayloadsVisible -or
+    $result.offsetSettings.initialActivations -ne 1 -or $result.offsetSettings.initialBatches -ne 1 -or
+    $result.offsetSettings.initialFinalRenders -ne 1 -or $result.offsetSettings.redrawQueries -ne 0 -or
+    $result.offsetSettings.samePageReopenActivations -ne 1 -or $result.offsetSettings.stormActivations -ne 1 -or
+    -not $result.offsetSettings.staleEntryIgnored -or -not $result.offsetSettings.searchWithoutActivation -or
+    -not $result.offsetSettings.pagingWithoutActivation -or -not $result.offsetSettings.staleRequestIgnored -or
+    -not $result.offsetSettings.requestIdsMonotonic -or $result.offsetSettings.validBatchFinalRenders -ne 1) {
+    throw 'Track-offset page lifecycle, request ordering or single-render checks did not complete.'
 }
 if (-not $result.reorderControls.sameColumn -or -not $result.reorderControls.crossColumn -or
     -not $result.reorderControls.emptyColumn -or -not $result.reorderControls.pointerGapPresentation -or

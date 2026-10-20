@@ -2,6 +2,18 @@
 
 更新：2026-10-20。最近成功完整构建的路径由本机 `artifacts/latest-build.txt` 提供；构建产物、布局检查图、日志和用户配置不提交到仓库。
 
+## 卡片矢量图标、鲜艳 Mica 与歌词偏移加载（2026-10-20）
+
+四张快捷卡片和天气刷新按钮的圆形图标改由 `UI/Cards/CardIconArt.cs` 绘制（上一首、播放／暂停、下一首、扬声器、扬声器静音、麦克风、麦克风静音、设置、刷新），不再依赖 Segoe Fluent Icons；静音状态通过切换矢量图形更新，不读取或修改字体字形。所有圆形按钮使用固定 20 DIP 图标宿主（32 DIP 按钮内 16 DIP，42 DIP 播放按钮内 20 DIP），`Padding=0`、零最小尺寸并关闭布局取整，修复字体缺失时的方框和内容偏移；下拉箭头、菜单勾选等非圆形系统图标保持不变。天气卡主题切换改为在 `ActualThemeChanged` 后确定性重绘彩色图标和预报模块。
+
+Mica 按 MicaTabless 的“内容透明、系统材质直接透出”原则实现：浅色和深色都只保留 `#0AFFFFFF` 的首帧防白闪层，内容不再叠加整卡底色；浅色使用 `MicaKind.Base` 与中性 `#F3F3F3` tint，深色使用 `MicaKind.BaseAlt` 与中性 `#202020` tint，fallback 同步中性化。材质设置拆为浅色和深色两组“色彩浓度／通透度”滑块，共四个（0–100%），默认浅色 45%／5%、深色 45%／50%；预览和现有卡片按当前实际主题使用对应组，点击“应用更改”后持久化四个值。旧文件的两个字段继续作为浅色配置：旧工厂值精确为 `1.0/1.0` 时迁移到新默认，其他自定义值保留浅色并按旧实际效果 `-0.02` 初始化深色；显式深色字段优先，非法值钳制，迁移只在内存中，下一次正常保存才写回。`quickCards.mica` 新增 `darkTintOpacity/darkLuminosityOpacity`，旧两字段载荷按旧偏移回退。
+
+“歌词 → 单曲偏移”改为显式页面激活生命周期：`ShowPage`、导航选择与设置窗口重开统一经 `EnterPage`，每次进入先渲染缓存再发送恰好一次 `trackOffsetsPageActivated + queryTrackOffsets`。搜索／刷新和翻页只查询；查询带单调递增 `requestId`，同一时刻最多一个请求加一个 latest-wins 尾随刷新，页面代次、离开页面或请求过期时丢弃整批响应，每次有效批次只最终渲染一次。`RenderOffsets` 不再在缓存缺失时自动加载。
+
+自动验证：`SettingsStoreTests` 覆盖新默认、`1.0/1.0` 工厂迁移、自定义旧值、显式深色优先、钳制、四字段往返和不覆盖既有文件；Media 测试 165/165 通过，UI 管道检查通过。屏外模板探针 `artifacts/builds/20261020-220043/ui-template-check.json` 为 `success=true`：6 个圆形图标宿主全部测得，最大中心误差 `0`；四滑块、深浅独立、默认值、旧格式兼容、预览与丢弃恢复全部通过；偏移页首次进入 `initialActivations=1`、`initialBatches=1`、`initialFinalRenders=1`，重绘查询 `0`，同页重开激活 `1`，导航风暴合并为 `1`，过期进入／请求被忽略，搜索／翻页不激活，`requestId` 单调且每批只最终渲染一次。最终完整构建、`validate-winui.ps1` 和最终发布包模板探针按 `artifacts/latest-build.txt` 指向的目录执行，结果以该构建的检查产物为准。
+
+桌面验收仍待完成：真实壁纸下的 Mica 鲜艳度与通透度、系统浅色／深色即时切换、真实输出／输入设备静音图标、混合 DPI、Explorer 重启后的卡片表现，均不能由离屏截图或模拟设备替代。本轮未启动正常产品、未替换日用安装、未修改启动项；提交、推送与 Release 按用户的后续明确授权执行。
+
 ## 出厂默认配置与彩色天气图标（2026-10-20）
 
 出厂默认配置改为编译期资源，不再依赖代码兜底：`Native/TrafficMonitor/defaults/` 下四个 `*.default.ini`（主配置与 Battery／PowerMon／Weather 三个内置模块）以 TEXT 资源编入 `TaskBarWidgets.exe`，`Media/Defaults/media-settings.default.json` 以嵌入资源编入媒体程序集。首次运行时只对**不存在**的目标文件逐字节写入，写入使用同目录临时文件加无覆盖改名；已有配置在启动、更新和重装路径上都不被读取、合并或覆盖，目录只读时静默回退。默认值已通用化：不写网卡描述（`connection_name`）、CPU 温度传感器名、任务栏字体、窗口位置、凭据与个人路径；天气保留通用默认城市北京（与代码兜底一致），用户设置后以用户城市为准。`cpu_core_name` 留空时按“平均温度”处理，`hard_disk_name` 为 `_Total`。同时修正 `global_cfg.ini` 首次写入只留 BOM 空文件、导致下次启动误判为非便携的问题。发布脚本、更新器和 `app-files.json` 未改动，默认值不会作为包内文件出现。

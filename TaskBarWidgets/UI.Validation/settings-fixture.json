@@ -642,6 +642,8 @@
     "toolWindowTheme": "System",
     "cardMicaTintOpacity": 0.34,
     "cardMicaLuminosityOpacity": 0.5,
+    "cardMicaDarkTintOpacity": 0.22,
+    "cardMicaDarkLuminosityOpacity": 0.4,
     "enableWordScanning": true,
     "showLyricTranslation": true,
     "showCover": true,

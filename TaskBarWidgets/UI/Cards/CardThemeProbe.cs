@@ -31,7 +31,7 @@ public sealed partial class CardGroup
             var dark = card.Root.ActualTheme == ElementTheme.Dark;
             if (backdrop is not null && backdrop.Theme != SystemBackdropTheme.Default && backdrop.Theme != (dark ? SystemBackdropTheme.Dark : SystemBackdropTheme.Light))
                 throw new InvalidOperationException("Mica configuration did not follow the card's actual theme.");
-            if (card.SurfaceBackground is not SolidColorBrush surface || (dark ? surface.Color.A > 0x0A : surface.Color.A > 0x66))
+            if (card.SurfaceBackground is not SolidColorBrush surface || surface.Color.A > 0x0A)
                 throw new InvalidOperationException("The card surface is too opaque for the vivid Mica treatment.");
             var background = dark ? Microsoft.UI.ColorHelper.FromArgb(255, 32, 32, 32) : Microsoft.UI.ColorHelper.FromArgb(255, 243, 243, 243);
             var textChecks = new List<double>();

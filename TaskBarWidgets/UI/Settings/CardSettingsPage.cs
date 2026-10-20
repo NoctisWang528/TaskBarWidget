@@ -125,67 +125,84 @@ public sealed partial class SettingsWindow
         var canPreview = CanPreviewCardMica;
         if (canPreview) ActivateCardMicaPreview(DraftCardMicaTuning);
         var initialMica = DraftCardMicaTuning;
-        var tint = new Slider
+        Slider MicaSlider(string name, string automationId, double value)
         {
-            Minimum = CardMicaTuning.MinimumTintOpacity * 100,
-            Maximum = CardMicaTuning.MaximumTintOpacity * 100,
-            StepFrequency = 1,
-            SnapsTo = SliderSnapsTo.StepValues,
-            IsThumbToolTipEnabled = true,
-            IsEnabled = canPreview,
-            HorizontalAlignment = HorizontalAlignment.Stretch
-        };
-        var transparency = new Slider
-        {
-            Minimum = (1 - CardMicaTuning.MaximumLuminosityOpacity) * 100,
-            Maximum = (1 - CardMicaTuning.MinimumLuminosityOpacity) * 100,
-            StepFrequency = 1,
-            SnapsTo = SliderSnapsTo.StepValues,
-            IsThumbToolTipEnabled = true,
-            IsEnabled = canPreview,
-            HorizontalAlignment = HorizontalAlignment.Stretch
-        };
-        AutomationProperties.SetName(tint, "卡片 Mica 色彩浓度");
-        AutomationProperties.SetAutomationId(tint, "setting-cardMicaTintOpacity");
-        AutomationProperties.SetName(transparency, "卡片 Mica 通透度");
-        AutomationProperties.SetAutomationId(transparency, "setting-cardMicaTransparency");
+            var slider = new Slider
+            {
+                Minimum = 0,
+                Maximum = 100,
+                StepFrequency = 1,
+                SnapsTo = SliderSnapsTo.StepValues,
+                IsThumbToolTipEnabled = true,
+                IsEnabled = canPreview,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Value = Math.Round(value)
+            };
+            AutomationProperties.SetName(slider, name);
+            AutomationProperties.SetAutomationId(slider, automationId);
+            return slider;
+        }
+
+        var lightTint = MicaSlider("浅色模式卡片 Mica 色彩浓度", "setting-cardMicaTintOpacity", initialMica.LightTintOpacity * 100);
+        var lightTransparency = MicaSlider("浅色模式卡片 Mica 通透度", "setting-cardMicaTransparency", initialMica.LightTransparency * 100);
+        var darkTint = MicaSlider("深色模式卡片 Mica 色彩浓度", "setting-cardMicaDarkTintOpacity", initialMica.DarkTintOpacity * 100);
+        var darkTransparency = MicaSlider("深色模式卡片 Mica 通透度", "setting-cardMicaDarkTransparency", initialMica.DarkTransparency * 100);
 
         var suppressMicaEvents = false;
-        CardMicaTuning SliderMica() => CardMicaTuning.FromUserValues(tint.Value, transparency.Value);
+        CardMicaTuning SliderMica() => CardMicaTuning.FromUserValues(
+            lightTint.Value,
+            lightTransparency.Value,
+            darkTint.Value,
+            darkTransparency.Value);
         void UpdateMicaLabels()
         {
-            tint.Header = $"色彩浓度 · {tint.Value:0}%";
-            transparency.Header = $"通透度 · {transparency.Value:0}%";
+            lightTint.Header = $"色彩浓度 · {lightTint.Value:0}%";
+            lightTransparency.Header = $"通透度 · {lightTransparency.Value:0}%";
+            darkTint.Header = $"色彩浓度 · {darkTint.Value:0}%";
+            darkTransparency.Header = $"通透度 · {darkTransparency.Value:0}%";
         }
-        void CommitMica(CardMicaTuning tuning)
+        void CommitMica()
         {
-            _media.Set("cardMicaTintOpacity", tuning.TintOpacity);
-            _media.Set("cardMicaLuminosityOpacity", tuning.LuminosityOpacity);
+            var tuning = SliderMica();
+            _media.Set("cardMicaTintOpacity", tuning.LightTintOpacity);
+            _media.Set("cardMicaLuminosityOpacity", tuning.LightLuminosityOpacity);
+            _media.Set("cardMicaDarkTintOpacity", tuning.DarkTintOpacity);
+            _media.Set("cardMicaDarkLuminosityOpacity", tuning.DarkLuminosityOpacity);
             Changed();
             PreviewCardMica(tuning);
         }
+        void BindMicaSlider(Slider slider)
+        {
+            slider.ValueChanged += (_, _) =>
+            {
+                if (suppressMicaEvents) return;
+                UpdateMicaLabels();
+                CommitMica();
+            };
+        }
 
         suppressMicaEvents = true;
-        tint.Value = Math.Round(initialMica.TintOpacity * 100);
-        transparency.Value = Math.Round(initialMica.Transparency * 100);
+        lightTint.Value = Math.Round(initialMica.LightTintOpacity * 100);
+        lightTransparency.Value = Math.Round(initialMica.LightTransparency * 100);
+        darkTint.Value = Math.Round(initialMica.DarkTintOpacity * 100);
+        darkTransparency.Value = Math.Round(initialMica.DarkTransparency * 100);
         suppressMicaEvents = false;
         UpdateMicaLabels();
-        tint.ValueChanged += (_, _) =>
-        {
-            if (suppressMicaEvents) return;
-            UpdateMicaLabels();
-            var tuning = SliderMica();
-            CommitMica(tuning);
-        };
-        transparency.ValueChanged += (_, _) =>
-        {
-            if (suppressMicaEvents) return;
-            UpdateMicaLabels();
-            var tuning = SliderMica();
-            CommitMica(tuning);
-        };
-        material.Children.Add(tint);
-        material.Children.Add(transparency);
+        BindMicaSlider(lightTint);
+        BindMicaSlider(lightTransparency);
+        BindMicaSlider(darkTint);
+        BindMicaSlider(darkTransparency);
+
+        var lightGroup = new StackPanel { Spacing = 8 };
+        lightGroup.Children.Add(new TextBlock { Text = "浅色模式", FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        lightGroup.Children.Add(lightTint);
+        lightGroup.Children.Add(lightTransparency);
+        material.Children.Add(lightGroup);
+        var darkGroup = new StackPanel { Spacing = 8 };
+        darkGroup.Children.Add(new TextBlock { Text = "深色模式", FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        darkGroup.Children.Add(darkTint);
+        darkGroup.Children.Add(darkTransparency);
+        material.Children.Add(darkGroup);
         if (!canPreview)
         {
             material.Children.Add(new InfoBar
