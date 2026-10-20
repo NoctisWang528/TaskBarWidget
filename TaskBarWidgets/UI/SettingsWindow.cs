@@ -1,11 +1,13 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.UI;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using TaskBarWidgets.UI.Cards;
 using TaskBarWidgets.UI.Settings;
 using Windows.Foundation;
@@ -27,6 +29,9 @@ public sealed partial class SettingsWindow : Window
     private readonly bool _vividSettingsBackdrop;
     private readonly Windows.UI.ViewManagement.AccessibilitySettings _accessibility = new();
     private bool _highContrastSubscriptionAttempted, _highContrastSubscribed;
+    private readonly Grid _titleBar = new() { Height = 48, Tag = "settings-title-bar" };
+    private readonly TextBlock _titleBarText = new() { Text = "TaskBarWidgets — 设置", FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+    private readonly Image _titleBarIcon = new() { Width = 16, Height = 16, Stretch = Stretch.Uniform, VerticalAlignment = VerticalAlignment.Center };
     private JsonObject _schema = new();
     private readonly NavigationView _navigation = new() { IsSettingsVisible = false, IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed, PaneDisplayMode = NavigationViewPaneDisplayMode.Auto, OpenPaneLength = 224, PaneTitle = "TaskBarWidgets" };
     private readonly SplitView _split = new() { PanePlacement = SplitViewPanePlacement.Right, DisplayMode = SplitViewDisplayMode.Overlay, OpenPaneLength = 352, Tag = "settings-split" };
@@ -64,12 +69,15 @@ public sealed partial class SettingsWindow : Window
     internal bool CanPreviewCardMica => !_accessibility.HighContrast && VividMicaBackdrop.IsSupported;
     internal bool UsesVividSettingsBackdrop => _vividSettingsBackdrop;
     internal CardMicaTuning SettingsMicaTuning => _cardMicaPreviewBackdrop.Tuning;
+    internal bool UsesWinUiTitleBar => AppWindow.TitleBar.ExtendsContentIntoTitleBar && ReferenceEquals(Content, _root);
+    internal double TitleBarHeight => _titleBar.ActualHeight;
 
     public SettingsWindow(UiConnection connection)
     {
         _connection = connection;
         Title = "TaskBarWidgets — 设置";
         WindowIcon.Apply(this);
+        InitializeTitleBar();
         // WinUI can invalidate another window's backdrop state when SystemBackdrop
         // is exchanged on a visible settings window. Assign one backdrop for the
         // lifetime of this reused HWND and preview by updating its controller.
@@ -155,7 +163,8 @@ public sealed partial class SettingsWindow : Window
         Grid.SetRow(scroll, 1); body.Children.Add(scroll);
         _split.Content = body;
         _split.Pane = UiThemeStyles.Apply(new ScrollViewer { Content = _properties, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled }, "SettingsPane");
-        _navigation.Content = _split; Content = _navigation;
+        _navigation.Content = _split;
+        Content = _root;
         InitializeModuleGestures();
         _root.ActualThemeChanged += (_, _) => UpdateTitleBarTheme();
         _root.Loaded += (_, _) => { TrySubscribeSettingsHighContrast(); UpdateTitleBarTheme(); };
@@ -181,6 +190,39 @@ public sealed partial class SettingsWindow : Window
             _lifetime.Dispose();
         };
         ShowPage("taskbar");
+    }
+
+    private void InitializeTitleBar()
+    {
+        var titleBar = AppWindow.TitleBar;
+        if (!AppWindowTitleBar.IsCustomizationSupported())
+            throw new InvalidOperationException("This Windows version does not support the WinUI title bar.");
+
+        ExtendsContentIntoTitleBar = true;
+        titleBar.ExtendsContentIntoTitleBar = true;
+        titleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
+        titleBar.IconShowOptions = IconShowOptions.HideIconAndSystemMenu;
+
+        _root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(48) });
+        _root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        _titleBar.HorizontalAlignment = HorizontalAlignment.Stretch;
+        _titleBar.VerticalAlignment = VerticalAlignment.Stretch;
+        _titleBar.Margin = new Thickness(0);
+        Grid.SetRow(_navigation, 1);
+        _titleBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        _titleBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var identity = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 10,
+            Margin = new Thickness(18, 0, 8, 0),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        _titleBarIcon.Source = new BitmapImage(new Uri(Path.Combine(AppContext.BaseDirectory, "Assets", "TaskBarWidgets.ico")));
+        identity.Children.Add(_titleBarIcon);
+        identity.Children.Add(_titleBarText);
+        _titleBar.Children.Add(identity);
+        _titleBar.Loaded += (_, _) => SetTitleBar(_titleBar);
     }
 
     public void NavigateTo(string page) => ShowPage(page);
@@ -435,11 +477,12 @@ public sealed partial class SettingsWindow : Window
         var titleBar = AppWindow.TitleBar;
         var contrast = _accessibility.HighContrast;
         var dark = _root.ActualTheme == ElementTheme.Dark;
+        // The title area is part of the Mica surface. Keep the caption buttons'
+        // hit targets transparent so only the glyphs and their hover fill show.
         Color? foreground = contrast ? null : dark ? Colors.White : Colors.Black;
-        Color? background = contrast ? null : dark ? Color.FromArgb(255, 32, 32, 32) : Color.FromArgb(255, 243, 243, 243);
         titleBar.ForegroundColor = titleBar.ButtonForegroundColor = foreground;
-        titleBar.BackgroundColor = titleBar.ButtonBackgroundColor = background;
-        titleBar.InactiveBackgroundColor = titleBar.ButtonInactiveBackgroundColor = background;
+        titleBar.BackgroundColor = titleBar.ButtonBackgroundColor = Colors.Transparent;
+        titleBar.InactiveBackgroundColor = titleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
         titleBar.InactiveForegroundColor = titleBar.ButtonInactiveForegroundColor = contrast ? null : dark ? Color.FromArgb(255, 160, 160, 160) : Color.FromArgb(255, 96, 96, 96);
         titleBar.ButtonHoverBackgroundColor = contrast ? null : dark ? Color.FromArgb(255, 55, 55, 55) : Color.FromArgb(255, 224, 224, 224);
         titleBar.ButtonPressedBackgroundColor = contrast ? null : dark ? Color.FromArgb(255, 48, 48, 48) : Color.FromArgb(255, 210, 210, 210);

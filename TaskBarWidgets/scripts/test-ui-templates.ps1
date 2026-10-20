@@ -43,8 +43,9 @@ if (-not $result.reorderControls.sameColumn -or -not $result.reorderControls.cro
     throw 'Reorder interaction checks did not complete.'
 }
 foreach ($layout in @($result.layoutChecks | Where-Object { $_.kind -eq 'settingsTaskbarLayout' })) {
-    if ($layout.advancedFields -lt 1 -or -not $layout.viewport.scrollbarAtRight) {
-        throw 'Settings viewport or directly expanded advanced fields were not verified at every width.'
+    if ($layout.advancedFields -lt 1 -or -not $layout.viewport.scrollbarAtRight -or
+        -not $layout.titleBar.custom -or $layout.titleBar.height -lt 44 -or -not $layout.titleBar.icon -or -not $layout.titleBar.title) {
+        throw 'Settings title bar, viewport or directly expanded advanced fields were not verified at every width.'
     }
 }
 foreach ($spectrum in @($result.layoutChecks | Where-Object { $_.kind -eq 'settingsSpectrumAdvancedFields' })) {

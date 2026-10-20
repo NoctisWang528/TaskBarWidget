@@ -24,6 +24,7 @@ internal static class UiLayoutProbe
         foreach (var panel in Walk(content).OfType<Panel>().Where(panel => Equals(panel.Tag, "settings-content"))) panel.ChildrenTransitions = null;
         var fixture = JsonNode.Parse(await File.ReadAllTextAsync(fixturePath))!.AsObject();
         window.LoadValidationData(fixture["native"]!.AsObject(), fixture["media"]!.AsObject());
+        var titleBar = AssertWinUiTitleBar(window, content);
         var advancedKeys = (fixture["native"]?["fields"] as JsonArray)?.OfType<JsonObject>()
             .Where(field => field["advanced"]?.ToString() == "true")
             .Select(field => field["key"]?.ToString() ?? "")
@@ -51,7 +52,7 @@ internal static class UiLayoutProbe
             var boxes = Toggles(content);
             var top = Path.Combine(outputDirectory, $"settings-taskbar-{width}.png");
             await CaptureAsync(content, top);
-            checks.Add(new { kind = "settingsTaskbarLayout", requestedPhysicalWidth = width, actualWidth = content.ActualWidth, viewport, advancedFields = advancedKeys.Length, previewWidth = preview.ActualWidth, previewHeight = preview.ActualHeight, previewColumns, columns, boxes, png = top, systemBackdropCaptured = false });
+            checks.Add(new { kind = "settingsTaskbarLayout", requestedPhysicalWidth = width, actualWidth = content.ActualWidth, titleBar, viewport, advancedFields = advancedKeys.Length, previewWidth = preview.ActualWidth, previewHeight = preview.ActualHeight, previewColumns, columns, boxes, png = top, systemBackdropCaptured = false });
 
             if (width == 1920) {
                 var drawer = await AssertOverlayDrawerAsync(window, content, pageScroll);
@@ -211,6 +212,27 @@ internal static class UiLayoutProbe
             scrollbarX = barOrigin!.Value.X,
             scrollbarWidth = bar.ActualWidth,
             scrollbarAtRight = true
+        };
+    }
+    private static object AssertWinUiTitleBar(SettingsWindow window, FrameworkElement content)
+    {
+        var titleBar = Walk(content).OfType<Grid>().Single(grid => Equals(grid.Tag, "settings-title-bar"));
+        var navigation = Walk(content).OfType<NavigationView>().Single();
+        var titleBarOrigin = titleBar.TransformToVisual(content).TransformPoint(new Point(0, 0));
+        var navigationOrigin = navigation.TransformToVisual(content).TransformPoint(new Point(0, 0));
+        if (!window.UsesWinUiTitleBar || !window.ExtendsContentIntoTitleBar || !content.IsLoaded)
+            throw new InvalidOperationException("Settings did not enable the WinUI title bar.");
+        if (titleBar.ActualHeight < 44 || Math.Abs(titleBar.ActualWidth - content.ActualWidth) > 2 ||
+            navigationOrigin.Y < titleBarOrigin.Y + titleBar.ActualHeight - 1)
+            throw new InvalidOperationException("The WinUI title bar is not realized above the full-width navigation content.");
+        return new
+        {
+            custom = true,
+            height = titleBar.ActualHeight,
+            contentWidth = titleBar.ActualWidth,
+            navigationTop = navigationOrigin.Y,
+            icon = Walk(titleBar).OfType<Image>().Single().Source is not null,
+            title = Walk(titleBar).OfType<TextBlock>().Any(text => text.Text.Contains("设置", StringComparison.Ordinal))
         };
     }
     private static ScrollBar? VerticalBar(ScrollViewer scroll) => Walk(scroll).OfType<ScrollBar>()

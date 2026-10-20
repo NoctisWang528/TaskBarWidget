@@ -21,7 +21,8 @@ public sealed partial class SettingsWindow
     private sealed record ModuleDropTarget(Border Surface, int? Row, StackPanel? Chips);
     private void InitializeModuleGestures()
     {
-        Content = _root; _root.Children.Add(_navigation); _root.Children.Add(_dragOverlay);
+        if (!_root.Children.Contains(_titleBar)) _root.Children.Add(_titleBar);
+        _root.Children.Add(_navigation); Grid.SetRow(_navigation, 1); _root.Children.Add(_dragOverlay);
         _pointerReorder = new PointerReorder(_navigation, _dragOverlay, ResetReorderFeedback);
         Activated += (_, args) => { if (args.WindowActivationState == WindowActivationState.Deactivated) _pointerReorder.Cancel("deactivated"); };
     }
