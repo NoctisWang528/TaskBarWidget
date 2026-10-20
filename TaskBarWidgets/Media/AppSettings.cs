@@ -75,6 +75,12 @@ public sealed class AppSettings
     public const double DefaultLyricsLayoutScalePercent = 100;
     public const double MinimumLyricsLayoutScalePercent = 25;
     public const double MaximumLyricsLayoutScalePercent = 300;
+    public const double DefaultCardMicaTintOpacity = 0.22;
+    public const double DefaultCardMicaLuminosityOpacity = 0.58;
+    public const double MinimumCardMicaTintOpacity = 0.05;
+    public const double MaximumCardMicaTintOpacity = 0.45;
+    public const double MinimumCardMicaLuminosityOpacity = 0.15;
+    public const double MaximumCardMicaLuminosityOpacity = 0.85;
 
     public const double DefaultWindowWidth = 420;
     public const double MinimumWindowWidth = 100;
@@ -152,6 +158,10 @@ public sealed class AppSettings
     public QuickCardResourceMode QuickCardResourceMode { get; set; } = QuickCardResourceMode.Resident;
 
     public string CardFontFamily { get; set; } = DefaultFontFamily;
+
+    public double CardMicaTintOpacity { get; set; } = DefaultCardMicaTintOpacity;
+
+    public double CardMicaLuminosityOpacity { get; set; } = DefaultCardMicaLuminosityOpacity;
 
     public DateTimeOffset? LastUpdateCheckUtc { get; set; }
 
@@ -345,7 +355,20 @@ public sealed class AppSettings
         if (!Enum.IsDefined(QuickCardResourceMode)) QuickCardResourceMode = QuickCardResourceMode.Resident;
 
         CardFontFamily = NormalizeFontFamily(CardFontFamily);
+        CardMicaTintOpacity = NormalizeMicaOpacity(
+            CardMicaTintOpacity,
+            DefaultCardMicaTintOpacity,
+            MinimumCardMicaTintOpacity,
+            MaximumCardMicaTintOpacity);
+        CardMicaLuminosityOpacity = NormalizeMicaOpacity(
+            CardMicaLuminosityOpacity,
+            DefaultCardMicaLuminosityOpacity,
+            MinimumCardMicaLuminosityOpacity,
+            MaximumCardMicaLuminosityOpacity);
     }
+
+    private static double NormalizeMicaOpacity(double value, double fallback, double minimum, double maximum) =>
+        double.IsFinite(value) ? Math.Clamp(value, minimum, maximum) : fallback;
 
     public bool AddCustomPlayerSource(string? sourceId, string? displayName, string? iconDataUrl = null,
         string? presetIconId = null, string? presetIconColor = null, bool enabled = true,

@@ -24,6 +24,8 @@ internal sealed class CardWindow
     internal FrameworkElement Content => _content;
     // Themed fill behind the content; the template probe asserts it never goes blank.
     internal Brush? SurfaceBackground => _surface.Background;
+    internal VividMicaBackdrop MicaBackdrop => _micaBackdrop;
+    internal CardMicaTuning MicaTuning => _micaBackdrop.Tuning;
     // True once the window has rendered a frame while hidden, so the first
     // click skips window creation and XAML realization.
     internal bool Prewarmed => _prewarmed;
@@ -32,6 +34,7 @@ internal sealed class CardWindow
     internal Task VisibleFrame => _visibleFrame?.Task ?? Task.CompletedTask;
     private readonly FrameworkElement _content;
     private readonly Grid _surface;
+    private readonly VividMicaBackdrop _micaBackdrop;
     private readonly bool _autoHeight;
 
     internal CardWindow(string title, FrameworkElement content, double height, bool autoHeight = false, double width = CardGroup.CardWidth)
@@ -46,7 +49,8 @@ internal sealed class CardWindow
         _surface = surface;
         surface.Children.Add(content);
         Root.Children.Add(new Viewbox { Child = surface, Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly });
-        Window = new Window { Title = "TaskBarWidgets · " + title, Content = Root, SystemBackdrop = new VividMicaBackdrop() };
+        _micaBackdrop = new VividMicaBackdrop();
+        Window = new Window { Title = "TaskBarWidgets · " + title, Content = Root, SystemBackdrop = _micaBackdrop };
         Window.Closed += (_, _) => { _closed = true; _motionGeneration++; };
         Handle = WinRT.Interop.WindowNative.GetWindowHandle(Window);
         Window.AppWindow.IsShownInSwitchers = false;
@@ -74,6 +78,8 @@ internal sealed class CardWindow
         Root.MinWidth = width;
         _surface.Width = Math.Max(Width, width);
     }
+
+    internal void SetMicaTuning(CardMicaTuning tuning) => _micaBackdrop.UpdateTuning(tuning);
 
     internal void Show(bool animate = true)
     {

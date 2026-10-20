@@ -12,8 +12,10 @@ internal sealed class SettingsDraft
     public Dictionary<string, JsonNode?> Pending { get; } = new(StringComparer.Ordinal);
     public IEnumerable<string> Keys => _base.Keys;
     public JsonNode? Get(string key) => (Pending.TryGetValue(key, out var draft) ? draft : _base.GetValueOrDefault(key))?.DeepClone();
+    public JsonNode? GetSaved(string key) => _base.GetValueOrDefault(key)?.DeepClone();
     public bool Bool(string key, bool fallback = false) => Get(key) is JsonValue value && value.TryGetValue<bool>(out var result) ? result : fallback;
     public double Number(string key, double fallback = 0) => double.TryParse(Get(key)?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value) ? value : fallback;
+    public double SavedNumber(string key, double fallback = 0) => double.TryParse(GetSaved(key)?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value) ? value : fallback;
     public string Text(string key, string fallback = "") => Get(key)?.ToString() ?? fallback;
     public void Set(string key, object? value) => SetNode(key, JsonSerializer.SerializeToNode(value));
     public void SetNode(string key, JsonNode? value)

@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
+using TaskBarWidgets.UI.Cards;
 using TaskBarWidgets.UI.Settings;
 using Windows.Foundation;
 using Windows.System;
@@ -20,6 +21,10 @@ public sealed partial class SettingsWindow : Window
     private readonly SettingsDraft _native = new();
     private readonly SettingsDraft _media = new();
     private readonly Grid _root = new();
+    private readonly MicaBackdrop _defaultBackdrop = new();
+    private readonly VividMicaBackdrop _cardMicaPreviewBackdrop = new();
+    private readonly SystemBackdrop _settingsBackdrop;
+    private readonly bool _vividSettingsBackdrop;
     private readonly Windows.UI.ViewManagement.AccessibilitySettings _accessibility = new();
     private bool _highContrastSubscriptionAttempted, _highContrastSubscribed;
     private JsonObject _schema = new();
@@ -40,17 +45,35 @@ public sealed partial class SettingsWindow : Window
     private bool _shutdown;
     private bool _closed;
     private bool _closeDialogOpen;
+    private bool _micaPreviewActive;
+    private bool _micaPreviewQueued;
+    private CardMicaTuning _pendingMicaPreview;
     internal bool ReloadWithoutPrompt;
     public event Action? Dismissed;
     internal event Action<ElementTheme>? ThemePreviewChanged;
+    internal event Action<CardMicaPreviewState>? MicaPreviewChanged;
     internal ElementTheme? ThemePreview => _loaded ? _root.RequestedTheme : null;
+    internal CardMicaTuning DraftCardMicaTuning => CardMicaTuning.FromValues(
+        _media.Number("cardMicaTintOpacity", CardMicaTuning.DefaultTintOpacity),
+        _media.Number("cardMicaLuminosityOpacity", CardMicaTuning.DefaultLuminosityOpacity));
+    internal CardMicaTuning CommittedCardMicaTuning => CardMicaTuning.FromValues(
+        _media.SavedNumber("cardMicaTintOpacity", CardMicaTuning.DefaultTintOpacity),
+        _media.SavedNumber("cardMicaLuminosityOpacity", CardMicaTuning.DefaultLuminosityOpacity));
+    internal bool CanPreviewCardMica => !_accessibility.HighContrast && VividMicaBackdrop.IsSupported;
+    internal bool UsesVividSettingsBackdrop => _vividSettingsBackdrop;
+    internal CardMicaTuning SettingsMicaTuning => _cardMicaPreviewBackdrop.Tuning;
 
     public SettingsWindow(UiConnection connection)
     {
         _connection = connection;
         Title = "TaskBarWidgets — 设置";
         WindowIcon.Apply(this);
-        SystemBackdrop = new MicaBackdrop();
+        // WinUI can invalidate another window's backdrop state when SystemBackdrop
+        // is exchanged on a visible settings window. Assign one backdrop for the
+        // lifetime of this reused HWND and preview by updating its controller.
+        _vividSettingsBackdrop = CanPreviewCardMica;
+        _settingsBackdrop = _vividSettingsBackdrop ? _cardMicaPreviewBackdrop : _defaultBackdrop;
+        SystemBackdrop = _settingsBackdrop;
         if (new Windows.UI.ViewManagement.UISettings().AnimationsEnabled)
             _page.ChildrenTransitions = new Microsoft.UI.Xaml.Media.Animation.TransitionCollection { new Microsoft.UI.Xaml.Media.Animation.EntranceThemeTransition { IsStaggeringEnabled = false } };
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1180, 820));
@@ -119,7 +142,15 @@ public sealed partial class SettingsWindow : Window
             args.Cancel = true;
             CloseDeferred();
         };
-        Closed += (_, _) => { _closed = true; CancelWeatherPage(); _lifetime.Cancel(); _connection.ConnectionChanged -= OnConnectionChanged; UnsubscribeSettingsHighContrast(); _lifetime.Dispose(); };
+        Closed += (_, _) => {
+            DeactivateCardMicaPreview();
+            _closed = true;
+            CancelWeatherPage();
+            _lifetime.Cancel();
+            _connection.ConnectionChanged -= OnConnectionChanged;
+            UnsubscribeSettingsHighContrast();
+            _lifetime.Dispose();
+        };
         ShowPage("taskbar");
     }
 
@@ -132,12 +163,16 @@ public sealed partial class SettingsWindow : Window
         if (page is "weather") page = "quickCardsWeather";
         var item = NavigationPages().FirstOrDefault(item => (string)item.Tag == page)
             ?? NavigationPages().First();
+        var samePage = string.Equals(_currentPage, (string)item.Tag, StringComparison.Ordinal);
         _currentPage = (string)item.Tag;
         foreach (var parent in _navigation.MenuItems.OfType<NavigationViewItem>())
             if (parent.MenuItems.Contains(item)) parent.IsExpanded = true;
         if (_navigation.IsLoaded) { _navigation.SelectedItem = item; if (_currentPage == "hardware" && _weatherPage is null) RenderPage(); }
         else RenderPage();
         _split.IsPaneOpen = false;
+        // The window is reused via AppWindow.Hide. Reopening the same page does
+        // not raise NavigationView.SelectionChanged, so re-arm its live preview.
+        if (_loaded && samePage && _currentPage == "quickCards") UpdateCardMicaPreviewSurface();
     }
     public void Shutdown() { _shutdown = true; Close(); }
     private void CloseDeferred() => BeginCloseConfirmation();
@@ -156,6 +191,7 @@ public sealed partial class SettingsWindow : Window
         if (!pending || _root.XamlRoot is null)
         {
             CancelWeatherPage();
+            DeactivateCardMicaPreview();
             AppWindow.Hide();
             Dismissed?.Invoke();
             return;
@@ -192,6 +228,7 @@ public sealed partial class SettingsWindow : Window
         _media.Pending.Clear();
         CancelWeatherPage();
         CancelModulePointerDrag();
+        DeactivateCardMicaPreview();
         AppWindow.Hide();
         Dismissed?.Invoke();
     }
@@ -247,7 +284,7 @@ public sealed partial class SettingsWindow : Window
             var media = await RequestAsync("getMediaSettings");
             await LoadFontsAsync();
             SetNativeReadback(native, nativeRevision); _media.Readback(MediaValues(media), mediaRevision);
-            _loaded = true; ApplyTheme(); RenderPage();
+            _loaded = true; ApplyTheme(); RefreshCardMicaAfterReadback(); RenderPage();
             _notice.IsOpen = false;
         }
         finally { _busy = false; UpdateSaveStatus(); }
@@ -275,6 +312,8 @@ public sealed partial class SettingsWindow : Window
             }
             if (media.Values.Count > 0) _media.Readback(MediaValues(await RequestAsync("applyMediaSettings", media.Values)), media);
             ApplyTheme();
+            if (media.Values.ContainsKey("cardMicaTintOpacity") || media.Values.ContainsKey("cardMicaLuminosityOpacity"))
+                RefreshCardMicaAfterReadback();
             _notice.Severity = InfoBarSeverity.Success; _notice.Message = "已保存并读回主程序配置。"; _notice.IsOpen = true;
         }
         finally { _busy = false; if (!themeOnly) RenderPage(); UpdateSaveStatus(); }
@@ -286,6 +325,78 @@ public sealed partial class SettingsWindow : Window
         if (_loaded) ThemePreviewChanged?.Invoke(_root.RequestedTheme);
         UpdateTitleBarTheme();
     }
+
+    internal void PreviewCardMica(CardMicaTuning tuning)
+    {
+        if (!_loaded || _closed || _currentPage != "quickCards" || !CanPreviewCardMica) return;
+        _pendingMicaPreview = tuning;
+        if (_micaPreviewQueued) return;
+        _micaPreviewQueued = true;
+        if (!DispatcherQueue.TryEnqueue(() =>
+        {
+            _micaPreviewQueued = false;
+            if (!_loaded || _closed || !_micaPreviewActive || _currentPage != "quickCards" || !CanPreviewCardMica)
+            {
+                DeactivateCardMicaPreview();
+                return;
+            }
+            // Reload/discard can replace the draft while an edit is queued.
+            // The draft is authoritative; never turn the preview off in that case.
+            var tuning = _pendingMicaPreview.Matches(DraftCardMicaTuning)
+                ? _pendingMicaPreview
+                : DraftCardMicaTuning;
+            ApplyCardMicaPreview(tuning);
+        }))
+        {
+            _micaPreviewQueued = false;
+        }
+    }
+
+    private void UpdateCardMicaPreviewSurface()
+    {
+        if (!_loaded || _closed || _currentPage != "quickCards" || !CanPreviewCardMica)
+        {
+            DeactivateCardMicaPreview();
+            return;
+        }
+        ApplyCardMicaPreview(DraftCardMicaTuning);
+    }
+
+    private void ApplyCardMicaPreview(CardMicaTuning tuning)
+    {
+        if (_vividSettingsBackdrop) _cardMicaPreviewBackdrop.UpdateTuning(tuning);
+        _micaPreviewActive = true;
+        MicaPreviewChanged?.Invoke(new CardMicaPreviewState(CommittedCardMicaTuning, tuning));
+    }
+
+    private void ActivateCardMicaPreview(CardMicaTuning tuning)
+    {
+        if (_vividSettingsBackdrop) _cardMicaPreviewBackdrop.UpdateTuning(tuning);
+        _micaPreviewActive = true;
+    }
+
+    private void DeactivateCardMicaPreview()
+    {
+        _micaPreviewQueued = false;
+        if (_vividSettingsBackdrop && !_cardMicaPreviewBackdrop.Tuning.Matches(CardMicaTuning.Default))
+            _cardMicaPreviewBackdrop.UpdateTuning(CardMicaTuning.Default);
+        if (!_micaPreviewActive) return;
+        _micaPreviewActive = false;
+        MicaPreviewChanged?.Invoke(new CardMicaPreviewState(CommittedCardMicaTuning, null));
+    }
+
+    private void RefreshCardMicaAfterReadback()
+    {
+        if (_currentPage == "quickCards" && CanPreviewCardMica)
+        {
+            ApplyCardMicaPreview(DraftCardMicaTuning);
+            return;
+        }
+        if (_vividSettingsBackdrop) _cardMicaPreviewBackdrop.UpdateTuning(CardMicaTuning.Default);
+        _micaPreviewActive = false;
+        MicaPreviewChanged?.Invoke(new CardMicaPreviewState(CommittedCardMicaTuning, null));
+    }
+
     private void UpdateTitleBarTheme()
     {
         var titleBar = AppWindow.TitleBar;
@@ -301,7 +412,14 @@ public sealed partial class SettingsWindow : Window
         titleBar.ButtonPressedBackgroundColor = contrast ? null : dark ? Color.FromArgb(255, 48, 48, 48) : Color.FromArgb(255, 210, 210, 210);
         titleBar.ButtonHoverForegroundColor = titleBar.ButtonPressedForegroundColor = foreground;
     }
-    private void OnSettingsHighContrastChanged(Windows.UI.ViewManagement.AccessibilitySettings sender, object args) => DispatcherQueue.TryEnqueue(() => { if (!_closed) UpdateTitleBarTheme(); });
+    private void OnSettingsHighContrastChanged(Windows.UI.ViewManagement.AccessibilitySettings sender, object args) =>
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_closed) return;
+            UpdateTitleBarTheme();
+            if (_currentPage == "quickCards") RenderPage();
+            else UpdateCardMicaPreviewSurface();
+        });
     private void TrySubscribeSettingsHighContrast()
     {
         if (_closed || _highContrastSubscriptionAttempted) return;
@@ -350,6 +468,7 @@ public sealed partial class SettingsWindow : Window
         if (_currentPage != "quickCardsWeather") CancelWeatherPage();
         _page.Children.Clear(); _preview = null; _split.IsPaneOpen = false;
         _heading.Text = NavigationPages().FirstOrDefault(item => (string)item.Tag == _currentPage)?.Content?.ToString() ?? "设置";
+        UpdateCardMicaPreviewSurface();
         if (!_loaded) { _page.Children.Add(Copy("连接主程序后即可读取设置。")); return; }
         if (_currentPage == "taskbar") RenderTaskbar();
         else if (_currentPage is "quickCards" or "quickCardsWeather") RenderQuickCards();

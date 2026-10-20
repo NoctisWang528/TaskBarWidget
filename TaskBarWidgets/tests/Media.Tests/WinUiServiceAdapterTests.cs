@@ -23,8 +23,15 @@ public sealed class WinUiServiceAdapterTests
                     () => Task.FromResult<CurrentTrackLyricsContext?>(null),
                     () => throw new NotSupportedException(), (_, _, _) => throw new NotSupportedException(),
                     (_, _, _) => throw new NotSupportedException(), () => cleared = true);
-                var payload = controller.ReadServiceSettings(new AppSettings { ShowLyricTranslation = true });
+                var payload = controller.ReadServiceSettings(new AppSettings
+                {
+                    ShowLyricTranslation = true,
+                    CardMicaTintOpacity = 0.08,
+                    CardMicaLuminosityOpacity = 0.30
+                });
                 Assert.True(payload.GetProperty("showLyricTranslation").GetBoolean());
+                Assert.Equal(0.08, payload.GetProperty("cardMicaTintOpacity").GetDouble());
+                Assert.Equal(0.30, payload.GetProperty("cardMicaLuminosityOpacity").GetDouble());
                 Assert.True(payload.TryGetProperty("spectrumTuning", out _));
                 Assert.False(payload.TryGetProperty("mediaHotkeys", out _));
                 Assert.False(payload.TryGetProperty("enableGlobalMediaHotkeys", out _));

@@ -3,7 +3,10 @@ using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
+using TaskBarWidgets.UI.Cards;
 using TaskBarWidgets.UI.Settings;
 
 namespace TaskBarWidgets.UI;
@@ -16,6 +19,13 @@ public sealed partial class SettingsWindow
         ("traffic", "流量消耗", "\uE9D9"),
         ("device", "音频设备", "\uE7F5"),
         ("media", "媒体", "\uE8D6")
+    ];
+    private static readonly (string Label, CardMicaTuning Tuning)[] CardMicaPresets =
+    [
+        ("柔和", CardMicaTuning.FromUserValues(12, 28)),
+        ("标准", CardMicaTuning.FromUserValues(22, 42)),
+        ("鲜艳", CardMicaTuning.FromUserValues(34, 50)),
+        ("极透", CardMicaTuning.FromUserValues(8, 70))
     ];
 
     private readonly List<(Border Cell, int Column, int Slot)> _cardOrderCells = [];
@@ -117,6 +127,130 @@ public sealed partial class SettingsWindow
         appearance.Children.Add(new TextBlock { Text = "卡片字体", FontSize = 14 });
         appearance.Children.Add(font);
         appearance.Children.Add(Copy("字体列表不可用时仍可输入系统已安装字体名称。"));
+
+        var material = Section("卡片材质", "调整快捷卡片 Mica 的色彩浓度和通透度。滑块会实时预览，点击“应用更改”后保存。");
+        var canPreview = CanPreviewCardMica;
+        if (canPreview) ActivateCardMicaPreview(DraftCardMicaTuning);
+        var initialMica = DraftCardMicaTuning;
+        var preset = new ComboBox
+        {
+            Header = "材质预设",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            PlaceholderText = "自定义",
+            IsEnabled = canPreview
+        };
+        AutomationProperties.SetName(preset, "卡片材质预设");
+        AutomationProperties.SetAutomationId(preset, "setting-cardMicaPreset");
+        foreach (var option in CardMicaPresets)
+            preset.Items.Add(new ComboBoxItem { Content = option.Label, Tag = option.Label });
+
+        var tint = new Slider
+        {
+            Minimum = CardMicaTuning.MinimumTintOpacity * 100,
+            Maximum = CardMicaTuning.MaximumTintOpacity * 100,
+            StepFrequency = 1,
+            SnapsTo = SliderSnapsTo.StepValues,
+            IsThumbToolTipEnabled = true,
+            IsEnabled = canPreview,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        var transparency = new Slider
+        {
+            Minimum = (1 - CardMicaTuning.MaximumLuminosityOpacity) * 100,
+            Maximum = (1 - CardMicaTuning.MinimumLuminosityOpacity) * 100,
+            StepFrequency = 1,
+            SnapsTo = SliderSnapsTo.StepValues,
+            IsThumbToolTipEnabled = true,
+            IsEnabled = canPreview,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        AutomationProperties.SetName(tint, "卡片 Mica 色彩浓度");
+        AutomationProperties.SetAutomationId(tint, "setting-cardMicaTintOpacity");
+        AutomationProperties.SetName(transparency, "卡片 Mica 通透度");
+        AutomationProperties.SetAutomationId(transparency, "setting-cardMicaTransparency");
+
+        var suppressMicaEvents = false;
+        CardMicaTuning SliderMica() => CardMicaTuning.FromUserValues(tint.Value, transparency.Value);
+        void UpdateMicaLabels()
+        {
+            tint.Header = $"色彩浓度 · {tint.Value:0}%";
+            transparency.Header = $"通透度 · {transparency.Value:0}%";
+        }
+        void SyncMicaPreset(CardMicaTuning tuning)
+        {
+            var matched = CardMicaPresets.FirstOrDefault(option => option.Tuning.Matches(tuning));
+            suppressMicaEvents = true;
+            preset.SelectedItem = matched.Label is null
+                ? null
+                : preset.Items.OfType<ComboBoxItem>().First(item => Equals(item.Tag, matched.Label));
+            suppressMicaEvents = false;
+        }
+        void MarkMicaCustom()
+        {
+            if (preset.SelectedItem is null) return;
+            suppressMicaEvents = true;
+            preset.SelectedItem = null;
+            suppressMicaEvents = false;
+        }
+        void CommitMica(CardMicaTuning tuning)
+        {
+            _media.Set("cardMicaTintOpacity", tuning.TintOpacity);
+            _media.Set("cardMicaLuminosityOpacity", tuning.LuminosityOpacity);
+            Changed();
+            PreviewCardMica(tuning);
+        }
+
+        suppressMicaEvents = true;
+        tint.Value = Math.Round(initialMica.TintOpacity * 100);
+        transparency.Value = Math.Round(initialMica.Transparency * 100);
+        suppressMicaEvents = false;
+        UpdateMicaLabels();
+        SyncMicaPreset(initialMica);
+        preset.SelectionChanged += (_, _) =>
+        {
+            if (suppressMicaEvents || preset.SelectedItem is not ComboBoxItem selected ||
+                selected.Tag is not string label) return;
+            var selectedMica = CardMicaPresets.First(option => option.Label == label).Tuning;
+            suppressMicaEvents = true;
+            tint.Value = Math.Round(selectedMica.TintOpacity * 100);
+            transparency.Value = Math.Round(selectedMica.Transparency * 100);
+            suppressMicaEvents = false;
+            UpdateMicaLabels();
+            CommitMica(selectedMica);
+        };
+        tint.ValueChanged += (_, _) =>
+        {
+            if (suppressMicaEvents) return;
+            UpdateMicaLabels();
+            var tuning = SliderMica();
+            MarkMicaCustom();
+            CommitMica(tuning);
+        };
+        transparency.ValueChanged += (_, _) =>
+        {
+            if (suppressMicaEvents) return;
+            UpdateMicaLabels();
+            var tuning = SliderMica();
+            MarkMicaCustom();
+            CommitMica(tuning);
+        };
+        material.Children.Add(preset);
+        material.Children.Add(tint);
+        material.Children.Add(transparency);
+        if (!canPreview)
+        {
+            material.Children.Add(new InfoBar
+            {
+                Severity = InfoBarSeverity.Informational,
+                IsOpen = true,
+                IsClosable = false,
+                Title = _accessibility.HighContrast ? "高对比度模式已启用" : "当前系统不支持 Mica",
+                Message = "材质调节暂不可用；卡片会继续使用系统回退色，文字和控件保持可读。"
+            });
+        }
+        material.Children.Add(BuildCardMicaPreview());
+        material.Children.Add(Copy("预览同步作用于设置窗口和已打开的快捷卡片；离开本页会恢复已保存值。"));
+
         var section = Section("卡片与顺序", "卡片可独立启用。拖动手柄把卡片放进左/右任意一列的任意位置，每列数量不限；关闭的卡片仍保留。");
         _cardOrderCells.Clear();
         var list = new Grid { ColumnSpacing = 10 };
@@ -184,6 +318,51 @@ public sealed partial class SettingsWindow
         status.Children.Add(Copy("天气卡的启停开关位于“快捷卡片 → 卡片与顺序”的天气行。此处配置来源、城市和连接。"));
 
         RenderWeatherSettings();
+    }
+
+    private static FrameworkElement BuildCardMicaPreview()
+    {
+        var surface = UiThemeStyles.Apply(new Grid
+        {
+            Width = 384,
+            Height = 174,
+            Padding = new Thickness(16)
+        }, "CardWindowSurface");
+        var content = new Grid { ColumnSpacing = 18 };
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var details = new StackPanel { Spacing = 5, VerticalAlignment = VerticalAlignment.Center };
+        var eyebrow = UiThemeStyles.Apply(new TextBlock { Text = "天气卡片预览", FontSize = 12 }, "CardTextSecondary");
+        var temperature = UiThemeStyles.Apply(new TextBlock { Text = "24°", FontSize = 36, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold }, "CardTextPrimary");
+        var condition = UiThemeStyles.Apply(new TextBlock { Text = "上海 · 晴", FontSize = 14 }, "CardTextPrimary");
+        var note = UiThemeStyles.Apply(new TextBlock { Text = "体感 25°   湿度 58%", FontSize = 12 }, "CardTextSecondary");
+        details.Children.Add(eyebrow);
+        details.Children.Add(temperature);
+        details.Children.Add(condition);
+        details.Children.Add(note);
+        content.Children.Add(details);
+        var glyph = UiThemeStyles.Apply(new TextBlock
+        {
+            Text = "\uE706",
+            FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Segoe Fluent Icons"),
+            FontSize = 48,
+            VerticalAlignment = VerticalAlignment.Center
+        }, "CardTextPrimary");
+        Grid.SetColumn(glyph, 1);
+        content.Children.Add(glyph);
+        surface.Children.Add(content);
+        return new Border
+        {
+            Child = new Viewbox
+            {
+                Child = surface,
+                Stretch = Stretch.Uniform,
+                StretchDirection = StretchDirection.DownOnly,
+                MaxHeight = 190
+            },
+            BorderThickness = new Thickness(1),
+            HorizontalAlignment = HorizontalAlignment.Center
+        };
     }
 
     private Border BuildQuickCardCell(string id, int column)

@@ -23,7 +23,9 @@ public sealed class SettingsStoreTests
                     ["unknown"] = true
                 },
                 QuickCardResourceMode = QuickCardResourceMode.OnDemand,
-                CardFontFamily = "Segoe UI"
+                CardFontFamily = "Segoe UI",
+                CardMicaTintOpacity = 0.34,
+                CardMicaLuminosityOpacity = 0.50
             };
             Assert.True(new SettingsStore(filePath).Save(settings));
             var loaded = new SettingsStore(filePath).Load();
@@ -34,6 +36,29 @@ public sealed class SettingsStoreTests
             Assert.False(loaded.QuickCardEnabled.ContainsKey("unknown"));
             Assert.Equal(QuickCardResourceMode.OnDemand, loaded.QuickCardResourceMode);
             Assert.Equal("Segoe UI", loaded.CardFontFamily);
+            Assert.Equal(0.34, loaded.CardMicaTintOpacity);
+            Assert.Equal(0.50, loaded.CardMicaLuminosityOpacity);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("{}", 0.22, 0.58)]
+    [InlineData("{\"CardMicaTintOpacity\":-1,\"CardMicaLuminosityOpacity\":2}", 0.05, 0.85)]
+    public void CardMicaSettingsUseDefaultsOrClamp(string json, double tint, double luminosity)
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        var filePath = Path.Combine(directory, "settings.json");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.WriteAllText(filePath, json);
+            var loaded = new SettingsStore(filePath).Load();
+            Assert.Equal(tint, loaded.CardMicaTintOpacity);
+            Assert.Equal(luminosity, loaded.CardMicaLuminosityOpacity);
         }
         finally
         {

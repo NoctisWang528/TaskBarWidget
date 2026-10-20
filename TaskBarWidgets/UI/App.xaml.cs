@@ -169,6 +169,7 @@ public partial class App : Application
         {
             _settings = new SettingsWindow(_connection);
             _settings.ThemePreviewChanged += theme => _cards?.SetThemePreview(theme);
+            _settings.MicaPreviewChanged += state => _cards?.SetMicaPreview(state.Preview, state.Committed);
             _settings.UpdateStateReceived += AcceptUpdateState;
             _settings.InstallUpdateRequested += OnInstallUpdateRequested;
             _settings.SetUpdateState(_updateState);

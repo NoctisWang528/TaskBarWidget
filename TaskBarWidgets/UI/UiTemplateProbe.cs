@@ -29,6 +29,7 @@ internal static class UiTemplateProbe
         object? weatherControls = null;
         object? weatherCardControls = null;
         object? themeControls = null;
+        object? micaControls = null;
         object? cardLyricsControls = null;
         object? sourceSelector = null;
         object? updateCard = null, updateControls = null, updateOrdering = null;
@@ -98,6 +99,16 @@ internal static class UiTemplateProbe
                 }
             }
             cardLifecycle["hiddenMeasuredPlacement"] = true;
+            {
+                var preview = CardMicaTuning.FromValues(0.41, 0.21);
+                cards.SetMicaPreview(preview);
+                cards.SetQuickCardEnabled("weather", false);
+                cards.SetQuickCardEnabled("weather", true);
+                if (cards.CardWindows.Any(card => !card.MicaTuning.Matches(preview)))
+                    throw new InvalidOperationException("A card created during Mica preview did not inherit the preview tuning.");
+                cards.SetMicaPreview(null);
+                cardLifecycle["micaNewCardInherits"] = true;
+            }
             // Prewarm must build exactly the cards the media settings payload
             // enables, not a hard-coded set.
             var settingsShaped = JsonSerializer.SerializeToElement(new
@@ -105,11 +116,16 @@ internal static class UiTemplateProbe
                 quickCardOrder = new[] { "traffic", "device", "media", "weather" },
                 quickCardColumns = new Dictionary<string, int> { ["traffic"] = 0, ["device"] = 0, ["media"] = 0, ["weather"] = 1 },
                 quickCardEnabled = new Dictionary<string, bool> { ["weather"] = false, ["traffic"] = true, ["device"] = true, ["media"] = true },
-                quickCardResourceMode = "OnDemand"
+                quickCardResourceMode = "OnDemand",
+                cardMicaTintOpacity = 0.08,
+                cardMicaLuminosityOpacity = 0.30
             });
             cards.ApplyQuickCardsFromSettings(settingsShaped);
             if (cards.CardWindows.Any(card => card.Window.Title.Contains("天气", StringComparison.Ordinal)))
                 throw new InvalidOperationException("Quick-card settings did not release the disabled card.");
+            foreach (var card in cards.CardWindows)
+                if (!card.MicaTuning.Matches(CardMicaTuning.FromValues(0.08, 0.30)))
+                    throw new InvalidOperationException("Quick-card settings did not apply the persisted Mica tuning.");
             cardLifecycle["prewarmFollowsQuickCardSettings"] = true;
             cards.SetQuickCardEnabled("weather", true);
             // The shipped startup prewarm must render each card once with no
@@ -164,6 +180,7 @@ internal static class UiTemplateProbe
                 checks.Add(new { surface = card.Window.Title, width = card.Root.ActualWidth, loaded = card.Root.IsLoaded, hideShowRacePassed = true });
             }
             themeControls = await SettingsWindow.ProbeThemeControlsAsync(settings, cards);
+            micaControls = await SettingsWindow.ProbeMicaControlsAsync(settings, cards);
             updateControls = await SettingsWindow.ProbeUpdateControlsAsync(settings);
             cardLifecycle["firstShowWithoutActivation"] = true;
             sourceSelector = await CardGroup.ProbeSourceSelectorAsync(cards);
@@ -198,7 +215,7 @@ internal static class UiTemplateProbe
             var result = resultIndex >= 0 && resultIndex + 1 < args.Length ? args[resultIndex + 1] : Path.Combine(AppContext.BaseDirectory, "template-probe.json");
             var winUiModule = System.Diagnostics.Process.GetCurrentProcess().Modules.Cast<System.Diagnostics.ProcessModule>()
                 .FirstOrDefault(module => string.Equals(module.ModuleName, "Microsoft.ui.xaml.dll", StringComparison.OrdinalIgnoreCase))?.FileName;
-            File.WriteAllText(result, JsonSerializer.Serialize(new { success = error is null, error, runtimeDirectory = RuntimeEnvironment.GetRuntimeDirectory(), winUiModule, checks, cardLifecycle, audioControls, weatherControls, weatherCardControls, themeControls, cardLyricsControls, sourceSelector, heatmapChecks, updateCard, updateControls, updateOrdering, layoutChecks, probeActivated = activated, externalForegroundChanged = GetForegroundWindow() != before }, new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(result, JsonSerializer.Serialize(new { success = error is null, error, runtimeDirectory = RuntimeEnvironment.GetRuntimeDirectory(), winUiModule, checks, cardLifecycle, audioControls, weatherControls, weatherCardControls, themeControls, micaControls, cardLyricsControls, sourceSelector, heatmapChecks, updateCard, updateControls, updateOrdering, layoutChecks, probeActivated = activated, externalForegroundChanged = GetForegroundWindow() != before }, new JsonSerializerOptions { WriteIndented = true }));
             Environment.ExitCode = error is null ? 0 : 1;
             app.Exit();
         }

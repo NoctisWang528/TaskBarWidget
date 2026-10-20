@@ -1316,6 +1316,8 @@ public partial class SettingsWindow : System.Windows.Window
             QuickCardEnabled = new Dictionary<string, bool>(_settings.QuickCardEnabled, StringComparer.Ordinal),
             QuickCardResourceMode = _settings.QuickCardResourceMode,
             CardFontFamily = _settings.CardFontFamily,
+            CardMicaTintOpacity = _settings.CardMicaTintOpacity,
+            CardMicaLuminosityOpacity = _settings.CardMicaLuminosityOpacity,
             SpectrumDisplayMode = _settings.SpectrumDisplayMode.ToString(),
             SpectrumAudioAccessGranted = _settings.SpectrumAudioAccessGranted,
             SpectrumTuning = _settings.SpectrumTuning.Clone(),
@@ -1613,6 +1615,18 @@ public partial class SettingsWindow : System.Windows.Window
                 break;
             case "cardFontFamily":
                 _settings.CardFontFamily = AppSettings.NormalizeFontFamily(ReadString(element, _settings.CardFontFamily));
+                break;
+            case "cardMicaTintOpacity":
+                _settings.CardMicaTintOpacity = Math.Clamp(
+                    ReadDouble(element, _settings.CardMicaTintOpacity),
+                    AppSettings.MinimumCardMicaTintOpacity,
+                    AppSettings.MaximumCardMicaTintOpacity);
+                break;
+            case "cardMicaLuminosityOpacity":
+                _settings.CardMicaLuminosityOpacity = Math.Clamp(
+                    ReadDouble(element, _settings.CardMicaLuminosityOpacity),
+                    AppSettings.MinimumCardMicaLuminosityOpacity,
+                    AppSettings.MaximumCardMicaLuminosityOpacity);
                 break;
             case "spectrumDisplayMode":
                 var spectrumDisplayMode = ReadString(element, SpectrumDisplayMode.Disabled.ToString());
@@ -2117,6 +2131,8 @@ public partial class SettingsWindow : System.Windows.Window
         target.QuickCardEnabled = new Dictionary<string, bool>(source.QuickCardEnabled, StringComparer.Ordinal);
         target.QuickCardResourceMode = source.QuickCardResourceMode;
         target.CardFontFamily = source.CardFontFamily;
+        target.CardMicaTintOpacity = source.CardMicaTintOpacity;
+        target.CardMicaLuminosityOpacity = source.CardMicaLuminosityOpacity;
         target.SpectrumDisplayMode = source.SpectrumDisplayMode;
         target.SpectrumAudioAccessGranted = source.SpectrumAudioAccessGranted;
         target.UseSafeFontSizeRange = source.UseSafeFontSizeRange;
@@ -2248,6 +2264,8 @@ public partial class SettingsWindow : System.Windows.Window
         public Dictionary<string, bool> QuickCardEnabled { get; set; } = new(StringComparer.Ordinal);
         public QuickCardResourceMode QuickCardResourceMode { get; set; }
         public string CardFontFamily { get; set; } = AppSettings.DefaultFontFamily;
+        public double CardMicaTintOpacity { get; set; } = AppSettings.DefaultCardMicaTintOpacity;
+        public double CardMicaLuminosityOpacity { get; set; } = AppSettings.DefaultCardMicaLuminosityOpacity;
         public string SpectrumDisplayMode { get; set; } = TaskbarLyrics.App.SpectrumDisplayMode.Disabled.ToString();
         public bool SpectrumAudioAccessGranted { get; set; }
         public SpectrumTuningSettings SpectrumTuning { get; set; } = new();

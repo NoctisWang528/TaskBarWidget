@@ -38,6 +38,8 @@ public sealed partial class CardGroup : IDisposable
         { ["weather"] = false, ["traffic"] = true, ["device"] = true, ["media"] = true };
     private bool _onDemand;
     private FontFamily _cardFontFamily = new("Microsoft YaHei UI");
+    private CardMicaTuning _cardMica = CardMicaTuning.Default;
+    private CardMicaTuning? _micaPreview;
     private readonly Dictionary<string, CardSlot> _slots;
     private readonly Dictionary<string, CardWindow> _cardsById = new(StringComparer.Ordinal);
     private IEnumerable<CardWindow> AllCards => _cardsById.Values.Append(_updateCard);
@@ -131,6 +133,7 @@ public sealed partial class CardGroup : IDisposable
         AutomationProperties.SetAutomationId(_updateInstall, "card-install-update");
         _updateInstall.Click += (_, _) => { if (_updateActionEnabled) UpdateActionRequested?.Invoke(); };
         _updateCard = new CardWindow("应用更新", updateContent, 180, width: UpdateCardWidth);
+        _updateCard.SetMicaTuning(_cardMica);
         _outsideClicks = new OutsideClickMonitor(_slots["traffic"].Content.DispatcherQueue, () => _flyoutsOpen > 0);
         _output.IsEnabled = _input.IsEnabled = _outputMute.IsEnabled = _inputMute.IsEnabled = _outputVolume.IsEnabled = _inputVolume.IsEnabled = false;
         _previous.IsEnabled = _play.IsEnabled = _next.IsEnabled = _seek.IsEnabled = _source.IsEnabled = false;
@@ -179,6 +182,7 @@ public sealed partial class CardGroup : IDisposable
     private void CreateCardWindow(CardSlot slot)
     {
         var card = new CardWindow(slot.Title, slot.Content, slot.Height, slot.AutoHeight, slot.Width);
+        card.SetMicaTuning(_micaPreview ?? _cardMica);
         slot.Window = card;
         _cardsById[slot.Id] = card;
         card.Window.AppWindow.Closing += (_, args) =>
@@ -483,6 +487,15 @@ public sealed partial class CardGroup : IDisposable
         _themePreview = theme;
         ApplyTheme(theme);
     }
+
+    internal void SetMicaPreview(CardMicaTuning? preview, CardMicaTuning? committed = null)
+    {
+        if (_disposed) return;
+        if (committed is { } saved) _cardMica = saved;
+        _micaPreview = preview;
+        var effective = preview ?? _cardMica;
+        foreach (var card in AllCards) card.SetMicaTuning(effective);
+    }
     internal void SetUpdateState(UpdateUiState state)
     {
         if (_disposed) return;
@@ -562,6 +575,11 @@ public sealed partial class CardGroup : IDisposable
             }
         }
         _onDemand = value.TryGetProperty("resourceMode", out var mode) && string.Equals(mode.GetString(), "OnDemand", StringComparison.OrdinalIgnoreCase);
+        if (value.TryGetProperty("mica", out var mica))
+        {
+            _cardMica = CardMicaTuning.FromJson(mica);
+            foreach (var card in AllCards) card.SetMicaTuning(_micaPreview ?? _cardMica);
+        }
         ReconcileCardWindows();
         if (_visible) { Position(_anchorX, _anchorY); RenderWeatherModules(); }
         else if (_placedAnchorSet) Place(_anchorX, _anchorY);
@@ -580,6 +598,17 @@ public sealed partial class CardGroup : IDisposable
             payload["resourceMode"] = mode.GetString();
         if (settings.TryGetProperty("cardFontFamily", out var font) && font.ValueKind == JsonValueKind.String)
             payload["font"] = font.GetString();
+        if (settings.TryGetProperty("cardMicaTintOpacity", out var tint) &&
+            tint.ValueKind == JsonValueKind.Number && tint.TryGetDouble(out var tintOpacity) &&
+            settings.TryGetProperty("cardMicaLuminosityOpacity", out var luminosity) &&
+            luminosity.ValueKind == JsonValueKind.Number && luminosity.TryGetDouble(out var luminosityOpacity))
+        {
+            payload["mica"] = new System.Text.Json.Nodes.JsonObject
+            {
+                ["tintOpacity"] = tintOpacity,
+                ["luminosityOpacity"] = luminosityOpacity
+            };
+        }
         ApplyQuickCards(JsonSerializer.SerializeToElement(payload));
     }
 

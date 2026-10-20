@@ -13,30 +13,66 @@ internal sealed class VividMicaBackdrop : SystemBackdrop
 {
     private MicaController? _controller;
     private SystemBackdropConfiguration? _configuration;
+    private CardMicaTuning _tuning;
+    private bool _dark;
+
+    internal VividMicaBackdrop(CardMicaTuning? tuning = null)
+    {
+        _tuning = tuning is { } value
+            ? CardMicaTuning.FromValues(value.TintOpacity, value.LuminosityOpacity)
+            : CardMicaTuning.Default;
+    }
 
     internal static MicaKind PreferredKind => MicaKind.BaseAlt;
+    internal static bool IsSupported
+    {
+        get
+        {
+            try { return MicaController.IsSupported(); }
+        catch (Exception exception) when (exception is COMException or NotSupportedException or InvalidOperationException or ArgumentException)
+            { return false; }
+        }
+    }
+    internal CardMicaTuning Tuning => _tuning;
+
+    internal void UpdateTuning(CardMicaTuning tuning)
+    {
+        _tuning = CardMicaTuning.FromValues(tuning.TintOpacity, tuning.LuminosityOpacity);
+        var controller = _controller;
+        if (controller is null) return;
+        try { ApplyTuning(controller); }
+        catch (Exception exception) when (exception is COMException or ObjectDisposedException or InvalidOperationException or ArgumentException)
+        {
+            CardLifecycleLog.Write($"mica-tuning-failed hr=0x{exception.HResult:X8}");
+        }
+    }
 
     protected override void OnTargetConnected(ICompositionSupportsSystemBackdrop connectedTarget, XamlRoot xamlRoot)
     {
         base.OnTargetConnected(connectedTarget, xamlRoot);
-        if (!MicaController.IsSupported()) return;
+        if (!IsSupported) return;
 
+        var controller = (MicaController?)null;
         try
         {
-            var controller = new MicaController();
+            controller = new MicaController();
             _configuration = GetDefaultSystemBackdropConfiguration(connectedTarget, xamlRoot);
             Configure(controller, _configuration, xamlRoot);
             if (!controller.AddSystemBackdropTarget(connectedTarget))
             {
                 controller.Dispose();
+                controller = null;
+                _configuration = null;
                 return;
             }
             controller.SetSystemBackdropConfiguration(_configuration);
             _controller = controller;
+            controller = null;
         }
         catch (Exception exception) when (exception is COMException or NotSupportedException or InvalidOperationException or ArgumentException)
         {
             CardLifecycleLog.Write($"mica-connect-failed hr=0x{exception.HResult:X8}");
+            controller?.Dispose();
             _controller?.Dispose();
             _controller = null;
             _configuration = null;
@@ -76,9 +112,9 @@ internal sealed class VividMicaBackdrop : SystemBackdrop
         }
     }
 
-    private static void Configure(MicaController controller, SystemBackdropConfiguration configuration, XamlRoot xamlRoot)
+    private void Configure(MicaController controller, SystemBackdropConfiguration configuration, XamlRoot xamlRoot)
     {
-        var dark = configuration.Theme switch
+        _dark = configuration.Theme switch
         {
             SystemBackdropTheme.Dark => true,
             SystemBackdropTheme.Light => false,
@@ -86,9 +122,14 @@ internal sealed class VividMicaBackdrop : SystemBackdrop
         };
 
         controller.Kind = PreferredKind;
-        controller.TintColor = dark ? Color.FromArgb(255, 12, 20, 34) : Color.FromArgb(255, 232, 241, 255);
-        controller.TintOpacity = dark ? 0.20f : 0.22f;
-        controller.LuminosityOpacity = dark ? 0.56f : 0.58f;
-        controller.FallbackColor = dark ? Color.FromArgb(255, 22, 25, 31) : Color.FromArgb(255, 243, 245, 248);
+        controller.TintColor = _dark ? Color.FromArgb(255, 12, 20, 34) : Color.FromArgb(255, 232, 241, 255);
+        ApplyTuning(controller);
+        controller.FallbackColor = _dark ? Color.FromArgb(255, 22, 25, 31) : Color.FromArgb(255, 243, 245, 248);
+    }
+
+    private void ApplyTuning(MicaController controller)
+    {
+        controller.TintOpacity = (float)_tuning.TintOpacityFor(_dark);
+        controller.LuminosityOpacity = (float)_tuning.LuminosityOpacityFor(_dark);
     }
 }

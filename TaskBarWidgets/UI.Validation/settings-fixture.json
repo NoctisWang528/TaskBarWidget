@@ -639,6 +639,8 @@
   },
   "media": {
     "toolWindowTheme": "System",
+    "cardMicaTintOpacity": 0.34,
+    "cardMicaLuminosityOpacity": 0.5,
     "enableWordScanning": true,
     "showLyricTranslation": true,
     "showCover": true,
