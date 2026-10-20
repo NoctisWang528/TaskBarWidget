@@ -120,11 +120,16 @@ public sealed partial class SettingsWindow
         appearance.Children.Add(font);
         appearance.Children.Add(Copy("字体列表不可用时仍可输入系统已安装字体名称。"));
 
-        var material = Section("卡片材质", "调整快捷卡片 Mica 的色彩浓度和通透度。滑块会实时同步设置窗口和已打开的卡片，点击“应用更改”后保存。");
+        var material = Section("卡片材质", "开启“鲜艳 Mica”后卡片直接使用系统 Mica 材质，桌面壁纸的颜色会透出来：色彩浓度是材质自身着色层的浓度，通透度是壁纸透出的程度。滑块会实时同步设置窗口和已打开的卡片，点击“应用更改”后保存。");
         AutomationProperties.SetAutomationId(material, "section-cardMica");
         var canPreview = CanPreviewCardMica;
         if (canPreview) ActivateCardMicaPreview(DraftCardMicaTuning);
         var initialMica = DraftCardMicaTuning;
+        var initialVivid = DraftCardMicaVivid;
+        var vivid = SettingsToggle.Row("鲜艳 Mica", "关闭后卡片改用系统默认 Mica 材质，下面四组浓度/通透度不再生效。",
+            initialVivid, "鲜艳 Mica", "setting-cardMicaVivid",
+            value => { _media.Set("cardMicaVivid", value); Changed(); RenderPage(); });
+        material.Children.Add(vivid);
         Slider MicaSlider(string name, string automationId, double value)
         {
             var slider = new Slider
@@ -134,7 +139,7 @@ public sealed partial class SettingsWindow
                 StepFrequency = 1,
                 SnapsTo = SliderSnapsTo.StepValues,
                 IsThumbToolTipEnabled = true,
-                IsEnabled = canPreview,
+                IsEnabled = canPreview && initialVivid,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 Value = Math.Round(value)
             };

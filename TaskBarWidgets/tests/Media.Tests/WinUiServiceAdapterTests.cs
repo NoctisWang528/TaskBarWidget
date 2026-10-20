@@ -26,12 +26,14 @@ public sealed class WinUiServiceAdapterTests
                 var payload = controller.ReadServiceSettings(new AppSettings
                 {
                     ShowLyricTranslation = true,
+                    CardMicaVivid = false,
                     CardMicaTintOpacity = 0.08,
                     CardMicaLuminosityOpacity = 0.30,
                     CardMicaDarkTintOpacity = 0.06,
                     CardMicaDarkLuminosityOpacity = 0.28
                 });
                 Assert.True(payload.GetProperty("showLyricTranslation").GetBoolean());
+                Assert.False(payload.GetProperty("cardMicaVivid").GetBoolean());
                 Assert.Equal(0.08, payload.GetProperty("cardMicaTintOpacity").GetDouble());
                 Assert.Equal(0.30, payload.GetProperty("cardMicaLuminosityOpacity").GetDouble());
                 Assert.Equal(0.06, payload.GetProperty("cardMicaDarkTintOpacity").GetDouble());

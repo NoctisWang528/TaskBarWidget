@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using TaskBarWidgets.UI.Cards;
 
 namespace TaskBarWidgets.UI;
 
@@ -45,6 +46,14 @@ public partial class App : Application
         if (arguments.Contains("--validate-templates"))
         {
             _ = UiTemplateProbe.RunAsync(this, arguments);
+            return;
+        }
+        // Desktop-only Mica acceptance helper: shows real card windows briefly on
+        // the primary monitor. Never part of the offscreen validation pass.
+        if (arguments.Contains("--mica-visual-check"))
+        {
+            var dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+            _ = CardMicaVisualProbe.RunAsync(arguments).ContinueWith(_ => dispatcher.TryEnqueue(Exit));
             return;
         }
         var hostIndex = Array.IndexOf(arguments, "--host-pid");
@@ -169,7 +178,11 @@ public partial class App : Application
         {
             _settings = new SettingsWindow(_connection);
             _settings.ThemePreviewChanged += theme => _cards?.SetThemePreview(theme);
-            _settings.MicaPreviewChanged += state => _cards?.SetMicaPreview(state.Preview, state.Committed);
+            _settings.MicaPreviewChanged += state =>
+            {
+                _cards?.SetMicaVivid(state.Vivid);
+                _cards?.SetMicaPreview(state.Preview, state.Committed);
+            };
             _settings.UpdateStateReceived += AcceptUpdateState;
             _settings.InstallUpdateRequested += OnInstallUpdateRequested;
             _settings.SetUpdateState(_updateState);

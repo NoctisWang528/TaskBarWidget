@@ -144,6 +144,24 @@ public sealed partial class CardGroup
         if (centerErrors.Count < 6 || centerErrors.Any(error => error > 0.5))
             throw new InvalidOperationException($"Circular icon hosts were not centered within 0.5 DIP: {string.Join("; ", centerDiagnostics)}.");
 
+        // The vector drawings are authored on the full host grid. PathIcon crops
+        // anything outside the box it is given, so each one has to stay inside a
+        // fixed scaler whose size matches the button's documented icon size.
+        var iconHosts = cards.CardWindows.SelectMany(card => Walk(card.Root)).OfType<CardIconHost>().ToArray();
+        var iconScalers = new List<double>();
+        foreach (var host in iconHosts)
+        {
+            var bounds = host.Icon.Data?.Bounds ?? throw new InvalidOperationException("A card icon lost its geometry.");
+            if (bounds.Left < -0.001 || bounds.Top < -0.001 ||
+                bounds.Right > CardIconArt.HostSize + 0.001 || bounds.Bottom > CardIconArt.HostSize + 0.001)
+                throw new InvalidOperationException($"Card icon {host.Kind} leaves the {CardIconArt.HostSize} unit drawing grid and would be clipped.");
+            if (host.IconScale.Child != host.Icon || host.IconScale.ActualWidth <= 0)
+                throw new InvalidOperationException($"Card icon {host.Kind} is not wrapped in a fixed scaler.");
+            iconScalers.Add(host.IconScale.Width);
+        }
+        if (iconHosts.Length < 6 || iconScalers.Any(size => Math.Abs(size - 16) > 0.001 && Math.Abs(size - 20) > 0.001))
+            throw new InvalidOperationException($"Card icon scalers did not use the documented 16/20 DIP sizes: {string.Join(", ", iconScalers)}.");
+
         var screenshots = Path.Combine(AppContext.BaseDirectory, "..", "ui-audio-check");
         Directory.CreateDirectory(screenshots);
         cards.ApplyBackendTheme(JsonSerializer.SerializeToElement(new { toolWindowTheme = 2 }));
@@ -163,7 +181,7 @@ public sealed partial class CardGroup
             throw new InvalidOperationException("Audio card did not grow and shrink with its visible status content.");
         return new { switchReadback = true, independentFlowControls = true, muteButtonRoundTrip = true, volumePreserved = true, staleReplyIgnored = true,
             inputMuteButtonRoundTrip = true, centeredIconHosts = centerErrors.Count,
-            maximumCenterError = centerErrors.Max(), compactHeight, errorHeight, contentHeightRestored = true,
+            maximumCenterError = centerErrors.Max(), scalerIcons = iconHosts.Length, iconsUnclipped = true, compactHeight, errorHeight, contentHeightRestored = true,
             lightScreenshot = "ui-audio-check/audio-light.png", darkScreenshot = "ui-audio-check/audio-dark.png",
             realAudioDevicesTouched = false };
     }

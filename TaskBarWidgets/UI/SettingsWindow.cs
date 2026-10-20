@@ -68,6 +68,9 @@ public sealed partial class SettingsWindow : Window
         key => _media.Number(key, DefaultMicaValue(key)));
     internal CardMicaTuning CommittedCardMicaTuning => ReadCardMicaTuning(
         key => _media.SavedNumber(key, DefaultMicaValue(key)));
+    internal bool DraftCardMicaVivid => _media.Bool("cardMicaVivid", CardMicaTuning.DefaultVivid);
+    internal bool CommittedCardMicaVivid => _media.GetSaved("cardMicaVivid") is JsonValue saved &&
+        saved.TryGetValue<bool>(out var vivid) ? vivid : CardMicaTuning.DefaultVivid;
     internal bool CanPreviewCardMica => !_accessibility.HighContrast && VividMicaBackdrop.IsSupported;
     internal bool UsesVividSettingsBackdrop => _vividSettingsBackdrop;
     internal CardMicaTuning SettingsMicaTuning => _cardMicaPreviewBackdrop.Tuning;
@@ -474,14 +477,15 @@ public sealed partial class SettingsWindow : Window
 
     private void ApplyCardMicaPreview(CardMicaTuning tuning)
     {
-        if (_vividSettingsBackdrop) _cardMicaPreviewBackdrop.UpdateTuning(tuning);
+        var vivid = DraftCardMicaVivid;
+        if (_vividSettingsBackdrop) _cardMicaPreviewBackdrop.UpdateTuning(vivid ? tuning : CardMicaTuning.SystemProxy);
         _micaPreviewActive = true;
-        MicaPreviewChanged?.Invoke(new CardMicaPreviewState(CommittedCardMicaTuning, tuning));
+        MicaPreviewChanged?.Invoke(new CardMicaPreviewState(CommittedCardMicaTuning, tuning, vivid));
     }
 
     private void ActivateCardMicaPreview(CardMicaTuning tuning)
     {
-        if (_vividSettingsBackdrop) _cardMicaPreviewBackdrop.UpdateTuning(tuning);
+        if (_vividSettingsBackdrop) _cardMicaPreviewBackdrop.UpdateTuning(DraftCardMicaVivid ? tuning : CardMicaTuning.SystemProxy);
         _micaPreviewActive = true;
     }
 
@@ -489,11 +493,13 @@ public sealed partial class SettingsWindow : Window
     {
         _micaPreviewQueued = false;
         var committed = CommittedCardMicaTuning;
-        if (_vividSettingsBackdrop && !_cardMicaPreviewBackdrop.Tuning.Matches(committed))
-            _cardMicaPreviewBackdrop.UpdateTuning(committed);
+        var vivid = CommittedCardMicaVivid;
+        var settingsTuning = vivid ? committed : CardMicaTuning.SystemProxy;
+        if (_vividSettingsBackdrop && !_cardMicaPreviewBackdrop.Tuning.Matches(settingsTuning))
+            _cardMicaPreviewBackdrop.UpdateTuning(settingsTuning);
         if (!_micaPreviewActive) return;
         _micaPreviewActive = false;
-        MicaPreviewChanged?.Invoke(new CardMicaPreviewState(committed, null));
+        MicaPreviewChanged?.Invoke(new CardMicaPreviewState(committed, null, vivid));
     }
 
     private void RefreshCardMicaAfterReadback()
@@ -504,9 +510,10 @@ public sealed partial class SettingsWindow : Window
             return;
         }
         var committed = CommittedCardMicaTuning;
-        if (_vividSettingsBackdrop) _cardMicaPreviewBackdrop.UpdateTuning(committed);
+        var vivid = CommittedCardMicaVivid;
+        if (_vividSettingsBackdrop) _cardMicaPreviewBackdrop.UpdateTuning(vivid ? committed : CardMicaTuning.SystemProxy);
         _micaPreviewActive = false;
-        MicaPreviewChanged?.Invoke(new CardMicaPreviewState(committed, null));
+        MicaPreviewChanged?.Invoke(new CardMicaPreviewState(committed, null, vivid));
     }
 
     private static CardMicaTuning ReadCardMicaTuning(Func<string, double> read) =>

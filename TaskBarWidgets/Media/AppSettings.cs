@@ -75,14 +75,17 @@ public sealed class AppSettings
     public const double DefaultLyricsLayoutScalePercent = 100;
     public const double MinimumLyricsLayoutScalePercent = 25;
     public const double MaximumLyricsLayoutScalePercent = 300;
-    public const double DefaultCardMicaTintOpacity = 0.45;
-    public const double DefaultCardMicaLuminosityOpacity = 0.95;
-    public const double DefaultCardMicaDarkTintOpacity = 0.45;
-    public const double DefaultCardMicaDarkLuminosityOpacity = 0.50;
+    public const double DefaultCardMicaTintOpacity = 0.10;
+    public const double DefaultCardMicaLuminosityOpacity = 0.85;
+    public const double DefaultCardMicaDarkTintOpacity = 0.15;
+    public const double DefaultCardMicaDarkLuminosityOpacity = 0.90;
     public const double MinimumCardMicaTintOpacity = 0;
     public const double MaximumCardMicaTintOpacity = 1;
     public const double MinimumCardMicaLuminosityOpacity = 0;
     public const double MaximumCardMicaLuminosityOpacity = 1;
+    // The four opacities only tune the vivid material; the switch selects
+    // between that tuned material and the plain system Mica material.
+    public const bool DefaultCardMicaVivid = true;
 
     public const double DefaultWindowWidth = 420;
     public const double MinimumWindowWidth = 100;
@@ -160,6 +163,8 @@ public sealed class AppSettings
     public QuickCardResourceMode QuickCardResourceMode { get; set; } = QuickCardResourceMode.Resident;
 
     public string CardFontFamily { get; set; } = DefaultFontFamily;
+
+    public bool CardMicaVivid { get; set; } = DefaultCardMicaVivid;
 
     public double CardMicaTintOpacity { get; set; } = DefaultCardMicaTintOpacity;
 
@@ -289,6 +294,7 @@ public sealed class AppSettings
     public static AppSettings CreateDefault(bool systemUsesLightTheme)
     {
         var settings = new AppSettings();
+        settings.CardMicaVivid = DefaultCardMicaVivid;
         settings.CardMicaTintOpacity = DefaultCardMicaTintOpacity;
         settings.CardMicaLuminosityOpacity = DefaultCardMicaLuminosityOpacity;
         settings.CardMicaDarkTintOpacity = DefaultCardMicaDarkTintOpacity;

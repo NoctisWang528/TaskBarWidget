@@ -30,21 +30,38 @@ internal sealed class CardIconHost : Grid
         VerticalAlignment = VerticalAlignment.Center;
         IsHitTestVisible = false;
         Kind = kind;
+        // PathIcon paints its geometry at its own size and clips whatever falls
+        // outside; the drawing is authored on the full 20-unit host grid, so a
+        // smaller PathIcon cut off the outer strokes (gear teeth, speaker waves,
+        // refresh arrow). A fixed Viewbox scales the whole drawing into the
+        // button's icon size instead of cropping it.
         Icon = new PathIcon
         {
-            Width = iconSize,
-            Height = iconSize,
+            Width = CardIconArt.HostSize,
+            Height = CardIconArt.HostSize,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
             Data = CardIconArt.Build(kind)
         };
         AutomationProperties.SetAutomationId(Icon, "card-icon-" + kind);
-        Children.Add(Icon);
+        IconScale = new Viewbox
+        {
+            Width = iconSize,
+            Height = iconSize,
+            Stretch = Stretch.Uniform,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = Icon
+        };
+        Children.Add(IconScale);
     }
 
     internal CardIconKind Kind { get; private set; }
 
     internal PathIcon Icon { get; }
+
+    // Fixed-size scaler that keeps the 20-unit drawing inside the button.
+    internal Viewbox IconScale { get; }
 
     internal void SetKind(CardIconKind kind)
     {

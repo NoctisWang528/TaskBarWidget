@@ -26,6 +26,8 @@ internal sealed class CardWindow
     internal Brush? SurfaceBackground => _surface.Background;
     internal VividMicaBackdrop MicaBackdrop => _micaBackdrop;
     internal CardMicaTuning MicaTuning => _micaBackdrop.Tuning;
+    // False keeps the plain system Mica material instead of the tuned vivid one.
+    internal bool UsesVividMica => _vividMica;
     // True once the window has rendered a frame while hidden, so the first
     // click skips window creation and XAML realization.
     internal bool Prewarmed => _prewarmed;
@@ -35,6 +37,8 @@ internal sealed class CardWindow
     private readonly FrameworkElement _content;
     private readonly Grid _surface;
     private readonly VividMicaBackdrop _micaBackdrop;
+    private readonly MicaBackdrop _systemMica = new();
+    private bool _vividMica = true;
     private readonly bool _autoHeight;
 
     internal CardWindow(string title, FrameworkElement content, double height, bool autoHeight = false, double width = CardGroup.CardWidth)
@@ -80,6 +84,16 @@ internal sealed class CardWindow
     }
 
     internal void SetMicaTuning(CardMicaTuning tuning) => _micaBackdrop.UpdateTuning(tuning);
+
+    // Switching the material is only safe through Window.SystemBackdrop; the
+    // tuned values stay on the vivid controller so turning the switch back on
+    // restores the user's own parameters.
+    internal void SetVividMica(bool vivid)
+    {
+        if (_closed || _vividMica == vivid) return;
+        _vividMica = vivid;
+        Window.SystemBackdrop = vivid ? _micaBackdrop : _systemMica;
+    }
 
     internal void Show(bool animate = true)
     {

@@ -1316,6 +1316,7 @@ public partial class SettingsWindow : System.Windows.Window
             QuickCardEnabled = new Dictionary<string, bool>(_settings.QuickCardEnabled, StringComparer.Ordinal),
             QuickCardResourceMode = _settings.QuickCardResourceMode,
             CardFontFamily = _settings.CardFontFamily,
+            CardMicaVivid = _settings.CardMicaVivid,
             CardMicaTintOpacity = _settings.CardMicaTintOpacity,
             CardMicaLuminosityOpacity = _settings.CardMicaLuminosityOpacity,
             CardMicaDarkTintOpacity = _settings.CardMicaDarkTintOpacity,
@@ -1623,6 +1624,9 @@ public partial class SettingsWindow : System.Windows.Window
                     ReadDouble(element, _settings.CardMicaTintOpacity),
                     AppSettings.MinimumCardMicaTintOpacity,
                     AppSettings.MaximumCardMicaTintOpacity);
+                break;
+            case "cardMicaVivid":
+                _settings.CardMicaVivid = ReadBool(element, _settings.CardMicaVivid);
                 break;
             case "cardMicaLuminosityOpacity":
                 _settings.CardMicaLuminosityOpacity = Math.Clamp(
@@ -2145,6 +2149,7 @@ public partial class SettingsWindow : System.Windows.Window
         target.QuickCardEnabled = new Dictionary<string, bool>(source.QuickCardEnabled, StringComparer.Ordinal);
         target.QuickCardResourceMode = source.QuickCardResourceMode;
         target.CardFontFamily = source.CardFontFamily;
+        target.CardMicaVivid = source.CardMicaVivid;
         target.CardMicaTintOpacity = source.CardMicaTintOpacity;
         target.CardMicaLuminosityOpacity = source.CardMicaLuminosityOpacity;
         target.CardMicaDarkTintOpacity = source.CardMicaDarkTintOpacity;
@@ -2280,6 +2285,7 @@ public partial class SettingsWindow : System.Windows.Window
         public Dictionary<string, bool> QuickCardEnabled { get; set; } = new(StringComparer.Ordinal);
         public QuickCardResourceMode QuickCardResourceMode { get; set; }
         public string CardFontFamily { get; set; } = AppSettings.DefaultFontFamily;
+        public bool CardMicaVivid { get; set; } = AppSettings.DefaultCardMicaVivid;
         public double CardMicaTintOpacity { get; set; } = AppSettings.DefaultCardMicaTintOpacity;
         public double CardMicaLuminosityOpacity { get; set; } = AppSettings.DefaultCardMicaLuminosityOpacity;
         public double CardMicaDarkTintOpacity { get; set; } = AppSettings.DefaultCardMicaDarkTintOpacity;

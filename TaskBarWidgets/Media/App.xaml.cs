@@ -280,6 +280,7 @@ public partial class App : System.Windows.Application
         resourceMode = Settings.QuickCardResourceMode.ToString(), font = Settings.CardFontFamily,
         mica = new
         {
+            vivid = Settings.CardMicaVivid,
             tintOpacity = Settings.CardMicaTintOpacity,
             luminosityOpacity = Settings.CardMicaLuminosityOpacity,
             darkTintOpacity = Settings.CardMicaDarkTintOpacity,

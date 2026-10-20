@@ -39,6 +39,7 @@ public sealed partial class CardGroup : IDisposable
     private bool _onDemand;
     private FontFamily _cardFontFamily = new("Microsoft YaHei UI");
     private CardMicaTuning _cardMica = CardMicaTuning.Default;
+    private bool _cardMicaVivid = true;
     private CardMicaTuning? _micaPreview;
     private readonly Dictionary<string, CardSlot> _slots;
     private readonly Dictionary<string, CardWindow> _cardsById = new(StringComparer.Ordinal);
@@ -187,6 +188,7 @@ public sealed partial class CardGroup : IDisposable
     {
         var card = new CardWindow(slot.Title, slot.Content, slot.Height, slot.AutoHeight, slot.Width);
         card.SetMicaTuning(_micaPreview ?? _cardMica);
+        card.SetVividMica(_cardMicaVivid);
         slot.Window = card;
         _cardsById[slot.Id] = card;
         card.Window.AppWindow.Closing += (_, args) =>
@@ -509,6 +511,13 @@ public sealed partial class CardGroup : IDisposable
         var effective = preview ?? _cardMica;
         foreach (var card in AllCards) card.SetMicaTuning(effective);
     }
+    internal bool MicaVivid => _cardMicaVivid;
+    internal void SetMicaVivid(bool vivid)
+    {
+        if (_disposed) return;
+        _cardMicaVivid = vivid;
+        foreach (var card in AllCards) card.SetVividMica(vivid);
+    }
     internal void SetUpdateState(UpdateUiState state)
     {
         if (_disposed) return;
@@ -594,6 +603,7 @@ public sealed partial class CardGroup : IDisposable
         {
             _cardMica = CardMicaTuning.FromJson(mica);
             foreach (var card in AllCards) card.SetMicaTuning(_micaPreview ?? _cardMica);
+            SetMicaVivid(!mica.TryGetProperty("vivid", out var vivid) || vivid.ValueKind != JsonValueKind.False);
         }
         ReconcileCardWindows();
         if (_visible) { Position(_anchorX, _anchorY); RenderWeatherModules(); }
@@ -623,6 +633,8 @@ public sealed partial class CardGroup : IDisposable
                 ["tintOpacity"] = tintOpacity,
                 ["luminosityOpacity"] = luminosityOpacity
             };
+            if (settings.TryGetProperty("cardMicaVivid", out var vividValue) && vividValue.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                mica["vivid"] = vividValue.GetBoolean();
             if (settings.TryGetProperty("cardMicaDarkTintOpacity", out var darkTint) &&
                 darkTint.ValueKind == JsonValueKind.Number && darkTint.TryGetDouble(out var darkTintOpacity))
                 mica["darkTintOpacity"] = darkTintOpacity;

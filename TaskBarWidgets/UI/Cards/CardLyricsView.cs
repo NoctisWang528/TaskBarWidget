@@ -22,10 +22,16 @@ internal sealed class CardLyricsView : Grid, IDisposable
     private static readonly SemaphoreSlim EnvironmentGate = new(1, 1);
     private static CoreWebView2Environment? _sharedEnvironment;
     private static string? _sharedProfile;
+    // Probe runs use their own profile folder so an installed copy that is
+    // currently running cannot lock the shared renderer directory.
+    internal static string ProfileName { get; set; } = "CardWebView2";
 
     internal CardLyricsView()
     {
         IsHitTestVisible = false;
+        // The card supplies the visible surface (Mica plus the card's own theme
+        // fill); the lyrics pane must never paint a block of its own.
+        Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
         Margin = new Thickness(0, 6, 0, 6);
         ActualThemeChanged += (_, _) => { _appliedStyles.Clear(); if (_active) _ = ApplyAsync(); };
     }
@@ -81,12 +87,21 @@ internal sealed class CardLyricsView : Grid, IDisposable
         try
         {
             _web = new WebView2 { DefaultBackgroundColor = Microsoft.UI.Colors.Transparent, Visibility = Visibility.Collapsed, IsTabStop = false };
+            // WinUI hosts the web content over a "system visual bridge" filled
+            // with SolidBackgroundFillColorBase, which is what painted an opaque
+            // block behind the transparent lyrics. The bridge reads its color from
+            // this resource, so a transparent override keeps the whole lyrics
+            // block see-through for the card material behind it.
+            _web.Resources["BrushForThemeBackgroundColor"] = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
             Children.Add(_web);
-            var profile = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TaskBarWidgets", "CardWebView2");
+            var profile = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TaskBarWidgets", ProfileName);
             var environment = await SharedEnvironmentAsync(profile);
             if (_disposed) return;
             await _web.EnsureCoreWebView2Async(environment);
             if (_disposed) return;
+            // Keep the composition surface transparent even if the controller was
+            // created with a default fill.
+            _web.DefaultBackgroundColor = Microsoft.UI.Colors.Transparent;
             var core = _web.CoreWebView2;
             core.Settings.AreDefaultContextMenusEnabled = false;
             core.Settings.AreDevToolsEnabled = false;
@@ -120,7 +135,13 @@ internal sealed class CardLyricsView : Grid, IDisposable
                 CardLifecycleLog.Write("card-lyrics renderer-process-failed");
             };
             var html = _html!.Replace("<head>", "<head><script>window.taskbarCardHost=true;</script>")
-                .Replace("</head>", "<style>.card-single-line #nextLine,.card-single-line #incomingLine,.card-single-line #incomingTranslationPair{visibility:hidden!important}html,body{pointer-events:none}.card-reduced-motion *{animation:none!important;transition:none!important}</style></head>")
+                // Card mode never shows the surface, cover or control panel, so the
+                // shipped background rules are neutralized here as well: the card
+                // material has to show through the whole lyrics block.
+                .Replace("</head>", "<style>.card-single-line #nextLine,.card-single-line #incomingLine,.card-single-line #incomingTranslationPair{visibility:hidden!important}"
+                    + "html,body{pointer-events:none}"
+                    + "html,body,#layout.layout,.shell,.lyrics-pane,.lyrics-layer,.viewport,.track{background:transparent!important;background-color:transparent!important;box-shadow:none!important}"
+                    + ".card-reduced-motion *{animation:none!important;transition:none!important}</style></head>")
                 .Replace("</body>", "<script>" + CardScript + "</script></body>");
             core.NavigateToString(html);
         }

@@ -33,6 +33,8 @@ public sealed partial class CardGroup
                 throw new InvalidOperationException("Mica configuration did not follow the card's actual theme.");
             if (card.SurfaceBackground is not SolidColorBrush surface || surface.Color.A > 0x0A)
                 throw new InvalidOperationException("The card surface is too opaque for the vivid Mica treatment.");
+            if (!card.UsesVividMica)
+                throw new InvalidOperationException("A default card did not use the vivid Mica material.");
             var background = dark ? Microsoft.UI.ColorHelper.FromArgb(255, 32, 32, 32) : Microsoft.UI.ColorHelper.FromArgb(255, 243, 243, 243);
             var textChecks = new List<double>();
             foreach (var text in WalkCardTheme(card.Root).OfType<TextBlock>().Where(text => text.Text.Length > 0 && text.Visibility == Visibility.Visible && text.FontSize <= 12 && text.Foreground is SolidColorBrush))

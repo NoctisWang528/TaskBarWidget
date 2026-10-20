@@ -12,10 +12,20 @@ internal readonly record struct CardMicaTuning(
     internal const double MaximumTintOpacity = 1;
     internal const double MinimumLuminosityOpacity = 0;
     internal const double MaximumLuminosityOpacity = 1;
-    internal const double DefaultLightTintOpacity = 0.45;
-    internal const double DefaultLightLuminosityOpacity = 0.95;
-    internal const double DefaultDarkTintOpacity = 0.45;
-    internal const double DefaultDarkLuminosityOpacity = 0.50;
+    // Measured on the shipped cards over a wallpaper: a neutral tint above
+    // roughly a fifth of the surface washes the desktop color out of the Mica
+    // material, so the vivid default stays near the system's own material
+    // parameters (Windows uses a 0.0 tint with 0.85 luminosity for light apps).
+    internal const double DefaultLightTintOpacity = 0.10;
+    internal const double DefaultLightLuminosityOpacity = 0.85;
+    internal const double DefaultDarkTintOpacity = 0.15;
+    internal const double DefaultDarkLuminosityOpacity = 0.90;
+    internal const bool DefaultVivid = true;
+    // Approximates the plain system material for previews, so the settings
+    // window still shows what a card renders while the switch is off. Windows'
+    // own light material runs a 0.0 tint at 0.85 luminosity and the dark one a
+    // 0.15 tint at 0.96.
+    internal static CardMicaTuning SystemProxy => new(0.00, 0.85, 0.15, 0.96);
 
     private const double LegacyThemeOffset = 0.02;
 
@@ -113,4 +123,5 @@ internal readonly record struct CardMicaTuning(
 
 internal readonly record struct CardMicaPreviewState(
     CardMicaTuning Committed,
-    CardMicaTuning? Preview);
+    CardMicaTuning? Preview,
+    bool Vivid);

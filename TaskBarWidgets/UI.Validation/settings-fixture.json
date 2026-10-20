@@ -640,6 +640,7 @@
   },
   "media": {
     "toolWindowTheme": "System",
+    "cardMicaVivid": true,
     "cardMicaTintOpacity": 0.34,
     "cardMicaLuminosityOpacity": 0.5,
     "cardMicaDarkTintOpacity": 0.22,

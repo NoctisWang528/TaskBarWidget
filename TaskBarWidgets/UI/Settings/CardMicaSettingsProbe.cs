@@ -38,9 +38,10 @@ public sealed partial class SettingsWindow
             !lowerEndpoints.Matches(CardMicaTuning.FromThemeValues(0, 0, 0, 0)) ||
             !upperEndpoints.Matches(CardMicaTuning.FromThemeValues(1, 1, 1, 1)) ||
             !nonFinite.Matches(defaults) ||
-            !defaults.Matches(CardMicaTuning.FromThemeValues(0.45, 0.95, 0.45, 0.50)) ||
+            !defaults.Matches(CardMicaTuning.FromThemeValues(0.10, 0.85, 0.15, 0.90)) ||
+            !CardMicaTuning.SystemProxy.Matches(CardMicaTuning.FromThemeValues(0.00, 0.85, 0.15, 0.96)) ||
             !legacyPayload.Matches(CardMicaTuning.FromThemeValues(0.08, 0.30, 0.06, 0.28)) ||
-            !mixedPayload.Matches(CardMicaTuning.FromThemeValues(0.08, 0.95, 0.22, 0.50)) ||
+            !mixedPayload.Matches(CardMicaTuning.FromThemeValues(0.08, 0.85, 0.22, 0.90)) ||
             !explicitDarkPayload.Matches(CardMicaTuning.FromThemeValues(0.08, 0.30, 0.22, 0.44)) ||
             VividMicaBackdrop.KindFor(false) != MicaKind.Base ||
             VividMicaBackdrop.KindFor(true) != MicaKind.BaseAlt)
@@ -57,6 +58,7 @@ public sealed partial class SettingsWindow
         void Preview(CardMicaPreviewState state)
         {
             events.Add(state);
+            cards.SetMicaVivid(state.Vivid);
             cards.SetMicaPreview(state.Preview, state.Committed);
         }
 
@@ -79,11 +81,14 @@ public sealed partial class SettingsWindow
             var lightTransparency = FindMicaControl<Slider>(window._page, "setting-cardMicaTransparency");
             var darkTint = FindMicaControl<Slider>(window._page, "setting-cardMicaDarkTintOpacity");
             var darkTransparency = FindMicaControl<Slider>(window._page, "setting-cardMicaDarkTransparency");
+            var vivid = FindMicaControl<ToggleSwitch>(window._page, "setting-cardMicaVivid");
             if (Math.Abs(lightTint.Value - 34) > 0.01 ||
                 Math.Abs(lightTransparency.Value - 50) > 0.01 ||
                 Math.Abs(darkTint.Value - 22) > 0.01 ||
                 Math.Abs(darkTransparency.Value - 60) > 0.01)
                 throw new InvalidOperationException("Mica controls did not load the persisted four-value draft.");
+            if (!vivid.IsOn || !cards.MicaVivid || cards.CardWindows.Any(card => !card.UsesVividMica))
+                throw new InvalidOperationException("The vivid Mica switch did not load the persisted enabled state.");
 
             if (!window.CanPreviewCardMica)
             {
@@ -96,6 +101,7 @@ public sealed partial class SettingsWindow
                     fourSliders = true,
                     noPresets = true,
                     noMockPreview = true,
+                    vividSwitch = true,
                     themeKinds = true,
                     settingsFocusOverride = false,
                     fixtureRoundTrip = true,
@@ -107,6 +113,8 @@ public sealed partial class SettingsWindow
 
             if (!window.UsesVividSettingsBackdrop || !window.SettingsMicaTuning.Matches(fixture))
                 throw new InvalidOperationException("The settings window did not enter the saved four-value Mica preview.");
+            if (sliders.Any(slider => !slider.IsEnabled))
+                throw new InvalidOperationException("Mica sliders were disabled while vivid Mica was enabled.");
             if (events.Count == 0 || events[^1].Preview is null)
                 throw new InvalidOperationException("Entering the quick-card page did not raise a Mica preview.");
 
@@ -179,6 +187,37 @@ public sealed partial class SettingsWindow
                 throw new InvalidOperationException("Mica preview did not resume after reopening the quick-card page.");
             AssertCardMica(cards, window.DraftCardMicaTuning);
 
+            // The switch selects between the tuned material and the plain system
+            // one; the tuned values stay on the controller while it is off.
+            FindMicaControl<ToggleSwitch>(window._page, "setting-cardMicaVivid").IsOn = false;
+            await Task.Delay(120);
+            if (window.DraftCardMicaVivid || events[^1].Vivid)
+                throw new InvalidOperationException("Turning vivid Mica off did not reach the draft state.");
+            if (cards.MicaVivid || cards.CardWindows.Any(card => card.UsesVividMica))
+                throw new InvalidOperationException("Turning vivid Mica off did not switch the cards to the system material.");
+            if (!window.SettingsMicaTuning.Matches(CardMicaTuning.SystemProxy))
+                throw new InvalidOperationException("The settings preview did not follow the vivid switch.");
+            var offSliders = WalkTheme(FindMicaControl<StackPanel>(window._page, "section-cardMica")).OfType<Slider>().ToArray();
+            if (offSliders.Length != 4 || offSliders.Any(slider => slider.IsEnabled))
+                throw new InvalidOperationException("Card Mica sliders stayed editable while vivid Mica was off.");
+            AssertCardMica(cards, window.DraftCardMicaTuning);
+            AssertSavedMica(window, fixture);
+            if (window._media.GetSaved("cardMicaVivid") is System.Text.Json.Nodes.JsonValue savedVivid &&
+                savedVivid.TryGetValue<bool>(out var savedFlag) && !savedFlag)
+                throw new InvalidOperationException("The vivid switch changed the saved setting before Apply.");
+
+            FindMicaControl<ToggleSwitch>(window._page, "setting-cardMicaVivid").IsOn = true;
+            await Task.Delay(120);
+            if (!window.DraftCardMicaVivid || !events[^1].Vivid)
+                throw new InvalidOperationException("Turning vivid Mica back on did not reach the draft state.");
+            if (!cards.MicaVivid || cards.CardWindows.Any(card => !card.UsesVividMica))
+                throw new InvalidOperationException("Turning vivid Mica back on did not restore the tuned material.");
+            var onSliders = WalkTheme(FindMicaControl<StackPanel>(window._page, "section-cardMica")).OfType<Slider>().ToArray();
+            if (onSliders.Length != 4 || onSliders.Any(slider => !slider.IsEnabled))
+                throw new InvalidOperationException("Card Mica sliders did not become editable again.");
+            if (!window.SettingsMicaTuning.Matches(window.DraftCardMicaTuning))
+                throw new InvalidOperationException("The settings preview did not return to the tuned material.");
+
             window.NavigateTo("taskbar");
             await Task.Delay(40);
             if (!window.SettingsMicaTuning.Matches(fixture))
@@ -195,6 +234,8 @@ public sealed partial class SettingsWindow
                 independentThemes = true,
                 noPresets = true,
                 noMockPreview = true,
+                vividSwitch = true,
+                vividRoundTrip = true,
                 themeKinds = true,
                 settingsFocusOverride = false,
                 frameCoalesced = true,

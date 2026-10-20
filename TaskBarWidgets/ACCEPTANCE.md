@@ -2,6 +2,20 @@
 
 更新：2026-10-20。最近成功完整构建的路径由本机 `artifacts/latest-build.txt` 提供；构建产物、布局检查图、日志和用户配置不提交到仓库。
 
+## 图标裁剪、歌词块透明与真正生效的鲜艳 Mica（2026-10-20）
+
+用户反馈三项：媒体卡歌词块仍有底色、设置／刷新／静音按钮仍被截断、鲜艳 Mica 看起来没有生效。三项都定位到具体实现缺陷，而不是参数微调。
+
+**图标截断**：`PathIcon` 按自身尺寸直接绘制并裁掉超出部分，而 `CardIconArt` 的图形按 20 单位网格绘制。32 DIP 圆形按钮此前把 `PathIcon` 设成 16 DIP，设置齿轮、扬声器波纹、刷新箭头和上一首／下一首的最外圈因此被切掉（播放按钮 42 DIP 内仍为 20 DIP，所以一直正常）。现在每个图标都用固定 `Viewbox` 承载完整 20 单位图形：32 DIP 按钮缩放为 16 DIP，42 DIP 播放按钮保持 20 DIP；宿主仍为 20 DIP 居中、`Padding=0`、`MinWidth/MinHeight=0`，静音与播放状态继续通过切换矢量图形更新。`CardAudioProbe` 新增断言：每个图标的几何必须完整落在 20 单位绘制网格内，且必须由固定尺寸缩放器承载（本轮 7 个宿主），同时继续校验中心误差不超过 0.5 DIP。
+
+**歌词块底色**：底色不是来自网页样式（`html/body/.layout` 计算背景本来就是透明），而是 WinUI `WebView2` 的 system visual bridge——它用 `SolidBackgroundFillColorBase` 填充承载网页的合成视觉，网页透明时就露出一整块不透明底色。`CardLyricsView` 现在把渲染器资源 `BrushForThemeBackgroundColor` 覆盖为透明画刷，并在注入样式中把 `html/body/#layout.layout/.shell/.lyrics-pane/.lyrics-layer/.viewport/.track` 的背景与阴影强制为透明。桌面取像素验证：歌词块与卡片材质同色，不再出现白色矩形。歌词探针新增两项断言：渲染器资源必须是 alpha 0 画刷，`body` 与 `.layout` 的计算背景必须是 `rgba(0, 0, 0, 0)`。
+
+**鲜艳 Mica 为什么“没生效”**：材质一直生效，问题在中性 tint 的浓度。新增的桌面验收工具 `scripts/mica-visual-check.ps1` 让 UI 进程在真实桌面显示一排卡片窗口并按窗口矩形取像素（DWM 合成的 Mica 不在 XAML 视觉树里，离屏渲染永远看不到它）。实测（浅色、彩色壁纸）：`tint 0.45 / luminosity 0.95` 是接近不透明的浅灰面板，`tint 0.10 / luminosity 0.85` 能清楚透出壁纸颜色，`tint 0.25` 起明显发灰；深色模式 `tint 0.15` 比 `0.45` 更能带出壁纸色相。用户旧配置正好是浓度 45%／通透度 10%，落在完全不透明的范围内，所以新版本看起来和旧版本一样。新默认改为浅色浓度 10%／通透度 15%、深色浓度 15%／通透度 10%（`tint 0.10 / luminosity 0.85`、`0.15 / 0.90`），并新增“鲜艳 Mica”开关（默认开启）：关闭后卡片改用系统默认 `MicaBackdrop`，四个滑块停用；设置窗口预览用 `CardMicaTuning.SystemProxy`（浅色 `0 / 0.85`、深色 `0.15 / 0.96`，与 Windows 自身材质参数一致）近似系统材质。`quickCards.mica` 新增 `vivid`，设置命令新增 `cardMicaVivid`。
+
+旧配置一次性迁移：文件中缺少 `CardMicaVivid` 即视为“鲜艳材质之前的配置”，四个数值一次性重置为新默认（旧值是按几乎不透明的旧观感调的），写入开关后不会再重置；已有该字段的配置保留用户自选值，显式深色字段优先和 `-0.02` 旧偏移兼容逻辑不变。工厂 JSON 与 `media-settings.default.json` 同步为新默认，仍只在整份配置缺失时种入。
+
+自动验证：`verify.ps1` 全部通过（Core 27/27、Media 167/167、Web 28/28、原生行布局与出厂默认检查）；新增用例覆盖鲜艳开关往返、缺少开关时的一次性迁移、迁移后自选值不再被重置。完整硬件 Release 构建为 `20261020-233109`、版本 `261020-2331`，`validate-winui.ps1` 针对该构建通过：`ui-template-check.json` 为 `success=true`，`audioControls.scalerIcons=6`、`iconsUnclipped=true`、最大中心误差 `0`，`micaControls.vividSwitch=true`、`vividRoundTrip=true`，歌词探针包含透明桥资源与网页计算背景断言。桌面取像素证据为 `artifacts/builds/20261020-233109/ui-mica-check/desktop.png`：新默认浅色卡透出壁纸色、旧 45%/95% 仍是灰白面板，歌词块与卡片同色。仍需桌面验收：真实壁纸下的最终观感与开关取舍、系统浅色／深色即时切换、真实音频设备静音图标、混合 DPI、Explorer 重启后的表现。本轮未启动正常产品、未替换日用安装、未修改启动项。
+
 ## 卡片矢量图标、鲜艳 Mica 与歌词偏移加载（2026-10-20）
 
 四张快捷卡片和天气刷新按钮的圆形图标改由 `UI/Cards/CardIconArt.cs` 绘制（上一首、播放／暂停、下一首、扬声器、扬声器静音、麦克风、麦克风静音、设置、刷新），不再依赖 Segoe Fluent Icons；静音状态通过切换矢量图形更新，不读取或修改字体字形。所有圆形按钮使用固定 20 DIP 图标宿主（32 DIP 按钮内 16 DIP，42 DIP 播放按钮内 20 DIP），`Padding=0`、零最小尺寸并关闭布局取整，修复字体缺失时的方框和内容偏移；下拉箭头、菜单勾选等非圆形系统图标保持不变。天气卡主题切换改为在 `ActualThemeChanged` 后确定性重绘彩色图标和预报模块。

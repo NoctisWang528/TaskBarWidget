@@ -39,6 +39,9 @@ internal static class CardLyricsProbe
             lyrics.Activate(); lyrics.Initialize(html);
             lyrics.Receive(Frame(1, "probe-a", "Synthetic lyric alpha", "Synthetic next alpha"));
             var renderer = lyrics.Renderer ?? throw new InvalidOperationException("Lyrics renderer was not created.");
+            if (!renderer.Resources.TryGetValue("BrushForThemeBackgroundColor", out var bridgeBrush) ||
+                bridgeBrush is not Microsoft.UI.Xaml.Media.SolidColorBrush { Color.A: 0 })
+                throw new InvalidOperationException("The lyrics renderer kept an opaque system visual bridge background.");
             var navigation = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             renderer.NavigationCompleted += (_, args) => {
                 if (args.IsSuccess) navigation.TrySetResult(true);
@@ -67,7 +70,9 @@ internal static class CardLyricsProbe
             bool HasText(JsonElement state, string expected) => state.GetProperty("current").GetString() == expected &&
                 state.GetProperty("currentWidth").GetDouble() > 0 && state.GetProperty("currentHeight").GetDouble() > 0;
             var narrow = await UntilAsync(state => HasText(state, "Synthetic lyric alpha") && state.GetProperty("single").GetBoolean() &&
-                state.GetProperty("nextVisibility").GetString() == "hidden" && renderer.Visibility == Visibility.Visible,
+                state.GetProperty("nextVisibility").GetString() == "hidden" && renderer.Visibility == Visibility.Visible &&
+                state.GetProperty("bodyBackground").GetString() == "rgba(0, 0, 0, 0)" &&
+                state.GetProperty("surfaceBackground").GetString() == "rgba(0, 0, 0, 0)",
                 "Narrow lyrics did not display a nonempty single line.");
             checks.Add(new { kind = "narrow", state = narrow });
 
@@ -144,6 +149,8 @@ internal static class CardLyricsProbe
           return {current:current.textContent,next:document.getElementById('nextLineText').textContent,
             single:document.documentElement.classList.contains('card-single-line'),nextVisibility:getComputedStyle(next).visibility,
             primary:getComputedStyle(document.documentElement).getPropertyValue('--primary').trim(),
+            bodyBackground:getComputedStyle(document.body).backgroundColor,
+            surfaceBackground:getComputedStyle(document.getElementById('layout')).backgroundColor,
             currentWidth:bounds.width,currentHeight:bounds.height,revision:window.__taskbarProbeRevision||0,
             viewportWidth:innerWidth,viewportHeight:innerHeight};
         })()

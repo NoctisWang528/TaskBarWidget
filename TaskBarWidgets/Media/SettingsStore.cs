@@ -139,6 +139,21 @@ public sealed class SettingsStore
 
     private static void ApplyMicaSettings(JsonElement root, AppSettings settings)
     {
+        // The switch arrived with the vivid material. A file without it was tuned
+        // against the old, almost opaque wash, so it receives the vivid defaults
+        // once; the stored switch then keeps whatever the user tunes later.
+        if (!root.TryGetProperty(nameof(AppSettings.CardMicaVivid), out var vivid) ||
+            vivid.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+        {
+            settings.CardMicaVivid = AppSettings.DefaultCardMicaVivid;
+            settings.CardMicaTintOpacity = AppSettings.DefaultCardMicaTintOpacity;
+            settings.CardMicaLuminosityOpacity = AppSettings.DefaultCardMicaLuminosityOpacity;
+            settings.CardMicaDarkTintOpacity = AppSettings.DefaultCardMicaDarkTintOpacity;
+            settings.CardMicaDarkLuminosityOpacity = AppSettings.DefaultCardMicaDarkLuminosityOpacity;
+            return;
+        }
+
+        settings.CardMicaVivid = vivid.GetBoolean();
         var hasLegacyTint = TryReadDouble(
             root, nameof(AppSettings.CardMicaTintOpacity), out var legacyTint);
         var hasLegacyLuminosity = TryReadDouble(

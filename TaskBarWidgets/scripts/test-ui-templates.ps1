@@ -25,12 +25,15 @@ if ($result.winUiModule -notmatch '\\WindowsApps\\Microsoft.WindowsAppRuntime\.2
 if ($result.checks.Count -ne 5 -or @($result.checks | Where-Object { -not $_.loaded -or $_.width -le 0 }).Count) { throw 'Not all five UI surfaces realized their templates.' }
 if (-not $result.audioControls.muteButtonRoundTrip -or -not $result.audioControls.inputMuteButtonRoundTrip -or
     -not $result.audioControls.volumePreserved -or -not $result.audioControls.staleReplyIgnored -or
+    -not $result.audioControls.iconsUnclipped -or $result.audioControls.scalerIcons -lt 6 -or
     $result.audioControls.centeredIconHosts -lt 6 -or $result.audioControls.maximumCenterError -gt 0.5 -or
     -not $result.cardLifecycle.externalClickPolicy) { throw 'Audio controls, icon centering or outside-click component checks did not complete.' }
 if (-not $result.micaControls.fixtureRoundTrip -or -not $result.micaControls.noPresets -or
     -not $result.micaControls.noMockPreview -or -not $result.micaControls.themeKinds -or
     -not $result.micaControls.fourSliders -or -not $result.micaControls.legacyCompatible -or
+    -not $result.micaControls.vividSwitch -or
     ($result.micaControls.available -and (-not $result.micaControls.frameCoalesced -or
+        -not $result.micaControls.vividRoundTrip -or
         -not $result.micaControls.discardRestored -or -not $result.micaControls.previewRestoredOnLeave -or
         -not $result.micaControls.independentThemes -or -not $result.micaControls.reopenRearmsPreview)) -or
     -not $result.micaControls.limitsClamped -or -not $result.micaControls.defaultsFallback) { throw 'Card Mica settings checks did not complete.' }

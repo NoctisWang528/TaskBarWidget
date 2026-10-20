@@ -13,6 +13,7 @@ internal static class UiTemplateProbe
 {
     internal static async Task RunAsync(Application app, string[] args)
     {
+        CardLyricsView.ProfileName = "CardWebView2-template-probe";
         SettingsWindow? settings = null;
         CardGroup? cards = null;
         using var connection = new UiConnection("TaskBarWidgets.UI.template-probe.disconnected");
