@@ -211,6 +211,8 @@ namespace NativeMedia
         void SetEffectiveScene();
         bool LayerNeedsPaint(Layer& layer) const;
         bool CreateCompositionTarget();
+        void ResetSurfaceForReveal();
+        void InvalidateScanSignal();
         Frame FrameForLyrics() const;
     };
 }

@@ -119,7 +119,11 @@ namespace NativeMedia
         std::optional<double> Current(std::uint64_t now) const
         {
             if (!m_hasValue) return std::nullopt;
-            if (m_duration == 0 || now <= m_started) return m_to;
+            // An immediate set is already at its target. A running interpolation
+            // starts at m_from: returning m_to at the start tick made the first
+            // presented frame jump to the endpoint and then walk backwards.
+            if (m_duration == 0) return m_to;
+            if (now <= m_started) return m_from;
             if (now >= m_started + m_duration) return m_to;
             const double elapsed = static_cast<double>(now - m_started);
             const double duration = static_cast<double>(m_duration);

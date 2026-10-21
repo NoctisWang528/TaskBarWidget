@@ -285,13 +285,7 @@ namespace NativeMedia
         m_layerTransitionActive = false;
         m_coverCrossPending = false;
         m_coverFadeActive = false;
-        m_wordScan.Reset();
-        m_displayedScan.reset();
-        m_scanTrack.clear();
-        m_scanLine = -1;
-        m_scanPlaying = false;
-        m_scanInitialized = false;
-        m_scanTarget.reset();
+        InvalidateScanSignal();
         m_secondaryOpacity = 0.72;
         m_secondaryTarget = 0.72;
         m_lastPresent = 0;
@@ -342,9 +336,14 @@ namespace NativeMedia
     void NativeMediaRenderer::SetOptions(bool reducedMotion, bool highContrast)
     {
         if (m_reducedMotion == reducedMotion && m_highContrast == highContrast) return;
+        const bool motionChanged = m_reducedMotion != reducedMotion;
         m_reducedMotion = reducedMotion;
         m_highContrast = highContrast;
         ComputeEffectiveStyle();
+        // A motion-mode switch changes which value the scan must present. Drop the
+        // interpolator together with its input cache so the next frame rebuilds
+        // both under the new rules instead of reading an empty interpolator.
+        if (motionChanged) InvalidateScanSignal();
         MarkAllDirty();
     }
 
@@ -1110,19 +1109,14 @@ namespace NativeMedia
         const bool wasVisible = m_requestedVisible;
         if (m_requestedVisible == visible && m_ready) return;
         m_requestedVisible = visible;
+        const bool revealing = visible && !wasVisible;
+        // Reset the presentation state before touching composition resources: a
+        // reveal may happen while layers are being recreated, and the retained
+        // frame is the only complete snapshot to restore from.
+        if (revealing) ResetSurfaceForReveal();
         if (!m_ready || !m_compositionDevice || !m_rootVisual) return;
-        if (visible && !wasVisible)
+        if (revealing)
         {
-            m_transition.Reset();
-            m_layerTransitionActive = false;
-            m_coverFadeActive = false;
-            m_coverCrossPending = false;
-            m_coverKey = 0;
-            m_displayedFrame = m_pendingFrame;
-            m_displayedScan.reset();
-            m_wordScan.Reset();
-            m_spectrumAnimator.SettleNow();
-            SetEffectiveScene();
             SetLayerOpacity(m_lyrics, m_lyricsTargetOpacity);
             SetLayerOpacity(m_spectrum, m_spectrumTargetOpacity);
             SetLayerOpacity(m_browser, m_browserTargetOpacity);
@@ -1133,6 +1127,33 @@ namespace NativeMedia
         m_fade.Set(m_compositionDevice.Get(), m_rootVisual.Get(), visible,
             animate && !m_reducedMotion);
         m_compositionDevice->Commit();
+    }
+
+    void NativeMediaRenderer::ResetSurfaceForReveal()
+    {
+        m_transition.Reset();
+        m_layerTransitionActive = false;
+        m_coverFadeActive = false;
+        m_coverCrossPending = false;
+        m_coverKey = 0;
+        m_displayedFrame = m_pendingFrame;
+        // The interpolator and its input cache share one lifetime. Clearing only
+        // the interpolator left the same revision/progress looking like "no new
+        // signal", so the restored panel rendered an empty scan.
+        InvalidateScanSignal();
+        m_spectrumAnimator.SettleNow();
+        SetEffectiveScene();
+    }
+
+    void NativeMediaRenderer::InvalidateScanSignal()
+    {
+        m_displayedScan.reset();
+        m_wordScan.Reset();
+        m_scanInitialized = false;
+        m_scanTarget.reset();
+        m_scanTrack.clear();
+        m_scanLine = -1;
+        m_scanPlaying = false;
     }
 
     bool NativeMediaRenderer::HitTest(float x, float y, HitAction& action)
@@ -1214,8 +1235,10 @@ namespace NativeMedia
             m_scanLine = frame.lyrics.currentLineIndex;
             m_scanPlaying = frame.lyrics.isPlaying;
             m_scanTarget = targetScan;
-            if (m_reducedMotion && targetScan)
+            if (m_reducedMotion)
             {
+                // Reduced motion never interpolates, so the interpolator stays
+                // empty and must not be read back on later frames.
                 m_wordScan.Reset();
                 m_displayedScan = targetScan;
             }
@@ -1225,6 +1248,10 @@ namespace NativeMedia
                     frame.lyrics.isPlaying, targetScan, now);
                 m_displayedScan = m_wordScan.Current(now);
             }
+        }
+        else if (m_reducedMotion)
+        {
+            m_displayedScan = targetScan;
         }
         else
         {

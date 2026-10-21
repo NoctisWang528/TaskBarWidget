@@ -39,6 +39,26 @@ namespace
         return frame;
     }
 
+    bool Near(double actual, double expected, double tolerance = 1e-6)
+    {
+        return std::abs(actual - expected) <= tolerance;
+    }
+
+    void RequireScan(const NativeMedia::RendererProbe& probe, double expected, const char* message)
+    {
+        Require(probe.displayedScan.has_value(), message);
+        Require(Near(*probe.displayedScan, expected), message);
+    }
+
+    NativeMedia::Frame MakePausedFrame(std::uint64_t revision, NativeMedia::Scene scene,
+        int line, double progress, std::optional<double> scan)
+    {
+        auto frame = MakeFrame(revision, scene, line, progress, scan);
+        frame.isPlaying = false;
+        frame.lyrics.isPlaying = false;
+        return frame;
+    }
+
     NativeMedia::RenderUpdate MakeUpdate(const NativeMedia::Frame& frame, bool force = false)
     {
         static const NativeMedia::Style style;
@@ -68,6 +88,9 @@ int main()
     renderer.Apply(MakeUpdate(second));
     const auto scanStart = renderer.AdvanceHeadlessTest(1010);
     const auto scanMiddle = renderer.AdvanceHeadlessTest(1055);
+    // The tick that establishes the new target must present the interpolation
+    // start, not jump to the endpoint and walk backwards afterwards.
+    RequireScan(scanStart, 0.10, "A new scan target starts at the previous value.");
     Require(scanMiddle.displayedScan.has_value(), "Scan remains available during smoothing.");
     Require(*scanMiddle.displayedScan > 0.10 && *scanMiddle.displayedScan < 0.20,
         "Renderer presents interpolated scan progress between authoritative frames.");
@@ -76,7 +99,6 @@ int main()
     const auto settled = renderer.AdvanceHeadlessTest(3000);
     Require(!settled.scanActive && !settled.needsAnimation,
         "A stable scan target settles and stops the animation scheduler.");
-    (void)scanStart;
 
     NativeMediaRenderer roll;
     roll.BeginHeadlessTest();
@@ -158,6 +180,184 @@ int main()
     const auto lyricsDone = roll.AdvanceHeadlessTest(6300);
     Require(!lyricsDone.transitionActive,
         "Lyrics exit layer transition completes at its original deadline.");
+
+    // ---- Issue 2: a new target must present start/middle/end in order. ----
+    {
+        NativeMediaRenderer scan;
+        scan.BeginHeadlessTest();
+        auto seed = MakeFrame(100, Scene::Lyrics, 1, 0.10, 0.10);
+        scan.Apply(MakeUpdate(seed, true));
+        RequireScan(scan.AdvanceHeadlessTest(10000), 0.10, "Seed scan value is immediate.");
+
+        auto target = MakeFrame(101, Scene::Lyrics, 1, 0.10, 0.20);
+        scan.Apply(MakeUpdate(target));
+        RequireScan(scan.AdvanceHeadlessTest(10010), 0.10,
+            "The tick that observes a new target presents the interpolation start.");
+        RequireScan(scan.AdvanceHeadlessTest(10055), 0.15,
+            "The middle tick presents the interpolated value.");
+        RequireScan(scan.AdvanceHeadlessTest(10100), 0.20,
+            "The deadline tick presents the target.");
+
+        auto monotonic = MakeFrame(102, Scene::Lyrics, 1, 0.10, 0.20);
+        scan.Apply(MakeUpdate(monotonic));
+        auto settledStart = scan.AdvanceHeadlessTest(10200);
+        RequireScan(settledStart, 0.20, "An already reached target stays at the endpoint.");
+        double previous = *settledStart.displayedScan;
+        for (int step = 1; step <= 6; ++step)
+        {
+            auto probe = scan.AdvanceHeadlessTest(10200 + static_cast<std::uint64_t>(step) * 5);
+            Require(probe.displayedScan.has_value(), "A settled scan keeps its value.");
+            Require(*probe.displayedScan >= previous - 1e-9,
+                "A settled scan never moves backwards.");
+            previous = *probe.displayedScan;
+        }
+        Require(!scan.AdvanceHeadlessTest(10300).needsAnimation,
+            "A converged scan stops requesting animation frames.");
+    }
+
+    // ---- Issue 2: full forward sequence is monotonic from start to end. ----
+    {
+        NativeMediaRenderer sequence;
+        sequence.BeginHeadlessTest();
+        auto seed = MakeFrame(110, Scene::Lyrics, 4, 0.2, 0.10);
+        sequence.Apply(MakeUpdate(seed, true));
+        RequireScan(sequence.AdvanceHeadlessTest(20000), 0.10, "Sequence seed value.");
+
+        auto target = MakeFrame(111, Scene::Lyrics, 4, 0.2, 0.20);
+        sequence.Apply(MakeUpdate(target));
+        double previous = *sequence.AdvanceHeadlessTest(20010).displayedScan;
+        Require(Near(previous, 0.10), "Forward scan starts at the previous value.");
+        for (int step = 1; step <= 9; ++step)
+        {
+            const auto probe = sequence.AdvanceHeadlessTest(
+                20010 + static_cast<std::uint64_t>(step) * 10);
+            Require(probe.displayedScan.has_value(), "Forward scan keeps a value.");
+            Require(*probe.displayedScan >= previous - 1e-9,
+                "Forward scan output never goes backwards.");
+            Require(*probe.displayedScan <= 0.20 + 1e-9,
+                "Forward scan output never overshoots the target.");
+            previous = *probe.displayedScan;
+        }
+        Require(Near(previous, 0.20), "Forward scan ends exactly at the target.");
+    }
+
+    // ---- Issue 2: identical targets never restart the interpolation. ----
+    {
+        NativeMediaRenderer steady;
+        steady.BeginHeadlessTest();
+        auto seed = MakeFrame(120, Scene::Lyrics, 2, 0.3, 0.10);
+        steady.Apply(MakeUpdate(seed, true));
+        RequireScan(steady.AdvanceHeadlessTest(30000), 0.10, "Restart-check seed value.");
+
+        auto target = MakeFrame(121, Scene::Lyrics, 2, 0.3, 0.20);
+        steady.Apply(MakeUpdate(target));
+        RequireScan(steady.AdvanceHeadlessTest(30010), 0.10, "Restart-check start value.");
+        RequireScan(steady.AdvanceHeadlessTest(30050), 0.144444, "Restart-check midpoint.");
+        // A newer revision with the same scan target must not restart the 90 ms
+        // interpolation that started at 30010.
+        auto repeated = MakeFrame(122, Scene::Lyrics, 2, 0.3, 0.20);
+        steady.Apply(MakeUpdate(repeated));
+        RequireScan(steady.AdvanceHeadlessTest(30100), 0.20,
+            "The original interpolation deadline still applies to a repeated target.");
+    }
+
+    // ---- Issue 2: seek/jump corrections stay immediate. ----
+    {
+        NativeMediaRenderer corrections;
+        corrections.BeginHeadlessTest();
+        auto seed = MakeFrame(130, Scene::Lyrics, 3, 0.4, 0.60);
+        corrections.Apply(MakeUpdate(seed, true));
+        RequireScan(corrections.AdvanceHeadlessTest(40000), 0.60, "Correction seed value.");
+
+        auto backward = MakeFrame(131, Scene::Lyrics, 3, 0.4, 0.20);
+        corrections.Apply(MakeUpdate(backward));
+        RequireScan(corrections.AdvanceHeadlessTest(40010), 0.20,
+            "A backward seek corrects the scan immediately.");
+
+        auto forwardJump = MakeFrame(132, Scene::Lyrics, 3, 0.4, 0.90);
+        corrections.Apply(MakeUpdate(forwardJump));
+        RequireScan(corrections.AdvanceHeadlessTest(40020), 0.90,
+            "A large forward jump corrects the scan immediately.");
+    }
+
+    // ---- Issue 3: a reveal restores the scan from the retained frame. ----
+    {
+        NativeMediaRenderer reveal;
+        reveal.BeginHeadlessTest();
+        auto paused = MakePausedFrame(200, Scene::Lyrics, 2, 0.3, 0.62);
+        reveal.Apply(MakeUpdate(paused, true));
+        RequireScan(reveal.AdvanceHeadlessTest(50000), 0.62, "Paused scan is presented.");
+
+        reveal.SetVisible(false, false);
+        reveal.SetVisible(true, false);
+        RequireScan(reveal.AdvanceHeadlessTest(50100), 0.62,
+            "A paused hide/reveal restores the same scan without waiting for lyrics.");
+
+        auto repeated = MakePausedFrame(201, Scene::Lyrics, 2, 0.3, 0.62);
+        reveal.Apply(MakeUpdate(repeated));
+        RequireScan(reveal.AdvanceHeadlessTest(50200), 0.62,
+            "A repeated identical snapshot still shows the scan.");
+
+        // Window rebinding or device resource recovery re-enters the reveal path.
+        reveal.DetachHost();
+        reveal.SetVisible(true, false);
+        RequireScan(reveal.AdvanceHeadlessTest(50300), 0.62,
+            "Rebinding the host restores the scan from the retained frame.");
+    }
+
+    // ---- Issue 3: a reveal during a word gap must not invent a scan value. ----
+    {
+        NativeMediaRenderer gap;
+        gap.BeginHeadlessTest();
+        auto gapFrame = MakeFrame(210, Scene::Lyrics, 3, 0.5, std::nullopt);
+        gap.Apply(MakeUpdate(gapFrame, true));
+        Require(!gap.AdvanceHeadlessTest(60000).displayedScan.has_value(),
+            "A word gap presents no scan.");
+
+        gap.SetVisible(false, false);
+        gap.SetVisible(true, false);
+        Require(!gap.AdvanceHeadlessTest(60100).displayedScan.has_value(),
+            "A word-gap reveal keeps the scan empty instead of reusing a stale value.");
+
+        auto nextWord = MakeFrame(211, Scene::Lyrics, 3, 0.5, 0.40);
+        gap.Apply(MakeUpdate(nextWord));
+        RequireScan(gap.AdvanceHeadlessTest(60200), 0.40,
+            "The next authoritative scan target appears after a reveal.");
+    }
+
+    // ---- Issue 4: reduced motion always presents the authoritative target. ----
+    {
+        NativeMediaRenderer reduced;
+        reduced.BeginHeadlessTest();
+        reduced.SetOptions(true, false);
+        auto frame = MakeFrame(300, Scene::Lyrics, 5, 0.2, 0.30);
+        reduced.Apply(MakeUpdate(frame, true));
+        const auto reducedStart = reduced.AdvanceHeadlessTest(70000);
+        RequireScan(reducedStart, 0.30, "Reduced motion presents the authoritative scan.");
+        Require(!reducedStart.scanActive, "Reduced motion does not animate the scan.");
+
+        const auto reducedSecond = reduced.AdvanceHeadlessTest(70016);
+        RequireScan(reducedSecond, 0.30,
+            "A later paint with the same target keeps the scan in reduced motion.");
+
+        auto lineChange = MakeFrame(301, Scene::Lyrics, 6, 0.0, 0.30);
+        reduced.Apply(MakeUpdate(lineChange));
+        RequireScan(reduced.AdvanceHeadlessTest(70032), 0.30,
+            "A line-change repaint keeps the scan in reduced motion.");
+
+        reduced.SetOptions(false, false);
+        RequireScan(reduced.AdvanceHeadlessTest(70048), 0.30,
+            "Leaving reduced motion rebuilds the scan instead of clearing it.");
+
+        reduced.SetOptions(true, false);
+        RequireScan(reduced.AdvanceHeadlessTest(70064), 0.30,
+            "Re-entering reduced motion keeps the authoritative scan.");
+
+        reduced.SetVisible(false, false);
+        reduced.SetVisible(true, false);
+        RequireScan(reduced.AdvanceHeadlessTest(70080), 0.30,
+            "A reduced-motion reveal keeps the scan.");
+    }
 
     std::cout << "Native renderer lifecycle scheduling assertions passed.\n";
     return 0;
