@@ -45,11 +45,18 @@ if ($null -eq $result.cardLyricsControls -or -not $result.cardLyricsControls.str
     $result.cardLyricsControls.probeActivated) { throw 'Native lyric cards did not use structured fixtures exclusively.' }
 $lyricKinds = @($result.cardLyricsControls.checks | ForEach-Object kind)
 foreach ($required in @('ordinary','wordScan','pauseFrozen','resume','seek','lineRoll','trackSwitch',
-    'cardFontFallback','mediaHeight','translation','translationRoll','narrow','longText','alignment','theme','highContrast','reducedMotion','revisionRestart',
+    'cardFontFallback','mediaHeight','translation','translationRoll','primaryFontResize','translationFontResize',
+    'narrow','longText','alignment','theme','highContrast','reducedMotion','revisionRestart',
     'hideReopen','unavailable')) {
     if ($lyricKinds -notcontains $required) { throw "Native lyric check missing: $required" }
 }
 if (-not ($result.cardLyricsControls.checks | Where-Object { $_.kind -eq 'wordScan' }).reusedVisualTree -or
+    ($result.cardLyricsControls.checks | Where-Object { $_.kind -eq 'wordScan' }).remeasured -ne $false -or
+    -not ($result.cardLyricsControls.checks | Where-Object { $_.kind -eq 'primaryFontResize' }).measuredOnFontChange -or
+    -not ($result.cardLyricsControls.checks | Where-Object { $_.kind -eq 'primaryFontResize' }).measuredOnHeightChange -or
+    -not ($result.cardLyricsControls.checks | Where-Object { $_.kind -eq 'primaryFontResize' }).reusedVisualTree -or
+    -not ($result.cardLyricsControls.checks | Where-Object { $_.kind -eq 'translationFontResize' }).measuredOnFontChange -or
+    -not ($result.cardLyricsControls.checks | Where-Object { $_.kind -eq 'translationFontResize' }).reusedVisualTree -or
     -not ($result.cardLyricsControls.checks | Where-Object { $_.kind -eq 'longText' }).identicalWidth -or
     @($result.cardLyricsControls.images | Where-Object { $_.path -and (Test-Path -LiteralPath $_.path) -and (Get-Item -LiteralPath $_.path).Length -gt 0 }).Count -lt 5) {
     throw 'Native lyric visual-tree reuse or nonzero layout captures were not verified.'

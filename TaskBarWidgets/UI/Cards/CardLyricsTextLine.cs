@@ -75,12 +75,14 @@ internal sealed class CardLyricsTextLine : Canvas
 
     internal TextBlock BaseText => _base;
     internal TextBlock ScanText => _scan;
+    internal TextBlock ShadowText => _shadow;
     internal string Text => _text;
     internal bool IsScanning => _scanning;
     internal double ScanClipWidth => _scanClip.Rect.Width;
     internal double ContentWidth => _contentWidth;
     internal double HorizontalOffset => _scrollOffset;
     internal bool HasHorizontalOverflow => _horizontalOverflow;
+    internal int MeasureCount { get; private set; }
     internal Visual Visual => ElementCompositionPreview.GetElementVisual(this);
 
     internal void SetText(string value)
@@ -98,10 +100,20 @@ internal sealed class CardLyricsTextLine : Canvas
     internal void SetStyle(CardLyricsLineVisualStyle style)
     {
         if (Equals(_style, style)) return;
+        var previous = _style;
+        var previousFontSize = _base.FontSize;
+        var fontSize = RoleFontSize(style, _role);
+        var typographyChanged = previous is null ||
+            !Equals(previous.FontFamily, style.FontFamily) ||
+            previous.FontWeight != style.FontWeight ||
+            previous.FontStyle != style.FontStyle ||
+            previous.TextDecorations != style.TextDecorations ||
+            Math.Abs(previousFontSize - fontSize) > .01;
         _style = style;
         foreach (var text in new[] { _shadow, _base, _scan })
         {
             text.FontFamily = style.FontFamily;
+            text.FontSize = fontSize;
             text.FontWeight = style.FontWeight;
             text.FontStyle = style.FontStyle;
             text.TextDecorations = style.TextDecorations;
@@ -111,22 +123,22 @@ internal sealed class CardLyricsTextLine : Canvas
         }
         _shadow.Foreground = style.ShadowBrush;
         _shadow.Visibility = style.TextShadow ? Visibility.Visible : Visibility.Collapsed;
-        _layoutDirty = true;
+        if (typographyChanged) _layoutDirty = true;
         ApplyColors();
     }
 
     internal void SetRole(CardLyricsLineRole role, bool placeholder = false)
     {
         if (_style is null) return;
-        if (_roleInitialized && role == _role && placeholder == _placeholder) return;
-        var fontChanged = !_roleInitialized ||
-            (role == CardLyricsLineRole.Primary) != (_role == CardLyricsLineRole.Primary);
+        var fontSize = RoleFontSize(_style, role);
+        var roleChanged = !_roleInitialized || role != _role || placeholder != _placeholder;
+        var fontChanged = Math.Abs(_base.FontSize - fontSize) > .01 ||
+            Math.Abs(_scan.FontSize - fontSize) > .01 ||
+            Math.Abs(_shadow.FontSize - fontSize) > .01;
+        if (!roleChanged && !fontChanged) return;
         _roleInitialized = true;
         _placeholder = placeholder;
         _role = role;
-        var fontSize = role == CardLyricsLineRole.Primary
-            ? _style.PrimaryFontSize
-            : _style.SecondaryFontSize;
         foreach (var text in new[] { _shadow, _base, _scan })
             text.FontSize = fontSize;
         Opacity = role switch
@@ -135,9 +147,12 @@ internal sealed class CardLyricsTextLine : Canvas
             CardLyricsLineRole.Translation => placeholder ? .55 : 1,
             _ => .72
         };
-        ApplyColors();
+        if (roleChanged) ApplyColors();
         if (fontChanged) _layoutDirty = true;
     }
+
+    private static double RoleFontSize(CardLyricsLineVisualStyle style, CardLyricsLineRole role) =>
+        role == CardLyricsLineRole.Primary ? style.PrimaryFontSize : style.SecondaryFontSize;
 
     internal void SetScan(double? progress, bool scanning)
     {
@@ -175,6 +190,7 @@ internal sealed class CardLyricsTextLine : Canvas
 
         Width = viewportWidth;
         Height = rowHeight;
+        MeasureCount++;
         var requestedLineHeight = Math.Max(1, _base.FontSize * 1.12);
         foreach (var text in new[] { _shadow, _base, _scan })
         {

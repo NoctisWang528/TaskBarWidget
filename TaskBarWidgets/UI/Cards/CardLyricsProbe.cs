@@ -95,6 +95,7 @@ internal static class CardLyricsProbe
             // Progress-only updates must reuse the same four line objects and all
             // derived TextBlocks; only the scan clip and scroll offset change.
             double previousClip = -1;
+            var progressMeasureCount = lyrics.PrimaryLine!.MeasureCount;
             foreach (var (revision, progress) in new[] { (2L, .1), (3L, .3), (4L, .65), (5L, .95) })
             {
                 lyrics.Receive(Frame(revision, "probe-a", "第一行歌词", "第二行歌词", .42, 0,
@@ -105,9 +106,11 @@ internal static class CardLyricsProbe
                     throw new InvalidOperationException("The native scan clip did not advance with authoritative progress.");
                 previousClip = line.ScanClipWidth;
             }
-            if (!ReusedSameElements(lyrics, reusedLines) || lyrics.LayoutBuilds != reusedLayoutBuilds)
-                throw new InvalidOperationException("Frame updates rebuilt lyric TextBlocks instead of reusing the visual tree.");
-            checks.Add(new { kind = "wordScan", finalClip = previousClip, reusedVisualTree = true, layoutBuilds = reusedLayoutBuilds });
+            if (!ReusedSameElements(lyrics, reusedLines) || lyrics.LayoutBuilds != reusedLayoutBuilds ||
+                lyrics.PrimaryLine!.MeasureCount != progressMeasureCount)
+                throw new InvalidOperationException("Progress-only frames rebuilt or remeasured the lyric visual tree.");
+            checks.Add(new { kind = "wordScan", finalClip = previousClip, reusedVisualTree = true,
+                layoutBuilds = reusedLayoutBuilds, remeasured = false });
 
             lyrics.Receive(Frame(6, "probe-a", "第一行歌词", "第二行歌词", .42, 0,
                 isPlaying: false, wordScanProgress: .62));
@@ -279,6 +282,112 @@ internal static class CardLyricsProbe
             checks.Add(new { kind = "reducedMotion", immediate = true });
             lyrics.ProbeReducedMotion = null;
 
+            // Keep track, line, role, and placeholder fixed while the effective
+            // primary font changes with style size and available height.
+            lyrics.Height = 96;
+            card.Root.UpdateLayout();
+            await SettleAsync(card.Root, deadline.Token);
+            lyrics.Activate();
+            lyrics.Receive(Frame(20, "dynamic-font", "Dynamic primary line", "Dynamic next line", .3, 4,
+                isPlaying: false, wordScanProgress: .5, fontSize: 18));
+            await SettleAsync(card.Root, deadline.Token);
+            primary = lyrics.PrimaryLine!;
+            var dynamicLines = lyrics.Lines.ToArray();
+            var dynamicBuilds = lyrics.LayoutBuilds;
+            var primarySize18 = AssertFontTriplet(primary);
+            var primaryWidth18 = primary.ContentWidth;
+            var primaryMeasure18 = primary.MeasureCount;
+            AssertScanMeasurement(primary, "initial primary font");
+            if (Math.Abs(primarySize18 - 18) > .05)
+                throw new InvalidOperationException("The initial fixed primary role did not use the requested 18-DIP font.");
+
+            lyrics.Receive(Frame(21, "dynamic-font", "Dynamic primary line", "Dynamic next line", .3, 4,
+                isPlaying: false, wordScanProgress: .5, fontSize: 26));
+            await SettleAsync(card.Root, deadline.Token);
+            primary = lyrics.PrimaryLine!;
+            var primarySize26 = AssertFontTriplet(primary);
+            AssertScanMeasurement(primary, "larger primary font");
+            var primaryWidth26 = primary.ContentWidth;
+            var primaryMeasure26 = primary.MeasureCount;
+            if (Math.Abs(primarySize26 - 26) > .05 || primarySize26 <= primarySize18 + 1 ||
+                primaryWidth26 <= primaryWidth18 + 1 ||
+                primaryMeasure26 <= primaryMeasure18 ||
+                !ReusedSameElements(lyrics, dynamicLines) || lyrics.LayoutBuilds != dynamicBuilds)
+                throw new InvalidOperationException("Dynamic primary font style did not update font, measurement, and scan clip in the reused tree.");
+            images.Add(new { kind = "dynamicPrimaryFont",
+                path = await CaptureAsync(card.Root, directory, "lyrics-dynamic-primary-font.png") });
+
+            lyrics.Height = 24;
+            card.Root.UpdateLayout();
+            await SettleAsync(card.Root, deadline.Token);
+            primary = lyrics.PrimaryLine!;
+            var primarySizeHeight = AssertFontTriplet(primary);
+            AssertScanMeasurement(primary, "reduced primary height");
+            if (primarySizeHeight >= primarySize26 - 1 || primary.ContentWidth >= primaryWidth26 - .5)
+                throw new InvalidOperationException(
+                    "Available-height font reduction did not remeasure the primary text. " +
+                    $"size26={primarySize26:0.###} sizeHeight={primarySizeHeight:0.###} " +
+                    $"width26={primaryWidth26:0.###} widthHeight={primary.ContentWidth:0.###} " +
+                    $"host={lyrics.ActualHeight:0.###} row={lyrics.RowHeight:0.###}");
+            if (primary.MeasureCount <= primaryMeasure26)
+                throw new InvalidOperationException("Available-height font reduction did not invalidate lyric measurement.");
+            checks.Add(new
+            {
+                kind = "primaryFontResize",
+                role = "Primary",
+                placeholder = false,
+                size18 = primarySize18,
+                size26 = primarySize26,
+                sizeAtReducedHeight = primarySizeHeight,
+                width18 = primaryWidth18,
+                width26 = primaryWidth26,
+                widthAtReducedHeight = primary.ContentWidth,
+                measuredOnFontChange = primaryMeasure26 > primaryMeasure18,
+                measuredOnHeightChange = primary.MeasureCount > primaryMeasure26,
+                reusedVisualTree = ReusedSameElements(lyrics, dynamicLines) && lyrics.LayoutBuilds == dynamicBuilds
+            });
+            lyrics.Height = 96;
+            card.Root.UpdateLayout();
+            await SettleAsync(card.Root, deadline.Token);
+
+            // Fixed translation role/placeholder with only its effective font
+            // size changing. Its measured text width must change as well.
+            lyrics.Receive(Frame(22, "dynamic-font", "Primary fixed", "Next fixed", .3, 4,
+                isPlaying: false, translationMode: true, currentTranslation: "Translation fixed text",
+                wordScanProgress: null, fontSize: 18));
+            await SettleAsync(card.Root, deadline.Token);
+            var secondary = lyrics.SecondaryLine ??
+                throw new InvalidOperationException("Dynamic translation scenario did not realize its secondary line.");
+            if (secondary.Text != "Translation fixed text")
+                throw new InvalidOperationException("Dynamic translation scenario lost its fixed translation role/placeholder state.");
+            var translationSize18 = AssertFontTriplet(secondary);
+            var translationWidth18 = secondary.ContentWidth;
+            var translationMeasure18 = secondary.MeasureCount;
+
+            lyrics.Receive(Frame(23, "dynamic-font", "Primary fixed", "Next fixed", .3, 4,
+                isPlaying: false, translationMode: true, currentTranslation: "Translation fixed text",
+                wordScanProgress: null, fontSize: 26));
+            await SettleAsync(card.Root, deadline.Token);
+            secondary = lyrics.SecondaryLine!;
+            var translationSize26 = AssertFontTriplet(secondary);
+            if (translationSize26 <= translationSize18 + .5 ||
+                secondary.ContentWidth <= translationWidth18 + 1 ||
+                secondary.MeasureCount <= translationMeasure18 ||
+                !ReusedSameElements(lyrics, dynamicLines) || lyrics.LayoutBuilds != dynamicBuilds)
+                throw new InvalidOperationException("Dynamic translation font did not update font and measured width in the reused tree.");
+            checks.Add(new
+            {
+                kind = "translationFontResize",
+                role = "Translation",
+                placeholder = false,
+                size18 = translationSize18,
+                size26 = translationSize26,
+                width18 = translationWidth18,
+                width26 = secondary.ContentWidth,
+                measuredOnFontChange = secondary.MeasureCount > translationMeasure18,
+                reusedVisualTree = ReusedSameElements(lyrics, dynamicLines) && lyrics.LayoutBuilds == dynamicBuilds
+            });
+
             lyrics.Activate();
             lyrics.Receive(Frame(50, "probe-resource", "Low", "Old", .1, 0));
             if (lyrics.Revision != 50)
@@ -437,6 +546,23 @@ internal static class CardLyricsProbe
             Math.Abs(line.BaseText.ActualWidth - line.ScanText.ActualWidth) > .5 ||
             AutomationProperties.GetAccessibilityView(line.ScanText) != AccessibilityView.Raw)
             throw new InvalidOperationException("Base and scan lyric copies did not share identical layout and a visible scan clip.");
+    }
+
+    private static double AssertFontTriplet(CardLyricsTextLine line)
+    {
+        var size = line.BaseText.FontSize;
+        if (!(size > 0) ||
+            Math.Abs(line.ScanText.FontSize - size) > .01 ||
+            Math.Abs(line.ShadowText.FontSize - size) > .01)
+            throw new InvalidOperationException("Shadow, base, and scan text did not share the effective font size.");
+        return size;
+    }
+
+    private static void AssertScanMeasurement(CardLyricsTextLine line, string scenario)
+    {
+        if (line.ContentWidth <= 0 ||
+            Math.Abs(line.ScanClipWidth - (line.ContentWidth * .5)) > 1)
+            throw new InvalidOperationException($"Scan measurement did not follow {scenario}.");
     }
 
     private static bool ReusedSameElements(CardLyricsView lyrics, IReadOnlyList<CardLyricsTextLine>? lines)
