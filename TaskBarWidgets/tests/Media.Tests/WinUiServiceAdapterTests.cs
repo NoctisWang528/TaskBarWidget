@@ -1,9 +1,6 @@
-using System.Runtime.ExceptionServices;
 using System.IO;
 using System.Text.Json;
-using System.Windows.Interop;
 using TaskbarLyrics.App;
-using TaskbarLyrics.Core.Models;
 using Xunit;
 
 namespace TaskBarWidgets.Media.Tests;
@@ -11,56 +8,110 @@ namespace TaskBarWidgets.Media.Tests;
 public sealed class WinUiServiceAdapterTests
 {
     [Fact]
-    public void HeadlessSettingsAdapterReturnsSettingsAndSafeCommandWithoutCreatingWindow()
+    public void HeadlessSettingsServiceReadsAndAppliesWithoutCreatingAWindow()
     {
-        Exception? failure = null;
-        var thread = new Thread(() =>
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "tbw-settings-service-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
         {
-            try
+            var settingsPath = Path.Combine(directory, "media-settings.json");
+            var store = new SettingsStore(settingsPath);
+            using var service = MediaSettingsServiceTestFactory.Create(
+                new AppSettings(),
+                saveSettings: settings => store.Save(settings),
+                getDisplays: () => [],
+                getPrimaryDpiScale: () => 1,
+                getWorkAreaWidth: () => 1920);
+
+            Assert.False(typeof(MediaSettingsService).IsSubclassOf(typeof(System.Windows.Window)));
+
+            var payload = service.ReadServiceSettings(new AppSettings
             {
-                var cleared = false;
-                var controller = new SettingsWindow(new AppSettings(), null!,
-                    () => Task.FromResult<CurrentTrackLyricsContext?>(null),
-                    () => throw new NotSupportedException(), (_, _, _) => throw new NotSupportedException(),
-                    (_, _, _) => throw new NotSupportedException(), () => cleared = true);
-                var payload = controller.ReadServiceSettings(new AppSettings
-                {
-                    ShowLyricTranslation = true,
-                    CardMicaVivid = false,
-                    CardMicaTintOpacity = 0.08,
-                    CardMicaLuminosityOpacity = 0.30,
-                    CardMicaDarkTintOpacity = 0.06,
-                    CardMicaDarkLuminosityOpacity = 0.28
-                });
-                Assert.True(payload.GetProperty("showLyricTranslation").GetBoolean());
-                Assert.False(payload.GetProperty("cardMicaVivid").GetBoolean());
-                Assert.Equal(0.08, payload.GetProperty("cardMicaTintOpacity").GetDouble());
-                Assert.Equal(0.30, payload.GetProperty("cardMicaLuminosityOpacity").GetDouble());
-                Assert.Equal(0.06, payload.GetProperty("cardMicaDarkTintOpacity").GetDouble());
-                Assert.Equal(0.28, payload.GetProperty("cardMicaDarkLuminosityOpacity").GetDouble());
-                Assert.True(payload.TryGetProperty("spectrumTuning", out _));
-                Assert.False(payload.TryGetProperty("mediaHotkeys", out _));
-                Assert.False(payload.TryGetProperty("enableGlobalMediaHotkeys", out _));
-                Assert.False(payload.TryGetProperty("enableControlPanel", out _));
-                Assert.False(payload.TryGetProperty("syncDefaultCommunicationsDevice", out _));
-                var reply = controller.ExecuteServiceCommandAsync(new AppSettings(), "clearCache", null).GetAwaiter().GetResult();
-                Assert.True(cleared);
-                Assert.True(reply.TryGetProperty("settings", out _));
-                Assert.Equal(IntPtr.Zero, new WindowInteropHelper(controller).Handle);
-                controller.Close();
+                ShowLyricTranslation = true,
+                CardMicaVivid = false,
+                CardMicaTintOpacity = 0.08,
+                CardMicaLuminosityOpacity = 0.30,
+                CardMicaDarkTintOpacity = 0.06,
+                CardMicaDarkLuminosityOpacity = 0.28
+            });
+            Assert.True(payload.GetProperty("showLyricTranslation").GetBoolean());
+            Assert.False(payload.GetProperty("cardMicaVivid").GetBoolean());
+            Assert.Equal(0.08, payload.GetProperty("cardMicaTintOpacity").GetDouble());
+            Assert.Equal(0.30, payload.GetProperty("cardMicaLuminosityOpacity").GetDouble());
+            Assert.Equal(0.06, payload.GetProperty("cardMicaDarkTintOpacity").GetDouble());
+            Assert.Equal(0.28, payload.GetProperty("cardMicaDarkLuminosityOpacity").GetDouble());
+            Assert.True(payload.TryGetProperty("spectrumTuning", out _));
+            Assert.False(payload.TryGetProperty("mediaHotkeys", out _));
+            Assert.False(payload.TryGetProperty("enableGlobalMediaHotkeys", out _));
+            Assert.False(payload.TryGetProperty("enableControlPanel", out _));
+            Assert.False(payload.TryGetProperty("syncDefaultCommunicationsDevice", out _));
+
+            var patch = JsonSerializer.SerializeToElement(new
+            {
+                showLyricTranslation = true,
+                cardMicaVivid = false,
+                cardMicaTintOpacity = 0.12,
+                cardMicaLuminosityOpacity = 0.34
+            });
+            var applied = service.ApplyServiceSettings(new AppSettings(), patch);
+            Assert.False(applied.GetProperty("cardMicaVivid").GetBoolean());
+            Assert.Equal(0.12, applied.GetProperty("cardMicaTintOpacity").GetDouble());
+            Assert.Equal(0.34, applied.GetProperty("cardMicaLuminosityOpacity").GetDouble());
+
+            var saved = new SettingsStore(settingsPath).Load();
+            Assert.True(saved.ShowLyricTranslation);
+            Assert.False(saved.CardMicaVivid);
+            Assert.Equal(0.12, saved.CardMicaTintOpacity, 6);
+            Assert.Equal(0.34, saved.CardMicaLuminosityOpacity, 6);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
             }
-            catch (Exception exception) { failure = exception; }
-        });
-        thread.IsBackground = true;
-        thread.SetApartmentState(ApartmentState.STA); thread.Start();
-        Assert.True(thread.Join(TimeSpan.FromSeconds(15)), "Hidden service adapter did not finish.");
-        if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
+        }
+    }
+
+    [Fact]
+    public async Task SafeCommandWhitelistRejectsUnknownOperations()
+    {
+        var cleared = false;
+        using var service = MediaSettingsServiceTestFactory.Create(
+            new AppSettings(),
+            clearCache: () => cleared = true,
+            getDisplays: () => [],
+            getPrimaryDpiScale: () => 1,
+            getWorkAreaWidth: () => 1920);
+
+        var reply = await service.ExecuteServiceCommandAsync(
+            new AppSettings(),
+            "clearCache",
+            null);
+        Assert.True(cleared);
+        Assert.True(reply.TryGetProperty("settings", out _));
+        Assert.Equal(JsonValueKind.Array, reply.GetProperty("events").ValueKind);
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => service.ExecuteServiceCommandAsync(
+                new AppSettings(),
+                "openSettings",
+                null));
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => service.ExecuteServiceCommandAsync(
+                new AppSettings(),
+                "runProcess",
+                null));
     }
 
     [Fact]
     public void LegacyDisabledAudioAndEnabledShortcutsCannotReenableRemovedPreferences()
     {
-        var directory = Path.Combine(AppContext.BaseDirectory, "removed-preferences-" + Guid.NewGuid().ToString("N"));
+        var directory = Path.Combine(
+            AppContext.BaseDirectory,
+            "removed-preferences-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         try
         {
@@ -79,7 +130,23 @@ public sealed class WinUiServiceAdapterTests
             Assert.DoesNotContain("EnableControlPanel", saved);
             Assert.DoesNotContain("SyncDefaultCommunicationsDevice", saved);
             Assert.True(store.Load().ShowLyricTranslation);
+
+            using var service = MediaSettingsServiceTestFactory.Create(
+                settings,
+                saveSettings: _ => true,
+                getDisplays: () => [],
+                getPrimaryDpiScale: () => 1,
+                getWorkAreaWidth: () => 1920);
+            var payload = service.ReadServiceSettings(settings);
+            Assert.True(payload.GetProperty("showLyricTranslation").GetBoolean());
+            Assert.False(payload.TryGetProperty("mediaHotkeys", out _));
+            Assert.False(payload.TryGetProperty("enableGlobalMediaHotkeys", out _));
+            Assert.False(payload.TryGetProperty("enableControlPanel", out _));
+            Assert.False(payload.TryGetProperty("syncDefaultCommunicationsDevice", out _));
         }
-        finally { Directory.Delete(directory, true); }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
     }
 }
