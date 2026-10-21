@@ -13,11 +13,9 @@ internal sealed class MediaPipeServer : IAsyncDisposable
     private readonly Func<object> _snapshot;
     private readonly Func<JsonElement, Task> _command;
     private readonly CancellationTokenSource _stop = new();
-    // Frames are full snapshots, so replacing an unsent frame never loses state.
-    private readonly Channel<object> _outgoing = Channel.CreateBounded<object>(new BoundedChannelOptions(2)
-    {
-        FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true
-    });
+    // Display snapshots are complete. Replacing one never loses state; commands use
+    // a separate reliable bounded queue and are never coalesced.
+    private readonly LatestDisplayQueue _outgoing = new();
     private Task? _run;
     private readonly Channel<object> _commands = Channel.CreateBounded<object>(16);
     private readonly Channel<bool> _wake = Channel.CreateBounded<bool>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
@@ -32,7 +30,7 @@ internal sealed class MediaPipeServer : IAsyncDisposable
     }
 
     internal void Start() => _run = RunAsync(_stop.Token);
-    internal void Publish(object frame) { _outgoing.Writer.TryWrite(frame); _wake.Writer.TryWrite(true); }
+    internal void Publish(object frame) { _outgoing.Publish(frame); _wake.Writer.TryWrite(true); }
     internal async Task SendCommandAsync(object command, CancellationToken cancellationToken = default)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token, cancellationToken);
@@ -50,7 +48,7 @@ internal sealed class MediaPipeServer : IAsyncDisposable
                     PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
                 await pipe.WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
                 using var connection = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                while (_outgoing.Reader.TryRead(out _)) { }
+                _outgoing.Clear();
                 await WriteAsync(pipe, _initialize(), connection.Token).ConfigureAwait(false);
                 var filter = new MediaFrameFilter();
                 await WriteAsync(pipe, filter.Filter(_snapshot()), connection.Token).ConfigureAwait(false);
@@ -76,7 +74,7 @@ internal sealed class MediaPipeServer : IAsyncDisposable
         {
             while (_commands.Reader.TryRead(out var command))
                 await WriteAsync(pipe, command, cancellationToken).ConfigureAwait(false);
-            if (_outgoing.Reader.TryRead(out var frame))
+            if (_outgoing.TryTake(out var frame) && frame is not null)
             {
                 await WriteAsync(pipe, filter.Filter(frame), cancellationToken).ConfigureAwait(false);
                 continue;
@@ -138,7 +136,6 @@ internal sealed class MediaPipeServer : IAsyncDisposable
         if (_disposed) return;
         _disposed = true;
         _stop.Cancel();
-        _outgoing.Writer.TryComplete();
         _commands.Writer.TryComplete();
         _wake.Writer.TryComplete();
         if (_run is not null)
