@@ -207,6 +207,11 @@ struct NativeMediaHost::Impl
         if (!PostMessageW(hwnd, WM_MEDIA_HOST_WAKE, 0, 0)) uiWakePosted = false;
     }
 
+    void WakeWorker()
+    {
+        if (workerWake) SetEvent(workerWake);
+    }
+
     void ApplyAppearance()
     {
         if (!state.connected) return;
@@ -246,7 +251,11 @@ struct NativeMediaHost::Impl
         {
             std::lock_guard lock(mutex);
             if (incoming.size() >= 128 || incomingBytes + message.size() > 8 * 1024 * 1024)
+            {
+                reconnect = true;
+                WakeWorker();
                 return;
+            }
             incomingBytes += message.size();
             incoming.push_back(std::move(message));
         }
@@ -988,20 +997,24 @@ struct NativeMediaHost::Impl
                 {
                     Failure(error, E_INVALIDARG);
                     reconnect = true;
+                    WakeWorker();
                     state.Disconnect();
                     firstFramePending = true;
                     stateDirty = true;
                     renderer.SetVisible(false, false);
+                    break;
                 }
             }
             catch (...)
             {
                 Failure(L"Invalid or oversized media message.", E_INVALIDARG);
                 reconnect = true;
+                WakeWorker();
                 state.Disconnect();
                 firstFramePending = true;
                 stateDirty = true;
                 renderer.SetVisible(false, false);
+                break;
             }
         }
     }
