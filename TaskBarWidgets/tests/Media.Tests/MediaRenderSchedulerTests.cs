@@ -172,6 +172,32 @@ public sealed class MediaRenderSchedulerTests
         Assert.Equal(2, calls);
     }
 
+    [Fact]
+    public void FailedProcessFallbackObservationIsCachedUntilTheRetryInterval()
+    {
+        var now = At(0);
+        var calls = 0;
+        var cache = new ProcessFallbackDetectionCache(() => now);
+        ProcessFallbackObservation Detect()
+        {
+            calls++;
+            return new ProcessFallbackObservation(
+                null,
+                string.Empty,
+                string.Empty,
+                ProcessQuerySucceeded: false);
+        }
+
+        Assert.False(cache.GetOrRefresh(Detect).ProcessQuerySucceeded);
+        now = now.Add(TimeSpan.FromMilliseconds(999));
+        Assert.False(cache.GetOrRefresh(Detect).ProcessQuerySucceeded);
+        Assert.Equal(1, calls);
+
+        now = now.Add(TimeSpan.FromMilliseconds(1));
+        Assert.False(cache.GetOrRefresh(Detect).ProcessQuerySucceeded);
+        Assert.Equal(2, calls);
+    }
+
     private static DateTimeOffset At(int milliseconds) =>
         new DateTimeOffset(2026, 10, 21, 0, 0, 0, TimeSpan.Zero)
             .AddMilliseconds(milliseconds);

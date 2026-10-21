@@ -94,6 +94,7 @@ internal sealed class MediaCoordinator : IDisposable
             if (_disposed || NativeAppearanceJson.Equivalent(_nativeAppearance, normalized)) return;
             _nativeAppearance = normalized;
             Interlocked.Increment(ref _stateVersion);
+            _scheduler.RequestState();
             _scheduler.RequestPresentation();
             ScheduleNext();
         });
