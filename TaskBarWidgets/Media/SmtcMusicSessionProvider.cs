@@ -1428,7 +1428,6 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
                 string.Empty,
                 string.Empty,
                 ProcessQuerySucceeded: false);
-            _processFallbackDetectionCache.Invalidate();
             return result;
         }
         var detected = DetectRunningSourceUncached(processes);

@@ -52,6 +52,8 @@ internal sealed class MediaCoordinator : IDisposable
     private bool _preview;
     private bool _showSpectrum;
     private long _stateVersion;
+    private long _authorityVersion;
+    private long _playbackAuthorityVersion;
     private DateTimeOffset _lastAuthorityUtc;
     private int _presentationFailureCount;
     private int _invalidationPosted;
@@ -86,12 +88,12 @@ internal sealed class MediaCoordinator : IDisposable
 
     internal void ApplyNativeAppearance(JsonElement appearance)
     {
-        if (appearance.ValueKind != JsonValueKind.Object) return;
         var normalized = NativeAppearanceJson.Normalize(appearance);
         RunOnDispatcher(() =>
         {
             if (_disposed || NativeAppearanceJson.Equivalent(_nativeAppearance, normalized)) return;
             _nativeAppearance = normalized;
+            Interlocked.Increment(ref _stateVersion);
             _scheduler.RequestPresentation();
             ScheduleNext();
         });
@@ -212,7 +214,6 @@ internal sealed class MediaCoordinator : IDisposable
             {
                 Lyrics.Dispose();
                 Lyrics = Composition.CreateLyricSyncService(_settings, Offsets);
-                _stateVersion++;
             }
             if (changes.LocalMediaLibraryChanged)
             {
@@ -221,7 +222,8 @@ internal sealed class MediaCoordinator : IDisposable
                 _localCoverIdentity = null;
             }
 
-            _stateVersion++;
+            Interlocked.Increment(ref _stateVersion);
+            Interlocked.Increment(ref _authorityVersion);
             _scheduler.RequestState(full: true);
             UpdateSpectrum(_showSpectrum);
             ScheduleNext();
@@ -235,6 +237,12 @@ internal sealed class MediaCoordinator : IDisposable
             if (_disposed || _taskbarVisible == visible) return;
             _taskbarVisible = visible;
             _scheduler.SetVisibility(_taskbarVisible, _cardVisible);
+            if (visible)
+            {
+                MediaPublicationPolicy.PublishFrameOnReveal(
+                    _frame,
+                    FrameReady);
+            }
             UpdateSpectrum(_showSpectrum);
             ScheduleNext();
         });
@@ -247,6 +255,12 @@ internal sealed class MediaCoordinator : IDisposable
             if (_disposed || _cardVisible == visible) return;
             _cardVisible = visible;
             _scheduler.SetVisibility(_taskbarVisible, _cardVisible);
+            if (visible)
+            {
+                MediaPublicationPolicy.PublishCardOnReveal(
+                    _card,
+                    CardFrameReady);
+            }
             ScheduleNext();
         });
     }
@@ -296,6 +310,8 @@ internal sealed class MediaCoordinator : IDisposable
             _spectrumTimer.Interval = TimeSpan.FromMilliseconds(_tuning.UpdateIntervalMs);
             _spectrum.ApplyTuning(_tuning);
             _tuningFrame = NativeMediaPayloadFactory.CreateSpectrumTuning(_tuning);
+            Interlocked.Increment(ref _stateVersion);
+            Interlocked.Increment(ref _authorityVersion);
             _scheduler.RequestState(full: true);
             _scheduler.RequestPresentation();
             ScheduleNext();
@@ -305,6 +321,8 @@ internal sealed class MediaCoordinator : IDisposable
     private void OnProviderInvalidated()
     {
         if (_disposed || Interlocked.Exchange(ref _invalidationPosted, 1) != 0) return;
+        Interlocked.Increment(ref _stateVersion);
+        Interlocked.Increment(ref _authorityVersion);
         try
         {
             _dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
@@ -406,6 +424,7 @@ internal sealed class MediaCoordinator : IDisposable
         CancellationToken cancellationToken)
     {
         var stateVersion = Volatile.Read(ref _stateVersion);
+        var authorityVersion = Volatile.Read(ref _authorityVersion);
         var snapshot = await Provider.GetCurrentAsync(forceMetadataRefresh, cancellationToken);
         if (_disposed) return false;
 
@@ -422,15 +441,20 @@ internal sealed class MediaCoordinator : IDisposable
         var track = snapshot.Track;
         var isBrowser = NonLyricsMediaPolicy.IsNonLyrics(snapshot);
         var trackId = track is null ? "" : LyricSyncService.BuildStableTrackIdentity(track);
+        var lyricsService = Lyrics;
 
         // Start or advance lyric acquisition before cover I/O, while keeping
         // browser and other non-lyric media on a strict no-query path.
-        await Lyrics.GetDisplayFrameAsync(LyricsInput(snapshot));
-        if (_disposed) return false;
+        await lyricsService.GetDisplayFrameAsync(LyricsInput(snapshot));
+        if (_disposed ||
+            stateVersion != Volatile.Read(ref _stateVersion) ||
+            authorityVersion != Volatile.Read(ref _authorityVersion)) return false;
         _scheduler.SetPlaybackState(snapshot.IsPlaying);
 
         await UpdateCoverAsync(snapshot, cancellationToken);
-        if (_disposed) return false;
+        if (_disposed ||
+            stateVersion != Volatile.Read(ref _stateVersion) ||
+            authorityVersion != Volatile.Read(ref _authorityVersion)) return false;
 
         var latest = Provider.RefreshPlaybackState(snapshot);
         _playback = latest;
@@ -442,17 +466,23 @@ internal sealed class MediaCoordinator : IDisposable
         }
         snapshot = latest;
 
-        var display = await Lyrics.GetDisplayFrameAsync(LyricsInput(snapshot));
+        var display = await lyricsService.GetDisplayFrameAsync(LyricsInput(snapshot));
         // Settings and commands invalidate in-flight presentation calculations.
-        if (_disposed || stateVersion != Volatile.Read(ref _stateVersion)) return false;
+        if (_disposed ||
+            stateVersion != Volatile.Read(ref _stateVersion) ||
+            authorityVersion != Volatile.Read(ref _authorityVersion)) return false;
         var scene = LyricsPresentationCalculator.ResolveScene(
             _settings,
             display,
             isBrowser,
             snapshot.Track is not null,
-            Lyrics.CurrentLyricAcquisition);
+            lyricsService.CurrentLyricAcquisition);
         _showSpectrum = scene == LyricsPresentationScene.Spectrum;
         UpdateSpectrum(_showSpectrum);
+        // Keep ticking while a lyric search can complete asynchronously, but
+        // never for browser/Douyin/message-only playback.
+        _scheduler.SetPresentationActive(
+            scene is LyricsPresentationScene.Lyrics or LyricsPresentationScene.Searching);
 
         var lyrics = LyricsPresentationCalculator.Create(
             snapshot,
@@ -460,7 +490,7 @@ internal sealed class MediaCoordinator : IDisposable
             _settings,
             scene,
             isBrowser,
-            Lyrics.CurrentLyricAcquisition);
+            lyricsService.CurrentLyricAcquisition);
         var capabilities = Provider.GetControlCapabilities();
         var sources = Provider.GetSourceChoices();
         ControlState = new MediaControlState(
@@ -480,10 +510,10 @@ internal sealed class MediaCoordinator : IDisposable
             sources,
             snapshot.SourceAppUserModelId);
 
-        Provider.SetCurrentLyricSource(Lyrics.CurrentLyricSourceApp);
+        Provider.SetCurrentLyricSource(lyricsService.CurrentLyricSourceApp);
         Provider.SetCurrentLyricOffsets(
             _settings.GetPlayerLyricOffsetMilliseconds(snapshot.Track?.SourceApp),
-            Offsets.GetOffsetMilliseconds(snapshot.Track, Lyrics.CurrentLyricSourceApp));
+            Offsets.GetOffsetMilliseconds(snapshot.Track, lyricsService.CurrentLyricSourceApp));
 
         var browser = new MediaBrowserFrame(
             isBrowser,
@@ -509,6 +539,7 @@ internal sealed class MediaCoordinator : IDisposable
             _nativeAppearance));
         Volatile.Write(ref _frame, update.Frame);
         Volatile.Write(ref _card, update.Card);
+        Volatile.Write(ref _playbackAuthorityVersion, authorityVersion);
         _scheduler.SetPlaybackState(snapshot.IsPlaying);
 
         MediaPublicationPolicy.PublishFrame(update, _taskbarVisible, FrameReady);
@@ -516,7 +547,7 @@ internal sealed class MediaCoordinator : IDisposable
         // Timeline changes can move the lyrics before another SMTC event arrives.
         // Keep authoritative reads low-frequency, then smooth only within the
         // current lyric line's own interval.
-        return Lyrics.CurrentLyricAcquisition == LyricAcquisitionKind.Searching;
+        return lyricsService.CurrentLyricAcquisition == LyricAcquisitionKind.Searching;
     }
 
     internal static bool CanPublishSnapshot(
@@ -735,7 +766,8 @@ internal sealed class MediaCoordinator : IDisposable
         RunOnDispatcher(() =>
         {
             if (_disposed) return;
-            _stateVersion++;
+            Interlocked.Increment(ref _stateVersion);
+            Interlocked.Increment(ref _authorityVersion);
             _scheduler.RequestState(full: true);
             ScheduleNext();
         });
@@ -757,6 +789,13 @@ internal sealed class MediaCoordinator : IDisposable
             return;
         }
 
+        var stateVersion = Volatile.Read(ref _stateVersion);
+        var authorityVersion = Volatile.Read(ref _playbackAuthorityVersion);
+        if (authorityVersion != Volatile.Read(ref _authorityVersion))
+        {
+            _scheduler.RequestState();
+            return;
+        }
         var update = await MediaPresentationTickBuilder.BuildAsync(
             _playback,
             _lastAuthorityUtc,
@@ -767,8 +806,14 @@ internal sealed class MediaCoordinator : IDisposable
             Lyrics,
             _settings,
             _spectrumActive ? _spectrumBars : [],
-            _nativeAppearance);
-        if (_disposed) return;
+            _nativeAppearance,
+            () => !_disposed &&
+                stateVersion == Volatile.Read(ref _stateVersion) &&
+                authorityVersion == Volatile.Read(ref _authorityVersion) &&
+                ReferenceEquals(previous, _presentation.CurrentFrame));
+        if (_disposed ||
+            stateVersion != Volatile.Read(ref _stateVersion) ||
+            authorityVersion != Volatile.Read(ref _authorityVersion)) return;
         if (update is null) return;
         var current = update.Value;
         Volatile.Write(ref _frame, current.Frame);

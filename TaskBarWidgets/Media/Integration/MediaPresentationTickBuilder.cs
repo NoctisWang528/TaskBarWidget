@@ -17,7 +17,8 @@ internal static class MediaPresentationTickBuilder
         LyricSyncService lyrics,
         AppSettings settings,
         IReadOnlyList<float> spectrum,
-        JsonElement nativeAppearance)
+        JsonElement nativeAppearance,
+        Func<bool>? isCurrent = null)
     {
         if (!authoritative.IsPlaying || !previous.isPlaying) return null;
 
@@ -49,6 +50,7 @@ internal static class MediaPresentationTickBuilder
             scene,
             isBrowser,
             lyrics.CurrentLyricAcquisition);
+        if (isCurrent is not null && !isCurrent()) return null;
         return state.Apply(new MediaPresentationInput(
             projected,
             isBrowser,

@@ -136,4 +136,24 @@ internal static class MediaPublicationPolicy
         publish?.Invoke(frame);
         return publish is not null;
     }
+
+    internal static bool PublishFrameOnReveal(
+        MediaFrame? frame,
+        Action<object>? publish)
+    {
+        if (frame is null) return false;
+        // A hidden surface deliberately suppresses visual progress. Reveal is
+        // the boundary where the retained complete snapshot must be sent again.
+        publish?.Invoke(frame);
+        return publish is not null;
+    }
+
+    internal static bool PublishCardOnReveal(
+        CardFrame? card,
+        Action<object>? publish)
+    {
+        if (card is null) return false;
+        publish?.Invoke(card);
+        return publish is not null;
+    }
 }

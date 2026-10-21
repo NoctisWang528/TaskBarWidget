@@ -24,6 +24,7 @@ internal sealed class MediaRenderScheduler
     private bool _taskbarVisible;
     private bool _cardVisible;
     private bool _isPlaying;
+    private bool _presentationActive = true;
     private bool _stateRequested = true;
     private bool _presentationRequested;
     private bool _forceMetadataRefresh = true;
@@ -41,7 +42,8 @@ internal sealed class MediaRenderScheduler
     internal bool TaskbarVisible => _taskbarVisible;
     internal bool CardVisible => _cardVisible;
     internal bool HasVisibleSurface => _taskbarVisible || _cardVisible;
-    internal bool HasActivePresentation => HasVisibleSurface && _isPlaying;
+    internal bool HasActivePresentation =>
+        HasVisibleSurface && _isPlaying && _presentationActive;
 
     internal void Initialize()
     {
@@ -86,6 +88,20 @@ internal sealed class MediaRenderScheduler
     internal void SetPlaybackState(bool isPlaying)
     {
         _isPlaying = isPlaying;
+    }
+
+    internal void SetPresentationActive(bool active)
+    {
+        if (_presentationActive == active) return;
+        _presentationActive = active;
+        if (active)
+        {
+            RequestPresentation();
+        }
+        else
+        {
+            _presentationRequested = false;
+        }
     }
 
     internal void DeferState(
@@ -148,8 +164,8 @@ internal sealed class MediaRenderScheduler
                 if (_stateRequestGeneration == plan.StateRequestGeneration)
                 {
                     _stateRequested = false;
+                    _forceMetadataRefresh = false;
                 }
-                _forceMetadataRefresh = false;
                 _nextStateUtc = now + FallbackInterval;
                 if (plan.PresentationRequested &&
                     _presentationRequestGeneration == plan.PresentationRequestGeneration)

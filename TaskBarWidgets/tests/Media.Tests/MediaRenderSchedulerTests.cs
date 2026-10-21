@@ -13,6 +13,7 @@ public sealed class MediaRenderSchedulerTests
         var scheduler = new MediaRenderScheduler(() => now);
         scheduler.SetVisibility(taskbarVisible: true, cardVisible: false);
         scheduler.SetPlaybackState(true);
+        scheduler.SetPresentationActive(true);
         scheduler.Initialize();
 
         var initial = scheduler.Poll();
@@ -64,6 +65,23 @@ public sealed class MediaRenderSchedulerTests
     }
 
     [Fact]
+    public void NonLyricPresentationDoesNotRunTheFastCadence()
+    {
+        var now = At(0);
+        var scheduler = new MediaRenderScheduler(() => now);
+        scheduler.SetVisibility(taskbarVisible: true, cardVisible: false);
+        scheduler.SetPlaybackState(true);
+        scheduler.SetPresentationActive(false);
+        scheduler.Initialize();
+        scheduler.MarkCompleted(scheduler.Poll());
+
+        now = At(100);
+        Assert.Equal(MediaWorkKind.None, scheduler.Poll().Kind);
+        now = At(2000);
+        Assert.Equal(MediaWorkKind.FullState, scheduler.Poll().Kind);
+    }
+
+    [Fact]
     public void ProviderEventsCoalesceAndAreNotLostWhileWorkIsRunning()
     {
         var now = At(0);
@@ -81,6 +99,25 @@ public sealed class MediaRenderSchedulerTests
         scheduler.RequestState();
         scheduler.MarkCompleted(refresh);
         Assert.Equal(MediaWorkKind.FullState, scheduler.Poll().Kind);
+    }
+
+    [Fact]
+    public void FullStateRequestArrivingDuringWorkKeepsItsMetadataRefresh()
+    {
+        var now = At(0);
+        var scheduler = new MediaRenderScheduler(() => now);
+        scheduler.SetVisibility(taskbarVisible: false, cardVisible: false);
+        scheduler.Initialize();
+        scheduler.MarkCompleted(scheduler.Poll());
+
+        scheduler.RequestState(full: true);
+        var inFlight = scheduler.Poll();
+        scheduler.RequestState(full: true);
+        scheduler.MarkCompleted(inFlight);
+
+        var next = scheduler.Poll();
+        Assert.Equal(MediaWorkKind.FullState, next.Kind);
+        Assert.True(next.ForceMetadataRefresh);
     }
 
     [Fact]

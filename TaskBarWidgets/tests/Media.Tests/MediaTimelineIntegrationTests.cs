@@ -134,6 +134,44 @@ public sealed class MediaTimelineIntegrationTests
         Assert.Equal("", display.NextLine);
     }
 
+    [Fact]
+    public async Task StalePresentationTickCannotReplaceCurrentState()
+    {
+        var track = CreateTrack("Stale tick");
+        var resolved = CreateResolvedLyrics(
+            new ParsedLyricLine(At(1.0), At(4.0), "Current"));
+        using var service = await CreateServiceAsync(track, resolved);
+        var authoritative = CreateSnapshot(track, 1.05);
+        var display = await service.GetDisplayFrameAsync(authoritative);
+        var settings = new AppSettings();
+        var lyrics = LyricsPresentationCalculator.Create(
+            authoritative,
+            display,
+            settings,
+            LyricsPresentationScene.Lyrics,
+            isBrowser: false,
+            LyricAcquisitionKind.Remote);
+        var state = new MediaPresentationState();
+        state.Apply(CreateInput(authoritative, lyrics, settings));
+        var retained = state.CurrentFrame;
+
+        var update = await MediaPresentationTickBuilder.BuildAsync(
+            authoritative,
+            authoritativeAtUtc: At(0),
+            nowUtc: At(500),
+            isBrowser: false,
+            previous: retained!,
+            state: state,
+            lyrics: service,
+            settings: settings,
+            spectrum: [],
+            nativeAppearance: NativeAppearanceJson.Empty,
+            isCurrent: () => false);
+
+        Assert.Null(update);
+        Assert.Same(retained, state.CurrentFrame);
+    }
+
     private static async Task<LyricSyncService> CreateServiceAsync(
         TrackInfo track,
         ResolvedLyrics resolved,

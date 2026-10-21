@@ -199,6 +199,46 @@ public sealed class MediaPresentationStateTests
             value => published.Add((MediaFrame)value)));
     }
 
+    [Fact]
+    public void RevealingSurfacesReplaysRetainedCompleteSnapshots()
+    {
+        var state = new MediaPresentationState();
+        var input = CreateInput();
+        var initial = state.Apply(input);
+        var progressed = state.Apply(input with
+        {
+            Lyrics = input.Lyrics with
+            {
+                progress = 0.9,
+                wordScanProgress = 0.85
+            }
+        });
+
+        var mediaFrames = new List<MediaFrame>();
+        var cardFrames = new List<CardFrame>();
+        Assert.False(MediaPublicationPolicy.PublishFrame(
+            progressed,
+            taskbarVisible: false,
+            value => mediaFrames.Add((MediaFrame)value)));
+        Assert.Empty(mediaFrames);
+
+        var retainedFrame = state.CurrentFrame!;
+        var retainedCard = state.CurrentCard!;
+        Assert.True(MediaPublicationPolicy.PublishFrameOnReveal(
+            retainedFrame,
+            value => mediaFrames.Add((MediaFrame)value)));
+        Assert.True(MediaPublicationPolicy.PublishCardOnReveal(
+            retainedCard,
+            value => cardFrames.Add((CardFrame)value)));
+
+        Assert.Single(mediaFrames);
+        Assert.Same(retainedFrame, mediaFrames[0]);
+        Assert.NotNull(mediaFrames[0].style);
+        Assert.NotNull(mediaFrames[0].cover);
+        Assert.Same(retainedCard, Assert.Single(cardFrames));
+        Assert.Equal(progressed.Frame.revision, mediaFrames[0].revision);
+    }
+
     private static MediaPresentationInput CreateInput()
     {
         var snapshot = new PlaybackSnapshot(
