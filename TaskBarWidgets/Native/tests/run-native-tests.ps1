@@ -46,6 +46,23 @@ $command = 'call "{0}" >nul && cl /nologo /EHsc /std:c++20 /W4 /Fe:"{1}" /Fo:"{2
 & $env:ComSpec /d /s /c $command
 if ($LASTEXITCODE -ne 0) { throw "Native composition resize regression failed ($LASTEXITCODE)." }
 
+$drawCommon = Get-Content -LiteralPath (Join-Path $nativeRoot 'TrafficMonitor\TaskBarDlgDrawCommon.cpp') -Raw
+$reinitialize = [regex]::Match($drawCommon, 'CD2D1DeviceContextHelper::Reinitialize\(\)\s*\{(?<body>.*?)\r?\n\}', 'Singleline')
+if (-not $reinitialize.Success) { throw 'CD2D1DeviceContextHelper::Reinitialize() was not found.' }
+$reinitializeBody = $reinitialize.Groups['body'].Value
+$resetIndex = $reinitializeBody.IndexOf('Reset();')
+$createIndex = $reinitializeBody.IndexOf('CreateDeviceContext(')
+if ($resetIndex -lt 0 -or ($createIndex -ge 0 -and $resetIndex -gt $createIndex)) {
+    throw 'Reinitialize() must call Reset() before replacing the D2D1 device context, or a cached old context keeps the swap-chain buffer referenced.'
+}
+$resize = [regex]::Match($drawCommon, 'CDCompositionHelper::Resize\(const D2D1_SIZE_U size\)(?<body>.*?)\r?\n\}', 'Singleline')
+if (-not $resize.Success) { throw 'CDCompositionHelper::Resize() was not found.' }
+$resizeBody = $resize.Groups['body'].Value
+if ($resizeBody.IndexOf('DXGI_ERROR_INVALID_CALL') -lt 0 -or $resizeBody.IndexOf('m_p_swap_chain1.Reset();') -lt 0) {
+    throw 'Resize() must log the failed ResizeBuffers and rebuild the swap chain instead of retrying the same failure every frame.'
+}
+Write-Host 'Native composition resize detach order and swap-chain rebuild guard passed.'
+
 $source = Join-Path $PSScriptRoot 'TaskbarRowLayoutTests.cpp'
 $executable = Join-Path $output 'TaskbarRowLayoutTests.exe'
 $object = Join-Path $output 'TaskbarRowLayoutTests.obj'

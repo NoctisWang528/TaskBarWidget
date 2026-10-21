@@ -626,6 +626,10 @@ auto CTaskBarDlgDrawCommonWindowSupport::CDWriteHelper::GetTextFormat() noexcept
 
 void CD2D1DeviceContextWindowSupport::CD2D1DeviceContextHelper::Reinitialize()
 {
+    // 覆盖m_p_device_context前必须先解除旧context的target：全局位图/图标缓存仍持有旧context，
+    // 旧context一旦继续引用交换链buffer，紧随其后的ResizeBuffers就会返回DXGI_ERROR_INVALID_CALL。
+    Reset();
+
     constexpr static D2D1_DEVICE_CONTEXT_OPTIONS options = D2D1_DEVICE_CONTEXT_OPTIONS_NONE;
 
     ThrowIfFailed<CD2D1Exception>(
@@ -859,14 +863,30 @@ auto CD2D1DeviceContextWindowSupport::CDCompositionHelper::Resize(const D2D1_SIZ
     }
     else
     {
-        ThrowIfFailed<CDxgiException>(
-            m_p_swap_chain1->ResizeBuffers(
-                0,
-                size.width,
-                size.height,
-                DXGI_FORMAT_UNKNOWN,
-                0),
-            TRAFFICMONITOR_ERROR_STR("Resize composition swap chain failed."));
+        const HRESULT resize_result = m_p_swap_chain1->ResizeBuffers(
+            0,
+            size.width,
+            size.height,
+            DXGI_FORMAT_UNKNOWN,
+            0);
+        if (FAILED(resize_result))
+        {
+            // 首次失败必须记录到日志，不能静默吞掉。
+            CDxgiException resize_error{
+                resize_result,
+                TRAFFICMONITOR_ERROR_STR("Resize composition swap chain failed.")};
+            LogHResultException(resize_error);
+            if (resize_result != DXGI_ERROR_INVALID_CALL)
+            {
+                // 设备丢失等情况交给上层重建设备，不要在这里掩盖真实原因。
+                throw resize_error;
+            }
+
+            // 仍有对象引用交换链buffer时无法原地resize：直接重建交换链。
+            // 否则m_size不会更新，之后每一帧都会以相同方式失败并高速刷日志。
+            m_p_swap_chain1.Reset();
+            InitializeSwapChain(size);
+        }
     }
 
     RebindSwapChain(m_p_swap_chain1);
