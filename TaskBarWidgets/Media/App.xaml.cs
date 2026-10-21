@@ -27,9 +27,7 @@ public partial class App : System.Windows.Application
     private UpdateInstallBridge? _updateInstaller;
     private UpdateSnapshot _updateUnavailable = new() { Phase = "error", Error = "更新服务尚未准备好。" };
     private readonly AudioDeviceService _audio = new();
-    private SettingsWindow? _settingsWindow;
-    private SpectrumTuningWindow? _tuningWindow;
-    private SmtcTimelineMonitorWindow? _timelineWindow;
+    private MediaSettingsService? _settingsService;
     private readonly CancellationTokenSource _stop = new();
     private bool _shutdownRequested;
     internal AppSettings Settings { get; private set; } = new();
@@ -60,12 +58,13 @@ public partial class App : System.Windows.Application
             _media = new MediaCoordinator();
             _media.ApplySettings(Settings);
             _media.ApplyTuning(Settings.SpectrumTuning ?? SpectrumTuningSettings.CreateDefault());
-            _pipe = new MediaPipeServer(_pipeName, () => new { version = 1, type = "initialize", html = MediaCoordinator.GetHtml() },
+            _pipe = new MediaPipeServer(_pipeName, MediaProtocol.Initialize,
                 _media.Snapshot, command => Dispatcher.InvokeAsync(() => HandleCommandAsync(command)).Task.Unwrap());
             _media.FrameReady += _pipe.Publish;
             _nativeSettings = new NativeSettingsClient((message, token) => _pipe.SendCommandAsync(message, token));
             var currentVersion = typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion?.Split('+')[0] ?? "";
             _ui = new UiHostBridge((command, token) => Dispatcher.InvokeAsync(() => HandleUiRequestAsync(command, token)).Task.Unwrap());
+            _ui.CardLyricsReleased += () => _media?.SetCardVisible(false);
             try
             {
                 _updates = new UpdateCoordinator(applicationRoot, currentVersion, Settings.ProductAutomaticUpdatesEnabled,
@@ -129,7 +128,7 @@ public partial class App : System.Windows.Application
                 break;
             case "taskbarAppearance":
                 if (_media is not null && command.TryGetProperty("payload", out var appearance) && appearance.ValueKind == JsonValueKind.Object)
-                    _media.NativeAppearanceScript = "window.taskbarLyrics?.receive({version:1,type:'nativeAppearance',payload:" + appearance.GetRawText() + "});";
+                    _media.NativeAppearance = appearance.Clone();
                 break;
             default:
                 if (_media is not null) await _media.CommandAsync(action, TryNumber(command, "positionSeconds", out var position) ? position : null);
@@ -175,8 +174,12 @@ public partial class App : System.Windows.Application
             case "subscribeCardLyrics":
                 var cardVisible = payload.GetProperty("visible").GetBoolean();
                 var cardSession = payload.GetProperty("session").GetInt64();
-                _ui?.SetCardLyricsVisible(cardVisible, cardSession);
-                return new { html = cardVisible ? MediaCoordinator.GetHtml() : "", snapshot = cardVisible ? _media.CardSnapshot : null };
+                // The bridge owns the session epoch. A stale request must not move
+                // the coordinator either, or a superseded panel could pin lyric work.
+                if (_ui is null || !_ui.SetCardLyricsVisible(cardVisible, cardSession))
+                    return new { snapshot = (object?)null };
+                _media.SetCardVisible(cardVisible);
+                return new { snapshot = cardVisible ? _media.CardSnapshot : null };
             case "getState":
                 var state = _media.ControlState;
                 return new { state.Title, state.Artist, state.Source, state.PositionSeconds, state.DurationSeconds,
@@ -243,19 +246,28 @@ public partial class App : System.Windows.Application
             property.TryGetDouble(out number) && double.IsFinite(number);
     }
 
-    private SettingsWindow SettingsService()
+    private MediaSettingsService SettingsService()
     {
         if (_media is null) throw new InvalidOperationException("媒体服务尚未准备好。");
-        if (_settingsWindow is null)
+        if (_settingsService is null)
         {
-            _settingsWindow = new SettingsWindow(Settings.Clone(), _media.Offsets, () => Task.FromResult(_media.CurrentTrackContext),
+            // One service instance owns the settings readback and keeps draft
+            // revisions across requests; it has no window, WebView2 or script bridge.
+            _settingsService = new MediaSettingsService(
+                Settings.Clone(),
+                _media.Offsets,
+                () => Task.FromResult(_media.CurrentTrackContext),
                 () => _media.Composition.CreateLyricDiagnosticRunner(Settings),
                 (track, resolved, token) => { token.ThrowIfCancellationRequested(); return Task.FromResult(_media.TryApplyResolvedLyrics(track, resolved)); },
                 (track, resolved, token) => _media.Composition.RememberResolvedLyricsAsync(track, resolved, token).AsTask(),
-                _media.Composition.ClearLyricCache);
-            _settingsWindow.Closed += (_, _) => { _settingsWindow = null; _media.ApplySettings(Settings); };
+                _media.Composition.ClearLyricCache,
+                SaveSettings,
+                PreviewSettings,
+                RetrySpectrumCapture,
+                IsApplicationUsingLightTheme,
+                IsSystemUiUsingLightTheme);
         }
-        return _settingsWindow;
+        return _settingsService;
     }
 
     private void OpenSettings() { if (_ui is not null) TaskObserver.Observe(_ui.SendAsync("openSettings"), "WinUI settings"); }
@@ -312,30 +324,6 @@ public partial class App : System.Windows.Application
     }
 
     internal void RetrySpectrumCapture() => _media?.RetrySpectrum();
-    internal void OpenSpectrumTuningWindow()
-    {
-        if (_media is null) return;
-        if (_tuningWindow is null)
-        {
-            _tuningWindow = new SpectrumTuningWindow(Settings.SpectrumTuning, tuning =>
-            {
-                Settings.SpectrumTuning = tuning.Clone(); _media.ApplyTuning(tuning); _store?.Save(Settings);
-            });
-            _tuningWindow.Closed += (_, _) => { _tuningWindow = null; _media.SetPreview(false); };
-        }
-        _media.SetPreview(true); _tuningWindow.Show(); _tuningWindow.Activate();
-    }
-
-    internal void OpenSmtcTimelineMonitorWindow()
-    {
-        if (_media is null) return;
-        if (_timelineWindow is null)
-        {
-            _timelineWindow = new SmtcTimelineMonitorWindow(_media.Provider, _media.Lyrics);
-            _timelineWindow.Closed += (_, _) => _timelineWindow = null;
-        }
-        _timelineWindow.Show(); _timelineWindow.Activate();
-    }
 
     internal static void ApplyStartupForegroundColor(AppSettings settings) => ForegroundColorPolicy.ApplySelectedMode(settings, IsSystemUiUsingLightTheme());
     internal static bool IsApplicationUsingLightTheme() => ReadLightThemePreference("AppsUseLightTheme");
@@ -357,7 +345,7 @@ public partial class App : System.Windows.Application
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
         _stop.Cancel();
         if (_updates is not null) TaskObserver.Observe(_updates.DisposeAsync().AsTask(), "update service shutdown");
-        _settingsWindow?.Close(); _tuningWindow?.Close(); _timelineWindow?.Close();
+        _settingsService?.Dispose();
         _audio.Dispose();
         if (_ui is not null) TaskObserver.Observe(_ui.DisposeAsync().AsTask(), "WinUI shutdown");
         _media?.Dispose();
@@ -373,11 +361,8 @@ public partial class App : System.Windows.Application
         _nativeSettings?.Dispose();
         _stop.Cancel();
         if (_updates is not null) await _updates.DisposeAsync();
-        // Window-close callbacks may restore previews. Run them while media services
-        // still exist, then stop input producers before releasing those services.
-        _settingsWindow?.Close();
-        _tuningWindow?.Close();
-        _timelineWindow?.Close();
+        // Stop input producers before releasing the media services they call into.
+        _settingsService?.Dispose();
         if (_ui is not null) await _ui.DisposeAsync();
         await _audio.DisposeAsync();
         _media?.Dispose();

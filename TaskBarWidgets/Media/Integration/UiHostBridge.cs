@@ -17,6 +17,11 @@ internal sealed class UiHostBridge : IAsyncDisposable
     private int _pollLogs;
     private bool _cardLyricsVisible;
     private long _cardLyricsSession;
+    // Raised whenever the UI can no longer own a card subscription: the client
+    // disconnected, the UI process exited, or a new UI epoch starts. The owner
+    // drops the coordinator's card visibility with it so a dead session can
+    // never keep lyric work alive.
+    internal event Action? CardLyricsReleased;
     private readonly object _updateGate = new();
     private JsonElement? _pendingUpdate;
     private bool _sendingUpdate;
@@ -50,10 +55,20 @@ internal sealed class UiHostBridge : IAsyncDisposable
         }
         catch { lock (_updateGate) _sendingUpdate = false; throw; }
     }
-    internal void SetCardLyricsVisible(bool visible, long session)
+    // Returns false for a superseded request so the caller cannot switch the
+    // coordinator's card visibility on behalf of a stale session.
+    internal bool SetCardLyricsVisible(bool visible, long session)
     {
-        if (session < _cardLyricsSession) return;
+        if (session < _cardLyricsSession) return false;
         _cardLyricsSession = session; _cardLyricsVisible = visible;
+        return true;
+    }
+    internal void ReleaseCardLyrics()
+    {
+        _cardLyricsSession = 0;
+        if (!_cardLyricsVisible) return;
+        _cardLyricsVisible = false;
+        CardLyricsReleased?.Invoke();
     }
     internal void PublishCardLyrics(object frame)
     {
@@ -66,7 +81,8 @@ internal sealed class UiHostBridge : IAsyncDisposable
         _requests = new UiRequestDispatcher(request, RecordTiming);
         _server = new MediaPipeServer(_name,
             () => new { version = 1, type = "command", action = "uiReady" },
-            () => new { version = 1, type = "command", action = "uiReady" }, HandleRequestAsync);
+            () => new { version = 1, type = "command", action = "uiReady" }, HandleRequestAsync,
+            connected => { if (connected) _cardLyricsSession = 0; else ReleaseCardLyrics(); });
         _server.Start();
         EnsureProcess();
     }
@@ -74,7 +90,8 @@ internal sealed class UiHostBridge : IAsyncDisposable
     {
         if (_disposed || _process is { HasExited: false }) return;
         _process?.Dispose();
-        _cardLyricsSession = 0; _cardLyricsVisible = false;
+        // A restarted UI starts a new subscription epoch at session 1.
+        ReleaseCardLyrics();
         var root = Directory.GetParent(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar))!.FullName;
         var executable = Path.Combine(root, "UI", "TaskBarWidgets.UI.exe");
         if (!File.Exists(executable)) throw new FileNotFoundException("WinUI 界面文件缺失，请使用完整构建目录。", executable);
@@ -92,6 +109,7 @@ internal sealed class UiHostBridge : IAsyncDisposable
         launched.EnableRaisingEvents = true;
         launched.Exited += (_, _) =>
         {
+            ReleaseCardLyrics();
             if (_disposed) return;
             try { Log.Warn($"WinUI process exited: {launched.ExitCode}. See UI/ui-error.log if present."); }
             catch (InvalidOperationException) { }

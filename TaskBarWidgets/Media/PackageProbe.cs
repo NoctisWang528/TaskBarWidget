@@ -1,7 +1,6 @@
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.Json;
-using System.Windows.Interop;
 using Microsoft.Data.Sqlite;
 using TaskBarWidgets.Media.Updates;
 
@@ -32,13 +31,15 @@ internal static class PackageProbe
     {
         try
         {
-            var adapter = new SettingsWindow(new AppSettings(), null!, () => Task.FromResult<CurrentTrackLyricsContext?>(null),
+            // The published helper must answer settings requests without a window.
+            using var adapter = new MediaSettingsService(new AppSettings(), null,
+                () => Task.FromResult<CurrentTrackLyricsContext?>(null),
                 () => throw new NotSupportedException(), (_, _, _) => throw new NotSupportedException(),
-                (_, _, _) => throw new NotSupportedException(), () => { });
+                (_, _, _) => throw new NotSupportedException(), () => { }, _ => true);
             var settings = adapter.ReadServiceSettings(new AppSettings { ShowLyricTranslation = true });
-            if (!settings.GetProperty("showLyricTranslation").GetBoolean() || new WindowInteropHelper(adapter).Handle != IntPtr.Zero)
+            if (!settings.GetProperty("showLyricTranslation").GetBoolean() ||
+                typeof(MediaSettingsService).IsSubclassOf(typeof(System.Windows.Window)))
                 throw new InvalidOperationException("Headless settings adapter failed.");
-            adapter.Close();
             using var database = new SqliteConnection("Data Source=:memory:");
             database.Open();
             using var query = database.CreateCommand(); query.CommandText = "SELECT 42";

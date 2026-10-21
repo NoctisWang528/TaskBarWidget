@@ -12,6 +12,7 @@ internal sealed class MediaPipeServer : IAsyncDisposable
     private readonly Func<object> _initialize;
     private readonly Func<object> _snapshot;
     private readonly Func<JsonElement, Task> _command;
+    private readonly Action<bool>? _connectionChanged;
     private readonly CancellationTokenSource _stop = new();
     // Display snapshots are complete. Replacing one never loses state; commands use
     // a separate reliable bounded queue and are never coalesced.
@@ -21,12 +22,14 @@ internal sealed class MediaPipeServer : IAsyncDisposable
     private readonly Channel<bool> _wake = Channel.CreateBounded<bool>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
     private bool _disposed;
 
-    internal MediaPipeServer(string name, Func<object> initialize, Func<object> snapshot, Func<JsonElement, Task> command)
+    internal MediaPipeServer(string name, Func<object> initialize, Func<object> snapshot, Func<JsonElement, Task> command,
+        Action<bool>? connectionChanged = null)
     {
         _name = name;
         _initialize = initialize;
         _snapshot = snapshot;
         _command = command;
+        _connectionChanged = connectionChanged;
     }
 
     internal void Start() => _run = RunAsync(_stop.Token);
@@ -52,12 +55,20 @@ internal sealed class MediaPipeServer : IAsyncDisposable
                 await WriteAsync(pipe, _initialize(), connection.Token).ConfigureAwait(false);
                 var filter = new MediaFrameFilter();
                 await WriteAsync(pipe, filter.Filter(_snapshot()), connection.Token).ConfigureAwait(false);
-                var reader = ReadCommandsAsync(pipe, connection.Token);
-                var writer = WriteFramesAsync(pipe, filter, connection.Token);
-                await Task.WhenAny(reader, writer).ConfigureAwait(false);
-                connection.Cancel();
-                try { await Task.WhenAll(reader, writer).ConfigureAwait(false); }
-                catch (Exception exception) when (exception is IOException or OperationCanceledException or JsonException or InvalidDataException) { }
+                _connectionChanged?.Invoke(true);
+                try
+                {
+                    var reader = ReadCommandsAsync(pipe, connection.Token);
+                    var writer = WriteFramesAsync(pipe, filter, connection.Token);
+                    await Task.WhenAny(reader, writer).ConfigureAwait(false);
+                    connection.Cancel();
+                    try { await Task.WhenAll(reader, writer).ConfigureAwait(false); }
+                    catch (Exception exception) when (exception is IOException or OperationCanceledException or JsonException or InvalidDataException) { }
+                }
+                finally
+                {
+                    _connectionChanged?.Invoke(false);
+                }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
