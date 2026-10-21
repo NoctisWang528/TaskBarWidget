@@ -807,6 +807,12 @@ namespace NativeMedia
         {
             m_spectrumDirty = false;
             m_tuningDirty = false;
+            if (!m_spectrumSignalLogged && std::any_of(m_spectrumAnimator.Values().begin(),
+                m_spectrumAnimator.Values().end(), [](double value) { return value > 0.01; }))
+            {
+                m_spectrumSignalLogged = true;
+                Log(L"Spectrum rendered with a nonzero audio signal.", S_OK);
+            }
         }
         return painted;
     }
@@ -829,7 +835,7 @@ namespace NativeMedia
         return painted;
     }
 
-    bool NativeMediaRenderer::PaintCoverLayer(bool standby, const Cover* cover,
+    bool NativeMediaRenderer::PaintCoverLayer(Layer& layer, const Cover* cover,
         std::uint64_t key)
     {
         Cover fallback;
@@ -846,7 +852,6 @@ namespace NativeMedia
         paint.dpiScale = m_dpiScale;
         paint.image = hasBitmap ? bitmap.bitmap.Get() : nullptr;
         paint.cover = cover;
-        Layer& layer = standby ? m_coverBack : m_coverFront;
         const bool painted = PaintLayer(layer, [&](ID2D1DeviceContext* context)
         {
             m_painter.PaintCover(context, paint);
@@ -854,7 +859,7 @@ namespace NativeMedia
         if (painted)
         {
             m_coverDirty = false;
-            if (!standby && !m_coverFadeActive && key) m_coverKey = key;
+            if (!m_coverFadeActive && key) m_coverKey = key;
         }
         return painted;
     }
@@ -898,6 +903,7 @@ namespace NativeMedia
         const auto& frame = m_pendingFrame;
         if (frame.lyrics.scene != Scene::Spectrum || !frame.lyrics.isPlaying)
         {
+            m_spectrumSignalLogged = false;
             if (m_spectrumDirty)
             {
                 m_spectrumAnimator.SetTargets({}, false);
@@ -939,21 +945,22 @@ namespace NativeMedia
         const std::uint64_t key = decoded ? bitmap.key : NativeMediaPainter::HashText(
             cover->dataUri.empty() ? cover->fallbackIconDataUri : cover->dataUri);
         if (!m_ready || !m_coverFront.visual || !m_coverBack.visual) return false;
-        if (decoded && key == m_coverKey && m_coverFront.hasContent)
+        Layer& active = m_coverFrontIsActive ? m_coverFront : m_coverBack;
+        Layer& standby = m_coverFrontIsActive ? m_coverBack : m_coverFront;
+        if (decoded && key == m_coverKey && active.hasContent)
         {
-            PaintCoverLayer(false, cover, key);
+            PaintCoverLayer(active, cover, key);
             return true;
         }
-        const bool standby = m_coverFrontIsActive;
-        PaintCoverLayer(standby, cover, key);
+        if (!PaintCoverLayer(standby, cover, key)) return false;
         m_coverPendingKey = key;
         m_coverBackOpacity = 0.0f;
         m_coverFrontOpacity = 1.0f;
-        SetLayerOpacity(standby ? m_coverBack : m_coverFront, 0.0f);
-        SetLayerOpacity(standby ? m_coverFront : m_coverBack, 1.0f);
-        AnimateLayerOpacity(standby ? m_coverBack : m_coverFront, 0.0f, 1.0f,
+        SetLayerOpacity(standby, 0.0f);
+        SetLayerOpacity(active, m_coverTargetOpacity);
+        AnimateLayerOpacity(standby, 0.0f, m_coverTargetOpacity,
             m_reducedMotion ? 0 : 440);
-        AnimateLayerOpacity(standby ? m_coverFront : m_coverBack, 1.0f, 0.0f,
+        AnimateLayerOpacity(active, m_coverTargetOpacity, 0.0f,
             m_reducedMotion ? 0 : 440);
         m_coverFadeActive = true;
         m_coverFadeUntil = now + (m_reducedMotion ? 0 : 440);
@@ -966,7 +973,7 @@ namespace NativeMedia
         (void)now;
         const bool standbyWasFront = m_coverFrontIsActive;
         m_coverFrontIsActive = !m_coverFrontIsActive;
-        SetLayerOpacity(standbyWasFront ? m_coverBack : m_coverFront, 1.0f);
+        SetLayerOpacity(standbyWasFront ? m_coverBack : m_coverFront, m_coverTargetOpacity);
         SetLayerOpacity(standbyWasFront ? m_coverFront : m_coverBack, 0.0f);
         if (m_compositionDevice) m_compositionDevice->Commit();
         m_coverKey = m_coverPendingKey;
@@ -1045,8 +1052,12 @@ namespace NativeMedia
             SetLayerOpacity(m_lyrics, m_lyricsTargetOpacity);
             SetLayerOpacity(m_spectrum, m_spectrumTargetOpacity);
             SetLayerOpacity(m_browser, m_browserTargetOpacity);
-            AnimateLayerOpacity(m_coverFrontIsActive ? m_coverFront : m_coverBack,
-                m_coverTargetOpacity, m_coverTargetOpacity, 0);
+            if (!m_coverFadeActive)
+            {
+                SetLayerOpacity(m_coverFrontIsActive ? m_coverFront : m_coverBack,
+                    m_coverTargetOpacity);
+                SetLayerOpacity(m_coverFrontIsActive ? m_coverBack : m_coverFront, 0.0f);
+            }
         }
         if (m_compositionDevice) m_compositionDevice->Commit();
     }
@@ -1122,6 +1133,7 @@ namespace NativeMedia
             SetLayerOpacity(m_browser, m_browserTargetOpacity);
             SetLayerOpacity(m_coverFrontIsActive ? m_coverFront : m_coverBack,
                 m_coverTargetOpacity);
+            SetLayerOpacity(m_coverFrontIsActive ? m_coverBack : m_coverFront, 0.0f);
             MarkAllDirty();
         }
         m_fade.Set(m_compositionDevice.Get(), m_rootVisual.Get(), visible,
@@ -1317,7 +1329,7 @@ namespace NativeMedia
             }
             if ((m_coverDirty || geometryDirty) && !m_coverFadeActive)
             {
-                if (PaintCoverLayer(m_coverFrontIsActive,
+                if (PaintCoverLayer(m_coverFrontIsActive ? m_coverFront : m_coverBack,
                     m_cover ? &*m_cover : nullptr, m_coverKey))
                 {
                     painted = true;

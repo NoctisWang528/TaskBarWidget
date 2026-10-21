@@ -79,6 +79,7 @@ namespace NativeMedia
         RendererProbe AdvanceHeadlessTest(std::uint64_t now);
 
     private:
+        friend struct NativeMediaRendererTestAccess;
         struct Layer
         {
             Microsoft::WRL::ComPtr<IDXGISwapChain1> swapChain;
@@ -155,6 +156,7 @@ namespace NativeMedia
         RollTransition m_transition;
         WordScanSmoother m_wordScan;
         SpectrumAnimator m_spectrumAnimator;
+        bool m_spectrumSignalLogged{};
         std::optional<double> m_displayedScan;
         std::wstring m_scanTrack;
         int m_scanLine{ -1 };
@@ -198,7 +200,7 @@ namespace NativeMedia
         bool PaintLyricsLayer();
         bool PaintSpectrumLayer();
         bool PaintBrowserLayer();
-        bool PaintCoverLayer(bool standby, const Cover* cover, std::uint64_t key);
+        bool PaintCoverLayer(Layer& layer, const Cover* cover, std::uint64_t key);
         void UpdateSecondaryOpacity(std::uint64_t now);
         void UpdateSpectrum(std::uint64_t now);
         bool UpdateCover(std::uint64_t now);

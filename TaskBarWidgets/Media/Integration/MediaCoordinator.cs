@@ -49,6 +49,8 @@ internal sealed class MediaCoordinator : IDisposable
     private bool _taskbarVisible;
     private bool _cardVisible;
     private bool _spectrumActive;
+    private int _spectrumDiagnosticTicks;
+    private int _spectrumDiagnosticReports;
     private bool _preview;
     private bool _showSpectrum;
     private LyricsPresentationScene _taskbarScene = LyricsPresentationScene.NoPlayback;
@@ -598,9 +600,12 @@ internal sealed class MediaCoordinator : IDisposable
                 spectrumContentVisible);
         if (shouldCapture == _spectrumActive) return;
 
+        if (_spectrumDiagnosticReports < 8)
+            Log.Diagnostic("SPECTRUM", $"active={shouldCapture} visible={_taskbarVisible} playing={_playback.IsPlaying} scene={spectrumContentVisible}");
         _spectrumActive = shouldCapture;
         if (shouldCapture)
         {
+            _spectrumDiagnosticTicks = 0;
             _spectrum.Start();
             _spectrumTimer.Start();
         }
@@ -619,6 +624,8 @@ internal sealed class MediaCoordinator : IDisposable
         var bars = _spectrum.GetSpectrum();
         _spectrumBars = bars;
         var capture = _spectrum.GetDiagnostics();
+        if (++_spectrumDiagnosticTicks == 60 && _spectrumDiagnosticReports++ < 8)
+            Log.Diagnostic("SPECTRUM", $"available={capture.IsAvailable} visible={_taskbarVisible} playing={_playback.IsPlaying} inputPeak={capture.InputPeak:F4} barPeak={(bars.Length == 0 ? 0 : bars.Max()):F4} error={capture.LastError}");
         SpectrumDiagnosticsState.Update(new(
             _utcNow(),
             true,

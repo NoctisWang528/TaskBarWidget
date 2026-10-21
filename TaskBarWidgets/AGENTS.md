@@ -52,6 +52,8 @@ For updater changes run the targeted Media update tests and scripts/test-updater
 
 Distribute only Simplified Chinese and English language files, managed satellite assemblies and native MUI resources. Preserve neutral/framework PRI and globalization data. Keep all required third-party notices; licensing files are not unused runtime dependencies.
 
+Public Release notes contain only user-facing upgrade changes: features, improvements and fixes. Do not include test counts, verification reports, developer workflow, acceptance checklists or untested-environment notes. Keep development evidence and validation limits in ACCEPTANCE.md and local artifacts.
+
 The standing user instruction is not to auto-start the normal product. Do not run smoke-native.ps1/smoke-media.ps1 without desktop-launch authorization. Report actual player, audio, Explorer, multi-monitor, DPI and visual acceptance as pending where untested.
 
 ## Git, user data and cleanup

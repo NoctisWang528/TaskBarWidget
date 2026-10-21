@@ -5,6 +5,7 @@
 #include "MediaFrameContract.h"
 #include "NativeMediaJson.h"
 #include "NativeMediaRenderer.h"
+#include "NativePipeReader.h"
 #include "ManagedRuntimeEnvironment.h"
 #include "UpdateHealth.h"
 #include "TrafficMonitor.h"
@@ -124,6 +125,8 @@ struct NativeMediaHost::Impl
     std::wstring lastAppearance;
     bool appearancePending{ true };
     ULONGLONG lastFailureLog{};
+    std::wstring lastDiagnosticStage;
+    ULONGLONG lastDiagnosticLog{};
     std::mutex logMutex;
     std::filesystem::path appDirectory;
     UINT timerInterval{};
@@ -197,6 +200,18 @@ struct NativeMediaHost::Impl
             lastFailureLog = GetTickCount64();
             Log(message, result);
         }
+    }
+
+    // Records the failing stage, the real error code and the payload length.
+    // Media content itself is never logged, and a repeating stage is rate
+    // limited so a broken connection cannot flood the log.
+    void Diagnostic(const std::wstring& stage, size_t bytes, HRESULT result)
+    {
+        const ULONGLONG now = GetTickCount64();
+        if (stage == lastDiagnosticStage && now - lastDiagnosticLog < 5000) return;
+        lastDiagnosticStage = stage;
+        lastDiagnosticLog = now;
+        Log(stage + L" (" + std::to_wstring(bytes) + L" bytes)", result);
     }
 
     void PostWake()
@@ -401,78 +416,59 @@ struct NativeMediaHost::Impl
             Log(L"Media helper pipe connected.");
             reconnect = false;
             bool alive = true;
-            std::string partial;
-            std::vector<char> readBuffer(64 * 1024);
-            HANDLE readEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-            OVERLAPPED readOperation{};
-            readOperation.hEvent = readEvent;
-            bool readPending = false;
-            const auto handleChunk = [&](const char* data, size_t length)
+            const wchar_t* stage = L"read";
+            DWORD transportError = ERROR_SUCCESS;
+            NativePipeReader reader([this](std::string message)
             {
-                partial.append(data, length);
-                size_t line;
-                while ((line = partial.find('\n')) != std::string::npos)
-                {
-                    if (line > MaximumMessage) { alive = false; return; }
-                    std::string message = partial.substr(0, line);
-                    partial.erase(0, line + 1);
-                    EnqueueIncoming(std::move(message));
-                }
-                if (partial.size() > MaximumMessage) alive = false;
-            };
-            const auto issueRead = [&]()
+                EnqueueIncoming(std::move(message));
+            }, MaximumMessage);
+            if (reader.Initialize())
             {
-                if (readPending || !alive) return;
-                ResetEvent(readEvent);
-                DWORD received{};
-                const BOOL ok = ReadFile(pipe, readBuffer.data(),
-                    static_cast<DWORD>(readBuffer.size()), &received, &readOperation);
-                if (ok)
+                while (!stop && alive && !reconnect)
                 {
-                    if (!received) alive = false;
-                    else handleChunk(readBuffer.data(), received);
-                }
-                else if (GetLastError() == ERROR_IO_PENDING)
-                {
-                    readPending = true;
-                }
-                else
-                {
-                    alive = false;
-                }
-            };
-            while (!stop && alive && !reconnect)
-            {
-                if (!DrainWrites(pipe)) { alive = false; break; }
-                issueRead();
-                HANDLE waits[3]{ readEvent, workerWake, nullptr };
-                DWORD waitCount = workerWake ? 2 : 1;
-                const DWORD wait = WaitForMultipleObjects(waitCount, waits, FALSE, INFINITE);
-                if (stop) break;
-                if (wait == WAIT_OBJECT_0)
-                {
-                    DWORD received{};
-                    if (!GetOverlappedResult(pipe, &readOperation, &received, FALSE))
+                    if (!DrainWrites(pipe))
                     {
+                        transportError = GetLastError();
+                        stage = L"write";
                         alive = false;
                         break;
                     }
-                    readPending = false;
-                    if (!received) { alive = false; break; }
-                    handleChunk(readBuffer.data(), received);
+                    // One read at a time. A synchronous completion delivers its
+                    // bytes here and its completion event is never reaped again.
+                    switch (reader.Pump(pipe, workerWake))
+                    {
+                    case NativePipeReader::PumpResult::Data:
+                        break;
+                    case NativePipeReader::PumpResult::Woken:
+                        // workerWake auto-resets when the wait consumes it. An
+                        // explicit reset could erase a newly queued command's wake.
+                        break;
+                    case NativePipeReader::PumpResult::TimedOut:
+                        // The worker waits without a deadline; kept explicit so a
+                        // bounded caller cannot turn a timeout into a failure.
+                        break;
+                    case NativePipeReader::PumpResult::Failed:
+                        transportError = reader.LastError();
+                        alive = false;
+                        break;
+                    }
                 }
-                else if (wait == WAIT_OBJECT_0 + 1)
+                reader.CancelPending(pipe);
+                if (!alive && !stop)
                 {
-                    ResetEvent(workerWake);
-                    continue;
-                }
-                else
-                {
-                    alive = false;
+                    // Keep the original failure: cancelling an outstanding read
+                    // during cleanup must not replace it with OPERATION_ABORTED.
+                    Log(L"Media pipe " + std::wstring(stage) + L" failed.",
+                        HRESULT_FROM_WIN32(transportError ? transportError : ERROR_BROKEN_PIPE));
                 }
             }
-            if (readPending) CancelIoEx(pipe, &readOperation);
-            if (readEvent) CloseHandle(readEvent);
+            else
+            {
+                // Without a completion event there is no valid handle to wait on.
+                Failure(L"Media pipe reader could not start.",
+                    HRESULT_FROM_WIN32(reader.LastError()));
+                alive = false;
+            }
             if (stop)
             {
                 const char shutdown[] = "{\"version\":1,\"type\":\"command\",\"action\":\"shutdown\"}\n";
@@ -968,9 +964,24 @@ struct NativeMediaHost::Impl
                     break;
                 }
             }
+            catch (const winrt::hresult_error& error)
+            {
+                // Keep the real parse HRESULT and the payload length (never its
+                // content) instead of blaming message size for every failure.
+                Diagnostic(L"Media message parse failed", entry.size(), error.code());
+                Failure(L"Media message parse failed.", error.code());
+                reconnect = true;
+                WakeWorker();
+                state.Disconnect();
+                firstFramePending = true;
+                stateDirty = true;
+                renderer.SetVisible(false, false);
+                break;
+            }
             catch (...)
             {
-                Failure(L"Invalid or oversized media message.", E_INVALIDARG);
+                Diagnostic(L"Media message parse failed", entry.size(), E_UNEXPECTED);
+                Failure(L"Media message parse failed.", E_UNEXPECTED);
                 reconnect = true;
                 WakeWorker();
                 state.Disconnect();

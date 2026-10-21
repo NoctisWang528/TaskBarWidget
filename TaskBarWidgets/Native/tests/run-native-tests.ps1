@@ -70,12 +70,31 @@ $command = 'call "{0}" >nul && cl /nologo /EHsc /std:c++20 /W4 /MD /Fe:"{1}" "{2
 & $env:ComSpec /d /s /c $command
 if ($LASTEXITCODE -ne 0) { throw "Native renderer lifecycle validation failed ($LASTEXITCODE)." }
 
+$source = Join-Path $PSScriptRoot 'NativePipeTransportTests.cpp'
+$readerSource = Join-Path $nativeRoot 'TrafficMonitor\NativePipeReader.cpp'
+$executable = Join-Path $output 'NativePipeTransportTests.exe'
+$command = 'call "{0}" >nul && cl /nologo /EHsc /std:c++20 /W4 /MD /Fe:"{1}" /Fo:"{2}\\" "{3}" "{4}" && "{1}"' -f $vcvars, $executable, $output, $source, $readerSource
+& $env:ComSpec /d /s /c $command
+if ($LASTEXITCODE -ne 0) { throw "Native pipe transport regression tests failed ($LASTEXITCODE)." }
+Write-Host 'Native pipe completion, framing, cancellation and reconnect regression tests passed.'
+
+$source = Join-Path $PSScriptRoot 'NativePipeIntegrationClient.cpp'
+$executable = Join-Path $output 'NativePipeIntegrationClient.exe'
+$command = 'call "{0}" >nul && cl /nologo /EHsc /std:c++20 /W4 /MD /Fe:"{1}" /Fo:"{2}\\" "{3}" "{4}" windowsapp.lib ole32.lib' -f $vcvars, $executable, $output, $source, $readerSource
+& $env:ComSpec /d /s /c $command
+if ($LASTEXITCODE -ne 0) { throw "Native pipe integration client failed to build ($LASTEXITCODE)." }
+Write-Host 'Native pipe integration client built for the managed cross-language test.'
+
 $mediaHost = Get-Content -LiteralPath (Join-Path $nativeRoot 'TrafficMonitor\NativeMediaHost.cpp') -Raw
 if ($mediaHost -match 'PeekNamedPipe|ExecuteScript|NavigateToString|CoreWebView2|chrome\.webview') {
     throw 'Native media host still contains WebView2 or idle pipe polling code.'
 }
-if ($mediaHost -notmatch 'WaitForMultipleObjects' -or $mediaHost -notmatch 'SECURITY_IDENTIFICATION') {
-    throw 'Native media pipe must use cancelable waits and current-user pipe security.'
+if ($mediaHost -notmatch 'SECURITY_IDENTIFICATION' -or $mediaHost -notmatch 'NativePipeReader') {
+    throw 'Native media pipe must keep current-user pipe security and use the tested reader.'
+}
+$pipeReader = Get-Content -LiteralPath (Join-Path $nativeRoot 'TrafficMonitor\NativePipeReader.cpp') -Raw
+if ($pipeReader -notmatch 'WaitForMultipleObjects' -or $pipeReader -notmatch 'CancelIoEx' -or $pipeReader -notmatch 'GetOverlappedResult') {
+    throw 'Native pipe reader must keep cancelable event waits and overlapped completion handling.'
 }
 $taskbar = Get-Content -LiteralPath (Join-Path $nativeRoot 'TrafficMonitor\TaskBarDlg.cpp') -Raw
 if ($taskbar -match 'SetTimer\(1243, 33' -or $taskbar -match 'nIDEvent == 1243') {

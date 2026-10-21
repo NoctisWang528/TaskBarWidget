@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug (lite)|ARM64EC">
@@ -1040,7 +1040,9 @@
     <ClCompile Include="NativeMediaHost.cpp" />
     <ClCompile Include="NativeMediaPainter.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="NativeMediaRenderer.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="NativePipeReader.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClInclude Include="NativeMediaHost.h" />
+    <ClInclude Include="NativePipeReader.h" />
     <ClInclude Include="NativeMediaJson.h" />
     <ClInclude Include="NativeMediaPainter.h" />
     <ClInclude Include="NativeMediaRenderer.h" />

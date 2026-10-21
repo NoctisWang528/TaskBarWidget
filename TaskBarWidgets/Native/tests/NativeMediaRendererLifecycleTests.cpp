@@ -5,6 +5,18 @@
 #include <stdexcept>
 #include <string>
 
+namespace NativeMedia
+{
+    struct NativeMediaRendererTestAccess
+    {
+        static bool ActiveCoverWasPainted(NativeMediaRenderer& renderer)
+        {
+            const auto& layer = renderer.m_coverFrontIsActive ? renderer.m_coverFront : renderer.m_coverBack;
+            return layer.hasContent && layer.target != nullptr;
+        }
+    };
+}
+
 namespace
 {
     void Require(bool condition, const char* message)
@@ -75,6 +87,7 @@ namespace
 }
 
 int main()
+try
 {
     using namespace NativeMedia;
 
@@ -359,6 +372,56 @@ int main()
             "A reduced-motion reveal keeps the scan.");
     }
 
+    // Exercise actual composition layers: painter-only fixtures cannot catch
+    // painting the hidden standby swap chain instead of the visible cover.
+    {
+        const HRESULT apartment = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        Require(SUCCEEDED(apartment), "COM initializes for the isolated renderer.");
+        HWND window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            L"STATIC", L"Cover layer regression", WS_POPUP, -16000, -16000,
+            400, 48, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        Require(window != nullptr, "An inactive offscreen host exists.");
+        {
+            NativeMediaRenderer covers;
+            covers.SetHost(window);
+            covers.UpdateGeometry(400, 48, 1);
+            Require(covers.EnsureInitialized(GetTickCount64()), "Composition initializes.");
+            auto frame = MakeFrame(400, Scene::Lyrics, 1, 0, std::nullopt);
+            Cover cover;
+            cover.fallbackText = L"A";
+            cover.fallbackColor = L"#ff0000";
+            cover.trackId = frame.trackId;
+            auto update = MakeUpdate(frame, true);
+            update.cover = &cover;
+            update.coverChanged = true;
+            covers.Apply(update);
+            covers.SetVisible(true, false);
+            auto now = GetTickCount64();
+            covers.Present(now);
+            Require(NativeMediaRendererTestAccess::ActiveCoverWasPainted(covers),
+                "The initially visible cover layer was painted and presented.");
+            for (int i = 0; i < 2; ++i)
+            {
+                cover.fallbackText = i ? L"C" : L"B";
+                update.forceFull = false;
+                covers.Apply(update);
+                covers.Present(now += 1000);
+                covers.Present(now += 500);
+                covers.SetVisible(false, false);
+                covers.SetVisible(true, false);
+                covers.Present(now += 1000);
+                Require(NativeMediaRendererTestAccess::ActiveCoverWasPainted(covers),
+                    "Both swapped cover layers repaint correctly after hide/reveal.");
+            }
+        }
+        DestroyWindow(window);
+        CoUninitialize();
+    }
     std::cout << "Native renderer lifecycle scheduling assertions passed.\n";
     return 0;
+}
+catch (const std::exception& error)
+{
+    std::cerr << "Renderer regression failed: " << error.what() << '\n';
+    return 1;
 }
