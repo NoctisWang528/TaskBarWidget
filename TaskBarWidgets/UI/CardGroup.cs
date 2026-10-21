@@ -96,6 +96,7 @@ public sealed partial class CardGroup : IDisposable
     private long _audioRequestSequence, _audioAppliedSequence;
     private int _audioGeneration;
     private int _generation, _ticks, _flyoutsOpen;
+    private long _lyricsSession;
     private string? _outputId, _inputId, _lastCover, _selectedSourceId;
     private bool _outputMuted, _inputMuted;
     private ElementTheme? _themePreview;
@@ -107,7 +108,6 @@ public sealed partial class CardGroup : IDisposable
     private DateTimeOffset _lastHiddenAt = DateTimeOffset.UtcNow;
     private bool _residentResourcesReleased;
     private readonly DispatcherTimer _idleReleaseTimer = new() { Interval = TimeSpan.FromSeconds(30) };
-    private bool _memoryNotificationsSubscribed;
     private sealed class CardSlot(string id, string title, FrameworkElement content, double height, bool autoHeight, double width)
     {
         internal string Id { get; } = id;
@@ -150,7 +150,6 @@ public sealed partial class CardGroup : IDisposable
         _idleReleaseTimer.Tick += (_, _) =>
         {
             if (_visible) _idleReleaseTimer.Stop();
-            else if (!_onDemand && SystemMemoryPressure()) _lyrics.SetMemoryLevel(true);
             else ReleaseResidentResourcesIfNeeded();
         };
         _seekTimer.Tick += async (_, _) =>
@@ -171,7 +170,6 @@ public sealed partial class CardGroup : IDisposable
         });
         ReconcileCardWindows();
         _connection.ConnectionChanged += OnLyricsConnection;
-        TrySubscribeMemoryNotifications();
     }
 
     private void ReconcileCardWindows()
@@ -206,6 +204,11 @@ public sealed partial class CardGroup : IDisposable
             card.Root.ActualThemeChanged += (_, _) => ApplyWeatherTheme(ResolveWeatherTheme(card));
         if (slot.Id == "device")
             card.Root.Loaded += (_, _) => { if (_visible) Position(_anchorX, _anchorY); };
+        if (slot.Id == "media" && _visible)
+        {
+            _lyrics.Activate();
+            _ = SubscribeLyricsAsync(++_lyricsSession, true);
+        }
         if (_themePreview is { } preview) card.Root.RequestedTheme = preview;
         else if (_requestedTheme != ElementTheme.Default) card.Root.RequestedTheme = _requestedTheme;
         if (slot.Id == "weather") ApplyWeatherTheme(ResolveWeatherTheme(card));
@@ -229,7 +232,8 @@ public sealed partial class CardGroup : IDisposable
         slot.AllowClose = false;
         if (slot.Id == "media")
         {
-            _lyrics.ReleaseRenderer();
+            _lyrics.ReleaseResources();
+            _ = SubscribeLyricsAsync(++_lyricsSession, false);
             _sourceImageCache.Clear();
             _lastCover = null;
             _lastSourceIcon = "";
@@ -241,12 +245,15 @@ public sealed partial class CardGroup : IDisposable
         }
     }
 
-    // Create and render every enabled card while hidden so the first click does
-    // not pay for window creation, XAML realization, or the first composition
-    // pass. No weather, traffic, audio, or lyric work is started here.
+    // Resident mode creates and renders every enabled card while hidden so the
+    // first click does not pay for window creation, XAML realization, or the
+    // first composition pass. On-demand mode skips this path from App.
     internal async Task PrewarmAsync()
     {
-        if (_disposed || _visible) return;
+        // The product only calls this in resident mode. Keep an explicit guard so
+        // a settings change that arrives between timer and execution cannot
+        // create speculative surfaces in on-demand mode.
+        if (_disposed || _visible || _onDemand) return;
         var timing = System.Diagnostics.Stopwatch.StartNew();
         try
         {
@@ -291,7 +298,11 @@ public sealed partial class CardGroup : IDisposable
         _ticks = 0;
         if (_residentResourcesReleased) RestoreResidentResources();
         _visibleLifetime = new CancellationTokenSource();
-        if (_quickCardEnabled.GetValueOrDefault("media")) _lyrics.Activate();
+        if (_quickCardEnabled.GetValueOrDefault("media"))
+        {
+            _lyricsSession++;
+            _lyrics.Activate();
+        }
         var openElapsed = timing.Elapsed;
         var queuedWait = _openQueued;
         _openTiming = null;
@@ -313,7 +324,7 @@ public sealed partial class CardGroup : IDisposable
         _timer.Start();
         _idleReleaseTimer.Stop();
         _ = RefreshAsync(_quickCardEnabled.GetValueOrDefault("device"), _quickCardEnabled.GetValueOrDefault("traffic"));
-        if (_quickCardEnabled.GetValueOrDefault("media")) _ = SubscribeLyricsAsync(_generation, true);
+        if (_quickCardEnabled.GetValueOrDefault("media")) _ = SubscribeLyricsAsync(_lyricsSession, true);
         if (_quickCardEnabled.GetValueOrDefault("weather")) _ = LoadWeatherAsync();
     }
 
@@ -352,7 +363,7 @@ public sealed partial class CardGroup : IDisposable
         _visible = false;
         _generation++;
         _lyrics.HideLyrics();
-        if (_quickCardEnabled.GetValueOrDefault("media")) _ = SubscribeLyricsAsync(_generation, false);
+        if (_quickCardEnabled.GetValueOrDefault("media")) _ = SubscribeLyricsAsync(++_lyricsSession, false);
         _timer.Stop();
         _outsideClicks.Stop();
         _seekTimer.Stop();
@@ -592,6 +603,7 @@ public sealed partial class CardGroup : IDisposable
             {
                 _cardFontFamily = new FontFamily(family);
                 ApplyCardFont(_slots.Values.Select(slot => slot.Content).Append(_updateCard.Content));
+                _lyrics.SetCardFallbackFont(_cardFontFamily);
                 _appliedCardFont = family;
                 FitWeatherTemperature();
                 RefreshWeatherLayout();
@@ -1104,10 +1116,10 @@ public sealed partial class CardGroup : IDisposable
         if (_disposed) return;
         CardLifecycleLog.Write($"dispose visible={_visible}");
         _disposed = true; _visible = false; _generation++;
+        if (_quickCardEnabled.GetValueOrDefault("media")) _ = SubscribeLyricsAsync(++_lyricsSession, false);
         _visibleLifetime?.Cancel(); _visibleLifetime?.Dispose(); _visibleLifetime = null;
         _volumeTimer.Stop(); _seekTimer.Stop(); _timer.Stop(); _idleReleaseTimer.Stop(); _weatherAlertTimer.Stop(); _outsideClicks.Dispose();
         _connection.ConnectionChanged -= OnLyricsConnection;
-        UnsubscribeMemoryNotifications();
         _lyrics.Dispose();
         foreach (var flyout in _flyouts) flyout.Hide();
         _pendingVolumes.Clear();
@@ -1121,33 +1133,57 @@ public sealed partial class CardGroup : IDisposable
         _slots["media"].Content.DispatcherQueue.TryEnqueue(() => {
             if (_disposed || !_visible) return;
             if (!_quickCardEnabled.GetValueOrDefault("media")) return;
-            if (connected) { _lyrics.Activate(); _ = SubscribeLyricsAsync(_generation, true); }
-            else _lyrics.HideLyrics();
+            if (connected)
+            {
+                // A reconnect can reach a restarted backend whose revision is
+                // lower. The subscription starts a new local ordering epoch.
+                _lyrics.Activate();
+                _ = SubscribeLyricsAsync(++_lyricsSession, true);
+            }
+            else
+            {
+                _lyricsSession++;
+                _lyrics.HideLyrics();
+            }
         });
     }
-    private async Task SubscribeLyricsAsync(int generation, bool visible)
+    private async Task SubscribeLyricsAsync(long session, bool visible)
     {
         try
         {
-            var result = await _connection.RequestAsync("subscribeCardLyrics", new { visible, session = generation });
-            if (_disposed || !_visible || generation != _generation || !visible) return;
-            _lyrics.Initialize(String(result, "html"));
-            if (result.TryGetProperty("snapshot", out var snapshot)) _lyrics.Receive(snapshot);
+            var result = await _connection.RequestAsync("subscribeCardLyrics", new { visible, session });
+            if (_disposed || !_visible || session != _lyricsSession || !visible) return;
+            if (!result.TryGetProperty("snapshot", out var snapshot) || snapshot.ValueKind != JsonValueKind.Object)
+            {
+                CardLifecycleLog.Write("card-lyrics subscribe-without-snapshot");
+                return;
+            }
+            _lyrics.Receive(snapshot);
         }
         catch (Exception error) when (error is not OutOfMemoryException)
-        { if (!_disposed && generation == _generation) CardLifecycleLog.Write($"card-lyrics subscribe-failed hr=0x{error.HResult:X8}"); }
+        { if (!_disposed && session == _lyricsSession) CardLifecycleLog.Write($"card-lyrics subscribe-failed hr=0x{error.HResult:X8}"); }
     }
     internal void ReceiveLyrics(JsonElement message)
     {
-        if (_disposed || !_visible || !message.TryGetProperty("session", out var session) || session.GetInt64() != _generation) return;
-        if (message.TryGetProperty("payload", out var payload)) _lyrics.Receive(payload);
+        if (_disposed || !_visible || !_quickCardEnabled.GetValueOrDefault("media") ||
+            !message.TryGetProperty("session", out var session) ||
+            session.ValueKind != JsonValueKind.Number ||
+            !session.TryGetInt64(out var sessionId) ||
+            sessionId != _lyricsSession)
+        {
+            return;
+        }
+        if (message.TryGetProperty("payload", out var payload) && payload.ValueKind == JsonValueKind.Object)
+            _lyrics.Receive(payload);
     }
     private void ReleaseResidentResourcesIfNeeded()
     {
         if (!_onDemand || _visible || _residentResourcesReleased) return;
         if (DateTimeOffset.UtcNow - _lastHiddenAt < TimeSpan.FromMinutes(10)) return;
         _residentResourcesReleased = true;
-        _lyrics.ReleaseRenderer();
+        // Release only media-card imagery and lyric layout, not unrelated card
+        // visuals. The next open recreates both from the latest snapshot.
+        _lyrics.ReleaseResources();
         _cover.Source = null;
         _sourceImage.Source = null;
         _sourceImageCache.Clear();
@@ -1159,47 +1195,7 @@ public sealed partial class CardGroup : IDisposable
     {
         if (!_residentResourcesReleased) return;
         _residentResourcesReleased = false;
-        _lyrics.SetMemoryLevel(false);
         CardLifecycleLog.Write("resident-resources-restored");
-    }
-    private static bool SystemMemoryPressure()
-    {
-        var status = new MemoryStatusEx { Length = (uint)Marshal.SizeOf<MemoryStatusEx>() };
-        return GlobalMemoryStatusEx(ref status) && status.MemoryLoad >= 90;
-    }
-    private void OnMemoryUsageChanged(object? sender, object args)
-    {
-        if (_disposed) return;
-        try
-        {
-            var low = Windows.System.MemoryManager.AppMemoryUsageLevel >= Windows.System.AppMemoryUsageLevel.High;
-            _lyrics.SetMemoryLevel(low && !_visible);
-        }
-        catch (Exception error) when (error is InvalidOperationException or System.Runtime.InteropServices.COMException or NotSupportedException) { }
-    }
-    private void TrySubscribeMemoryNotifications()
-    {
-        try
-        {
-            Windows.System.MemoryManager.AppMemoryUsageIncreased += OnMemoryUsageChanged;
-            Windows.System.MemoryManager.AppMemoryUsageDecreased += OnMemoryUsageChanged;
-            _memoryNotificationsSubscribed = true;
-        }
-        catch (Exception error) when (error is InvalidOperationException or System.Runtime.InteropServices.COMException or NotSupportedException)
-        {
-            CardLifecycleLog.Write($"memory-notifications-unavailable hr=0x{error.HResult:X8}");
-        }
-    }
-    private void UnsubscribeMemoryNotifications()
-    {
-        if (!_memoryNotificationsSubscribed) return;
-        _memoryNotificationsSubscribed = false;
-        try
-        {
-            Windows.System.MemoryManager.AppMemoryUsageIncreased -= OnMemoryUsageChanged;
-            Windows.System.MemoryManager.AppMemoryUsageDecreased -= OnMemoryUsageChanged;
-        }
-        catch (Exception error) when (error is InvalidOperationException or System.Runtime.InteropServices.COMException or NotSupportedException) { }
     }
     private sealed record AudioChoice(string Id, string Name, bool IsDefault, bool IsCommunications, double Volume, bool IsMuted, bool CanControl);
     private sealed record SourceChoice(string Id, string Label, string IconDataUrl);
@@ -1223,12 +1219,6 @@ public sealed partial class CardGroup : IDisposable
     }
     private static void Add(Grid grid, FrameworkElement element, int column, int row = 0) { Grid.SetColumn(element, column); Grid.SetRow(element, row); grid.Children.Add(element); }
     [StructLayout(LayoutKind.Sequential)] private struct NativePoint { public int X, Y; }
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)] private struct MemoryStatusEx
-    {
-        public uint Length, MemoryLoad;
-        public ulong TotalPhysical, AvailablePhysical, TotalPageFile, AvailablePageFile, TotalVirtual, AvailableVirtual, AvailableExtendedVirtual;
-    }
-    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GlobalMemoryStatusEx(ref MemoryStatusEx status);
     [StructLayout(LayoutKind.Sequential)] private struct NativeRect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] private struct MonitorInfo { public int Size; public NativeRect Monitor, Work; public uint Flags; }
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetWindowRect(nint window, out NativeRect bounds);

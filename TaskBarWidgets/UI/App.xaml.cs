@@ -19,6 +19,8 @@ public partial class App : Application
     private UpdateUiState _updateState = new();
     private bool _installConfirmationOpen, _uiReadyReported, _installAfterDownload;
     private JsonElement _quickCards;
+    private JsonElement _cardSettings;
+    private bool _cardSettingsApplied;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _prewarmTimer;
     private readonly PendingPanelToggle _pendingPanel = new();
 
@@ -86,35 +88,64 @@ public partial class App : Application
         _prewarmTimer.Start();
     }
 
-    // Build and render the enabled card windows while hidden. Any failure is
-    // swallowed by CardGroup and the original lazy creation path still applies.
+    // Resident prewarm realizes cards while hidden. On-demand
+    // mode creates no card surface and still reports UI health.
     private async Task PrewarmCardsAsync()
     {
         if (_stopping || _connection is null) return;
         try
         {
-            _cards ??= new CardGroup(_connection, OpenSettings);
             if (_quickCards.ValueKind != JsonValueKind.Object)
             {
                 // Media owns the quick-card configuration; reading it once lets
-                // prewarm build exactly the cards this user has enabled.
+                // prewarm build exactly the cards this user has enabled. On-demand
+                // mode deliberately creates no card surface until the first click.
                 try
                 {
                     var settings = await _connection.RequestAsync("getMediaSettings", cancellationToken: _lifetime.Token);
+                    _cardSettings = settings.Clone();
+                    if (IsOnDemand(settings))
+                    {
+                        if (_cards is not null && !_cardSettingsApplied)
+                        {
+                            _cards.ApplyQuickCardsFromSettings(settings);
+                            _cardSettingsApplied = true;
+                        }
+                        CardLifecycleLog.Write("prewarm-skipped resource-mode=on-demand");
+                        return;
+                    }
+                    _cards ??= new CardGroup(_connection, OpenSettings);
                     _cards.ApplyQuickCardsFromSettings(settings);
+                    _cardSettingsApplied = true;
                 }
                 catch (Exception readError) when (readError is not OutOfMemoryException)
                 {
                     // Keep the built-in defaults; the first toggle applies the
                     // real configuration before showing anything.
                     CardLifecycleLog.Write($"prewarm-settings-unavailable hr=0x{readError.HResult:X8}");
+                    _cards ??= new CardGroup(_connection, OpenSettings);
                 }
+            }
+            else
+            {
+                if (IsOnDemand(_quickCards))
+                {
+                    CardLifecycleLog.Write("prewarm-skipped resource-mode=on-demand");
+                    return;
+                }
+                _cards ??= new CardGroup(_connection, OpenSettings);
             }
             await _cards.PrewarmAsync();
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         { CardLifecycleLog.Write($"prewarm-start-failed hr=0x{exception.HResult:X8}"); }
     }
+
+    private static bool IsOnDemand(JsonElement settings) =>
+        settings.ValueKind == JsonValueKind.Object &&
+        settings.TryGetProperty("quickCardResourceMode", out var mode) &&
+        mode.ValueKind == JsonValueKind.String &&
+        string.Equals(mode.GetString(), "OnDemand", StringComparison.OrdinalIgnoreCase);
 
     private void OnBackendEvent(JsonElement message)
     {
@@ -153,6 +184,11 @@ public partial class App : Application
                     if (payload.TryGetProperty("quickCards", out var quickCards) && quickCards.ValueKind == JsonValueKind.Object)
                         _quickCards = quickCards.Clone();
                     _cards ??= new CardGroup(_connection, OpenSettings);
+                    if (!_cardSettingsApplied && _cardSettings.ValueKind == JsonValueKind.Object)
+                    {
+                        _cards.ApplyQuickCardsFromSettings(_cardSettings);
+                        _cardSettingsApplied = true;
+                    }
                     // ToggleAtPhysicalPoint positions an opening group once;
                     // a closing group needs no hidden layout rebuild.
                     _cards.ApplyQuickCards(_quickCards, reposition: false);

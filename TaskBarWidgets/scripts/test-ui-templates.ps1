@@ -40,8 +40,25 @@ if (-not $result.micaControls.fixtureRoundTrip -or -not $result.micaControls.noP
         -not $result.micaControls.discardRestored -or -not $result.micaControls.previewRestoredOnLeave -or
         -not $result.micaControls.independentThemes -or -not $result.micaControls.reopenRearmsPreview)) -or
     -not $result.micaControls.limitsClamped -or -not $result.micaControls.defaultsFallback) { throw 'Card Mica settings checks did not complete.' }
+if ($null -eq $result.cardLyricsControls -or -not $result.cardLyricsControls.structuredFixtures -or
+    $result.cardLyricsControls.webView2Used -or $result.cardLyricsControls.htmlParsed -or
+    $result.cardLyricsControls.probeActivated) { throw 'Native lyric cards did not use structured fixtures exclusively.' }
+$lyricKinds = @($result.cardLyricsControls.checks | ForEach-Object kind)
+foreach ($required in @('ordinary','wordScan','pauseFrozen','resume','seek','lineRoll','trackSwitch',
+    'cardFontFallback','mediaHeight','translation','translationRoll','narrow','longText','alignment','theme','highContrast','reducedMotion','revisionRestart',
+    'hideReopen','unavailable')) {
+    if ($lyricKinds -notcontains $required) { throw "Native lyric check missing: $required" }
+}
+if (-not ($result.cardLyricsControls.checks | Where-Object { $_.kind -eq 'wordScan' }).reusedVisualTree -or
+    -not ($result.cardLyricsControls.checks | Where-Object { $_.kind -eq 'longText' }).identicalWidth -or
+    @($result.cardLyricsControls.images | Where-Object { $_.path -and (Test-Path -LiteralPath $_.path) -and (Get-Item -LiteralPath $_.path).Length -gt 0 }).Count -lt 5) {
+    throw 'Native lyric visual-tree reuse or nonzero layout captures were not verified.'
+}
 if (-not $result.cardLifecycle.micaNewCardInherits) { throw 'A card created during Mica preview did not inherit it.' }
 if (-not $result.cardLifecycle.micaAlwaysInputActive) { throw 'Card Mica was not configured to remain input-active.' }
+if (-not $result.cardLifecycle.onDemandSkipsPrewarm -or -not $result.cardLifecycle.prewarmRendersHidden) {
+    throw 'Resource-mode prewarm behavior was not verified.'
+}
 if (-not $result.offsetSettings.bothPayloadsVisible -or
     $result.offsetSettings.initialActivations -ne 1 -or $result.offsetSettings.initialBatches -ne 1 -or
     $result.offsetSettings.initialFinalRenders -ne 1 -or $result.offsetSettings.redrawQueries -ne 0 -or

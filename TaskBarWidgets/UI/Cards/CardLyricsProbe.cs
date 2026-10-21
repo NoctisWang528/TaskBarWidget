@@ -1,158 +1,475 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using Windows.Graphics;
+using Windows.UI.ViewManagement;
 
 namespace TaskBarWidgets.UI.Cards;
 
 internal static class CardLyricsProbe
 {
-    // Real shipped HTML/JS, synthetic complete frames, and a nonactivating,
-    // offscreen HWND. No native/media host, settings or player is started.
+    // Structured fixtures exercise the real native template in a nonactivating
+    // offscreen CardWindow. No media/native host, player, HTML, or script runs.
     internal static async Task<object> RunAsync()
     {
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(18));
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var elapsed = Stopwatch.StartNew();
-        var directory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "Media", "Web", "Lyrics"));
-        var script = string.Join("\n", new[] { "bridge.js", "state.js", "presentation.js", "app.js", "browser.js" }
-            .Select(file => File.ReadAllText(Path.Combine(directory, file))));
-        var html = File.ReadAllText(Path.Combine(directory, "index.html"))
-            .Replace("{{STYLE_CSS}}", File.ReadAllText(Path.Combine(directory, "style.css")))
-            .Replace("{{APP_JS}}", script);
-        var lyrics = new CardLyricsView { Height = 28, VerticalAlignment = VerticalAlignment.Top, RequestedTheme = ElementTheme.Dark };
-        var root = new Grid(); root.Children.Add(lyrics);
-        var host = new Window { Content = root, Title = "Card lyrics component probe" };
-        var activated = false;
-        host.Activated += (_, args) => { if (args.WindowActivationState != WindowActivationState.Deactivated) activated = true; };
+        var directory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "ui-lyrics-check"));
+        Directory.CreateDirectory(directory);
+        var images = new List<object>();
         var checks = new List<object>();
+        var content = new Grid { Height = 220 };
+        var lyrics = new CardLyricsView { Height = 96, VerticalAlignment = VerticalAlignment.Top };
+        content.Children.Add(lyrics);
+        var card = new CardWindow("Card lyrics component probe", content, 280, autoHeight: false, width: 384);
+        card.Root.RequestedTheme = ElementTheme.Dark;
+        card.Window.AppWindow.IsShownInSwitchers = false;
+        UiTemplateProbe.PreventProbeActivation(card.Window);
+        card.Window.AppWindow.MoveAndResize(new RectInt32(-30000, -30000, 384, 280));
+        var activated = false;
+        card.Window.Activated += (_, args) =>
+        {
+            if (args.WindowActivationState != WindowActivationState.Deactivated) activated = true;
+        };
+        CardLyricsTextLine[]? reusedLines = null;
+        var reusedLayoutBuilds = 0;
         try
         {
-            UiTemplateProbe.PreventProbeActivation(host);
-            host.AppWindow.IsShownInSwitchers = false;
-            host.AppWindow.MoveAndResize(new RectInt32(-30000, -30000, 480, 240));
-            host.AppWindow.Show(false);
-            await Task.Delay(60, deadline.Token);
-            root.UpdateLayout();
+            card.Show(animate: false);
+            await card.VisibleFrame.WaitAsync(deadline.Token);
+            await SettleAsync(card.Root, deadline.Token);
             if (!lyrics.IsLoaded || lyrics.ActualWidth <= 0 || lyrics.ActualHeight <= 0)
-                throw new InvalidOperationException("Lyrics probe host did not realize its content.");
-            lyrics.Activate(); lyrics.Initialize(html);
-            lyrics.Receive(Frame(1, "probe-a", "Synthetic lyric alpha", "Synthetic next alpha"));
-            var renderer = lyrics.Renderer ?? throw new InvalidOperationException("Lyrics renderer was not created.");
-            if (!renderer.Resources.TryGetValue("BrushForThemeBackgroundColor", out var bridgeBrush) ||
-                bridgeBrush is not Microsoft.UI.Xaml.Media.SolidColorBrush { Color.A: 0 })
-                throw new InvalidOperationException("The lyrics renderer kept an opaque system visual bridge background.");
-            var navigation = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            renderer.NavigationCompleted += (_, args) => {
-                if (args.IsSuccess) navigation.TrySetResult(true);
-                else navigation.TrySetException(new InvalidOperationException("Lyrics HTML navigation failed: " + args.WebErrorStatus));
-            };
-            await navigation.Task.WaitAsync(deadline.Token);
-            checks.Add(new { kind = "navigation", success = true, realShippedBundle = true });
+                throw new InvalidOperationException("Native lyrics host did not realize a nonzero layout.");
 
-            async Task<JsonElement> ReadAsync()
+            lyrics.Activate();
+            lyrics.Receive(Frame(1, "probe-a", "第一行歌词", "第二行歌词", .42, 0,
+                isPlaying: true, wordScanProgress: .35));
+            await SettleAsync(card.Root, deadline.Token);
+            AssertRealized(lyrics, "ordinary");
+            reusedLines = lyrics.Lines.ToArray();
+            reusedLayoutBuilds = lyrics.LayoutBuilds;
+            if (!lyrics.ContentVisible || lyrics.SingleLine)
+                throw new InvalidOperationException("The 96-DIP lyric host did not keep the compact two-line layout.");
+            var primary = lyrics.PrimaryLine ?? throw new InvalidOperationException("No primary lyric line was realized.");
+            if (primary.Text != "第一行歌词" || lyrics.SecondaryLine?.Text != "第二行歌词")
+                throw new InvalidOperationException("The ordinary native lyric fixture did not apply current/next text.");
+            if (lyrics.SecondaryLine.Opacity is < .66 or > .69)
+                throw new InvalidOperationException("The next-line progress opacity was not applied after layout.");
+            AssertScanLayout(primary);
+            checks.Add(new
             {
-                async Task<string> ExecuteAsync() => await renderer.ExecuteScriptAsync(ReadState);
-                using var state = JsonDocument.Parse(await ExecuteAsync().WaitAsync(deadline.Token));
-                return state.RootElement.Clone();
+                kind = "ordinary",
+                width = lyrics.ActualWidth,
+                height = lyrics.ActualHeight,
+                rowHeight = lyrics.RowHeight,
+                singleLine = lyrics.SingleLine,
+                primary = primary.Text,
+                next = lyrics.SecondaryLine?.Text
+            });
+            images.Add(new { kind = "ordinaryDark", path = await CaptureAsync(card.Root, directory, "lyrics-ordinary-dark.png") });
+
+            lyrics.SetCardFallbackFont(new FontFamily("Segoe UI"));
+            lyrics.Receive(Frame(1, "probe-a", "第一行歌词", "第二行歌词", .42, 0,
+                isPlaying: true, wordScanProgress: .35));
+            await SettleAsync(card.Root, deadline.Token);
+            if (lyrics.PrimaryLine?.BaseText.FontFamily.Source != "Segoe UI")
+                throw new InvalidOperationException("The card-level font fallback was not consumed by the next lyric frame.");
+            checks.Add(new { kind = "cardFontFallback", family = lyrics.PrimaryLine.BaseText.FontFamily.Source });
+
+            lyrics.Height = 62;
+            card.Root.UpdateLayout();
+            await SettleAsync(card.Root, deadline.Token);
+            if (lyrics.SingleLine || lyrics.PrimaryLine is not { ActualWidth: > 0, ActualHeight: > 0 } ||
+                lyrics.SecondaryLine?.Visibility != Visibility.Visible)
+                throw new InvalidOperationException("The media-card lyric height did not keep two nonempty compact rows.");
+            checks.Add(new { kind = "mediaHeight", height = lyrics.ActualHeight, rowHeight = lyrics.RowHeight,
+                singleLine = lyrics.SingleLine });
+            lyrics.Height = 96;
+            card.Root.UpdateLayout();
+            await SettleAsync(card.Root, deadline.Token);
+
+            // Progress-only updates must reuse the same four line objects and all
+            // derived TextBlocks; only the scan clip and scroll offset change.
+            double previousClip = -1;
+            foreach (var (revision, progress) in new[] { (2L, .1), (3L, .3), (4L, .65), (5L, .95) })
+            {
+                lyrics.Receive(Frame(revision, "probe-a", "第一行歌词", "第二行歌词", .42, 0,
+                    isPlaying: false, wordScanProgress: progress));
+                await SettleAsync(card.Root, deadline.Token);
+                var line = lyrics.PrimaryLine!;
+                if (line.ScanClipWidth <= previousClip)
+                    throw new InvalidOperationException("The native scan clip did not advance with authoritative progress.");
+                previousClip = line.ScanClipWidth;
             }
-            async Task<JsonElement> UntilAsync(Func<JsonElement, bool> matches, string failure)
+            if (!ReusedSameElements(lyrics, reusedLines) || lyrics.LayoutBuilds != reusedLayoutBuilds)
+                throw new InvalidOperationException("Frame updates rebuilt lyric TextBlocks instead of reusing the visual tree.");
+            checks.Add(new { kind = "wordScan", finalClip = previousClip, reusedVisualTree = true, layoutBuilds = reusedLayoutBuilds });
+
+            lyrics.Receive(Frame(6, "probe-a", "第一行歌词", "第二行歌词", .42, 0,
+                isPlaying: false, wordScanProgress: .62));
+            await SettleAsync(card.Root, deadline.Token);
+            if (lyrics.DisplayedWordScan != .62 || lyrics.ScanSmoothing)
+                throw new InvalidOperationException("Pause did not freeze the authoritative word-scan position.");
+            checks.Add(new { kind = "pauseFrozen", progress = lyrics.DisplayedWordScan });
+
+            lyrics.Receive(Frame(7, "probe-a", "第一行歌词", "第二行歌词", .42, 0,
+                isPlaying: true, wordScanProgress: .82));
+            await SettleAsync(card.Root, deadline.Token);
+            lyrics.Receive(Frame(8, "probe-a", "第一行歌词", "第二行歌词", .43, 0,
+                isPlaying: true, wordScanProgress: .9));
+            await Task.Delay(70, deadline.Token);
+            if (lyrics.DisplayedWordScan is not { } smoothing || smoothing < .82 || smoothing > .9)
+                throw new InvalidOperationException("Resume did not smooth toward the new authoritative scan progress.");
+            await UntilAsync(() => lyrics.DisplayedWordScan == .9, deadline, "Word-scan smoothing never converged.");
+            checks.Add(new { kind = "resume", smoothedTo = .9 });
+
+            lyrics.Receive(Frame(9, "probe-a", "Seek 校正后的当前行", "Seek 后的下一行", .08, 7,
+                isPlaying: true, wordScanProgress: .18));
+            await SettleAsync(card.Root, deadline.Token);
+            if (lyrics.TransitionActive || lyrics.PrimaryLine?.Text != "Seek 校正后的当前行" ||
+                lyrics.DisplayedWordScan != .18)
+                throw new InvalidOperationException("Seek did not cancel interpolation and apply the authoritative frame immediately.");
+            checks.Add(new { kind = "seek", transition = false, progress = lyrics.DisplayedWordScan });
+
+            lyrics.Receive(Frame(10, "probe-a", "Seek 后的下一行", "再下一行", .12, 8,
+                isPlaying: true, wordScanProgress: .25));
+            await SettleAsync(card.Root, deadline.Token);
+            if (!lyrics.TransitionActive)
+                throw new InvalidOperationException("A sequential lyric line change did not start the native roll.");
+            var rollingTops = lyrics.Lines
+                .Where(line => line.Visibility == Visibility.Visible)
+                .Select(Canvas.GetTop)
+                .ToArray();
+            if (rollingTops.Length != 3 || rollingTops.Distinct().Count() != 3 ||
+                Math.Abs(lyrics.TransitionDistance - lyrics.RowPitch) > .01)
+                throw new InvalidOperationException("The native single-line roll reused a row or had an invalid distance.");
+            var singleRollDistance = lyrics.TransitionDistance;
+            lyrics.Receive(Frame(10, "probe-a", "Seek 后的下一行", "再下一行", .12, 8,
+                isPlaying: true, wordScanProgress: .6));
+            await Task.Delay(100, deadline.Token);
+            var promoting = lyrics.PrimaryLine ??
+                throw new InvalidOperationException("The promoting line disappeared during a roll.");
+            if (promoting.ContentWidth <= 0 ||
+                promoting.ScanClipWidth < promoting.ContentWidth * .55)
+                throw new InvalidOperationException("Progress-only frames during a roll did not update the promoting line scan.");
+            images.Add(new { kind = "lineRoll", path = await CaptureAsync(card.Root, directory, "lyrics-line-roll-dark.png") });
+            await UntilAsync(() => !lyrics.TransitionActive, deadline, "Sequential lyric roll did not complete.");
+            await SettleAsync(card.Root, deadline.Token);
+            if (lyrics.PrimaryLine?.Text != "Seek 后的下一行" || lyrics.SecondaryLine?.Text != "再下一行")
+                throw new InvalidOperationException("The completed line roll lost the promoted current or incoming next text.");
+            checks.Add(new { kind = "lineRoll", promoted = lyrics.PrimaryLine?.Text, next = lyrics.SecondaryLine?.Text,
+                rows = rollingTops.Length, distance = singleRollDistance });
+
+            lyrics.Receive(Frame(11, "probe-b", "切歌后的当前行", "切歌后的下一行", .2, 0,
+                isPlaying: true, wordScanProgress: null));
+            await SettleAsync(card.Root, deadline.Token);
+            if (lyrics.TransitionActive || lyrics.PrimaryLine?.Text != "切歌后的当前行")
+                throw new InvalidOperationException("Track switch reused the old roll or text.");
+            checks.Add(new { kind = "trackSwitch", immediate = true });
+
+            lyrics.Receive(Frame(12, "probe-b", "Translation current", "Translation next", .2, 0,
+                isPlaying: true, translationMode: true, currentTranslation: "译文当前行",
+                nextTranslation: "译文下一行", wordScanProgress: null));
+            await SettleAsync(card.Root, deadline.Token);
+            var translationLine = lyrics.SecondaryLine ??
+                throw new InvalidOperationException("Translation mode did not realize a second line.");
+            if (translationLine.Text != "译文当前行" ||
+                translationLine.BaseText.Foreground is not SolidColorBrush translationBrush ||
+                translationBrush.Color != lyrics.TranslationColor)
+                throw new InvalidOperationException("Translation mode did not use the translation foreground token.");
+            checks.Add(new { kind = "translation", secondary = translationLine.Text });
+            images.Add(new { kind = "translationDark", path = await CaptureAsync(card.Root, directory, "lyrics-translation-dark.png") });
+
+            lyrics.Receive(Frame(13, "probe-b", "Translation next", "Translation after", .1, 1,
+                isPlaying: true, translationMode: true, currentTranslation: "译文下一行",
+                nextTranslation: "译文再下一行", wordScanProgress: null));
+            await SettleAsync(card.Root, deadline.Token);
+            if (!lyrics.TransitionActive || lyrics.Lines.Count(line => line.Visibility == Visibility.Visible) != 4 ||
+                Math.Abs(lyrics.TransitionDistance - (lyrics.RowPitch * 2)) > .01)
+                throw new InvalidOperationException("Translation mode did not start a two-row pair roll.");
+            var translationRollDistance = lyrics.TransitionDistance;
+            await UntilAsync(() => !lyrics.TransitionActive, deadline, "Translation pair roll did not complete.");
+            await SettleAsync(card.Root, deadline.Token);
+            if (lyrics.PrimaryLine?.Text != "Translation next" || lyrics.SecondaryLine?.Text != "译文下一行")
+                throw new InvalidOperationException("Translation pair roll did not commit the next original/translation pair.");
+            checks.Add(new { kind = "translationRoll", rows = 4, distance = translationRollDistance,
+                primary = lyrics.PrimaryLine?.Text, translation = lyrics.SecondaryLine?.Text });
+
+            lyrics.Height = 28;
+            card.Root.UpdateLayout();
+            await SettleAsync(card.Root, deadline.Token);
+            if (!lyrics.SingleLine || lyrics.SecondaryLine?.Visibility != Visibility.Collapsed ||
+                lyrics.PrimaryLine is not { ActualWidth: > 0, ActualHeight: > 0 })
+                throw new InvalidOperationException(
+                    $"Narrow lyrics did not collapse to one nonempty line. single={lyrics.SingleLine} " +
+                    $"host={lyrics.ActualWidth}x{lyrics.ActualHeight} row={lyrics.RowHeight:0.##} " +
+                    $"secondary={lyrics.SecondaryLine?.Visibility} " +
+                    $"primary={lyrics.PrimaryLine?.ActualWidth}x{lyrics.PrimaryLine?.ActualHeight} " +
+                    $"text={lyrics.PrimaryLine?.BaseText.ActualWidth}x{lyrics.PrimaryLine?.BaseText.ActualHeight}");
+            checks.Add(new { kind = "narrow", width = lyrics.ActualWidth, height = lyrics.ActualHeight, singleLine = true });
+            images.Add(new { kind = "narrow", path = await CaptureAsync(card.Root, directory, "lyrics-narrow-dark.png") });
+
+            lyrics.Height = 96;
+            card.Root.UpdateLayout();
+            await SettleAsync(card.Root, deadline.Token);
+            var longText = "这是一行很长的歌词，用于验证卡片内不会重建文本布局，并且扫描推进时能够水平跟随而不越界。" +
+                string.Concat(Enumerable.Repeat("连续文本 Long lyric phrase 0123456789。", 5));
+            lyrics.Receive(Frame(14, "probe-b", longText, "长文本的下一行", .5, 1,
+                isPlaying: false, wordScanProgress: .7));
+            await SettleAsync(card.Root, deadline.Token);
+            primary = lyrics.PrimaryLine!;
+            if (!primary.HasHorizontalOverflow || primary.HorizontalOffset <= 0 ||
+                Math.Abs(primary.BaseText.ActualWidth - primary.ScanText.ActualWidth) > .5)
+                throw new InvalidOperationException("Long lyric text did not use identical base/scan layout with bounded horizontal follow.");
+            checks.Add(new
             {
-                while (true)
+                kind = "longText",
+                contentWidth = primary.ContentWidth,
+                viewportWidth = lyrics.ActualWidth,
+                offset = primary.HorizontalOffset,
+                identicalWidth = Math.Abs(primary.BaseText.ActualWidth - primary.ScanText.ActualWidth) <= .5
+            });
+            images.Add(new { kind = "longTextDark", path = await CaptureAsync(card.Root, directory, "lyrics-long-text-dark.png") });
+
+            card.Root.RequestedTheme = ElementTheme.Light;
+            await Task.Delay(140, deadline.Token);
+            card.Root.UpdateLayout();
+            await SettleAsync(card.Root, deadline.Token);
+            if (lyrics.PrimaryColor.R != 20 || lyrics.PrimaryColor.G != 20 || lyrics.PrimaryColor.B != 20)
+                throw new InvalidOperationException("Light theme did not switch the native lyric foreground.");
+            checks.Add(new { kind = "theme", theme = lyrics.EffectiveTheme.ToString(), primary = lyrics.PrimaryColor.ToString() });
+            images.Add(new { kind = "longTextLight", path = await CaptureAsync(card.Root, directory, "lyrics-long-text-light.png") });
+
+            lyrics.Receive(Frame(15, "probe-b", "居中歌词", "下一行", .4, 1,
+                isPlaying: false, textAlignment: "Center"));
+            await SettleAsync(card.Root, deadline.Token);
+            primary = lyrics.PrimaryLine!;
+            var expectedCenter = (lyrics.ActualWidth - primary.ContentWidth) / 2;
+            if (Canvas.GetLeft(primary.BaseText) <= 0 ||
+                Math.Abs(Canvas.GetLeft(primary.BaseText) - expectedCenter) > 1 ||
+                Math.Abs(Canvas.GetLeft(primary.BaseText) - Canvas.GetLeft(primary.ScanText)) > .01)
+                throw new InvalidOperationException("Center alignment did not keep base/scan in the same centered layout.");
+            checks.Add(new { kind = "alignment", alignment = "Center",
+                left = Canvas.GetLeft(primary.BaseText), width = primary.BaseText.ActualWidth });
+
+            lyrics.ProbeHighContrast = true;
+            lyrics.RefreshAppearance();
+            await SettleAsync(card.Root, deadline.Token);
+            var expected = new UISettings().GetColorValue(UIColorType.Foreground);
+            if (lyrics.PrimaryColor.A != 255 || lyrics.PrimaryColor.R != expected.R ||
+                lyrics.PrimaryColor.G != expected.G || lyrics.PrimaryColor.B != expected.B ||
+                lyrics.TextShadowEnabled || lyrics.SecondaryLine?.Opacity != 1 ||
+                lyrics.SecondaryColor != lyrics.PrimaryColor)
+                throw new InvalidOperationException("High contrast did not use the opaque system foreground without text shadow.");
+            checks.Add(new { kind = "highContrast", primary = lyrics.PrimaryColor.ToString(), shadow = lyrics.TextShadowEnabled });
+            images.Add(new { kind = "highContrast", path = await CaptureAsync(card.Root, directory, "lyrics-high-contrast.png") });
+            lyrics.ProbeHighContrast = null;
+            lyrics.RefreshAppearance();
+
+            lyrics.ProbeReducedMotion = true;
+            lyrics.Receive(Frame(16, "probe-b", "下一行", "Reduced motion next", .1, 2,
+                isPlaying: false, wordScanProgress: null));
+            await SettleAsync(card.Root, deadline.Token);
+            if (lyrics.TransitionActive || lyrics.PrimaryLine?.Text != "下一行")
+                throw new InvalidOperationException("Reduced motion did not replace the lyric roll with an immediate update.");
+            checks.Add(new { kind = "reducedMotion", immediate = true });
+            lyrics.ProbeReducedMotion = null;
+
+            lyrics.Activate();
+            lyrics.Receive(Frame(50, "probe-resource", "Low", "Old", .1, 0));
+            if (lyrics.Revision != 50)
+                throw new InvalidOperationException("Resource-probe revision gate rejected a valid frame.");
+            lyrics.Activate();
+            lyrics.Receive(Frame(1, "probe-resource", "Restarted", "New", .1, 0));
+            if (lyrics.Revision != 1)
+                throw new InvalidOperationException("A backend restart with a lower revision was rejected after resubscribe.");
+            if (CardLyricsFrameParser.TryParse(JsonSerializer.SerializeToElement(new
                 {
-                    deadline.Token.ThrowIfCancellationRequested();
-                    var state = await ReadAsync();
-                    if (state.ValueKind == JsonValueKind.Object && matches(state)) return state;
-                    try { await Task.Delay(40, deadline.Token); }
-                    catch (OperationCanceledException) { throw new InvalidOperationException(failure); }
-                }
-            }
-            bool HasText(JsonElement state, string expected) => state.GetProperty("current").GetString() == expected &&
-                state.GetProperty("currentWidth").GetDouble() > 0 && state.GetProperty("currentHeight").GetDouble() > 0;
-            var narrow = await UntilAsync(state => HasText(state, "Synthetic lyric alpha") && state.GetProperty("single").GetBoolean() &&
-                state.GetProperty("nextVisibility").GetString() == "hidden" && renderer.Visibility == Visibility.Visible &&
-                state.GetProperty("bodyBackground").GetString() == "rgba(0, 0, 0, 0)" &&
-                state.GetProperty("surfaceBackground").GetString() == "rgba(0, 0, 0, 0)",
-                "Narrow lyrics did not display a nonempty single line.");
-            checks.Add(new { kind = "narrow", state = narrow });
-
-            lyrics.Height = 92; root.UpdateLayout();
-            var tall = await UntilAsync(state => HasText(state, "Synthetic lyric alpha") && !state.GetProperty("single").GetBoolean() &&
-                state.GetProperty("nextVisibility").GetString() == "visible" && state.GetProperty("next").GetString() == "Synthetic next alpha",
-                "Taller lyrics did not restore both synchronized lines.");
-            checks.Add(new { kind = "tall", state = tall });
-
-            lyrics.RequestedTheme = ElementTheme.Light;
-            var light = await UntilAsync(state => HasText(state, "Synthetic lyric alpha") &&
-                state.GetProperty("primary").GetString()!.Replace(" ", "").Contains("20,20,20"),
-                "A theme-only change did not recolor the existing lyric frame.");
-            var darkPrimary = narrow.GetProperty("primary").GetString()!;
-            if (!darkPrimary.Replace(" ", "").Contains("255,255,255") || darkPrimary == light.GetProperty("primary").GetString())
-                throw new InvalidOperationException("Dark and light lyric themes did not resolve distinct readable colors.");
-            checks.Add(new { kind = "theme", darkPrimary, light = light.GetProperty("primary").GetString() });
+                    revision = 2,
+                    trackId = "probe-resource",
+                    available = true,
+                    scripts = Array.Empty<string>()
+                }), out _))
+                throw new InvalidOperationException("A legacy script frame was accepted by the structured frame parser.");
+            checks.Add(new { kind = "revisionRestart", acceptedLowerRevision = true, rejectedLegacyScripts = true });
 
             lyrics.HideLyrics();
-            lyrics.Receive(Frame(999, "ignored-hidden", "Hidden frame must be dropped", "Hidden next"));
-            await Task.Delay(60, deadline.Token);
-            var hidden = await ReadAsync();
-            if (renderer.Visibility != Visibility.Collapsed || !HasText(hidden, "Synthetic lyric alpha") || hidden.GetProperty("revision").GetInt32() != 1)
-                throw new InvalidOperationException("A hidden lyric frame executed or made the renderer visible.");
+            var hiddenRevision = lyrics.Revision;
+            lyrics.Receive(Frame(99, "probe-hidden", "Hidden frame must be ignored", "Hidden next", .1, 0,
+                isPlaying: true, wordScanProgress: .2));
+            if (lyrics.ContentVisible || lyrics.Revision != hiddenRevision ||
+                lyrics.TransitionActive || lyrics.AnimationTimerActive)
+                throw new InvalidOperationException("Hidden lyrics consumed a frame or remained visible.");
+            lyrics.Height = 120;
+            card.Root.UpdateLayout();
+            await SettleAsync(card.Root, deadline.Token);
+            if (lyrics.ContentVisible)
+                throw new InvalidOperationException("A hidden lyric host was resurrected by a layout pass.");
+            lyrics.Height = 96;
+            card.Root.UpdateLayout();
             lyrics.Activate();
-            lyrics.Receive(Frame(2, "probe-a", "Synthetic lyric alpha", "Synthetic next alpha"));
-            await UntilAsync(state => state.GetProperty("revision").GetInt32() == 2 && renderer.Visibility == Visibility.Visible,
-                "Reopening did not apply its current snapshot.");
-            checks.Add(new { kind = "hiddenFrame", ignored = true });
+            lyrics.Receive(Frame(17, "probe-b", "Reopen snapshot current", "Reopen snapshot next", .1, 2,
+                isPlaying: true, wordScanProgress: null));
+            await SettleAsync(card.Root, deadline.Token);
+            if (!lyrics.ContentVisible || lyrics.TransitionActive ||
+                lyrics.PrimaryLine?.Text != "Reopen snapshot current" || lyrics.LayoutBuilds != reusedLayoutBuilds)
+                throw new InvalidOperationException("Reopen did not apply the latest snapshot immediately with reused visuals.");
+            checks.Add(new { kind = "hideReopen", transition = false, layoutBuilds = lyrics.LayoutBuilds });
 
-            // Keep ExecuteScriptAsync in flight across hide/show. This catches a
-            // lost new-generation frame when the previous apply owns the pump.
-            lyrics.Receive(Frame(3, "probe-a", "Old frame must not survive", "Old next", delay: true));
-            lyrics.HideLyrics();
-            if (renderer.Visibility != Visibility.Collapsed) throw new InvalidOperationException("Hide did not immediately collapse lyrics.");
-            lyrics.Activate();
-            lyrics.Receive(Frame(4, "probe-b", "Synthetic lyric beta", "Synthetic next beta"));
-            var reopened = await UntilAsync(state => HasText(state, "Synthetic lyric beta") && state.GetProperty("revision").GetInt32() == 4 &&
-                renderer.Visibility == Visibility.Visible, "Reopening retained an old track or lost the new-generation lyric frame.");
-            checks.Add(new { kind = "hideReopenDuringApply", state = reopened, hiddenFrameDropped = true });
-
-            lyrics.Receive(JsonSerializer.SerializeToElement(new { revision = 5, trackId = "", available = false, scripts = Array.Empty<string>() }));
-            if (renderer.Visibility != Visibility.Collapsed) throw new InvalidOperationException("Unavailable lyrics remained visible.");
-            var position = host.AppWindow.Position;
-            var size = host.AppWindow.Size;
-            if (activated || position.X + size.Width >= -20000 || position.Y + size.Height >= -20000)
-                throw new InvalidOperationException("Lyrics probe activated or left the offscreen region.");
+            lyrics.Receive(Frame(18, "probe-b", "", "", 0, -1, available: false,
+                isPlaying: false, wordScanProgress: null, scene: "message"));
+            await SettleAsync(card.Root, deadline.Token);
+            if (lyrics.ContentVisible)
+                throw new InvalidOperationException("Unavailable lyrics left the native lyric content visible.");
             checks.Add(new { kind = "unavailable", collapsed = true });
-            return new { checks, durationMs = elapsed.ElapsedMilliseconds, probeActivated = activated, syntheticFrames = true,
-                actualPlayerTimingVerified = false, wordScanAnimationVisuallyVerified = false };
+
+            var position = card.Window.AppWindow.Position;
+            var size = card.Window.AppWindow.Size;
+            if (activated || position.X + size.Width >= -20000 || position.Y + size.Height >= -20000)
+                throw new InvalidOperationException("The lyrics probe activated or left its offscreen region.");
+            return new
+            {
+                checks,
+                images,
+                durationMs = elapsed.ElapsedMilliseconds,
+                probeActivated = activated,
+                structuredFixtures = true,
+                webView2Used = false,
+                htmlParsed = false,
+                actualPlayerTimingVerified = false,
+                realHighContrastToggleVerified = false
+            };
         }
-        finally { lyrics.Dispose(); host.Close(); }
+        finally
+        {
+            lyrics.ProbeHighContrast = null;
+            lyrics.ProbeReducedMotion = null;
+            lyrics.Dispose();
+            card.Close();
+        }
     }
 
-    private static JsonElement Frame(int revision, string trackId, string current, string next, bool delay = false)
+    internal static JsonElement Frame(
+        long revision,
+        string trackId,
+        string current,
+        string next,
+        double progress = .4,
+        int currentLineIndex = 0,
+        bool available = true,
+        bool isPlaying = false,
+        double? wordScanProgress = null,
+        bool translationMode = false,
+        string currentTranslation = "",
+        string nextTranslation = "",
+        bool animateTransition = true,
+        string scene = "lyrics",
+        bool isPureMusic = false,
+        double fontSize = 18,
+        string textAlignment = "Left",
+        object? nativeAppearance = null)
     {
-        string Message(string type, object payload) => "window.taskbarLyrics.receive(" + JsonSerializer.Serialize(new { version = 1, type, payload }) + ")";
-        var scripts = new[] {
-            delay ? "(()=>{const start=performance.now();while(performance.now()-start<120){}})()" : "void 0",
-            Message("style", new { fontFamily = "Segoe UI", fontSize = 18, layoutScalePercent = 100, showCover = false, enableControlPanel = false }),
-            Message("nativeAppearance", new { fontSize = 18, layoutScalePercent = 100 }),
-            Message("lyrics", new { current, next, progress = .4, currentLineIndex = 0, trackId, isPureMusic = false, isPlaying = false,
-                currentTranslation = "", nextTranslation = "", translationMode = false, animateTransition = false, scene = "lyrics" }),
-            "window.__taskbarProbeRevision=" + revision
-        };
-        return JsonSerializer.SerializeToElement(new { revision, trackId, available = true, scripts });
+        return JsonSerializer.SerializeToElement(new
+        {
+            renderVersion = 2,
+            revision,
+            trackId,
+            available,
+            isPlaying,
+            lyrics = new
+            {
+                current,
+                next,
+                progress,
+                currentLineIndex,
+                trackId,
+                isPureMusic,
+                isPlaying,
+                currentTranslation,
+                nextTranslation,
+                translationMode,
+                animateTransition,
+                wordScanProgress,
+                scene
+            },
+            style = new
+            {
+                fontFamily = "Segoe UI Variable Text",
+                layoutScalePercent = 100,
+                fontSize,
+                fontWeight = 500,
+                showCover = false,
+                enableControlPanel = false,
+                surfaceColor = "transparent",
+                surfaceShadow = "none",
+                primaryColor = "rgba(255, 255, 255, .95)",
+                secondaryColor = "rgba(255, 255, 255, .65)",
+                translationColor = "rgba(255, 255, 255, .7)",
+                wordScanOverlayColor = "#8ed8ff",
+                textShadow = "0 1px 2px rgba(0, 0, 0, .36)",
+                textAlignment,
+                viewportDescenderBuffer = 2,
+                primaryOffsetY = 1,
+                secondaryOffsetY = 2
+            },
+            nativeAppearance = nativeAppearance ?? new Dictionary<string, object?>()
+        }, JsonOptions);
     }
 
-    private const string ReadState = """
-        (()=>{
-          const current=document.getElementById('currentLineText'),next=document.getElementById('nextLine');
-          if(!current||!next)return null;
-          const bounds=current.getBoundingClientRect();
-          return {current:current.textContent,next:document.getElementById('nextLineText').textContent,
-            single:document.documentElement.classList.contains('card-single-line'),nextVisibility:getComputedStyle(next).visibility,
-            primary:getComputedStyle(document.documentElement).getPropertyValue('--primary').trim(),
-            bodyBackground:getComputedStyle(document.body).backgroundColor,
-            surfaceBackground:getComputedStyle(document.getElementById('layout')).backgroundColor,
-            currentWidth:bounds.width,currentHeight:bounds.height,revision:window.__taskbarProbeRevision||0,
-            viewportWidth:innerWidth,viewportHeight:innerHeight};
-        })()
-        """;
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    private static void AssertRealized(CardLyricsView lyrics, string kind)
+    {
+        if (!lyrics.ContentVisible || lyrics.PrimaryLine is not { } line ||
+            line.BaseText.ActualWidth <= 0 || line.BaseText.ActualHeight <= 0 ||
+            line.ScanText.ActualWidth <= 0 || line.ScanText.ActualHeight <= 0)
+            throw new InvalidOperationException($"The {kind} lyrics fixture did not realize nonzero text.");
+    }
+
+    private static void AssertScanLayout(CardLyricsTextLine line)
+    {
+        if (!line.IsScanning || line.ScanText.Visibility != Visibility.Visible ||
+            line.ScanClipWidth <= 0 || line.BaseText.FontSize != line.ScanText.FontSize ||
+            Math.Abs(line.BaseText.ActualWidth - line.ScanText.ActualWidth) > .5 ||
+            AutomationProperties.GetAccessibilityView(line.ScanText) != AccessibilityView.Raw)
+            throw new InvalidOperationException("Base and scan lyric copies did not share identical layout and a visible scan clip.");
+    }
+
+    private static bool ReusedSameElements(CardLyricsView lyrics, IReadOnlyList<CardLyricsTextLine>? lines)
+    {
+        if (lines is null || lyrics.Lines.Count != lines.Count) return false;
+        for (var index = 0; index < lines.Count; index++)
+            if (!ReferenceEquals(lines[index], lyrics.Lines[index])) return false;
+        return true;
+    }
+
+    private static async Task<string> CaptureAsync(FrameworkElement element, string directory, string name)
+    {
+        var path = Path.GetFullPath(Path.Combine(directory, name));
+        await UiLayoutProbe.CaptureAsync(element, path);
+        if (!File.Exists(path) || new FileInfo(path).Length == 0)
+            throw new InvalidOperationException("The lyric layout capture was empty.");
+        return path;
+    }
+
+    private static async Task SettleAsync(FrameworkElement root, CancellationToken token)
+    {
+        root.UpdateLayout();
+        await Task.Delay(40, token);
+        root.UpdateLayout();
+    }
+
+    private static async Task UntilAsync(Func<bool> condition, CancellationTokenSource deadline, string failure)
+    {
+        while (!condition())
+        {
+            if (deadline.IsCancellationRequested) throw new InvalidOperationException(failure);
+            try { await Task.Delay(25, deadline.Token); }
+            catch (OperationCanceledException) { throw new InvalidOperationException(failure); }
+        }
+    }
 }
