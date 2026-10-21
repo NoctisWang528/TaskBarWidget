@@ -13,7 +13,6 @@ internal static class UiTemplateProbe
 {
     internal static async Task RunAsync(Application app, string[] args)
     {
-        CardLyricsView.ProfileName = "CardWebView2-template-probe";
         SettingsWindow? settings = null;
         CardGroup? cards = null;
         using var connection = new UiConnection("TaskBarWidgets.UI.template-probe.disconnected");
@@ -133,7 +132,7 @@ internal static class UiTemplateProbe
                 quickCardOrder = new[] { "traffic", "device", "media", "weather" },
                 quickCardColumns = new Dictionary<string, int> { ["traffic"] = 0, ["device"] = 0, ["media"] = 0, ["weather"] = 1 },
                 quickCardEnabled = new Dictionary<string, bool> { ["weather"] = false, ["traffic"] = true, ["device"] = true, ["media"] = true },
-                quickCardResourceMode = "OnDemand",
+                quickCardResourceMode = "Resident",
                 cardMicaTintOpacity = 0.08,
                 cardMicaLuminosityOpacity = 0.30
             });
@@ -145,6 +144,27 @@ internal static class UiTemplateProbe
                     throw new InvalidOperationException("Quick-card settings did not apply the persisted Mica tuning.");
             cardLifecycle["prewarmFollowsQuickCardSettings"] = true;
             cards.SetQuickCardEnabled("weather", true);
+            // On-demand must not create or render a hidden card set; keep this
+            // check before switching back to resident for the visual probe.
+            var onDemandCards = new CardGroup(connection, _ => throw new InvalidOperationException("Probe must not invoke settings."));
+            onDemandCards.ApplyQuickCardsFromSettings(JsonSerializer.SerializeToElement(new
+            {
+                quickCardResourceMode = "OnDemand",
+                quickCardEnabled = new Dictionary<string, bool> { ["weather"] = true, ["traffic"] = true, ["device"] = true, ["media"] = true }
+            }));
+            await onDemandCards.PrewarmAsync();
+            if (onDemandCards.CardWindows.Any(card => card.Prewarmed) ||
+                onDemandCards.CardWindows.Any(card => IsWindowVisible(card.Handle)))
+                throw new InvalidOperationException("On-demand prewarm created or rendered hidden card surfaces.");
+            cardLifecycle["onDemandSkipsPrewarm"] = true;
+            onDemandCards.Dispose();
+            cards.ApplyQuickCardsFromSettings(JsonSerializer.SerializeToElement(new
+            {
+                quickCardResourceMode = "Resident",
+                quickCardOrder = new[] { "traffic", "device", "media", "weather" },
+                quickCardColumns = new Dictionary<string, int> { ["traffic"] = 0, ["device"] = 0, ["media"] = 0, ["weather"] = 1 },
+                quickCardEnabled = new Dictionary<string, bool> { ["weather"] = true, ["traffic"] = true, ["device"] = true, ["media"] = true }
+            }));
             // The shipped startup prewarm must render each card once with no
             // visible window and no layout drift, so the first click only shows
             // already-committed windows.

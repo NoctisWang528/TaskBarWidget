@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using Windows.Graphics;
 
 namespace TaskBarWidgets.UI.Cards;
@@ -26,8 +27,8 @@ internal static class CardMicaVisualProbe
         string? error = null;
         try
         {
-            // All generated files, including the optional WebView profile, stay
-            // in this build's diagnostic directory, never in user configuration.
+            // All generated files stay in this build's diagnostic directory,
+            // never in user configuration.
             var diagnosticRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "ui-mica-check"));
             var requestedPath = Path.GetFullPath(Argument(args, "--result") ??
                 Path.Combine(diagnosticRoot, $"manual-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Environment.ProcessId}", "probe.json"));
@@ -35,7 +36,6 @@ internal static class CardMicaVisualProbe
                 throw new ArgumentException("Mica results must be inside the build's ui-mica-check directory.");
             Directory.CreateDirectory(Path.GetDirectoryName(requestedPath)!);
             resultPath = requestedPath;
-            CardLyricsView.ProfileName = Path.Combine(Path.GetDirectoryName(resultPath)!, "webview-profile");
             var holdMilliseconds = Number(args, "--hold-ms", 9000, 2000, 60000);
             var stabilizeMilliseconds = Number(args, "--stabilize-ms", 1800, 1000, 10000);
             var samples = SampleFile(args) ?? DefaultSamples();
@@ -76,7 +76,7 @@ internal static class CardMicaVisualProbe
                 if (!Equals(next, diagnostics)) { diagnostics = next; stableSince = clock.ElapsedMilliseconds; }
             }
             var stabilized = clock.ElapsedMilliseconds - stableSince >= stabilizeMilliseconds;
-            object? painted = lyrics is null ? null : await PaintedBackgroundsAsync(lyrics);
+            object? painted = lyrics is null ? null : PaintedBackgrounds(lyrics);
             // Read again after connection, stabilization and optional DOM work.
             var finalDiagnostics = card.MicaBackdrop.Diagnostics;
             stabilized &= Equals(diagnostics, finalDiagnostics);
@@ -142,58 +142,62 @@ internal static class CardMicaVisualProbe
 
     private static void InitializeLyrics(CardLyricsView lyrics)
     {
-        var directory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "Media", "Web", "Lyrics"));
-        var script = string.Join("\n", new[] { "bridge.js", "state.js", "presentation.js", "app.js", "browser.js" }
-            .Select(file => File.ReadAllText(Path.Combine(directory, file))));
-        var html = File.ReadAllText(Path.Combine(directory, "index.html"))
-            .Replace("{{STYLE_CSS}}", File.ReadAllText(Path.Combine(directory, "style.css")))
-            .Replace("{{APP_JS}}", script);
         lyrics.Activate();
-        lyrics.Initialize(html);
-        lyrics.Receive(JsonSerializer.SerializeToElement(new
-        {
-            revision = 1,
-            trackId = "visual-probe",
-            available = true,
-            scripts = new[]
-            {
-                "window.taskbarLyrics.receive({version:1,type:'style',payload:{fontFamily:'Segoe UI',fontSize:15,layoutScalePercent:100,showCover:false,enableControlPanel:false}})",
-                "window.taskbarLyrics.receive({version:1,type:'nativeAppearance',payload:{fontSize:15,layoutScalePercent:100}})",
-                "window.taskbarLyrics.receive({version:1,type:'lyrics',payload:{current:'歌词块背景应当透明',next:'第二行歌词',progress:.4,currentLineIndex:0,trackId:'visual-probe',isPureMusic:false,isPlaying:false,currentTranslation:'',nextTranslation:'',translationMode:false,animateTransition:false,scene:'lyrics'}})"
-            }
-        }));
+        lyrics.Receive(CardLyricsProbe.Frame(
+            1,
+            "visual-probe",
+            "歌词块背景应当透明",
+            "第二行歌词",
+            .4,
+            0,
+            isPlaying: false,
+            wordScanProgress: .45,
+            animateTransition: false,
+            fontSize: 15));
     }
 
-    // Reports every element that still paints a background, so a visible block
-    // inside a card can be attributed to the DOM or to the renderer surface.
-    private static async Task<object> PaintedBackgroundsAsync(CardLyricsView lyrics)
+    // Reports every painted descendant so an opaque block can be attributed to
+    // the native lyrics tree rather than to the card material.
+    private static object PaintedBackgrounds(CardLyricsView lyrics)
     {
-        if (lyrics.Renderer?.CoreWebView2 is not { } core) return new { available = false };
-        const string script = """
-            (()=>{
-              const rows=[];
-              for(const element of document.querySelectorAll('html,body,*')){
-                const style=getComputedStyle(element);
-                if(style.backgroundColor==='rgba(0, 0, 0, 0)'||style.backgroundColor==='transparent')continue;
-                const rect=element.getBoundingClientRect();
-                if(rect.width<=0||rect.height<=0)continue;
-                rows.push({tag:element.tagName.toLowerCase(),id:element.id,cls:element.className&&element.className.toString?element.className.toString():'',
-                  background:style.backgroundColor,x:Math.round(rect.x),y:Math.round(rect.y),width:Math.round(rect.width),height:Math.round(rect.height)});
-              }
-              return {body:getComputedStyle(document.body).backgroundColor,html:getComputedStyle(document.documentElement).backgroundColor,painted:rows.slice(0,12)};
-            })()
-            """;
-        try
+        var painted = new List<object>();
+        var text = new List<string>();
+        void Walk(DependencyObject node)
         {
-            using var document = JsonDocument.Parse(await core.ExecuteScriptAsync(script));
-            return document.RootElement.ValueKind == JsonValueKind.String
-                ? JsonSerializer.Deserialize<JsonElement>(document.RootElement.GetString()!)
-                : document.RootElement.Clone();
+            if (node is FrameworkElement { } element)
+            {
+                if (element is TextBlock { } block && !string.IsNullOrWhiteSpace(block.Text))
+                    text.Add(block.Text);
+                var background = element switch
+                {
+                    Panel panel => panel.Background,
+                    Control control => control.Background,
+                    Border border => border.Background,
+                    _ => null
+                };
+                if (background is SolidColorBrush brush && brush.Color.A > 0 &&
+                    element.ActualWidth > 0 && element.ActualHeight > 0)
+                {
+                    painted.Add(new
+                    {
+                        type = element.GetType().Name,
+                        background = $"#{brush.Color.A:X2}{brush.Color.R:X2}{brush.Color.G:X2}{brush.Color.B:X2}",
+                        width = Math.Round(element.ActualWidth),
+                        height = Math.Round(element.ActualHeight)
+                    });
+                }
+            }
+            for (var index = 0; index < VisualTreeHelper.GetChildrenCount(node); index++)
+                Walk(VisualTreeHelper.GetChild(node, index));
         }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
+        Walk(lyrics);
+        return new
         {
-            return new { available = false, error = exception.Message };
-        }
+            available = true,
+            transparentRoot = lyrics.Background is Microsoft.UI.Xaml.Media.SolidColorBrush { Color.A: 0 },
+            textElements = text.Count,
+            painted
+        };
     }
 
     private static void Place(CardWindow card, RectInt32 rect)
