@@ -143,6 +143,54 @@ public sealed partial class CardGroup
             cards._weatherAlertPanel.Visibility != Visibility.Collapsed)
             throw new InvalidOperationException("Missing forecast data was not hidden and zero alerts did not leave the lower-left area blank.");
 
+        var gradientStatus = JsonSerializer.SerializeToElement(new
+        {
+            revision = 46,
+            city = new { name = "南京" },
+            details = new
+            {
+                current = new { temperature = "20", weather = "多云", conditionKind = "partly-cloudy" },
+                forecast = new[]
+                {
+                    new { min = "19", max = "25", conditionDayKind = "clear" },
+                    new { min = "19", max = "25", conditionDayKind = "clear" },
+                    new { min = "-30", max = "-25", conditionDayKind = "clear" },
+                    new { min = "31", max = "37", conditionDayKind = "clear" },
+                    new { min = "5", max = "5", conditionDayKind = "clear" }
+                },
+                alerts = System.Array.Empty<object>()
+            }
+        });
+        cards.RenderWeather(gradientStatus);
+        await Task.Delay(40);
+        card.Root.UpdateLayout();
+
+        var firstRange = ForecastGradientColors(cards, 0);
+        var repeatedRange = ForecastGradientColors(cards, 1);
+        var hotRange = ForecastGradientColors(cards, 3);
+        if (!firstRange.SequenceEqual(repeatedRange) ||
+            firstRange[0] != TemperatureColor(19).ToString() ||
+            firstRange[1] != TemperatureColor(25).ToString() ||
+            hotRange[0] != TemperatureColor(31).ToString() ||
+            hotRange[1] != TemperatureColor(37).ToString() ||
+            hotRange[0] == hotRange[1])
+            throw new InvalidOperationException("Forecast temperature gradients do not follow the absolute temperature scale.");
+        if (ForecastFill(cards, 2).Background is not SolidColorBrush ||
+            ForecastFill(cards, 4).Background is not SolidColorBrush)
+            throw new InvalidOperationException("Equivalent or clamped forecast temperatures did not use a solid color.");
+        if (!SameColor(TemperatureColor(-30), TemperatureColor(-20)) ||
+            !SameColor(TemperatureColor(50), TemperatureColor(40)) ||
+            SameColor(TemperatureColor(0), TemperatureColor(5)) ||
+            SameColor(TemperatureColor(5), TemperatureColor(10)))
+            throw new InvalidOperationException("Weather temperature color interpolation or clamping is incorrect.");
+
+        var missingMinimum = JsonNode.Parse(gradientStatus.GetRawText())!.AsObject();
+        missingMinimum["revision"] = 47;
+        ((JsonObject)((JsonArray)missingMinimum["details"]!["forecast"]!)[0]!).Remove("min");
+        cards.RenderWeather(JsonSerializer.SerializeToElement(missingMinimum));
+        if (ForecastFill(cards, 0).Background is not null)
+            throw new InvalidOperationException("A forecast row missing its minimum temperature retained a colored fill.");
+
         cards.SetQuickCardEnabled("weather", false);
         if (cards._cardsById.ContainsKey("weather")) throw new InvalidOperationException("Disabled weather card retained its HWND.");
         cards.SetQuickCardEnabled("weather", true);
@@ -159,11 +207,33 @@ public sealed partial class CardGroup
             missingDataHidden = true,
             micaSurface = true,
             staleRetained = true,
+            temperatureGradient = true,
             disabledCardWindowReleased = true,
             reenabledCardWindowRecreated = true,
             realNetworkTouched = false
         };
     }
+
+    private static Border ForecastFill(CardGroup cards, int row)
+    {
+        var rowGrid = (Grid)cards._weatherForecast.Children[row];
+        var track = rowGrid.Children.OfType<Border>().Single(child => Grid.GetColumn(child) == 3);
+        var range = track.Child as Grid
+            ?? throw new InvalidOperationException("Forecast temperature track has no range host.");
+        return range.Children.OfType<Border>().Single();
+    }
+
+    private static string[] ForecastGradientColors(CardGroup cards, int row)
+    {
+        if (ForecastFill(cards, row).Background is not LinearGradientBrush gradient)
+            throw new InvalidOperationException("Forecast temperature range is not a gradient.");
+        var colors = gradient.GradientStops.OrderBy(stop => stop.Offset).Select(stop => stop.Color.ToString()).ToArray();
+        if (colors.Length != 2) throw new InvalidOperationException("Forecast temperature gradient does not have two endpoints.");
+        return colors;
+    }
+
+    private static bool SameColor(Windows.UI.Color left, Windows.UI.Color right) =>
+        left.A == right.A && left.R == right.R && left.G == right.G && left.B == right.B;
 
     private static HashSet<string> IconColors(FrameworkElement icon)
     {

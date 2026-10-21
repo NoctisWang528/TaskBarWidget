@@ -20,6 +20,16 @@ public sealed partial class CardGroup
     private const double WeatherIconSize = 42;
     private const double WeatherIconGap = 6;
     private static readonly string[] WeatherDayLabels = ["今天", "明天", "后天", "周四", "周五"];
+    private static readonly (double Celsius, Color Color)[] TemperatureColorStops =
+    [
+        (-20, Color.FromArgb(255, 70, 102, 215)),
+        (-10, Color.FromArgb(255, 78, 129, 221)),
+        (0, Color.FromArgb(255, 78, 168, 222)),
+        (10, Color.FromArgb(255, 77, 184, 162)),
+        (20, Color.FromArgb(255, 159, 198, 92)),
+        (30, Color.FromArgb(255, 243, 184, 75)),
+        (40, Color.FromArgb(255, 232, 102, 79))
+    ];
 
     internal Button _weatherRefresh = CreateWeatherRefreshButton();
     internal Grid _weatherContent = new()
@@ -405,18 +415,21 @@ public sealed partial class CardGroup
                 Background = new SolidColorBrush(Color.FromArgb(72, 112, 120, 128)),
                 VerticalAlignment = VerticalAlignment.Center
             };
+            var hasLow = TryTemperature(String(day, "min"), out var low);
+            var hasHigh = TryTemperature(String(day, "max"), out var high);
+            var hasRange = hasLow && hasHigh;
+            if (hasRange && high < low) (low, high) = (high, low);
+
             var range = new Grid();
             var fill = new Border
             {
                 Height = 6,
                 HorizontalAlignment = HorizontalAlignment.Left,
                 CornerRadius = new CornerRadius(3),
-                Background = new SolidColorBrush(ForecastColor(row))
+                Background = hasRange ? ForecastTemperatureBrush(low, high) : null
             };
-            var hasRange = TryTemperature(String(day, "min"), out var low) && TryTemperature(String(day, "max"), out var high);
             void ResizeRange(object _, SizeChangedEventArgs args) =>
-                SetForecastRange(fill, args.NewSize.Width, hasRange, low,
-                    TryTemperature(String(day, "max"), out var parsedHigh) ? parsedHigh : 0, minimum, span);
+                SetForecastRange(fill, args.NewSize.Width, hasRange, low, high, minimum, span);
             bar.SizeChanged += ResizeRange;
             range.Children.Add(fill);
             bar.Child = range;
@@ -542,14 +555,45 @@ public sealed partial class CardGroup
         return double.TryParse(normalized, NumberStyles.Float, CultureInfo.InvariantCulture, out result) && double.IsFinite(result);
     }
 
-    private static Color ForecastColor(int index) => index switch
+    private static Brush ForecastTemperatureBrush(double low, double high)
     {
-        0 => Color.FromArgb(255, 242, 201, 76),
-        1 => Color.FromArgb(255, 151, 196, 145),
-        2 => Color.FromArgb(255, 114, 183, 170),
-        3 => Color.FromArgb(255, 169, 197, 174),
-        _ => Color.FromArgb(255, 220, 203, 113)
-    };
+        var lowColor = TemperatureColor(low);
+        var highColor = TemperatureColor(high);
+        if (lowColor.R == highColor.R && lowColor.G == highColor.G && lowColor.B == highColor.B)
+            return new SolidColorBrush(lowColor);
+
+        var brush = new LinearGradientBrush
+        {
+            StartPoint = new Windows.Foundation.Point(0, 0.5),
+            EndPoint = new Windows.Foundation.Point(1, 0.5)
+        };
+        brush.GradientStops.Add(new GradientStop { Color = lowColor, Offset = 0 });
+        brush.GradientStops.Add(new GradientStop { Color = highColor, Offset = 1 });
+        return brush;
+    }
+
+    private static Color TemperatureColor(double celsius)
+    {
+        if (celsius <= TemperatureColorStops[0].Celsius) return TemperatureColorStops[0].Color;
+        if (celsius >= TemperatureColorStops[^1].Celsius) return TemperatureColorStops[^1].Color;
+
+        for (var index = 1; index < TemperatureColorStops.Length; index++)
+        {
+            var upper = TemperatureColorStops[index];
+            if (celsius > upper.Celsius) continue;
+            var lower = TemperatureColorStops[index - 1];
+            var amount = (celsius - lower.Celsius) / (upper.Celsius - lower.Celsius);
+            return Color.FromArgb(
+                255,
+                InterpolateColorChannel(lower.Color.R, upper.Color.R, amount),
+                InterpolateColorChannel(lower.Color.G, upper.Color.G, amount),
+                InterpolateColorChannel(lower.Color.B, upper.Color.B, amount));
+        }
+        return TemperatureColorStops[^1].Color;
+    }
+
+    private static byte InterpolateColorChannel(byte from, byte to, double amount) =>
+        (byte)Math.Round(from + (to - from) * amount, MidpointRounding.AwayFromZero);
 
     private static string FirstNonEmpty(params string[] values) => values.FirstOrDefault(HasValue) ?? "";
     private static bool HasValue(string? value) => !string.IsNullOrWhiteSpace(value) && value != "--";
