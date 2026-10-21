@@ -139,6 +139,8 @@ public partial class App : Application
                         _quickCards = quickCards.Clone();
                     _cards ??= new CardGroup(_connection, OpenSettings);
                     _cards.ApplyQuickCards(_quickCards);
+                    if (_settings?.ActiveMicaPreview is { } micaPreview)
+                        _cards.SetMicaPreview(micaPreview.Preview, micaPreview.Committed);
                     _cards.UpdateActionRequested -= OnUpdateActionRequested;
                     _cards.UpdateActionRequested += OnUpdateActionRequested;
                     _cards.SetUpdateState(_updateState);
@@ -180,7 +182,6 @@ public partial class App : Application
             _settings.ThemePreviewChanged += theme => _cards?.SetThemePreview(theme);
             _settings.MicaPreviewChanged += state =>
             {
-                _cards?.SetMicaVivid(state.Vivid);
                 _cards?.SetMicaPreview(state.Preview, state.Committed);
             };
             _settings.UpdateStateReceived += AcceptUpdateState;

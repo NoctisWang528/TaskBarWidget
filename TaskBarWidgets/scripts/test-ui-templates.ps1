@@ -34,6 +34,9 @@ if (-not $result.micaControls.fixtureRoundTrip -or -not $result.micaControls.noP
     -not $result.micaControls.vividSwitch -or
     ($result.micaControls.available -and (-not $result.micaControls.frameCoalesced -or
         -not $result.micaControls.vividRoundTrip -or
+        -not $result.micaControls.actualControllers -or -not $result.micaControls.staleSwitchIgnored -or
+        -not $result.micaControls.stableBackdrop -or -not $result.micaControls.savedReadback -or
+        -not $result.micaControls.controllerLifecycle.disconnected -or
         -not $result.micaControls.discardRestored -or -not $result.micaControls.previewRestoredOnLeave -or
         -not $result.micaControls.independentThemes -or -not $result.micaControls.reopenRearmsPreview)) -or
     -not $result.micaControls.limitsClamped -or -not $result.micaControls.defaultsFallback) { throw 'Card Mica settings checks did not complete.' }

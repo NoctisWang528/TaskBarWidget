@@ -38,9 +38,8 @@ public sealed partial class CardGroup : IDisposable
         { ["weather"] = false, ["traffic"] = true, ["device"] = true, ["media"] = true };
     private bool _onDemand;
     private FontFamily _cardFontFamily = new("Microsoft YaHei UI");
-    private CardMicaTuning _cardMica = CardMicaTuning.Default;
-    private bool _cardMicaVivid = true;
-    private CardMicaTuning? _micaPreview;
+    private CardMicaAppearance _cardMica = CardMicaAppearance.Default;
+    private CardMicaAppearance? _micaPreview;
     private readonly Dictionary<string, CardSlot> _slots;
     private readonly Dictionary<string, CardWindow> _cardsById = new(StringComparer.Ordinal);
     private IEnumerable<CardWindow> AllCards => _cardsById.Values.Append(_updateCard);
@@ -138,7 +137,7 @@ public sealed partial class CardGroup : IDisposable
         AutomationProperties.SetAutomationId(_updateInstall, "card-install-update");
         _updateInstall.Click += (_, _) => { if (_updateActionEnabled) UpdateActionRequested?.Invoke(); };
         _updateCard = new CardWindow("应用更新", updateContent, 180, width: UpdateCardWidth);
-        _updateCard.SetMicaTuning(_cardMica);
+        _updateCard.SetMicaAppearance(_cardMica);
         _outsideClicks = new OutsideClickMonitor(_slots["traffic"].Content.DispatcherQueue, () => _flyoutsOpen > 0);
         _output.IsEnabled = _input.IsEnabled = _outputMute.IsEnabled = _inputMute.IsEnabled = _outputVolume.IsEnabled = _inputVolume.IsEnabled = false;
         _previous.IsEnabled = _play.IsEnabled = _next.IsEnabled = _seek.IsEnabled = _source.IsEnabled = false;
@@ -187,8 +186,7 @@ public sealed partial class CardGroup : IDisposable
     private void CreateCardWindow(CardSlot slot)
     {
         var card = new CardWindow(slot.Title, slot.Content, slot.Height, slot.AutoHeight, slot.Width);
-        card.SetMicaTuning(_micaPreview ?? _cardMica);
-        card.SetVividMica(_cardMicaVivid);
+        card.SetMicaAppearance(_micaPreview ?? _cardMica);
         slot.Window = card;
         _cardsById[slot.Id] = card;
         card.Window.AppWindow.Closing += (_, args) =>
@@ -503,20 +501,18 @@ public sealed partial class CardGroup : IDisposable
         ApplyTheme(theme);
     }
 
-    internal void SetMicaPreview(CardMicaTuning? preview, CardMicaTuning? committed = null)
+    internal void SetMicaPreview(CardMicaAppearance? preview, CardMicaAppearance? committed = null)
     {
         if (_disposed) return;
         if (committed is { } saved) _cardMica = saved;
         _micaPreview = preview;
-        var effective = preview ?? _cardMica;
-        foreach (var card in AllCards) card.SetMicaTuning(effective);
+        ApplyMicaAppearance();
     }
-    internal bool MicaVivid => _cardMicaVivid;
-    internal void SetMicaVivid(bool vivid)
+    internal bool MicaVivid => (_micaPreview ?? _cardMica).Vivid;
+    private void ApplyMicaAppearance()
     {
-        if (_disposed) return;
-        _cardMicaVivid = vivid;
-        foreach (var card in AllCards) card.SetVividMica(vivid);
+        var effective = _micaPreview ?? _cardMica;
+        foreach (var card in AllCards) card.SetMicaAppearance(effective);
     }
     internal void SetUpdateState(UpdateUiState state)
     {
@@ -601,9 +597,10 @@ public sealed partial class CardGroup : IDisposable
         _onDemand = value.TryGetProperty("resourceMode", out var mode) && string.Equals(mode.GetString(), "OnDemand", StringComparison.OrdinalIgnoreCase);
         if (value.TryGetProperty("mica", out var mica))
         {
-            _cardMica = CardMicaTuning.FromJson(mica);
-            foreach (var card in AllCards) card.SetMicaTuning(_micaPreview ?? _cardMica);
-            SetMicaVivid(!mica.TryGetProperty("vivid", out var vivid) || vivid.ValueKind != JsonValueKind.False);
+            _cardMica = new CardMicaAppearance(
+                !mica.TryGetProperty("vivid", out var vivid) || vivid.ValueKind != JsonValueKind.False,
+                CardMicaTuning.FromJson(mica));
+            ApplyMicaAppearance();
         }
         ReconcileCardWindows();
         if (_visible) { Position(_anchorX, _anchorY); RenderWeatherModules(); }

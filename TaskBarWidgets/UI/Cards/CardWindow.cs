@@ -22,7 +22,7 @@ internal sealed class CardWindow
     internal double Height { get; private set; }
     internal double Width { get; }
     internal FrameworkElement Content => _content;
-    // Themed fill behind the content; the template probe asserts it never goes blank.
+    // Thin themed wash shared with the settings sections.
     internal Brush? SurfaceBackground => _surface.Background;
     internal VividMicaBackdrop MicaBackdrop => _micaBackdrop;
     internal CardMicaTuning MicaTuning => _micaBackdrop.Tuning;
@@ -37,7 +37,6 @@ internal sealed class CardWindow
     private readonly FrameworkElement _content;
     private readonly Grid _surface;
     private readonly VividMicaBackdrop _micaBackdrop;
-    private readonly MicaBackdrop _systemMica = new();
     private bool _vividMica = true;
     private readonly bool _autoHeight;
 
@@ -46,16 +45,17 @@ internal sealed class CardWindow
         Height = height; Width = width;
         _content = content; _autoHeight = autoHeight;
         Root = new Grid();
-        // The surface carries the themed card fill so a composition frame can
-        // never flash the raw window background; Mica stays outside the card.
+        // Keep the content wash thin so the window Mica remains visible.
         var surface = new Grid { Width = width, Height = height, Padding = new Thickness(16) };
         UiThemeStyles.Apply(surface, "CardWindowSurface");
         _surface = surface;
         surface.Children.Add(content);
         Root.Children.Add(new Viewbox { Child = surface, Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly });
         _micaBackdrop = new VividMicaBackdrop(alwaysInputActive: true);
+        _micaBackdrop.StatusChanged += UpdateMicaFallback;
         Window = new Window { Title = "TaskBarWidgets · " + title, Content = Root, SystemBackdrop = _micaBackdrop };
-        Window.Closed += (_, _) => { _closed = true; _motionGeneration++; };
+        UpdateMicaFallback();
+        Window.Closed += (_, _) => { _closed = true; _motionGeneration++; _micaBackdrop.StatusChanged -= UpdateMicaFallback; };
         Handle = WinRT.Interop.WindowNative.GetWindowHandle(Window);
         Window.AppWindow.IsShownInSwitchers = false;
         if (Window.AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter)
@@ -85,15 +85,21 @@ internal sealed class CardWindow
 
     internal void SetMicaTuning(CardMicaTuning tuning) => _micaBackdrop.UpdateTuning(tuning);
 
-    // Switching the material is only safe through Window.SystemBackdrop; the
-    // tuned values stay on the vivid controller so turning the switch back on
-    // restores the user's own parameters.
-    internal void SetVividMica(bool vivid)
+    private void UpdateMicaFallback()
     {
-        if (_closed || _vividMica == vivid) return;
-        _vividMica = vivid;
-        Window.SystemBackdrop = vivid ? _micaBackdrop : _systemMica;
+        if (_closed) return;
+        if (_micaBackdrop.NeedsSolidFallback) UiThemeStyles.Apply(Root, "MicaFallbackRoot");
+        else Root.ClearValue(FrameworkElement.StyleProperty);
     }
+
+    internal void SetMicaAppearance(CardMicaAppearance appearance)
+    {
+        if (_closed) return;
+        _vividMica = appearance.Vivid;
+        _micaBackdrop.UpdateAppearance(appearance);
+    }
+
+    internal void SetVividMica(bool vivid) => SetMicaAppearance(new(vivid, MicaTuning));
 
     internal void Show(bool animate = true)
     {

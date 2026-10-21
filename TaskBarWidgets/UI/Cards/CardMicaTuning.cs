@@ -12,21 +12,13 @@ internal readonly record struct CardMicaTuning(
     internal const double MaximumTintOpacity = 1;
     internal const double MinimumLuminosityOpacity = 0;
     internal const double MaximumLuminosityOpacity = 1;
-    // Measured on the shipped cards over a wallpaper: a neutral tint above
-    // roughly a fifth of the surface washes the desktop color out of the Mica
-    // material, so the vivid default stays near the system's own material
-    // parameters (Windows uses a 0.0 tint with 0.85 luminosity for light apps).
+    // Preserve existing custom defaults until the desktop comparison is accepted.
+    // System mode obtains defaults from the runtime, never from these constants.
     internal const double DefaultLightTintOpacity = 0.10;
     internal const double DefaultLightLuminosityOpacity = 0.85;
     internal const double DefaultDarkTintOpacity = 0.15;
     internal const double DefaultDarkLuminosityOpacity = 0.90;
     internal const bool DefaultVivid = true;
-    // Approximates the plain system material for previews, so the settings
-    // window still shows what a card renders while the switch is off. Windows'
-    // own light material runs a 0.0 tint at 0.85 luminosity and the dark one a
-    // 0.15 tint at 0.96.
-    internal static CardMicaTuning SystemProxy => new(0.00, 0.85, 0.15, 0.96);
-
     private const double LegacyThemeOffset = 0.02;
 
     internal static CardMicaTuning Default => new(
@@ -34,10 +26,6 @@ internal readonly record struct CardMicaTuning(
         DefaultLightLuminosityOpacity,
         DefaultDarkTintOpacity,
         DefaultDarkLuminosityOpacity);
-
-    internal double LightTransparency => 1 - LightLuminosityOpacity;
-
-    internal double DarkTransparency => 1 - DarkLuminosityOpacity;
 
     internal double TintOpacityFor(bool dark) => dark ? DarkTintOpacity : LightTintOpacity;
 
@@ -51,17 +39,17 @@ internal readonly record struct CardMicaTuning(
 
     internal static CardMicaTuning FromUserValues(
         double lightTintPercent,
-        double lightTransparencyPercent,
+        double lightLuminosityPercent,
         double darkTintPercent,
-        double darkTransparencyPercent) =>
+        double darkLuminosityPercent) =>
         FromThemeValues(
             lightTintPercent / 100,
-            1 - lightTransparencyPercent / 100,
+            lightLuminosityPercent / 100,
             darkTintPercent / 100,
-            1 - darkTransparencyPercent / 100);
+            darkLuminosityPercent / 100);
 
-    internal static CardMicaTuning FromUserValues(double tintPercent, double transparencyPercent) =>
-        FromValues(tintPercent / 100, 1 - transparencyPercent / 100);
+    internal static CardMicaTuning FromUserValues(double tintPercent, double luminosityPercent) =>
+        FromValues(tintPercent / 100, luminosityPercent / 100);
 
     internal static CardMicaTuning FromValues(double tintOpacity, double luminosityOpacity)
         => FromThemeValues(tintOpacity, luminosityOpacity, tintOpacity, luminosityOpacity);
@@ -121,7 +109,11 @@ internal readonly record struct CardMicaTuning(
             : fallback;
 }
 
+internal readonly record struct CardMicaAppearance(bool Vivid, CardMicaTuning Tuning)
+{
+    internal static CardMicaAppearance Default => new(CardMicaTuning.DefaultVivid, CardMicaTuning.Default);
+}
+
 internal readonly record struct CardMicaPreviewState(
-    CardMicaTuning Committed,
-    CardMicaTuning? Preview,
-    bool Vivid);
+    CardMicaAppearance Committed,
+    CardMicaAppearance? Preview);

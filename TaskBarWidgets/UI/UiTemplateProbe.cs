@@ -118,10 +118,10 @@ internal static class UiTemplateProbe
             cardLifecycle["hiddenMeasuredPlacement"] = true;
             {
                 var preview = CardMicaTuning.FromValues(0.41, 0.21);
-                cards.SetMicaPreview(preview);
+                cards.SetMicaPreview(new CardMicaAppearance(false, preview));
                 cards.SetQuickCardEnabled("weather", false);
                 cards.SetQuickCardEnabled("weather", true);
-                if (cards.CardWindows.Any(card => !card.MicaTuning.Matches(preview)))
+                if (cards.CardWindows.Append(cards._updateCard).Any(card => card.UsesVividMica || !card.MicaTuning.Matches(preview)))
                     throw new InvalidOperationException("A card created during Mica preview did not inherit the preview tuning.");
                 cards.SetMicaPreview(null);
                 cardLifecycle["micaNewCardInherits"] = true;
@@ -229,7 +229,10 @@ internal static class UiTemplateProbe
         catch (Exception exception) { error = exception.ToString(); }
         finally
         {
-            cards?.Dispose(); settings?.Shutdown();
+            try { cards?.Dispose(); }
+            catch (Exception exception) { error = (error ?? "") + "\nCard cleanup: " + exception; }
+            try { settings?.Shutdown(); }
+            catch (Exception exception) { error = (error ?? "") + "\nSettings cleanup: " + exception; }
             var resultIndex = Array.IndexOf(args, "--result");
             var result = resultIndex >= 0 && resultIndex + 1 < args.Length ? args[resultIndex + 1] : Path.Combine(AppContext.BaseDirectory, "template-probe.json");
             var winUiModule = System.Diagnostics.Process.GetCurrentProcess().Modules.Cast<System.Diagnostics.ProcessModule>()
@@ -263,7 +266,7 @@ internal static class UiTemplateProbe
             !cards.ShouldDismissClick(ownPopup with { ProcessId = 0 }))
             throw new InvalidOperationException("Own flyout snapshots, unrelated own windows, and external popups were not distinguished.");
     }
-    private static void ShowOffscreen(Window window, int width, int height)
+    internal static void ShowOffscreen(Window window, int width, int height)
     {
         PositionOffscreen(window, width, height);
         window.AppWindow.Show(false); // Never calls Window.Activate or requests focus.

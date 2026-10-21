@@ -23,10 +23,7 @@ public sealed partial class SettingsWindow : Window
     private readonly SettingsDraft _native = new();
     private readonly SettingsDraft _media = new();
     private readonly Grid _root = new();
-    private readonly MicaBackdrop _defaultBackdrop = new();
     private readonly VividMicaBackdrop _cardMicaPreviewBackdrop = new();
-    private readonly SystemBackdrop _settingsBackdrop;
-    private readonly bool _vividSettingsBackdrop;
     private readonly Windows.UI.ViewManagement.AccessibilitySettings _accessibility = new();
     private bool _highContrastSubscriptionAttempted, _highContrastSubscribed;
     private readonly Grid _titleBar = new() { Height = 48, Tag = "settings-title-bar" };
@@ -72,7 +69,11 @@ public sealed partial class SettingsWindow : Window
     internal bool CommittedCardMicaVivid => _media.GetSaved("cardMicaVivid") is JsonValue saved &&
         saved.TryGetValue<bool>(out var vivid) ? vivid : CardMicaTuning.DefaultVivid;
     internal bool CanPreviewCardMica => !_accessibility.HighContrast && VividMicaBackdrop.IsSupported;
-    internal bool UsesVividSettingsBackdrop => _vividSettingsBackdrop;
+    internal bool UsesVividSettingsBackdrop => _cardMicaPreviewBackdrop.Custom;
+    private CardMicaAppearance DraftCardMicaAppearance => new(DraftCardMicaVivid, DraftCardMicaTuning);
+    private CardMicaAppearance CommittedCardMicaAppearance => new(CommittedCardMicaVivid, CommittedCardMicaTuning);
+    internal CardMicaPreviewState? ActiveMicaPreview => _micaPreviewActive
+        ? new(CommittedCardMicaAppearance, DraftCardMicaAppearance) : null;
     internal CardMicaTuning SettingsMicaTuning => _cardMicaPreviewBackdrop.Tuning;
     internal bool UsesWinUiTitleBar => AppWindow.TitleBar.ExtendsContentIntoTitleBar && ReferenceEquals(Content, _root);
     internal double TitleBarHeight => _titleBar.ActualHeight;
@@ -86,9 +87,11 @@ public sealed partial class SettingsWindow : Window
         // WinUI can invalidate another window's backdrop state when SystemBackdrop
         // is exchanged on a visible settings window. Assign one backdrop for the
         // lifetime of this reused HWND and preview by updating its controller.
-        _vividSettingsBackdrop = CanPreviewCardMica;
-        _settingsBackdrop = _vividSettingsBackdrop ? _cardMicaPreviewBackdrop : _defaultBackdrop;
-        SystemBackdrop = _settingsBackdrop;
+        SystemBackdrop = _cardMicaPreviewBackdrop;
+        _cardMicaPreviewBackdrop.StatusChanged += OnMicaStatusChanged;
+        _navigation.Resources.MergedDictionaries.Add(new ResourceDictionary
+        { Source = new Uri("ms-appx:///Settings/SettingsNavigationResources.xaml") });
+        if (_cardMicaPreviewBackdrop.NeedsSolidFallback) UiThemeStyles.Apply(_root, "MicaFallbackRoot");
         if (new Windows.UI.ViewManagement.UISettings().AnimationsEnabled)
             _page.ChildrenTransitions = new Microsoft.UI.Xaml.Media.Animation.TransitionCollection { new Microsoft.UI.Xaml.Media.Animation.EntranceThemeTransition { IsStaggeringEnabled = false } };
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1180, 820));
@@ -173,7 +176,7 @@ public sealed partial class SettingsWindow : Window
         _navigation.Content = _split;
         Content = _root;
         InitializeModuleGestures();
-        _root.ActualThemeChanged += (_, _) => UpdateTitleBarTheme();
+        _root.ActualThemeChanged += (_, _) => { UpdateTitleBarTheme(); UpdateMicaStatus(); };
         _root.Loaded += (_, _) => { TrySubscribeSettingsHighContrast(); UpdateTitleBarTheme(); };
         Activated += (_, _) => { if (!_closed) UpdateTitleBarTheme(); };
         _navigation.Loaded += async (_, _) => {
@@ -190,6 +193,7 @@ public sealed partial class SettingsWindow : Window
         Closed += (_, _) => {
             DeactivateCardMicaPreview();
             _closed = true;
+            _cardMicaPreviewBackdrop.StatusChanged -= OnMicaStatusChanged;
             CancelWeatherPage();
             _lifetime.Cancel();
             _connection.ConnectionChanged -= OnConnectionChanged;
@@ -422,7 +426,8 @@ public sealed partial class SettingsWindow : Window
             }
             if (media.Values.Count > 0) _media.Readback(MediaValues(await RequestAsync("applyMediaSettings", media.Values)), media);
             ApplyTheme();
-            if (media.Values.ContainsKey("cardMicaTintOpacity") ||
+            if (media.Values.ContainsKey("cardMicaVivid") ||
+                media.Values.ContainsKey("cardMicaTintOpacity") ||
                 media.Values.ContainsKey("cardMicaLuminosityOpacity") ||
                 media.Values.ContainsKey("cardMicaDarkTintOpacity") ||
                 media.Values.ContainsKey("cardMicaDarkLuminosityOpacity"))
@@ -477,29 +482,27 @@ public sealed partial class SettingsWindow : Window
 
     private void ApplyCardMicaPreview(CardMicaTuning tuning)
     {
-        var vivid = DraftCardMicaVivid;
-        if (_vividSettingsBackdrop) _cardMicaPreviewBackdrop.UpdateTuning(vivid ? tuning : CardMicaTuning.SystemProxy);
+        var appearance = new CardMicaAppearance(DraftCardMicaVivid, tuning);
+        _cardMicaPreviewBackdrop.UpdateAppearance(appearance);
         _micaPreviewActive = true;
-        MicaPreviewChanged?.Invoke(new CardMicaPreviewState(CommittedCardMicaTuning, tuning, vivid));
+        MicaPreviewChanged?.Invoke(new CardMicaPreviewState(CommittedCardMicaAppearance, appearance));
+        UpdateMicaStatus();
     }
 
     private void ActivateCardMicaPreview(CardMicaTuning tuning)
     {
-        if (_vividSettingsBackdrop) _cardMicaPreviewBackdrop.UpdateTuning(DraftCardMicaVivid ? tuning : CardMicaTuning.SystemProxy);
+        _cardMicaPreviewBackdrop.UpdateAppearance(new(DraftCardMicaVivid, tuning));
         _micaPreviewActive = true;
     }
 
     private void DeactivateCardMicaPreview()
     {
         _micaPreviewQueued = false;
-        var committed = CommittedCardMicaTuning;
-        var vivid = CommittedCardMicaVivid;
-        var settingsTuning = vivid ? committed : CardMicaTuning.SystemProxy;
-        if (_vividSettingsBackdrop && !_cardMicaPreviewBackdrop.Tuning.Matches(settingsTuning))
-            _cardMicaPreviewBackdrop.UpdateTuning(settingsTuning);
+        var committed = CommittedCardMicaAppearance;
+        _cardMicaPreviewBackdrop.UpdateAppearance(committed);
         if (!_micaPreviewActive) return;
         _micaPreviewActive = false;
-        MicaPreviewChanged?.Invoke(new CardMicaPreviewState(committed, null, vivid));
+        MicaPreviewChanged?.Invoke(new CardMicaPreviewState(committed, null));
     }
 
     private void RefreshCardMicaAfterReadback()
@@ -509,12 +512,19 @@ public sealed partial class SettingsWindow : Window
             ApplyCardMicaPreview(DraftCardMicaTuning);
             return;
         }
-        var committed = CommittedCardMicaTuning;
-        var vivid = CommittedCardMicaVivid;
-        if (_vividSettingsBackdrop) _cardMicaPreviewBackdrop.UpdateTuning(vivid ? committed : CardMicaTuning.SystemProxy);
+        var committed = CommittedCardMicaAppearance;
+        _cardMicaPreviewBackdrop.UpdateAppearance(committed);
         _micaPreviewActive = false;
-        MicaPreviewChanged?.Invoke(new CardMicaPreviewState(committed, null, vivid));
+        MicaPreviewChanged?.Invoke(new CardMicaPreviewState(committed, null));
     }
+
+    private void OnMicaStatusChanged() => DispatcherQueue.TryEnqueue(() =>
+    {
+        if (_closed) return;
+        if (_cardMicaPreviewBackdrop.NeedsSolidFallback) UiThemeStyles.Apply(_root, "MicaFallbackRoot");
+        else _root.ClearValue(FrameworkElement.StyleProperty);
+        UpdateMicaStatus();
+    });
 
     private static CardMicaTuning ReadCardMicaTuning(Func<string, double> read) =>
         CardMicaTuning.FromThemeValues(

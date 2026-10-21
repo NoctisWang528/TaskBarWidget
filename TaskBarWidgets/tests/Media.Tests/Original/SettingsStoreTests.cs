@@ -50,8 +50,16 @@ public sealed class SettingsStoreTests
         }
     }
 
-    [Fact]
-    public void VividMicaSwitchRoundTripsWithoutResettingTunedValues()
+    [Theory]
+    [InlineData(false, 0.45, 0.90, 0.30, 0.60)]
+    [InlineData(true, 0.0, 0.0, 0.0, 0.0)]
+    [InlineData(false, 0.0, 0.0, 0.0, 0.0)]
+    [InlineData(true, 1.0, 1.0, 1.0, 1.0)]
+    [InlineData(false, 1.0, 1.0, 1.0, 1.0)]
+    [InlineData(true, 0.0, 1.0, 1.0, 0.0)]
+    [InlineData(false, 1.0, 0.0, 0.0, 1.0)]
+    public void VividMicaSwitchRoundTripsWithoutResettingTunedValues(
+        bool vivid, double lightTint, double lightLuminosity, double darkTint, double darkLuminosity)
     {
         var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
         var filePath = Path.Combine(directory, "settings.json");
@@ -60,19 +68,19 @@ public sealed class SettingsStoreTests
         {
             var settings = new AppSettings
             {
-                CardMicaVivid = false,
-                CardMicaTintOpacity = 0.45,
-                CardMicaLuminosityOpacity = 0.90,
-                CardMicaDarkTintOpacity = 0.30,
-                CardMicaDarkLuminosityOpacity = 0.60
+                CardMicaVivid = vivid,
+                CardMicaTintOpacity = lightTint,
+                CardMicaLuminosityOpacity = lightLuminosity,
+                CardMicaDarkTintOpacity = darkTint,
+                CardMicaDarkLuminosityOpacity = darkLuminosity
             };
             Assert.True(new SettingsStore(filePath).Save(settings));
             var loaded = new SettingsStore(filePath).Load();
-            Assert.False(loaded.CardMicaVivid);
-            Assert.Equal(0.45, loaded.CardMicaTintOpacity, 6);
-            Assert.Equal(0.90, loaded.CardMicaLuminosityOpacity, 6);
-            Assert.Equal(0.30, loaded.CardMicaDarkTintOpacity, 6);
-            Assert.Equal(0.60, loaded.CardMicaDarkLuminosityOpacity, 6);
+            Assert.Equal(vivid, loaded.CardMicaVivid);
+            Assert.Equal(lightTint, loaded.CardMicaTintOpacity, 6);
+            Assert.Equal(lightLuminosity, loaded.CardMicaLuminosityOpacity, 6);
+            Assert.Equal(darkTint, loaded.CardMicaDarkTintOpacity, 6);
+            Assert.Equal(darkLuminosity, loaded.CardMicaDarkLuminosityOpacity, 6);
         }
         finally
         {
@@ -108,8 +116,7 @@ public sealed class SettingsStoreTests
     [InlineData("{}")]
     [InlineData("{\"ToolWindowTheme\":1}")]
     [InlineData("{\"ToolWindowTheme\":2}")]
-    [InlineData("{\"CardMicaTintOpacity\":0.20}")]
-    [InlineData("{\"CardMicaLuminosityOpacity\":0.50}")]
+    [InlineData("{\"CardMicaVivid\":true}")]
     [InlineData("{\"CardMicaTintOpacity\":\"invalid\",\"CardMicaLuminosityOpacity\":0.50}")]
     public void MissingOrInvalidLegacyMicaFieldsUseNewDefaults(string json)
     {
@@ -132,8 +139,11 @@ public sealed class SettingsStoreTests
         }
     }
 
-    [Fact]
-    public void ExactLegacyFactoryMicaValuesMigrateToNewFourValueDefaults()
+    [Theory]
+    [InlineData("")]
+    [InlineData("\"CardMicaVivid\":true,")]
+    [InlineData("\"CardMicaVivid\":false,")]
+    public void ExplicitMaximumMicaValuesSurviveLegacyDarkMigration(string switchField)
     {
         var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
         var filePath = Path.Combine(directory, "settings.json");
@@ -141,14 +151,14 @@ public sealed class SettingsStoreTests
 
         try
         {
-            File.WriteAllText(filePath, "{\"CardMicaTintOpacity\":1.0,\"CardMicaLuminosityOpacity\":1.0}");
+            File.WriteAllText(filePath, "{" + switchField + "\"CardMicaTintOpacity\":1.0,\"CardMicaLuminosityOpacity\":1.0}");
             var loaded = new SettingsStore(filePath).Load();
 
-            Assert.Equal(0.10, loaded.CardMicaTintOpacity, 6);
-            Assert.Equal(0.85, loaded.CardMicaLuminosityOpacity, 6);
-            Assert.Equal(0.15, loaded.CardMicaDarkTintOpacity, 6);
-            Assert.Equal(0.90, loaded.CardMicaDarkLuminosityOpacity, 6);
-            Assert.True(loaded.CardMicaVivid);
+            Assert.Equal(1.0, loaded.CardMicaTintOpacity, 6);
+            Assert.Equal(1.0, loaded.CardMicaLuminosityOpacity, 6);
+            Assert.Equal(0.98, loaded.CardMicaDarkTintOpacity, 6);
+            Assert.Equal(0.98, loaded.CardMicaDarkLuminosityOpacity, 6);
+            Assert.Equal(!switchField.Contains("false", StringComparison.Ordinal), loaded.CardMicaVivid);
         }
         finally
         {
@@ -157,7 +167,7 @@ public sealed class SettingsStoreTests
     }
 
     [Fact]
-    public void PreVividConfigurationReceivesTheVividMaterialDefaultsOnce()
+    public void MissingVividSwitchPreservesExplicitOpacitiesThroughSaveAndReload()
     {
         var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
         var filePath = Path.Combine(directory, "settings.json");
@@ -165,33 +175,28 @@ public sealed class SettingsStoreTests
 
         try
         {
-            // Values tuned against the old, almost opaque wash (the shape a
-            // pre-toggle configuration can carry) move to the vivid defaults;
-            // the saved file is untouched until the next normal save.
-            const string legacy = "{\"CardMicaTintOpacity\":0.45,\"CardMicaLuminosityOpacity\":0.90,\"CardMicaDarkTintOpacity\":0.45,\"CardMicaDarkLuminosityOpacity\":0.90}";
+            const string legacy = "{\"CardMicaTintOpacity\":0.45,\"CardMicaLuminosityOpacity\":0.90,\"CardMicaDarkTintOpacity\":0.30,\"CardMicaDarkLuminosityOpacity\":0.60}";
             File.WriteAllText(filePath, legacy);
             var store = new SettingsStore(filePath);
             var loaded = store.Load();
 
-            Assert.Equal(0.10, loaded.CardMicaTintOpacity, 6);
-            Assert.Equal(0.85, loaded.CardMicaLuminosityOpacity, 6);
-            Assert.Equal(0.15, loaded.CardMicaDarkTintOpacity, 6);
-            Assert.Equal(0.90, loaded.CardMicaDarkLuminosityOpacity, 6);
+            Assert.Equal(0.45, loaded.CardMicaTintOpacity, 6);
+            Assert.Equal(0.90, loaded.CardMicaLuminosityOpacity, 6);
+            Assert.Equal(0.30, loaded.CardMicaDarkTintOpacity, 6);
+            Assert.Equal(0.60, loaded.CardMicaDarkLuminosityOpacity, 6);
             Assert.True(loaded.CardMicaVivid);
             Assert.Equal(legacy, File.ReadAllText(filePath));
 
             Assert.True(store.Save(loaded));
             var saved = File.ReadAllText(filePath);
             Assert.Contains("\"CardMicaVivid\": true", saved, StringComparison.Ordinal);
-            Assert.Contains("\"CardMicaTintOpacity\": 0.1", saved, StringComparison.Ordinal);
-
-            // The stored toggle keeps a later tuned value from being reset.
-            loaded.CardMicaTintOpacity = 0.45;
-            loaded.CardMicaLuminosityOpacity = 0.90;
-            Assert.True(store.Save(loaded));
+            Assert.Contains("\"CardMicaTintOpacity\": 0.45", saved, StringComparison.Ordinal);
             var reloaded = store.Load();
+            Assert.True(reloaded.CardMicaVivid);
             Assert.Equal(0.45, reloaded.CardMicaTintOpacity, 6);
             Assert.Equal(0.90, reloaded.CardMicaLuminosityOpacity, 6);
+            Assert.Equal(0.30, reloaded.CardMicaDarkTintOpacity, 6);
+            Assert.Equal(0.60, reloaded.CardMicaDarkLuminosityOpacity, 6);
         }
         finally
         {
@@ -199,8 +204,10 @@ public sealed class SettingsStoreTests
         }
     }
 
-    [Fact]
-    public void CustomLegacyMicaValuesKeepLightColorsAndMigrateTheOldDarkOffset()
+    [Theory]
+    [InlineData("")]
+    [InlineData("\"CardMicaVivid\":true,")]
+    public void CustomLegacyMicaValuesKeepLightColorsAndMigrateTheOldDarkOffset(string switchField)
     {
         var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
         var filePath = Path.Combine(directory, "settings.json");
@@ -208,7 +215,7 @@ public sealed class SettingsStoreTests
 
         try
         {
-            File.WriteAllText(filePath, "{\"CardMicaVivid\":true,\"CardMicaTintOpacity\":0.34,\"CardMicaLuminosityOpacity\":0.50}");
+            File.WriteAllText(filePath, "{" + switchField + "\"CardMicaTintOpacity\":0.34,\"CardMicaLuminosityOpacity\":0.50}");
             var loaded = new SettingsStore(filePath).Load();
 
             Assert.Equal(0.34, loaded.CardMicaTintOpacity, 6);
@@ -216,6 +223,48 @@ public sealed class SettingsStoreTests
             Assert.Equal(0.32, loaded.CardMicaDarkTintOpacity, 6);
             Assert.Equal(0.48, loaded.CardMicaDarkLuminosityOpacity, 6);
             Assert.True(loaded.CardMicaVivid);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("{\"CardMicaTintOpacity\":0.20}", 0.20, 0.85, 0.18, 0.90)]
+    [InlineData("{\"CardMicaLuminosityOpacity\":0.50}", 0.10, 0.50, 0.15, 0.48)]
+    [InlineData("{\"CardMicaDarkTintOpacity\":0.0}", 0.10, 0.85, 0.0, 0.90)]
+    [InlineData("{\"CardMicaDarkLuminosityOpacity\":1.0}", 0.10, 0.85, 0.15, 1.0)]
+    [InlineData("{\"CardMicaTintOpacity\":0.20,\"CardMicaDarkTintOpacity\":0.70}", 0.20, 0.85, 0.70, 0.90)]
+    [InlineData("{\"CardMicaLuminosityOpacity\":0.50,\"CardMicaDarkLuminosityOpacity\":0.70}", 0.10, 0.50, 0.15, 0.70)]
+    [InlineData("{\"CardMicaVivid\":true,\"CardMicaTintOpacity\":1.0,\"CardMicaDarkLuminosityOpacity\":0.0}", 1.0, 0.85, 0.98, 0.0)]
+    [InlineData("{\"CardMicaVivid\":true,\"CardMicaLuminosityOpacity\":0.0,\"CardMicaDarkTintOpacity\":1.0}", 0.10, 0.0, 1.0, 0.0)]
+    [InlineData("{\"CardMicaTintOpacity\":1.0,\"CardMicaLuminosityOpacity\":1.0,\"CardMicaDarkTintOpacity\":1.0,\"CardMicaDarkLuminosityOpacity\":1.0}", 1.0, 1.0, 1.0, 1.0)]
+    public void MissingMicaFieldsMigrateIndependentlyAndRemainStableAfterSave(
+        string json, double lightTint, double lightLuminosity, double darkTint, double darkLuminosity)
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
+        var filePath = Path.Combine(directory, "settings.json");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.WriteAllText(filePath, json);
+            var store = new SettingsStore(filePath);
+            var loaded = store.Load();
+            Assert.True(loaded.CardMicaVivid);
+            Assert.Equal(lightTint, loaded.CardMicaTintOpacity, 6);
+            Assert.Equal(lightLuminosity, loaded.CardMicaLuminosityOpacity, 6);
+            Assert.Equal(darkTint, loaded.CardMicaDarkTintOpacity, 6);
+            Assert.Equal(darkLuminosity, loaded.CardMicaDarkLuminosityOpacity, 6);
+            Assert.Equal(json, File.ReadAllText(filePath));
+
+            Assert.True(store.Save(loaded));
+            var reloaded = new SettingsStore(filePath).Load();
+            Assert.True(reloaded.CardMicaVivid);
+            Assert.Equal(lightTint, reloaded.CardMicaTintOpacity, 6);
+            Assert.Equal(lightLuminosity, reloaded.CardMicaLuminosityOpacity, 6);
+            Assert.Equal(darkTint, reloaded.CardMicaDarkTintOpacity, 6);
+            Assert.Equal(darkLuminosity, reloaded.CardMicaDarkLuminosityOpacity, 6);
         }
         finally
         {
@@ -300,10 +349,15 @@ public sealed class SettingsStoreTests
             Assert.True(store.Save(loaded));
             var saved = File.ReadAllText(filePath);
             Assert.Contains("\"CardMicaVivid\": true", saved, StringComparison.Ordinal);
-            Assert.Contains("\"CardMicaTintOpacity\": 0.1", saved, StringComparison.Ordinal);
-            Assert.Contains("\"CardMicaLuminosityOpacity\": 0.85", saved, StringComparison.Ordinal);
-            Assert.Contains("\"CardMicaDarkTintOpacity\": 0.15", saved, StringComparison.Ordinal);
-            Assert.Contains("\"CardMicaDarkLuminosityOpacity\": 0.9", saved, StringComparison.Ordinal);
+            Assert.Contains("\"CardMicaTintOpacity\": 1", saved, StringComparison.Ordinal);
+            Assert.Contains("\"CardMicaLuminosityOpacity\": 1", saved, StringComparison.Ordinal);
+            Assert.Contains("\"CardMicaDarkTintOpacity\": 0.98", saved, StringComparison.Ordinal);
+            Assert.Contains("\"CardMicaDarkLuminosityOpacity\": 0.98", saved, StringComparison.Ordinal);
+            var reloaded = store.Load();
+            Assert.Equal(1.0, reloaded.CardMicaTintOpacity, 6);
+            Assert.Equal(1.0, reloaded.CardMicaLuminosityOpacity, 6);
+            Assert.Equal(0.98, reloaded.CardMicaDarkTintOpacity, 6);
+            Assert.Equal(0.98, reloaded.CardMicaDarkLuminosityOpacity, 6);
         }
         finally
         {

@@ -139,51 +139,29 @@ public sealed class SettingsStore
 
     private static void ApplyMicaSettings(JsonElement root, AppSettings settings)
     {
-        // The switch arrived with the vivid material. A file without it was tuned
-        // against the old, almost opaque wash, so it receives the vivid defaults
-        // once; the stored switch then keeps whatever the user tunes later.
-        if (!root.TryGetProperty(nameof(AppSettings.CardMicaVivid), out var vivid) ||
-            vivid.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
-        {
-            settings.CardMicaVivid = AppSettings.DefaultCardMicaVivid;
-            settings.CardMicaTintOpacity = AppSettings.DefaultCardMicaTintOpacity;
-            settings.CardMicaLuminosityOpacity = AppSettings.DefaultCardMicaLuminosityOpacity;
-            settings.CardMicaDarkTintOpacity = AppSettings.DefaultCardMicaDarkTintOpacity;
-            settings.CardMicaDarkLuminosityOpacity = AppSettings.DefaultCardMicaDarkLuminosityOpacity;
-            return;
-        }
-
-        settings.CardMicaVivid = vivid.GetBoolean();
+        settings.CardMicaVivid = TryReadBoolean(root, nameof(AppSettings.CardMicaVivid), out var vivid)
+            ? vivid
+            : AppSettings.DefaultCardMicaVivid;
         var hasLegacyTint = TryReadDouble(
             root, nameof(AppSettings.CardMicaTintOpacity), out var legacyTint);
         var hasLegacyLuminosity = TryReadDouble(
             root, nameof(AppSettings.CardMicaLuminosityOpacity), out var legacyLuminosity);
 
-        if (hasLegacyTint && hasLegacyLuminosity)
-        {
-            if (legacyTint == 1.0 && legacyLuminosity == 1.0)
-            {
-                settings.CardMicaTintOpacity = AppSettings.DefaultCardMicaTintOpacity;
-                settings.CardMicaLuminosityOpacity = AppSettings.DefaultCardMicaLuminosityOpacity;
-                settings.CardMicaDarkTintOpacity = AppSettings.DefaultCardMicaDarkTintOpacity;
-                settings.CardMicaDarkLuminosityOpacity = AppSettings.DefaultCardMicaDarkLuminosityOpacity;
-            }
-            else
-            {
-                settings.CardMicaTintOpacity = ClampMicaTint(legacyTint);
-                settings.CardMicaLuminosityOpacity = ClampMicaLuminosity(legacyLuminosity);
-                // These were the colors the old implicit dark offset produced.
-                settings.CardMicaDarkTintOpacity = ClampMicaTint(legacyTint - 0.02);
-                settings.CardMicaDarkLuminosityOpacity = ClampMicaLuminosity(legacyLuminosity - 0.02);
-            }
-        }
-        else
-        {
-            settings.CardMicaTintOpacity = AppSettings.DefaultCardMicaTintOpacity;
-            settings.CardMicaLuminosityOpacity = AppSettings.DefaultCardMicaLuminosityOpacity;
-            settings.CardMicaDarkTintOpacity = AppSettings.DefaultCardMicaDarkTintOpacity;
-            settings.CardMicaDarkLuminosityOpacity = AppSettings.DefaultCardMicaDarkLuminosityOpacity;
-        }
+        settings.CardMicaTintOpacity = hasLegacyTint
+            ? ClampMicaTint(legacyTint)
+            : AppSettings.DefaultCardMicaTintOpacity;
+        settings.CardMicaLuminosityOpacity = hasLegacyLuminosity
+            ? ClampMicaLuminosity(legacyLuminosity)
+            : AppSettings.DefaultCardMicaLuminosityOpacity;
+
+        // Only absent dark fields inherit the old implicit offset from their
+        // saved light counterpart. Explicit values, including (1, 1), are user settings.
+        settings.CardMicaDarkTintOpacity = hasLegacyTint
+            ? ClampMicaTint(legacyTint - 0.02)
+            : AppSettings.DefaultCardMicaDarkTintOpacity;
+        settings.CardMicaDarkLuminosityOpacity = hasLegacyLuminosity
+            ? ClampMicaLuminosity(legacyLuminosity - 0.02)
+            : AppSettings.DefaultCardMicaDarkLuminosityOpacity;
 
         // Explicit split-theme fields always win over both defaults and the
         // legacy two-field migration. They are only written on the next save.

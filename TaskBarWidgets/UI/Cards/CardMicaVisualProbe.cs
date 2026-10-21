@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.UI.Xaml;
@@ -8,8 +9,8 @@ namespace TaskBarWidgets.UI.Cards;
 
 // Desktop acceptance helper. The Mica material is composited by the desktop
 // window manager outside the XAML visual tree, so no offscreen render can show
-// it: this probe shows real card windows with the shipped backdrop on the
-// primary monitor for a bounded time so the material can be inspected by eye or
+// it: this probe shows one real card with the shipped backdrop at a fixed
+// screen rectangle for a bounded time so the material can be inspected by eye or
 // captured from the desktop. It never starts the product, reads user settings,
 // connects to the media host or activates a window, and the ordinary offscreen
 // template validation pass never calls it.
@@ -17,60 +18,129 @@ internal static class CardMicaVisualProbe
 {
     internal static async Task RunAsync(string[] args)
     {
-        CardLyricsView.ProfileName = "CardWebView2-visual-probe";
-        var resultPath = Argument(args, "--result") ?? Path.Combine(AppContext.BaseDirectory, "mica-visual-check.json");
-        var holdMilliseconds = int.TryParse(Argument(args, "--hold-ms"), out var parsedHold) ? Math.Clamp(parsedHold, 2000, 60000) : 9000;
-        var samples = SampleFile(args) ?? new[]
-        {
-            new Sample("浅色 浓度45 通透度5（当前默认）", false, 0.45, 0.95, false),
-            new Sample("浅色 浓度45 通透度90", false, 0.45, 0.10, false),
-            new Sample("浅色 浓度0 通透度15", false, 0.00, 0.85, false),
-            new Sample("深色 浓度45 通透度10（当前默认）", true, 0.45, 0.90, false),
-            new Sample("深色 浓度15 通透度4", true, 0.15, 0.96, false),
-            new Sample("歌词块（浅色 浓度45 通透度5）", false, 0.45, 0.95, true)
-        };
-        var cards = new List<CardWindow>();
+        string? resultPath = null;
+        CardWindow? card = null;
+        CardLyricsView? lyrics = null;
         var windows = new List<object>();
+        var totalCount = 0;
         string? error = null;
         try
         {
-            for (var index = 0; index < samples.Length; index++)
+            // All generated files, including the optional WebView profile, stay
+            // in this build's diagnostic directory, never in user configuration.
+            var diagnosticRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "ui-mica-check"));
+            var requestedPath = Path.GetFullPath(Argument(args, "--result") ??
+                Path.Combine(diagnosticRoot, $"manual-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Environment.ProcessId}", "probe.json"));
+            if (!requestedPath.StartsWith(diagnosticRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException("Mica results must be inside the build's ui-mica-check directory.");
+            Directory.CreateDirectory(Path.GetDirectoryName(requestedPath)!);
+            resultPath = requestedPath;
+            CardLyricsView.ProfileName = Path.Combine(Path.GetDirectoryName(resultPath)!, "webview-profile");
+            var holdMilliseconds = Number(args, "--hold-ms", 9000, 2000, 60000);
+            var stabilizeMilliseconds = Number(args, "--stabilize-ms", 1800, 1000, 10000);
+            var samples = SampleFile(args) ?? DefaultSamples();
+            totalCount = samples.Length;
+            var index = Number(args, "--sample-index", 0, 0, samples.Length - 1);
+            var sample = samples[index];
+            var rect = new RectInt32(Number(args, "--x", 70, -32000, 32000), Number(args, "--y", 70, -32000, 32000),
+                Number(args, "--width", 420, 320, 1600), Number(args, "--height", 300, 280, 1200));
+            var tuning = sample.Mode == "custom"
+                ? CardMicaTuning.FromValues(sample.TintOpacity, sample.LuminosityOpacity)
+                : CardMicaTuning.Default;
+            var vivid = sample.Mode != "system" && (sample.Mode != "default" || CardMicaTuning.DefaultVivid);
+            var content = ComparisonContent();
+            if (sample.Lyrics)
             {
-                var sample = samples[index];
-                var rect = new RectInt32(70 + index % 3 * 360, 70 + index / 3 * 160, 320, 128);
-                if (sample.Lyrics)
-                {
-                    var (lyricsCard, background) = await CreateLyricsCardAsync(sample, rect);
-                    cards.Add(lyricsCard);
-                    windows.Add(new { label = sample.Label, dark = sample.Dark, tint = sample.TintOpacity, luminosity = sample.LuminosityOpacity, rect = Rect(rect.X, rect.Y, rect.Width, rect.Height), lyrics = true, painted = background });
-                    continue;
-                }
-                var content = new StackPanel { Spacing = 6 };
-                content.Children.Add(new TextBlock { Text = sample.Label, FontSize = 13, TextWrapping = TextWrapping.Wrap });
-                content.Children.Add(new TextBlock { Text = "Mica 材质验收样本", FontSize = 11, Opacity = .7 });
-                var card = new CardWindow(sample.Label, content, 128, autoHeight: false, width: 320);
-                card.Root.RequestedTheme = sample.Dark ? ElementTheme.Dark : ElementTheme.Light;
-                card.SetMicaTuning(CardMicaTuning.FromValues(sample.TintOpacity, sample.LuminosityOpacity));
-                Place(card, rect);
-                cards.Add(card);
-                windows.Add(new { label = sample.Label, dark = sample.Dark, tint = sample.TintOpacity, luminosity = sample.LuminosityOpacity, rect = Rect(rect.X, rect.Y, rect.Width, rect.Height), lyrics = false, painted = (object?)null });
+                lyrics = new CardLyricsView { VerticalAlignment = VerticalAlignment.Top, Height = 64 };
+                content.Children.Add(lyrics);
             }
-            Write(resultPath, new { success = true, phase = "shown", holdMilliseconds, windows });
-            await Task.Delay(holdMilliseconds);
+            // Keep sample labels out of the window: every comparison has exactly
+            // the same text and controls, including the 11/14/24-DIP text probes.
+            card = new CardWindow("Mica visual diagnostic", content, rect.Height, autoHeight: false, width: rect.Width);
+            card.Root.RequestedTheme = sample.Dark ? ElementTheme.Dark : ElementTheme.Light;
+            card.Root.IsHitTestVisible = false;
+            card.SetMicaAppearance(new CardMicaAppearance(vivid, tuning));
+            if (lyrics is not null) InitializeLyrics(lyrics);
+            Place(card, rect);
+            await card.VisibleFrame.WaitAsync(TimeSpan.FromSeconds(5));
+
+            var clock = Stopwatch.StartNew();
+            while (!card.MicaBackdrop.Diagnostics.Connected && clock.ElapsedMilliseconds < 3000)
+                await Task.Delay(100);
+            var diagnostics = card.MicaBackdrop.Diagnostics;
+            var stableSince = clock.ElapsedMilliseconds;
+            while (clock.ElapsedMilliseconds - stableSince < stabilizeMilliseconds && clock.ElapsedMilliseconds < 15000)
+            {
+                await Task.Delay(100);
+                var next = card.MicaBackdrop.Diagnostics;
+                if (!Equals(next, diagnostics)) { diagnostics = next; stableSince = clock.ElapsedMilliseconds; }
+            }
+            var stabilized = clock.ElapsedMilliseconds - stableSince >= stabilizeMilliseconds;
+            object? painted = lyrics is null ? null : await PaintedBackgroundsAsync(lyrics);
+            // Read again after connection, stabilization and optional DOM work.
+            var finalDiagnostics = card.MicaBackdrop.Diagnostics;
+            stabilized &= Equals(diagnostics, finalDiagnostics);
+            diagnostics = finalDiagnostics;
+            var active = diagnostics.Connected && string.Equals(diagnostics.State, "Active", StringComparison.OrdinalIgnoreCase);
+            var configurationMatches = diagnostics.Custom == vivid && diagnostics.Dark == sample.Dark && diagnostics.InputActive &&
+                (!vivid || (diagnostics.TintOpacity is { } actualTint && diagnostics.LuminosityOpacity is { } actualLuminosity &&
+                    Math.Abs(actualTint - tuning.TintOpacityFor(sample.Dark)) < .0005 &&
+                    Math.Abs(actualLuminosity - tuning.LuminosityOpacityFor(sample.Dark)) < .0005));
+            if (!GetWindowRect(card.Handle, out var bounds)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            windows.Add(new
+            {
+                label = sample.Label, mode = sample.Mode, dark = sample.Dark, vivid,
+                tint = vivid ? (double?)tuning.TintOpacityFor(sample.Dark) : null,
+                luminosity = vivid ? (double?)tuning.LuminosityOpacityFor(sample.Dark) : null,
+                diagnostics, stabilized, configurationMatches, fallbackOrUnverified = !active,
+                assessment = !active ? "FALLBACK OR UNVERIFIED: not a visual pass" :
+                    !stabilized || !configurationMatches ? "UNSTABLE OR CONFIGURATION MISMATCH: not a visual pass" : "Active material; manual visual review required",
+                rect = Rect(bounds.Left, bounds.Top, bounds.Right - bounds.Left, bounds.Bottom - bounds.Top),
+                requestedRect = Rect(rect.X, rect.Y, rect.Width, rect.Height),
+                dpi = GetDpiForWindow(card.Handle), foreground = GetForegroundWindow() == card.Handle,
+                actualTheme = card.Root.ActualTheme.ToString(), textSizes = new[] { 11, 14, 24 },
+                lyrics = sample.Lyrics, painted
+            });
+            Write(resultPath, new { success = true, phase = "shown", sampleIndex = index, totalCount,
+                holdMilliseconds, stabilizeMilliseconds, visualPass = false, readyAtUtc = DateTimeOffset.UtcNow, windows });
+            var hold = Stopwatch.StartNew();
+            while (hold.ElapsedMilliseconds < holdMilliseconds &&
+                !(args.Contains("--wait-for-capture") && File.Exists(resultPath + ".captured")))
+                await Task.Delay(100);
+            if (args.Contains("--wait-for-capture") && !File.Exists(resultPath + ".captured"))
+                throw new TimeoutException("No screenshot acknowledgement arrived before the hold deadline.");
+            if (!Equals(diagnostics, card.MicaBackdrop.Diagnostics))
+                throw new InvalidOperationException("Mica diagnostics changed between readiness and capture completion; retry this sample.");
+            if (GetForegroundWindow() == card.Handle)
+                throw new InvalidOperationException("The diagnostic window unexpectedly acquired foreground focus.");
         }
         catch (Exception exception) { error = exception.ToString(); }
         finally
         {
-            foreach (var card in cards)
-            {
-                try { card.Close(); } catch (COMException) { }
-            }
-            Write(resultPath, new { success = error is null, phase = "closed", error, windows });
+            try { lyrics?.Dispose(); } catch (Exception exception) { error ??= exception.ToString(); }
+            try { card?.Close(); } catch (Exception exception) { error ??= exception.ToString(); }
+            if (resultPath is not null)
+                try { Write(resultPath, new { success = error is null, phase = "closed", error, totalCount, visualPass = false, windows }); }
+                catch (Exception) { error ??= "Could not write the diagnostic result."; }
             Environment.ExitCode = error is null ? 0 : 1;
         }
     }
 
-    private static async Task<(CardWindow Card, object Painted)> CreateLyricsCardAsync(Sample sample, RectInt32 rect)
+    private static StackPanel ComparisonContent()
+    {
+        var content = new StackPanel { Spacing = 8 };
+        content.Children.Add(new TextBlock { Text = "Mica 材质 · Aa 0123", FontSize = 24 });
+        content.Children.Add(new TextBlock { Text = "正文与控件 · Body text 0123456789", FontSize = 14 });
+        content.Children.Add(new TextBlock { Text = "辅助文字 · Small text 0123456789", FontSize = 11, Opacity = .7 });
+        var controls = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16 };
+        controls.Children.Add(new Button { Content = "示例按钮", IsTabStop = false });
+        controls.Children.Add(new ToggleSwitch { IsOn = true, OnContent = "已开启", IsTabStop = false });
+        content.Children.Add(controls);
+        content.Children.Add(new Slider { Minimum = 0, Maximum = 100, Value = 60, IsTabStop = false });
+        return content;
+    }
+
+    private static void InitializeLyrics(CardLyricsView lyrics)
     {
         var directory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "Media", "Web", "Lyrics"));
         var script = string.Join("\n", new[] { "bridge.js", "state.js", "presentation.js", "app.js", "browser.js" }
@@ -78,10 +148,6 @@ internal static class CardMicaVisualProbe
         var html = File.ReadAllText(Path.Combine(directory, "index.html"))
             .Replace("{{STYLE_CSS}}", File.ReadAllText(Path.Combine(directory, "style.css")))
             .Replace("{{APP_JS}}", script);
-        var lyrics = new CardLyricsView { VerticalAlignment = VerticalAlignment.Top, Height = 64 };
-        var card = new CardWindow("歌词块", lyrics, 128, autoHeight: false, width: 320);
-        card.Root.RequestedTheme = sample.Dark ? ElementTheme.Dark : ElementTheme.Light;
-        card.SetMicaTuning(CardMicaTuning.FromValues(sample.TintOpacity, sample.LuminosityOpacity));
         lyrics.Activate();
         lyrics.Initialize(html);
         lyrics.Receive(JsonSerializer.SerializeToElement(new
@@ -96,9 +162,6 @@ internal static class CardMicaVisualProbe
                 "window.taskbarLyrics.receive({version:1,type:'lyrics',payload:{current:'歌词块背景应当透明',next:'第二行歌词',progress:.4,currentLineIndex:0,trackId:'visual-probe',isPureMusic:false,isPlaying:false,currentTranslation:'',nextTranslation:'',translationMode:false,animateTransition:false,scene:'lyrics'}})"
             }
         }));
-        Place(card, rect);
-        await Task.Delay(1200);
-        return (card, await PaintedBackgroundsAsync(lyrics));
     }
 
     // Reports every element that still paints a background, so a visible block
@@ -153,36 +216,61 @@ internal static class CardMicaVisualProbe
 
     private static void Write(string path, object payload)
     {
-        try { File.WriteAllText(path, JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true })); }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
+        var temporary = path + ".tmp";
+        File.WriteAllText(temporary, JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+        File.Move(temporary, path, true);
     }
 
+    [StructLayout(LayoutKind.Sequential)] private struct NativeRect { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetWindowRect(nint window, out NativeRect rect);
+    [DllImport("user32.dll")] private static extern uint GetDpiForWindow(nint window);
+    [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtr(nint window, int index);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] private static extern nint SetWindowLongPtr(nint window, int index, nint value);
 
-    // Optional parameter grid: {"label":"…","dark":false,"tint":0.1,"luminosity":0.85,"lyrics":false}
+    private static int Number(string[] args, string name, int fallback, int minimum, int maximum)
+    {
+        var text = Argument(args, name);
+        if (text is null) return fallback;
+        if (!int.TryParse(text, out var value) || value < minimum || value > maximum)
+            throw new ArgumentException($"{name} must be between {minimum} and {maximum}.");
+        return value;
+    }
+
+    private static Sample[] DefaultSamples() => new[] { false, true }.SelectMany(dark =>
+    {
+        var theme = dark ? "深色" : "浅色";
+        var tuning = CardMicaTuning.Default;
+        return new[]
+        {
+            new Sample($"{theme} · system", dark, 0, 0, false, "system"),
+            new Sample(FormattableString.Invariant($"{theme} · current default (tint {tuning.TintOpacityFor(dark):0.##}, luminosity {tuning.LuminosityOpacityFor(dark):0.##})"), dark, 0, 0, false, "default"),
+            new Sample($"{theme} · tint 0 / luminosity 0.85", dark, 0, .85, false, "custom"),
+            new Sample($"{theme} · tint 0 / luminosity 0.65", dark, 0, .65, false, "custom"),
+            new Sample($"{theme} · tint 0 / luminosity 0.45", dark, 0, .45, false, "custom")
+        };
+    }).ToArray();
+
+    // Legacy parameter grids remain custom by default; mode may also be system/default.
     private static Sample[]? SampleFile(string[] args)
     {
         var path = Argument(args, "--samples-file");
-        if (path is null || !File.Exists(path)) return null;
-        try
+        if (path is null) return null;
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        var samples = new List<Sample>();
+        foreach (var item in document.RootElement.EnumerateArray())
         {
-            using var document = JsonDocument.Parse(File.ReadAllText(path));
-            var samples = new List<Sample>();
-            foreach (var item in document.RootElement.EnumerateArray())
-            {
-                samples.Add(new Sample(
-                    item.GetProperty("label").GetString() ?? "样本",
-                    item.TryGetProperty("dark", out var dark) && dark.GetBoolean(),
-                    item.TryGetProperty("tint", out var tint) ? tint.GetDouble() : 0.0,
-                    item.TryGetProperty("luminosity", out var luminosity) ? luminosity.GetDouble() : 0.85,
-                    item.TryGetProperty("lyrics", out var lyrics) && lyrics.GetBoolean()));
-            }
-            return samples.Count > 0 ? samples.ToArray() : null;
+            var mode = item.TryGetProperty("mode", out var modeElement) ? modeElement.GetString() : "custom";
+            if (mode is not ("custom" or "system" or "default")) throw new ArgumentException("Unknown Mica sample mode.");
+            samples.Add(new Sample(
+                item.GetProperty("label").GetString() ?? "样本",
+                item.TryGetProperty("dark", out var dark) && dark.GetBoolean(),
+                item.TryGetProperty("tint", out var tint) ? tint.GetDouble() : 0.0,
+                item.TryGetProperty("luminosity", out var luminosity) ? luminosity.GetDouble() : 0.85,
+                item.TryGetProperty("lyrics", out var lyrics) && lyrics.GetBoolean(), mode));
         }
-        catch (Exception exception) when (exception is JsonException or KeyNotFoundException or InvalidOperationException) { return null; }
+        return samples.Count > 0 ? samples.ToArray() : throw new ArgumentException("Sample file is empty.");
     }
 
-    private readonly record struct Sample(string Label, bool Dark, double TintOpacity, double LuminosityOpacity, bool Lyrics);
+    private readonly record struct Sample(string Label, bool Dark, double TintOpacity, double LuminosityOpacity, bool Lyrics, string Mode);
 }

@@ -60,11 +60,16 @@ public sealed partial class SettingsWindow
                     throw new InvalidOperationException("Theme did not reach the settings root, property drawer and drag overlay.");
                 var surface = ((SolidColorBrush)sectionCard.Background).Color;
                 var drawer = ((SolidColorBrush)pane.Background).Color;
-                if (requested == "Light") lightColor = surface;
-                else if (requested == "Dark" && surface == lightColor)
-                    throw new InvalidOperationException("Existing section ThemeResource did not refresh for the new theme.");
-                if (surface != drawer)
-                    throw new InvalidOperationException("Drawer and settings surface resolved different theme backgrounds.");
+                if (requested == "Light") lightColor = drawer;
+                else if (requested == "Dark" && drawer == lightColor && !window._accessibility.HighContrast)
+                    throw new InvalidOperationException("Existing drawer ThemeResource did not refresh for the new theme.");
+                var navigation = WalkTheme(window._navigation).OfType<Grid>()
+                    .Single(grid => grid.Name == "ContentGrid" && WalkTheme(grid).Contains(window._split));
+                var navigationColor = ((SolidColorBrush)navigation.Background).Color;
+                if (window._accessibility.HighContrast
+                    ? surface.A != 255 || navigationColor.A != 255
+                    : surface.A != 0x0A || navigationColor.A != 0)
+                    throw new InvalidOperationException("Settings Mica is covered by a duplicate content layer, or high-contrast fallback is transparent.");
                 var cardCheck = await CardGroup.ProbeThemeAsync(cards, expected);
                 checks.Add(new { cardCheck, requested, actual = window._root.ActualTheme.ToString(), surface = surface.ToString(), drawer = drawer.ToString(), unfinishedText = input.Text, retainedDrawer = true });
             }
