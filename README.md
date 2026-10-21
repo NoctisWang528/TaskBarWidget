@@ -20,25 +20,34 @@
 
 ## 效果展示
 
-以下为用户提供的当前版本桌面实机截图，展示快捷卡片、任务栏和设置窗口的实际 Mica 效果；材质颜色会随壁纸和主题变化。
+当前版本的桌面实机截图。Mica 色彩随壁纸和主题变化，点击图片可查看原图。
 
-### 快捷卡片与任务栏监测
-
-![流量热力图、音频设备、媒体和天气卡片，以及任务栏系统监测](TaskBarWidgets/docs/images/cards-live-20261021.png)
-
-流量、音频设备、媒体和天气四张卡片可按需启停与分列排列，底部任务栏显示网络、硬件和天气信息。
-
-### 媒体播放与任务栏歌词
-
-![QQ 音乐播放控制卡片与任务栏歌词](TaskBarWidgets/docs/images/media-live-20261021.png)
-
-媒体卡片显示封面、播放来源、控制按钮和进度，任务栏随音乐播放显示歌词。
+<table>
+  <tr>
+    <th align="center">快捷卡片与系统监测</th>
+    <th align="center">媒体播放与任务栏歌词</th>
+  </tr>
+  <tr>
+    <td align="center" valign="middle">
+      <a href="TaskBarWidgets/docs/images/cards-live-20261021.png"><img src="TaskBarWidgets/docs/images/cards-live-20261021.png" width="360" alt="流量、音频设备、媒体和天气卡片，以及任务栏系统监测"></a>
+    </td>
+    <td align="center" valign="middle">
+      <a href="TaskBarWidgets/docs/images/media-live-20261021.png"><img src="TaskBarWidgets/docs/images/media-live-20261021.png" width="300" alt="QQ 音乐播放控制卡片与任务栏歌词"></a>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">四张卡片按需启停、分列排列，任务栏展示监测信息。</td>
+    <td align="center">查看播放来源与进度，控制音乐，跟随任务栏歌词。</td>
+  </tr>
+</table>
 
 ### 任务栏布局与设置
 
-![Mica 设置窗口中的任务栏双行预览、显示组合与可用模块](TaskBarWidgets/docs/images/settings-layout-20261021.png)
+<p align="center">
+  <a href="TaskBarWidgets/docs/images/settings-layout-20261021.png"><img src="TaskBarWidgets/docs/images/settings-layout-20261021.png" width="640" alt="Mica 设置窗口中的任务栏双行预览、显示组合与可用模块"></a>
+</p>
 
-通过模块组合调整单行／双行布局。设置页上方的任务栏预览使用示例数值，实际监测读数显示在桌面任务栏中。
+<p align="center">拖动模块调整单行／双行布局；设置页预览使用示例数值。</p>
 
 ## 下载与运行
 
