@@ -133,6 +133,20 @@ internal sealed record MediaFrame(
         browser == other.browser &&
         spectrumTuning == other.spectrumTuning &&
         spectrum.SequenceEqual(other.spectrum);
+
+    internal bool SemanticEquals(MediaFrame other) =>
+        version == other.version &&
+        type == other.type &&
+        renderVersion == other.renderVersion &&
+        string.Equals(sourceId, other.sourceId, StringComparison.Ordinal) &&
+        isPlaying == other.isPlaying &&
+        hasMedia == other.hasMedia &&
+        isBrowser == other.isBrowser &&
+        string.Equals(trackId, other.trackId, StringComparison.Ordinal) &&
+        style == other.style &&
+        cover == other.cover &&
+        browser == other.browser &&
+        spectrumTuning == other.spectrumTuning;
 }
 
 internal sealed record CardFrame(

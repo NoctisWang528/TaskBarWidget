@@ -57,41 +57,6 @@ internal static class LyricsPresentationCalculator
             scene: scene.ToWireValue());
     }
 
-    public static MediaLyricsFrame CreateTimelineProjection(
-        MediaLyricsFrame authoritative,
-        double elapsedMilliseconds,
-        double currentLineDurationMilliseconds)
-    {
-        ArgumentNullException.ThrowIfNull(authoritative);
-        if (authoritative.currentLineIndex < 0 ||
-            authoritative.scene != "lyrics" ||
-            !authoritative.isPlaying ||
-            elapsedMilliseconds <= 0 ||
-            currentLineDurationMilliseconds <= 0 ||
-            string.IsNullOrEmpty(authoritative.trackId))
-        {
-            return authoritative;
-        }
-
-        var advance = Math.Min(
-            0.25,
-            elapsedMilliseconds / currentLineDurationMilliseconds);
-        var progress = Math.Clamp(authoritative.progress + advance, 0, 1);
-        if (progress >= 1)
-        {
-            progress = authoritative.progress;
-        }
-        double? wordScanProgress = authoritative.wordScanProgress is { } wordScan
-            ? Math.Clamp(wordScan + advance, 0, 1)
-            : null;
-        if (wordScanProgress >= 1) wordScanProgress = authoritative.wordScanProgress;
-        return authoritative with
-        {
-            progress = progress,
-            wordScanProgress = wordScanProgress
-        };
-    }
-
     public static LyricsPresentationScene ResolveScene(
         AppSettings settings,
         LyricDisplayFrame frame,
@@ -118,32 +83,4 @@ internal static class LyricsPresentationCalculator
             : LyricsPresentationScene.Message;
     }
 
-    public static bool CanSmoothTimelineProgress(
-        MediaLyricsFrame current,
-        MediaLyricsFrame previous)
-    {
-        ArgumentNullException.ThrowIfNull(current);
-        ArgumentNullException.ThrowIfNull(previous);
-        return current.scene == "lyrics" &&
-            previous.scene == "lyrics" &&
-            current.trackId == previous.trackId &&
-            current.currentLineIndex == previous.currentLineIndex &&
-            current.currentLineIndex >= 0 &&
-            current.progress >= previous.progress &&
-            current.progress - previous.progress <= 0.25 &&
-            current.currentTranslation == previous.currentTranslation &&
-            current.nextTranslation == previous.nextTranslation &&
-            current.translationMode == previous.translationMode;
-    }
-
-    public static MediaLyricsFrame SmoothTimelineProgress(
-        MediaLyricsFrame current,
-        MediaLyricsFrame previous,
-        double amount)
-    {
-        if (!CanSmoothTimelineProgress(current, previous) || amount <= 0) return current;
-        var progress = Math.Clamp(previous.progress + amount, 0, 1);
-        if (progress >= 1) progress = Math.Max(previous.progress, current.progress);
-        return current with { progress = progress };
-    }
 }

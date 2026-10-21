@@ -19,7 +19,8 @@ internal readonly record struct MediaPresentationUpdate(
     MediaFrame Frame,
     CardFrame Card,
     bool MediaFrameChanged,
-    bool CardFrameChanged);
+    bool CardFrameChanged,
+    bool SemanticFrameChanged);
 
 internal sealed class MediaPresentationState
 {
@@ -49,6 +50,7 @@ internal sealed class MediaPresentationState
             browser: input.Browser,
             spectrumTuning: input.SpectrumTuning,
             spectrum: input.Spectrum.ToArray());
+        var semanticFrameChanged = _frame is null || !_frame.SemanticEquals(nextFrame);
         var mediaChanged = _frame is null || !_frame.StateEquals(nextFrame);
         if (mediaChanged)
         {
@@ -75,7 +77,12 @@ internal sealed class MediaPresentationState
             _card = nextCard;
         }
 
-        return new MediaPresentationUpdate(_frame!, _card!, mediaChanged, cardChanged);
+        return new MediaPresentationUpdate(
+            _frame!,
+            _card!,
+            mediaChanged,
+            cardChanged,
+            semanticFrameChanged);
     }
 
     internal MediaFrame? UpdateSpectrum(IReadOnlyList<float> bars)
@@ -91,5 +98,42 @@ internal sealed class MediaPresentationState
         _mediaRevision++;
         _frame = next;
         return next;
+    }
+}
+
+internal static class MediaPublicationPolicy
+{
+    internal static bool PublishFrame(
+        MediaPresentationUpdate update,
+        bool taskbarVisible,
+        Action<object>? publish)
+    {
+        if (!update.MediaFrameChanged ||
+            (!taskbarVisible && !update.SemanticFrameChanged))
+        {
+            return false;
+        }
+        publish?.Invoke(update.Frame);
+        return publish is not null;
+    }
+
+    internal static bool PublishCard(
+        MediaPresentationUpdate update,
+        bool cardVisible,
+        Action<object>? publish)
+    {
+        if (!update.CardFrameChanged || !cardVisible) return false;
+        publish?.Invoke(update.Card);
+        return publish is not null;
+    }
+
+    internal static bool PublishSpectrumFrame(
+        MediaFrame? frame,
+        bool taskbarVisible,
+        Action<object>? publish)
+    {
+        if (frame is null || !taskbarVisible) return false;
+        publish?.Invoke(frame);
+        return publish is not null;
     }
 }

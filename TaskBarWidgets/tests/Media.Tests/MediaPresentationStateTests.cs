@@ -108,6 +108,97 @@ public sealed class MediaPresentationStateTests
         Assert.Equal(initial.Card, state.CurrentCard);
     }
 
+    [Fact]
+    public void HiddenFirstPlaybackPauseResumeAndSourceChangePublishSemanticFrames()
+    {
+        var state = new MediaPresentationState();
+        var published = new List<MediaFrame>();
+        void Publish(object value) => published.Add((MediaFrame)value);
+
+        var noMedia = CreateNoMediaInput();
+        Assert.True(MediaPublicationPolicy.PublishFrame(
+            state.Apply(noMedia),
+            taskbarVisible: false,
+            Publish));
+
+        var playing = CreateInput();
+        Assert.True(MediaPublicationPolicy.PublishFrame(
+            state.Apply(playing),
+            taskbarVisible: false,
+            Publish));
+
+        var paused = playing with
+        {
+            Snapshot = playing.Snapshot with { IsPlaying = false },
+            Lyrics = playing.Lyrics with { isPlaying = false },
+            Browser = playing.Browser with { isPlaying = false }
+        };
+        Assert.True(MediaPublicationPolicy.PublishFrame(
+            state.Apply(paused),
+            taskbarVisible: false,
+            Publish));
+
+        Assert.True(MediaPublicationPolicy.PublishFrame(
+            state.Apply(playing),
+            taskbarVisible: false,
+            Publish));
+
+        var switched = CreateInput() with
+        {
+            Snapshot = CreateInput().Snapshot with { SourceAppUserModelId = "cloudmusic.exe" },
+            TrackId = "NETEASE|OTHER|ARTIST",
+            Lyrics = CreateInput().Lyrics with
+            {
+                trackId = "NETEASE|OTHER|ARTIST",
+                current = "other"
+            }
+        };
+        Assert.True(MediaPublicationPolicy.PublishFrame(
+            state.Apply(switched),
+            taskbarVisible: false,
+            Publish));
+
+        Assert.Equal(5, published.Count);
+        Assert.False(published[0].isPlaying);
+        Assert.True(published[1].isPlaying);
+        Assert.False(published[2].isPlaying);
+        Assert.True(published[3].isPlaying);
+        Assert.Equal("cloudmusic.exe", published[4].sourceId);
+    }
+
+    [Fact]
+    public void HiddenVisualOnlyProgressDoesNotProduceHighFrequencyFrames()
+    {
+        var state = new MediaPresentationState();
+        var initial = CreateInput();
+        state.Apply(initial);
+        var published = new List<MediaFrame>();
+        var progressed = initial with
+        {
+            Lyrics = initial.Lyrics with
+            {
+                progress = 0.9,
+                wordScanProgress = 0.85
+            }
+        };
+
+        var update = state.Apply(progressed);
+        Assert.True(update.MediaFrameChanged);
+        Assert.False(update.SemanticFrameChanged);
+        Assert.False(MediaPublicationPolicy.PublishFrame(
+            update,
+            taskbarVisible: false,
+            value => published.Add((MediaFrame)value)));
+        Assert.Empty(published);
+
+        var unchanged = state.Apply(progressed);
+        Assert.False(unchanged.MediaFrameChanged);
+        Assert.False(MediaPublicationPolicy.PublishFrame(
+            unchanged,
+            taskbarVisible: false,
+            value => published.Add((MediaFrame)value)));
+    }
+
     private static MediaPresentationInput CreateInput()
     {
         var snapshot = new PlaybackSnapshot(
@@ -157,6 +248,37 @@ public sealed class MediaPresentationStateTests
                 true,
                 true,
                 true),
+            NativeMediaPayloadFactory.CreateSpectrumTuning(
+                SpectrumTuningSettings.CreateDefault()),
+            [],
+            NativeAppearanceJson.Empty);
+    }
+
+    private static MediaPresentationInput CreateNoMediaInput()
+    {
+        var snapshot = new PlaybackSnapshot(false, TimeSpan.Zero, null);
+        var lyrics = new MediaLyricsFrame(
+            "等待播放...",
+            "",
+            0,
+            -1,
+            "",
+            false,
+            false,
+            "",
+            "",
+            false,
+            true,
+            null,
+            "noPlayback");
+        return new MediaPresentationInput(
+            snapshot,
+            false,
+            "",
+            lyrics,
+            NativeMediaPayloadFactory.CreateStyle(new AppSettings(), 1),
+            NativeMediaPayloadFactory.EmptyCover(),
+            new MediaBrowserFrame(false, "", "", "", false, false, false, false),
             NativeMediaPayloadFactory.CreateSpectrumTuning(
                 SpectrumTuningSettings.CreateDefault()),
             [],

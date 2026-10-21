@@ -53,7 +53,6 @@ internal sealed class MediaCoordinator : IDisposable
     private bool _showSpectrum;
     private long _stateVersion;
     private DateTimeOffset _lastAuthorityUtc;
-    private DateTimeOffset _lastTimelineProjectionUtc;
     private int _presentationFailureCount;
     private int _invalidationPosted;
     private string _coverData = "";
@@ -420,7 +419,6 @@ internal sealed class MediaCoordinator : IDisposable
 
         _playback = snapshot = decision.Snapshot;
         _lastAuthorityUtc = _utcNow();
-        _lastTimelineProjectionUtc = _lastAuthorityUtc;
         var track = snapshot.Track;
         var isBrowser = NonLyricsMediaPolicy.IsNonLyrics(snapshot);
         var trackId = track is null ? "" : LyricSyncService.BuildStableTrackIdentity(track);
@@ -513,14 +511,8 @@ internal sealed class MediaCoordinator : IDisposable
         Volatile.Write(ref _card, update.Card);
         _scheduler.SetPlaybackState(snapshot.IsPlaying);
 
-        if (update.MediaFrameChanged && _taskbarVisible)
-        {
-            FrameReady?.Invoke(update.Frame);
-        }
-        if (update.CardFrameChanged && _cardVisible)
-        {
-            CardFrameReady?.Invoke(update.Card);
-        }
+        MediaPublicationPolicy.PublishFrame(update, _taskbarVisible, FrameReady);
+        MediaPublicationPolicy.PublishCard(update, _cardVisible, CardFrameReady);
         // Timeline changes can move the lyrics before another SMTC event arrives.
         // Keep authoritative reads low-frequency, then smooth only within the
         // current lyric line's own interval.
@@ -590,7 +582,10 @@ internal sealed class MediaCoordinator : IDisposable
         var updated = _presentation.UpdateSpectrum(bars);
         if (updated is null) return;
         Volatile.Write(ref _frame, updated);
-        if (_taskbarVisible || _preview) FrameReady?.Invoke(updated);
+        MediaPublicationPolicy.PublishSpectrumFrame(
+            updated,
+            _taskbarVisible || _preview,
+            FrameReady);
     }
 
     private async Task UpdateCoverAsync(
@@ -746,51 +741,40 @@ internal sealed class MediaCoordinator : IDisposable
         });
     }
 
-    private Task ApplyPresentationTickAsync(CancellationToken cancellationToken)
+    private async Task ApplyPresentationTickAsync(CancellationToken cancellationToken)
     {
-        if (!_taskbarVisible && !_cardVisible) return Task.CompletedTask;
+        if (!_taskbarVisible && !_cardVisible) return;
         if (_presentation.CurrentFrame is not { isPlaying: true } previous ||
-            !_playback.IsPlaying ||
-            previous.lyrics.scene != "lyrics")
+            !_playback.IsPlaying)
         {
-            return Task.CompletedTask;
+            return;
         }
 
         var now = _utcNow();
         if (now - _lastAuthorityUtc >= MediaRenderScheduler.FallbackInterval)
         {
             _scheduler.RequestState(full: true);
-            return Task.CompletedTask;
+            return;
         }
 
-        var elapsed = now - _lastTimelineProjectionUtc;
-        if (elapsed <= TimeSpan.Zero) return Task.CompletedTask;
-
-        var lyrics = LyricsPresentationCalculator.CreateTimelineProjection(
-            previous.lyrics,
-            Math.Min(
-                elapsed.TotalMilliseconds,
-                MediaRenderScheduler.PresentationInterval.TotalMilliseconds),
-            currentLineDurationMilliseconds: 2500);
-        if (lyrics == previous.lyrics) return Task.CompletedTask;
-        _lastTimelineProjectionUtc = now;
-
-        var update = _presentation.Apply(new MediaPresentationInput(
+        var update = await MediaPresentationTickBuilder.BuildAsync(
             _playback,
+            _lastAuthorityUtc,
+            now,
             previous.isBrowser,
-            lyrics.trackId,
-            lyrics,
-            previous.style ?? _style,
-            previous.cover ?? _coverFrame,
-            previous.browser,
-            previous.spectrumTuning,
+            previous,
+            _presentation,
+            Lyrics,
+            _settings,
             _spectrumActive ? _spectrumBars : [],
-            _nativeAppearance));
-        Volatile.Write(ref _frame, update.Frame);
-        Volatile.Write(ref _card, update.Card);
-        if (update.MediaFrameChanged && _taskbarVisible) FrameReady?.Invoke(update.Frame);
-        if (update.CardFrameChanged && _cardVisible) CardFrameReady?.Invoke(update.Card);
-        return Task.CompletedTask;
+            _nativeAppearance);
+        if (_disposed) return;
+        if (update is null) return;
+        var current = update.Value;
+        Volatile.Write(ref _frame, current.Frame);
+        Volatile.Write(ref _card, current.Card);
+        MediaPublicationPolicy.PublishFrame(current, _taskbarVisible, FrameReady);
+        MediaPublicationPolicy.PublishCard(current, _cardVisible, CardFrameReady);
     }
 
     private void RunOnDispatcher(Action action)
