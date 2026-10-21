@@ -244,4 +244,3 @@ NVIDIA游戏提示仍未确认有可靠的应用侧关闭方式，未修改全�
 **验证。** `tests/Media.Tests` 275 项、`tests/Lyrics.Core.Tests` 27 项通过，其中新增界面场景测试覆盖频谱＋卡片、任务栏切回监测、关闭卡片停更与真实歌词换行。`Native/tests/run-native-tests.ps1` 全部通过，新增断言检查新目标到达时刻、中间时刻与结束时刻，以及暂停／词间停顿重显、重复快照、宿主重绑和减少动画连续绘制。完整硬件 Release 构建（原生、Media、UI、独立更新器、共享运行库）通过；`test-ui-templates.ps1` 离屏加载设置与四张卡片且 `webView2Used=false`；`test-shared-runtime.ps1` 确认 Media 从系统共享运行库加载且无窗口设置服务可用；`run-managed-runtime-test.ps1` 的共享运行时、缺失／版本／配置失败与子进程启动检查通过。更新健康与更新器隔离检查见本轮交付说明。
 
 **未执行。** 正常产品启动、真实播放器与音频、Explorer 重启、多显示器混合 DPI、真实桌面视觉与输入验收尚未执行；离线测试与离屏模板不能替代这些场景，也未证明运行期间不存在 `msedgewebview2` 进程。
-
