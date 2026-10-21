@@ -51,6 +51,8 @@ internal sealed class MediaCoordinator : IDisposable
     private bool _spectrumActive;
     private bool _preview;
     private bool _showSpectrum;
+    private LyricsPresentationScene _taskbarScene = LyricsPresentationScene.NoPlayback;
+    private LyricsPresentationScene _cardScene = LyricsPresentationScene.NoPlayback;
     private long _stateVersion;
     private long _authorityVersion;
     private long _playbackAuthorityVersion;
@@ -130,6 +132,7 @@ internal sealed class MediaCoordinator : IDisposable
             IsBrowser: false,
             TrackId: "",
             initialLyrics,
+            LyricsPresentationScene.NoPlayback,
             _style,
             _coverFrame,
             new MediaBrowserFrame(false, "", "", "", false, false, false, false),
@@ -238,6 +241,7 @@ internal sealed class MediaCoordinator : IDisposable
             if (_disposed || _taskbarVisible == visible) return;
             _taskbarVisible = visible;
             _scheduler.SetVisibility(_taskbarVisible, _cardVisible);
+            UpdatePresentationActivity();
             if (visible)
             {
                 MediaPublicationPolicy.PublishFrameOnReveal(
@@ -256,6 +260,7 @@ internal sealed class MediaCoordinator : IDisposable
             if (_disposed || _cardVisible == visible) return;
             _cardVisible = visible;
             _scheduler.SetVisibility(_taskbarVisible, _cardVisible);
+            UpdatePresentationActivity();
             if (visible)
             {
                 MediaPublicationPolicy.PublishCardOnReveal(
@@ -478,12 +483,20 @@ internal sealed class MediaCoordinator : IDisposable
             isBrowser,
             snapshot.Track is not null,
             lyricsService.CurrentLyricAcquisition);
+        var cardScene = LyricsPresentationCalculator.ResolveCardScene(
+            _settings,
+            display,
+            isBrowser,
+            snapshot.Track is not null,
+            lyricsService.CurrentLyricAcquisition);
+        _taskbarScene = scene;
+        _cardScene = cardScene;
         _showSpectrum = scene == LyricsPresentationScene.Spectrum;
         UpdateSpectrum(_showSpectrum);
-        // Keep ticking while a lyric search can complete asynchronously, but
-        // never for browser/Douyin/message-only playback.
-        _scheduler.SetPresentationActive(
-            scene is LyricsPresentationScene.Lyrics or LyricsPresentationScene.Searching);
+        // Keep ticking while a lyric search can complete asynchronously, but never
+        // for browser/Douyin/message-only playback. A visible card keeps its own
+        // lyric timeline running even when the taskbar shows the spectrum.
+        UpdatePresentationActivity();
 
         var lyrics = LyricsPresentationCalculator.Create(
             snapshot,
@@ -532,6 +545,7 @@ internal sealed class MediaCoordinator : IDisposable
             isBrowser,
             trackId,
             lyrics,
+            cardScene,
             _style,
             _coverFrame,
             browser,
@@ -564,6 +578,14 @@ internal sealed class MediaCoordinator : IDisposable
             : latest.Track is not null &&
               LyricSyncService.BuildStableTrackIdentity(prepared.Track) ==
               LyricSyncService.BuildStableTrackIdentity(latest.Track));
+
+    // Fast lyric scheduling follows every surface that actually renders lyrics.
+    private void UpdatePresentationActivity() =>
+        _scheduler.SetPresentationActive(MediaPresentationActivity.ShouldAdvancePresentation(
+            _taskbarVisible,
+            _taskbarScene,
+            _cardVisible,
+            _cardScene));
 
     private void UpdateSpectrum(bool spectrumContentVisible)
     {
@@ -802,6 +824,8 @@ internal sealed class MediaCoordinator : IDisposable
             _lastAuthorityUtc,
             now,
             previous.isBrowser,
+            _taskbarVisible,
+            _cardVisible,
             previous,
             _presentation,
             Lyrics,

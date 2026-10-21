@@ -272,6 +272,7 @@ public sealed class MediaPresentationStateTests
             false,
             "QQMUSIC|TITLE|ARTIST",
             lyrics,
+            LyricsPresentationScene.Lyrics,
             NativeMediaPayloadFactory.CreateStyle(new AppSettings(), 1),
             NativeMediaPayloadFactory.CreateCover(
                 "data:image/png;base64,AAA",
@@ -316,6 +317,7 @@ public sealed class MediaPresentationStateTests
             false,
             "",
             lyrics,
+            LyricsPresentationScene.NoPlayback,
             NativeMediaPayloadFactory.CreateStyle(new AppSettings(), 1),
             NativeMediaPayloadFactory.EmptyCover(),
             new MediaBrowserFrame(false, "", "", "", false, false, false, false),

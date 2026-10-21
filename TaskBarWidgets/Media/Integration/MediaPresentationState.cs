@@ -1,4 +1,5 @@
 using System.Text.Json;
+using TaskbarLyrics.App;
 using TaskbarLyrics.Core.Models;
 
 namespace TaskBarWidgets.Media.Integration;
@@ -8,6 +9,7 @@ internal readonly record struct MediaPresentationInput(
     bool IsBrowser,
     string TrackId,
     MediaLyricsFrame Lyrics,
+    LyricsPresentationScene CardScene,
     MediaStyleFrame Style,
     MediaCoverFrame Cover,
     MediaBrowserFrame Browser,
@@ -67,7 +69,7 @@ internal sealed class MediaPresentationState
             trackId: input.TrackId,
             available: available,
             isPlaying: input.Snapshot.IsPlaying,
-            lyrics: input.Lyrics,
+            lyrics: LyricsPresentationCalculator.ForCard(input.Lyrics, input.CardScene),
             style: input.Style,
             nativeAppearance: NativeAppearanceJson.Normalize(input.NativeAppearance));
         var cardChanged = _card is null || !_card.StateEquals(nextCard);

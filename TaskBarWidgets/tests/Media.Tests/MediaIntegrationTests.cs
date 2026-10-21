@@ -149,6 +149,7 @@ public sealed class MediaIntegrationTests
             false,
             "QQMUSIC|TITLE|ARTIST",
             lyrics,
+            LyricsPresentationScene.Lyrics,
             style,
             CreateCover(),
             new MediaBrowserFrame(false, "", "", "qq", true, false, false, true),

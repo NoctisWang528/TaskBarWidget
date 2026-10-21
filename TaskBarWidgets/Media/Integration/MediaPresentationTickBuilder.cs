@@ -12,6 +12,8 @@ internal static class MediaPresentationTickBuilder
         DateTimeOffset authoritativeAtUtc,
         DateTimeOffset nowUtc,
         bool isBrowser,
+        bool taskbarVisible,
+        bool cardVisible,
         MediaFrame previous,
         MediaPresentationState state,
         LyricSyncService lyrics,
@@ -36,9 +38,19 @@ internal static class MediaPresentationTickBuilder
             isBrowser,
             projected.Track is not null,
             lyrics.CurrentLyricAcquisition);
-        if (scene is not (LyricsPresentationScene.Lyrics or
-            LyricsPresentationScene.Searching or
-            LyricsPresentationScene.Spectrum))
+        var cardScene = LyricsPresentationCalculator.ResolveCardScene(
+            settings,
+            display,
+            isBrowser,
+            projected.Track is not null,
+            lyrics.CurrentLyricAcquisition);
+        // A visible card keeps lyric advancement alive even while the taskbar
+        // shows its spectrum, and a hidden pair of surfaces stops it again.
+        if (!MediaPresentationActivity.ShouldAdvancePresentation(
+            taskbarVisible,
+            scene,
+            cardVisible,
+            cardScene))
         {
             return null;
         }
@@ -56,6 +68,7 @@ internal static class MediaPresentationTickBuilder
             isBrowser,
             lyricFrame.trackId,
             lyricFrame,
+            cardScene,
             previous.style ?? throw new InvalidOperationException("Presentation frame has no style."),
             previous.cover ?? NativeMediaPayloadFactory.EmptyCover(),
             previous.browser,

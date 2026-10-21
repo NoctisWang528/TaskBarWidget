@@ -57,6 +57,29 @@ internal static class LyricsPresentationCalculator
             scene: scene.ToWireValue());
     }
 
+    // The card never renders the spectrum, so it keeps a lyric-only scene even
+    // when the taskbar switches to spectrum. Availability still decides whether
+    // the card shows anything at all.
+    public static LyricsPresentationScene ResolveCardScene(
+        AppSettings settings,
+        LyricDisplayFrame frame,
+        bool isBrowser,
+        bool hasTrack,
+        LyricAcquisitionKind acquisition)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(frame);
+        if (!hasTrack) return LyricsPresentationScene.NoPlayback;
+        if (isBrowser) return LyricsPresentationScene.Message;
+        if (acquisition == LyricAcquisitionKind.Searching) return LyricsPresentationScene.Searching;
+        return frame.CurrentLineIndex >= 0 && !frame.IsPureMusic
+            ? LyricsPresentationScene.Lyrics
+            : LyricsPresentationScene.Message;
+    }
+
+    public static MediaLyricsFrame ForCard(MediaLyricsFrame frame, LyricsPresentationScene cardScene) =>
+        frame with { scene = cardScene.ToWireValue() };
+
     public static LyricsPresentationScene ResolveScene(
         AppSettings settings,
         LyricDisplayFrame frame,
