@@ -149,13 +149,19 @@ internal sealed class CoverVisualTransitionState
     }
 }
 
+internal sealed record ProcessFallbackObservation(
+    string? Source,
+    string InferredTitle,
+    string InferredArtist,
+    bool ProcessQuerySucceeded = true);
+
 internal sealed class ProcessFallbackDetectionCache
 {
     internal static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(1);
 
     private readonly Func<DateTimeOffset> _utcNow;
     private DateTimeOffset _nextRefreshUtc;
-    private string? _cachedSource;
+    private ProcessFallbackObservation? _cached;
     private bool _hasCachedResult;
 
     internal ProcessFallbackDetectionCache(Func<DateTimeOffset>? utcNow = null)
@@ -163,25 +169,32 @@ internal sealed class ProcessFallbackDetectionCache
         _utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
     }
 
-    internal string? GetOrRefresh(Func<string?> detect)
+    internal ProcessFallbackObservation GetOrRefresh(Func<ProcessFallbackObservation> detect)
     {
         ArgumentNullException.ThrowIfNull(detect);
 
         var nowUtc = _utcNow();
         if (_hasCachedResult && nowUtc < _nextRefreshUtc)
         {
-            return _cachedSource;
+            var cached = _cached!;
+            return cached.ProcessQuerySucceeded
+                ? cached
+                : new ProcessFallbackObservation(
+                    cached.Source,
+                    cached.InferredTitle,
+                    cached.InferredArtist,
+                    ProcessQuerySucceeded: false);
         }
 
-        _cachedSource = detect();
+        _cached = detect();
         _hasCachedResult = true;
         _nextRefreshUtc = nowUtc + RefreshInterval;
-        return _cachedSource;
+        return _cached;
     }
 
     internal void Invalidate()
     {
-        _cachedSource = null;
+        _cached = null;
         _hasCachedResult = false;
         _nextRefreshUtc = default;
     }
@@ -192,26 +205,30 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
     private string? _selectedSourceId;
     private readonly Func<long> _tickCount;
 
+    internal event Action? Invalidated;
+
     public SmtcMusicSessionProvider() : this(() => Environment.TickCount64) { }
     internal SmtcMusicSessionProvider(Func<long> tickCount) => _tickCount = tickCount;
 
     internal void SelectSource(string sourceId)
     {
+        if (Volatile.Read(ref _isDisposed) != 0) return;
         _selectedSourceId = string.IsNullOrWhiteSpace(sourceId) ? null : sourceId;
         ResetPlaybackTransition();
+        InvalidateCache(metadata: true, sources: true, controls: true);
+        Invalidate();
     }
 
     internal IReadOnlyList<TaskBarWidgets.Media.Integration.MediaSourceChoice> GetSourceChoices() =>
-        _manager?.GetSessions().Select(session => new TaskBarWidgets.Media.Integration.MediaSourceChoice(
-            session.SourceAppUserModelId, NonLyricsMediaPolicy.IsDouyin(session.SourceAppUserModelId)
-                ? "抖音" : ResolveSource(session.SourceAppUserModelId)))
-            .DistinctBy(source => source.Id).ToArray() ?? [];
+        GetSourceChoicesCached();
 
     internal (bool Previous, bool Next, bool PlayPause) GetControlCapabilities()
     {
-        var controls = _manager is null ? null : SelectSessionForControl(_manager)?.GetPlaybackInfo()?.Controls;
-        return (controls?.IsPreviousEnabled == true, controls?.IsNextEnabled == true,
-            controls?.IsPlayEnabled == true || controls?.IsPauseEnabled == true || controls?.IsPlayPauseToggleEnabled == true);
+        var manager = _manager;
+        var session = manager is null ? null : SelectSessionForControl(manager);
+        if (session is null) return (false, false, false);
+        var playback = GetSessionPlaybackState(session);
+        return (playback.Previous, playback.Next, playback.PlayPause);
     }
     private static readonly string[] DefaultEnabledSources = { "QQMusic", "Netease", "Kugou", "Spotify" };
     private static readonly string[] DefaultRecognitionOrder = { "QQMusic", "Netease", "Kugou", "Spotify", "Browser" };
@@ -229,6 +246,20 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
     private int _playbackRevision;
     private readonly ProcessFallbackDetectionCache _processFallbackDetectionCache = new();
     private GlobalSystemMediaTransportControlsSessionManager? _manager;
+    private GlobalSystemMediaTransportControlsSessionManager? _eventManager;
+    private readonly HashSet<GlobalSystemMediaTransportControlsSession> _subscribedSessions =
+        new(ReferenceEqualityComparer.Instance);
+    private GlobalSystemMediaTransportControlsSession[] _sessionCache = [];
+    private GlobalSystemMediaTransportControlsSessionManager? _sessionCacheManager;
+    private readonly Dictionary<GlobalSystemMediaTransportControlsSession, SessionPlaybackState> _sessionPlaybackCache =
+        new(ReferenceEqualityComparer.Instance);
+    private readonly object _eventGate = new();
+    private CachedMediaMetadata? _metadataCache;
+    private volatile bool _metadataCacheValid;
+    private bool _sessionCacheValid;
+    private IReadOnlyList<TaskBarWidgets.Media.Integration.MediaSourceChoice> _sourceChoicesCache = [];
+    private bool _sourceChoicesCacheValid;
+    private long _playbackCacheGeneration;
     private SmtcTimelineDiagnostics? _lastTimelineDiagnostics;
     private string? _currentLyricSourceApp;
     private int _currentPlayerLyricOffsetMilliseconds;
@@ -258,6 +289,7 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
         IReadOnlyCollection<string>? enabledSources = null,
         IReadOnlyCollection<string>? customSources = null)
     {
+        if (Volatile.Read(ref _isDisposed) != 0) return;
         _enabledSources = enabledSources is null
             ? new HashSet<string>(DefaultEnabledSources, StringComparer.OrdinalIgnoreCase)
             : new HashSet<string>(enabledSources, StringComparer.OrdinalIgnoreCase);
@@ -268,6 +300,8 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
         _recognitionOrder = normalized.ToArray();
         ResetPlaybackTransition();
         _processFallbackDetectionCache.Invalidate();
+        InvalidateCache(metadata: true, sources: true, controls: true);
+        Invalidate();
     }
 
     private void ResetPlaybackTransition()
@@ -276,6 +310,7 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
         _lastRawSnapshot = new(false, TimeSpan.Zero, null);
         _activeSessionCache.Clear();
         Interlocked.Increment(ref _playbackRevision);
+        InvalidateCache(metadata: true, sources: true, controls: true);
     }
 
     internal PlaybackSnapshot CommitPlaybackSnapshot(PlaybackSnapshot raw)
@@ -302,10 +337,13 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
 
         try
         {
-            var playbackInfo = session.GetPlaybackInfo();
-            var isPlaying = playbackInfo?.PlaybackStatus ==
-                GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
-            return CommitPlaybackSnapshot(ApplyLatestPlaybackState(raw, isPlaying));
+            var playbackState = ReadSessionPlaybackState(session);
+            var refreshed = raw with
+            {
+                IsPlaying = playbackState.IsPlaying,
+                CanSeek = playbackState.CanSeek
+            };
+            return CommitPlaybackSnapshot(refreshed);
         }
         catch (Exception exception)
         {
@@ -376,13 +414,13 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
             switch (action)
             {
                 case MediaControlAction.TogglePlayPause:
-                    var playback = session.GetPlaybackInfo();
+                    var playback = GetSessionPlaybackState(session);
                     cancellationToken.ThrowIfCancellationRequested();
                     var displayedDouyin = _douyinPlayback.ControlSourceId is { } controlId &&
                         string.Equals(controlId, session.SourceAppUserModelId, StringComparison.OrdinalIgnoreCase);
                     // During a transition the displayed pause button must not resume a temporarily paused video.
                     if (displayedDouyin ? _douyinPlayback.Current!.IsPlaying :
-                        playback?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
+                        playback.IsPlaying)
                     {
                         EnsureCommandAccepted(await session.TryPauseAsync());
                         if (displayedDouyin) ConfirmDouyinPlayback(session, false);
@@ -408,6 +446,12 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
                     await TrySeekAsync(session, TimeSpan.FromSeconds(5), cancellationToken);
                     break;
             }
+            Interlocked.Increment(ref _playbackRevision);
+            InvalidateCache(
+                metadata: action is MediaControlAction.PreviousTrack or MediaControlAction.NextTrack,
+                sources: true,
+                controls: true);
+            Invalidate();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -440,7 +484,7 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
             var manager = await GetManagerAsync(cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             var session = manager is null ? null : SelectSessionForControl(manager);
-            if (session?.GetPlaybackInfo()?.Controls?.IsPlaybackPositionEnabled != true)
+            if (session is null || !GetSessionPlaybackState(session).CanSeek)
             {
                 throw new InvalidOperationException("当前媒体来源不支持调整进度。");
             }
@@ -454,6 +498,9 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
             var target = TimeSpan.FromTicks(Math.Clamp(position.Ticks, timeline.StartTime.Ticks, timeline.EndTime.Ticks));
             cancellationToken.ThrowIfCancellationRequested();
             EnsureCommandAccepted(await session.TryChangePlaybackPositionAsync(target.Ticks));
+            Interlocked.Increment(ref _playbackRevision);
+            InvalidateCache(metadata: false, sources: false, controls: true);
+            Invalidate();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -473,6 +520,23 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
             return;
         }
 
+        lock (_eventGate)
+        {
+            DetachSessionSubscriptionLocked();
+            if (_eventManager is not null)
+            {
+                _eventManager.SessionsChanged -= OnSessionsChanged;
+                _eventManager = null;
+            }
+            _sessionPlaybackCache.Clear();
+            _sessionCache = [];
+            _sessionCacheManager = null;
+            _sessionCacheValid = false;
+            _sourceChoicesCache = [];
+            _sourceChoicesCacheValid = false;
+            Volatile.Write(ref _metadataCache, null);
+            _metadataCacheValid = false;
+        }
         _activeSessionCache.Clear();
         _manager = null;
         _managerLock.Dispose();
@@ -484,19 +548,19 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
         if (!accepted) throw new InvalidOperationException("播放器未接受此操作，请检查播放源是否仍可用。");
     }
 
-    private static async Task TrySeekAsync(
+    private async Task TrySeekAsync(
         GlobalSystemMediaTransportControlsSession session,
         TimeSpan offset,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var timeline = session.GetTimelineProperties();
-        var playback = session.GetPlaybackInfo();
-        if (playback?.Controls?.IsPlaybackPositionEnabled != true)
+        var playback = GetSessionPlaybackState(session);
+        if (!playback.CanSeek)
             throw new InvalidOperationException("当前媒体来源不支持调整进度。");
         var current = ComputeExtrapolatedPosition(
             timeline,
-            playback?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing,
+            playback.IsPlaying,
             DateTimeOffset.UtcNow,
             out _);
         var target = current + offset;
@@ -511,9 +575,17 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
 
         cancellationToken.ThrowIfCancellationRequested();
         EnsureCommandAccepted(await session.TryChangePlaybackPositionAsync(target.Ticks));
+        Interlocked.Increment(ref _playbackRevision);
+        InvalidateCache(metadata: false, sources: false, controls: true);
+        Invalidate();
     }
 
-    public async Task<PlaybackSnapshot> GetCurrentAsync(CancellationToken cancellationToken = default)
+    public Task<PlaybackSnapshot> GetCurrentAsync(CancellationToken cancellationToken = default) =>
+        GetCurrentAsync(forceMetadataRefresh: false, cancellationToken);
+
+    internal async Task<PlaybackSnapshot> GetCurrentAsync(
+        bool forceMetadataRefresh,
+        CancellationToken cancellationToken = default)
     {
         PlaybackSnapshot raw;
         int revision;
@@ -521,11 +593,12 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
         {
             revision = Volatile.Read(ref _playbackRevision);
             raw = await SmtcSessionReadBoundary.ReadAsync(
-                ReadCurrentSnapshotAsync,
+                token => ReadCurrentSnapshotAsync(forceMetadataRefresh, token),
                 () =>
                 {
                     _activeSessionCache.Clear();
                     _manager = null;
+                    DetachAllEvents();
                     return BuildProcessFallbackSnapshot();
                 },
                 LogSessionReadUnavailable,
@@ -545,12 +618,15 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
         Log.Diagnostic("SMTC", $"SessionReadUnavailable Reason='{errorKey}' Action='process-fallback'.");
     }
 
-    private async Task<PlaybackSnapshot?> ReadCurrentSnapshotAsync(CancellationToken cancellationToken)
+    private async Task<PlaybackSnapshot?> ReadCurrentSnapshotAsync(
+        bool forceMetadataRefresh,
+        CancellationToken cancellationToken)
     {
         var manager = await GetManagerAsync(cancellationToken);
         if (manager is null)
         {
             _activeSessionCache.Clear();
+            DetachAllEvents();
             return BuildProcessFallbackSnapshot();
         }
 
@@ -561,7 +637,7 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
             return BuildProcessFallbackSnapshot();
         }
 
-        var playbackInfo = session.GetPlaybackInfo();
+        var playbackState = GetSessionPlaybackState(session);
         var timeline = session.GetTimelineProperties();
         if (timeline is null) return null;
         var nowUtc = DateTimeOffset.UtcNow;
@@ -570,88 +646,142 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
         var rawSource = ResolveSource(sourceAppUserModelId);
         var sourceApp = ResolveSourceWithProcessFallback(rawSource);
 
-        var isPlaying = playbackInfo?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+        var isPlaying = playbackState.IsPlaying;
         var position = timeline.Position;
         var extrapolatedPosition = ComputeExtrapolatedPosition(timeline, isPlaying, nowUtc, out var lastUpdateAge);
 
-        string title = string.Empty;
-        string artist = string.Empty;
-        string album = string.Empty;
+        string title;
+        string artist;
+        string album;
         byte[]? coverImageBytes = null;
         bool isCoverLoading = false;
-        string? songId = null;
+        string? songId;
 
-        try
+        var cached = Volatile.Read(ref _metadataCache);
+        var useCached = !forceMetadataRefresh &&
+            _metadataCacheValid &&
+            cached is not null &&
+            ReferenceEquals(cached.Session, session) &&
+            string.Equals(cached.SourceApp, sourceApp, StringComparison.Ordinal);
+        if (useCached)
         {
-            var media = await session.TryGetMediaPropertiesAsync().AsTask(cancellationToken);
-            title = media?.Title?.Trim() ?? string.Empty;
-            artist = media?.Artist?.Trim() ?? string.Empty;
-            album = media?.AlbumTitle?.Trim() ?? string.Empty;
-
-            if (media?.Genres != null)
-            {
-                if (sourceApp.Equals("Netease", StringComparison.OrdinalIgnoreCase))
-                {
-                    songId = media.Genres
-                        .FirstOrDefault(x => x.StartsWith("NCM-", StringComparison.OrdinalIgnoreCase))?
-                        .Replace("NCM-", "");
-                }
-                else if (sourceApp.Equals("QQMusic", StringComparison.OrdinalIgnoreCase))
-                {
-                    songId = media.Genres
-                        .FirstOrDefault(x => x.StartsWith("QQ-", StringComparison.OrdinalIgnoreCase))?
-                        .Replace("QQ-", "");
-                }
-            }
-
+            title = cached!.Title;
+            artist = cached.Artist;
+            album = cached.Album;
+            songId = cached.SongId;
             (coverImageBytes, isCoverLoading) = GetCoverBytes(
                 sourceApp,
                 title,
                 artist,
                 album,
                 songId,
-                media?.Thumbnail,
+                cached.Thumbnail,
                 nowUtc);
-
-            // 从 Genres 流派元数据列表中解析播放器写入的 SongId (例如网易云 NCM-, QQ音乐 QQ-)
-            if (media?.Genres != null && sourceApp.Equals("QQMusic", StringComparison.OrdinalIgnoreCase))
+        }
+        else
+        {
+            var previous = cached is not null &&
+                ReferenceEquals(cached.Session, session) &&
+                string.Equals(cached.SourceApp, sourceApp, StringComparison.Ordinal)
+                    ? cached
+                    : null;
+            try
             {
-                var genresText = string.Join(" | ", media.Genres);
-                var diagnosticsKey = $"{title}|{artist}|{album}|{songId}|{genresText}";
-                if (!string.Equals(_lastQqMetadataDiagnosticsKey, diagnosticsKey, StringComparison.Ordinal))
+                var media = await session.TryGetMediaPropertiesAsync().AsTask(cancellationToken);
+                title = media?.Title?.Trim() ?? string.Empty;
+                artist = media?.Artist?.Trim() ?? string.Empty;
+                album = media?.AlbumTitle?.Trim() ?? string.Empty;
+                songId = null;
+
+                if (media?.Genres != null)
                 {
-                    _lastQqMetadataDiagnosticsKey = diagnosticsKey;
-                    Log.Debug($"SMTC QQMusic metadata: Album='{album}', SongId='{songId ?? string.Empty}', Genres='{genresText}'");
+                    if (sourceApp.Equals("Netease", StringComparison.OrdinalIgnoreCase))
+                    {
+                        songId = media.Genres
+                            .FirstOrDefault(x => x.StartsWith("NCM-", StringComparison.OrdinalIgnoreCase))?
+                            .Replace("NCM-", "");
+                    }
+                    else if (sourceApp.Equals("QQMusic", StringComparison.OrdinalIgnoreCase))
+                    {
+                        songId = media.Genres
+                            .FirstOrDefault(x => x.StartsWith("QQ-", StringComparison.OrdinalIgnoreCase))?
+                            .Replace("QQ-", "");
+                    }
+                }
+
+                Volatile.Write(ref _metadataCache, new CachedMediaMetadata(
+                    session,
+                    sourceApp,
+                    title,
+                    artist,
+                    album,
+                    songId,
+                    media?.Thumbnail));
+                _metadataCacheValid = true;
+
+                (coverImageBytes, isCoverLoading) = GetCoverBytes(
+                    sourceApp,
+                    title,
+                    artist,
+                    album,
+                    songId,
+                    media?.Thumbnail,
+                    nowUtc);
+
+                // 从 Genres 流派元数据列表中解析播放器写入的 SongId (例如网易云 NCM-, QQ音乐 QQ-)
+                if (media?.Genres != null && sourceApp.Equals("QQMusic", StringComparison.OrdinalIgnoreCase))
+                {
+                    var genresText = string.Join(" | ", media.Genres);
+                    var diagnosticsKey = $"{title}|{artist}|{album}|{songId}|{genresText}";
+                    if (!string.Equals(_lastQqMetadataDiagnosticsKey, diagnosticsKey, StringComparison.Ordinal))
+                    {
+                        _lastQqMetadataDiagnosticsKey = diagnosticsKey;
+                        Log.Debug($"SMTC QQMusic metadata: Album='{album}', SongId='{songId ?? string.Empty}', Genres='{genresText}'");
+                    }
                 }
             }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            // Keep fallback chain alive.
-            var errorKey = $"{sourceApp}|{ex.GetType().FullName}|{ex.HResult:X8}|{ex.Message}";
-            if (!string.Equals(errorKey, _lastMediaPropertiesErrorKey, StringComparison.Ordinal) ||
-                nowUtc >= _nextMediaPropertiesErrorLogUtc)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                _lastMediaPropertiesErrorKey = errorKey;
-                _nextMediaPropertiesErrorLogUtc = nowUtc.AddSeconds(30);
-                Log.Diagnostic(
-                    "COVER-SMTC",
-                    $"MediaPropertiesFailed Source='{ToLogValue(sourceApp)}' Exception='{ex.GetType().Name}' " +
-                    $"HResult=0x{ex.HResult:X8} Message='{ToLogValue(ex.Message)}'");
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // Keep the last known metadata during a transient SMTC read failure.
+                title = previous?.Title ?? string.Empty;
+                artist = previous?.Artist ?? string.Empty;
+                album = previous?.Album ?? string.Empty;
+                songId = previous?.SongId;
+                (coverImageBytes, isCoverLoading) = GetCoverBytes(
+                    sourceApp,
+                    title,
+                    artist,
+                    album,
+                    songId,
+                    previous?.Thumbnail,
+                    nowUtc);
+
+                var errorKey = $"{sourceApp}|{ex.GetType().FullName}|{ex.HResult:X8}|{ex.Message}";
+                if (!string.Equals(errorKey, _lastMediaPropertiesErrorKey, StringComparison.Ordinal) ||
+                    nowUtc >= _nextMediaPropertiesErrorLogUtc)
+                {
+                    _lastMediaPropertiesErrorKey = errorKey;
+                    _nextMediaPropertiesErrorLogUtc = nowUtc.AddSeconds(30);
+                    Log.Diagnostic(
+                        "COVER-SMTC",
+                        $"MediaPropertiesFailed Source='{ToLogValue(sourceApp)}' Exception='{ex.GetType().Name}' " +
+                        $"HResult=0x{ex.HResult:X8} Message='{ToLogValue(ex.Message)}'");
+                }
             }
         }
 
         if (sourceApp.Equals("Netease", StringComparison.OrdinalIgnoreCase) &&
             (string.IsNullOrWhiteSpace(title) || string.Equals(title, "Unknown Title", StringComparison.OrdinalIgnoreCase)))
         {
-            if (TryInferTrackFromNeteaseProcess(out var inferredTitle, out var inferredArtist))
+            var observation = GetProcessFallbackObservation();
+            if (!string.IsNullOrWhiteSpace(observation.InferredTitle))
             {
-                title = inferredTitle;
-                artist = inferredArtist;
+                title = observation.InferredTitle;
+                artist = observation.InferredArtist;
             }
         }
 
@@ -698,28 +828,29 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
             ExtrapolatedPosition: extrapolatedPosition,
             IsCoverLoading: isCoverLoading,
             SourceAppUserModelId: sourceAppUserModelId,
-            CanSeek: playbackInfo?.Controls?.IsPlaybackPositionEnabled == true);
+            CanSeek: playbackState.CanSeek);
     }
 
     private PlaybackSnapshot BuildProcessFallbackSnapshot()
     {
-        var preferredSource = DetectRunningSource();
+        var observation = GetProcessFallbackObservation();
+        var preferredSource = observation.Source;
         if (string.Equals(preferredSource, "Netease", StringComparison.OrdinalIgnoreCase))
         {
-            if (TryInferTrackFromNeteaseProcess(out var inferredTitle, out var inferredArtist))
+            if (!string.IsNullOrWhiteSpace(observation.InferredTitle))
             {
                 PublishFallbackDiagnostics(
                     sourceAppUserModelId: string.Empty,
                     resolvedSource: "Netease",
-                    title: inferredTitle,
-                    artist: inferredArtist);
+                    title: observation.InferredTitle,
+                    artist: observation.InferredArtist);
                 return new PlaybackSnapshot(
                     IsPlaying: false,
                     Position: TimeSpan.Zero,
                     Track: new TrackInfo(
-                        Id: $"Netease|{inferredTitle}|{inferredArtist}",
-                        Title: inferredTitle,
-                        Artist: inferredArtist,
+                        Id: $"Netease|{observation.InferredTitle}|{observation.InferredArtist}",
+                        Title: observation.InferredTitle,
+                        Artist: observation.InferredArtist,
                         Album: string.Empty,
                         SourceApp: "Netease",
                         Duration: TimeSpan.Zero),
@@ -839,13 +970,13 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
     private GlobalSystemMediaTransportControlsSession? SelectSession(
         GlobalSystemMediaTransportControlsSessionManager manager)
     {
-        return SelectSession(manager.GetSessions());
+        return SelectSession(GetSessionsCached(manager));
     }
 
     private GlobalSystemMediaTransportControlsSession? SelectSessionForControl(
         GlobalSystemMediaTransportControlsSessionManager manager)
     {
-        var sessions = manager.GetSessions();
+        var sessions = GetSessionsCached(manager);
         // Never send a retained Douyin display's commands to a paused fallback player.
         // Look up by source ID because SMTC may recreate the session object between videos.
         if (_douyinPlayback.ControlSourceId is not null)
@@ -910,6 +1041,7 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
             }
 
             _manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync().AsTask(cancellationToken);
+            AttachManagerEvents(_manager);
             return _manager;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -929,6 +1061,247 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
             catch (ObjectDisposedException) when (Volatile.Read(ref _isDisposed) != 0)
             {
                 // Shutdown can race an in-flight manager request; its result is no longer needed.
+            }
+        }
+    }
+
+    private GlobalSystemMediaTransportControlsSession[] GetSessionsCached(
+        GlobalSystemMediaTransportControlsSessionManager manager)
+    {
+        lock (_eventGate)
+        {
+            if (_sessionCacheValid && ReferenceEquals(_sessionCacheManager, manager))
+            {
+                return _sessionCache;
+            }
+        }
+
+        var sessions = manager.GetSessions()
+            .Where(session => session is not null)
+            .ToArray();
+        lock (_eventGate)
+        {
+            _sessionCache = sessions;
+            _sessionCacheManager = manager;
+            _sessionCacheValid = true;
+        }
+        AttachManagerEvents(manager);
+        EnsureSessionSubscriptions(sessions);
+        return sessions;
+    }
+
+    private IReadOnlyList<TaskBarWidgets.Media.Integration.MediaSourceChoice> GetSourceChoicesCached()
+    {
+        var manager = _manager;
+        if (manager is null)
+        {
+            return _sourceChoicesCacheValid ? _sourceChoicesCache : [];
+        }
+        lock (_eventGate)
+        {
+            if (_sourceChoicesCacheValid) return _sourceChoicesCache;
+        }
+
+        var sources = GetSessionsCached(manager)
+            .Select(session => new TaskBarWidgets.Media.Integration.MediaSourceChoice(
+                session.SourceAppUserModelId,
+                NonLyricsMediaPolicy.IsDouyin(session.SourceAppUserModelId)
+                    ? "抖音"
+                    : ResolveSource(session.SourceAppUserModelId)))
+            .DistinctBy(source => source.Id)
+            .ToArray();
+        lock (_eventGate)
+        {
+            _sourceChoicesCache = sources;
+            _sourceChoicesCacheValid = true;
+        }
+        return sources;
+    }
+
+    private SessionPlaybackState GetSessionPlaybackState(
+        GlobalSystemMediaTransportControlsSession session)
+    {
+        long generation;
+        lock (_eventGate)
+        {
+            generation = _playbackCacheGeneration;
+            if (_sessionPlaybackCache.TryGetValue(session, out var cached)) return cached;
+        }
+
+        var state = ReadSessionPlaybackState(session);
+
+        lock (_eventGate)
+        {
+            if (generation == _playbackCacheGeneration)
+            {
+                _sessionPlaybackCache[session] = state;
+            }
+        }
+        return state;
+    }
+
+    private static SessionPlaybackState ReadSessionPlaybackState(
+        GlobalSystemMediaTransportControlsSession session)
+    {
+        try
+        {
+            var playback = session.GetPlaybackInfo();
+            var controls = playback?.Controls;
+            return new SessionPlaybackState(
+                playback?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing,
+                controls?.IsPlaybackPositionEnabled == true,
+                controls?.IsPreviousEnabled == true,
+                controls?.IsNextEnabled == true,
+                controls?.IsPlayEnabled == true ||
+                    controls?.IsPauseEnabled == true ||
+                    controls?.IsPlayPauseToggleEnabled == true);
+        }
+        catch
+        {
+            return new SessionPlaybackState(false, false, false, false, false);
+        }
+    }
+
+    private void AttachManagerEvents(GlobalSystemMediaTransportControlsSessionManager manager)
+    {
+        lock (_eventGate)
+        {
+            if (ReferenceEquals(_eventManager, manager)) return;
+            if (_eventManager is not null)
+            {
+                _eventManager.SessionsChanged -= OnSessionsChanged;
+            }
+            _eventManager = manager;
+            manager.SessionsChanged += OnSessionsChanged;
+        }
+    }
+
+    private void DetachAllEvents()
+    {
+        lock (_eventGate)
+        {
+            DetachSessionSubscriptionLocked();
+            if (_eventManager is not null)
+            {
+                _eventManager.SessionsChanged -= OnSessionsChanged;
+                _eventManager = null;
+            }
+        }
+        InvalidateCache(metadata: true, sources: true, controls: true);
+    }
+
+    private void EnsureSessionSubscriptions(
+        IEnumerable<GlobalSystemMediaTransportControlsSession> sessions)
+    {
+        var desired = new HashSet<GlobalSystemMediaTransportControlsSession>(
+            sessions,
+            ReferenceEqualityComparer.Instance);
+        lock (_eventGate)
+        {
+            foreach (var session in _subscribedSessions.Except(desired).ToArray())
+            {
+                session.MediaPropertiesChanged -= OnMediaPropertiesChanged;
+                session.PlaybackInfoChanged -= OnPlaybackInfoChanged;
+                session.TimelinePropertiesChanged -= OnTimelinePropertiesChanged;
+                _subscribedSessions.Remove(session);
+            }
+            foreach (var session in desired)
+            {
+                if (!_subscribedSessions.Add(session)) continue;
+                session.MediaPropertiesChanged += OnMediaPropertiesChanged;
+                session.PlaybackInfoChanged += OnPlaybackInfoChanged;
+                session.TimelinePropertiesChanged += OnTimelinePropertiesChanged;
+            }
+        }
+    }
+
+    private void DetachSessionSubscriptionLocked()
+    {
+        foreach (var session in _subscribedSessions.ToArray())
+        {
+            session.MediaPropertiesChanged -= OnMediaPropertiesChanged;
+            session.PlaybackInfoChanged -= OnPlaybackInfoChanged;
+            session.TimelinePropertiesChanged -= OnTimelinePropertiesChanged;
+        }
+        _subscribedSessions.Clear();
+    }
+
+    private void OnSessionsChanged(
+        GlobalSystemMediaTransportControlsSessionManager sender,
+        SessionsChangedEventArgs args)
+    {
+        if (Volatile.Read(ref _isDisposed) != 0) return;
+        InvalidateCache(metadata: true, sources: true, controls: true);
+        lock (_eventGate) DetachSessionSubscriptionLocked();
+        Invalidate();
+    }
+
+    private void OnMediaPropertiesChanged(
+        GlobalSystemMediaTransportControlsSession sender,
+        MediaPropertiesChangedEventArgs args)
+    {
+        if (Volatile.Read(ref _isDisposed) != 0) return;
+        if (!ReferenceEquals(sender, _activeSessionCache.Current)) return;
+        InvalidateCache(metadata: true, sources: false, controls: true);
+        Invalidate();
+    }
+
+    private void OnPlaybackInfoChanged(
+        GlobalSystemMediaTransportControlsSession sender,
+        PlaybackInfoChangedEventArgs args)
+    {
+        if (Volatile.Read(ref _isDisposed) != 0) return;
+        InvalidateCache(metadata: false, sources: true, controls: true);
+        Invalidate();
+    }
+
+    private void OnTimelinePropertiesChanged(
+        GlobalSystemMediaTransportControlsSession sender,
+        TimelinePropertiesChangedEventArgs args)
+    {
+        if (Volatile.Read(ref _isDisposed) != 0) return;
+        if (!ReferenceEquals(sender, _activeSessionCache.Current)) return;
+        Invalidate();
+    }
+
+    private void InvalidateCache(bool metadata, bool sources, bool controls)
+    {
+        lock (_eventGate)
+        {
+            if (metadata)
+            {
+                _metadataCacheValid = false;
+                Volatile.Write(ref _metadataCache, null);
+            }
+            if (sources)
+            {
+                _sessionCacheValid = false;
+                _sourceChoicesCacheValid = false;
+                _sessionCache = [];
+                _sessionCacheManager = null;
+            }
+            if (controls)
+            {
+                _sessionPlaybackCache.Clear();
+                _playbackCacheGeneration++;
+            }
+        }
+    }
+
+    private void Invalidate()
+    {
+        if (Volatile.Read(ref _isDisposed) != 0) return;
+        var handlers = Invalidated;
+        if (handlers is null) return;
+        foreach (Action handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                handler();
+            }
+            catch (Exception exception)
+            {
+                Log.Warn($"SMTC invalidation callback failed: {exception.Message}");
             }
         }
     }
@@ -1011,57 +1384,6 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
             : _enabledSources.Contains("Browser");
     }
 
-    private static bool IsAnyProcessRunning(params string[] names)
-    {
-        Process[] allProcesses;
-        try
-        {
-            allProcesses = Process.GetProcesses();
-        }
-        catch
-        {
-            return false;
-        }
-
-        foreach (var rawName in names)
-        {
-            var name = rawName.Trim();
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                continue;
-            }
-
-            try
-            {
-                if (Process.GetProcessesByName(name).Length > 0)
-                {
-                    return true;
-                }
-
-                if (allProcesses.Any(p =>
-                {
-                    try
-                    {
-                        return p.ProcessName.Contains(name, StringComparison.OrdinalIgnoreCase);
-                    }
-                    catch
-                    {
-                        return false;
-                    }
-                }))
-                {
-                    return true;
-                }
-            }
-            catch
-            {
-                // Ignore query failures.
-            }
-        }
-
-        return false;
-    }
-
     private string ResolveSourceWithProcessFallback(string sourceApp)
     {
         if (!string.IsNullOrWhiteSpace(sourceApp) &&
@@ -1071,7 +1393,7 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
             return sourceApp;
         }
 
-        var detected = DetectRunningSource();
+        var detected = GetProcessFallbackObservation().Source;
         return detected ?? sourceApp;
     }
 
@@ -1093,41 +1415,114 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
         return DefaultRecognitionOrder.Contains(sourceApp, StringComparer.OrdinalIgnoreCase);
     }
 
-    private string? DetectRunningSource()
+    private ProcessFallbackObservation GetProcessFallbackObservation() =>
+        _processFallbackDetectionCache.GetOrRefresh(InspectProcessFallback);
+
+    private ProcessFallbackObservation InspectProcessFallback()
     {
-        return _processFallbackDetectionCache.GetOrRefresh(DetectRunningSourceUncached);
+        var processes = SnapshotProcesses();
+        if (processes is null)
+        {
+            var result = new ProcessFallbackObservation(
+                null,
+                string.Empty,
+                string.Empty,
+                ProcessQuerySucceeded: false);
+            _processFallbackDetectionCache.Invalidate();
+            return result;
+        }
+        var detected = DetectRunningSourceUncached(processes);
+        if (string.Equals(detected, "Netease", StringComparison.OrdinalIgnoreCase) &&
+            TryInferTrackFromNeteaseProcess(processes, out var title, out var artist))
+        {
+            return new ProcessFallbackObservation(detected, title, artist);
+        }
+        return new ProcessFallbackObservation(detected, string.Empty, string.Empty);
     }
 
-    private string? DetectRunningSourceUncached()
+    private string? DetectRunningSourceUncached(IReadOnlyList<ProcessSample> processes)
     {
         foreach (var source in _recognitionOrder)
         {
             if (source.Equals("QQMusic", StringComparison.OrdinalIgnoreCase) &&
-                IsAnyProcessRunning("qqmusic", "qqmusicapp", "qqmusicplayer"))
+                IsAnyProcessRunning(processes, "qqmusic", "qqmusicapp", "qqmusicplayer"))
             {
                 return "QQMusic";
             }
 
             if (source.Equals("Netease", StringComparison.OrdinalIgnoreCase) &&
-                IsAnyProcessRunning("cloudmusic", "neteasecloudmusic", "neteasemusic", "music.163", "music163"))
+                IsAnyProcessRunning(processes, "cloudmusic", "neteasecloudmusic", "neteasemusic", "music.163", "music163"))
             {
                 return "Netease";
             }
 
             if (source.Equals("Spotify", StringComparison.OrdinalIgnoreCase) &&
-                IsAnyProcessRunning("spotify"))
+                IsAnyProcessRunning(processes, "spotify"))
             {
                 return "Spotify";
             }
 
             if (source.Equals("Kugou", StringComparison.OrdinalIgnoreCase) &&
-                IsAnyProcessRunning("kugou", "kugoumusic", "kgmusic"))
+                IsAnyProcessRunning(processes, "kugou", "kugoumusic", "kgmusic"))
             {
                 return "Kugou";
             }
         }
 
         return null;
+    }
+
+    private static ProcessSample[]? SnapshotProcesses()
+    {
+        Process[] processes;
+        try
+        {
+            processes = Process.GetProcesses();
+        }
+        catch
+        {
+            return null;
+        }
+
+        try
+        {
+            var result = new List<ProcessSample>(processes.Length);
+            foreach (var process in processes)
+            {
+                try
+                {
+                    result.Add(new ProcessSample(
+                        process.ProcessName ?? string.Empty,
+                        process.MainWindowTitle?.Trim() ?? string.Empty));
+                }
+                catch
+                {
+                    // Access can fail for protected or exiting processes.
+                }
+            }
+            return result.ToArray();
+        }
+        finally
+        {
+            foreach (var process in processes) process.Dispose();
+        }
+    }
+
+    private static bool IsAnyProcessRunning(
+        IReadOnlyList<ProcessSample> processes,
+        params string[] names)
+    {
+        foreach (var rawName in names)
+        {
+            var name = rawName.Trim();
+            if (name.Length == 0) continue;
+            if (processes.Any(process =>
+                process.Name.Contains(name, StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private int GetRecognitionPriority(string source)
@@ -1143,10 +1538,9 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
         return int.MaxValue;
     }
 
-    private static bool IsSessionPlaying(GlobalSystemMediaTransportControlsSession session)
+    private bool IsSessionPlaying(GlobalSystemMediaTransportControlsSession session)
     {
-        var playback = session.GetPlaybackInfo();
-        return playback?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+        return GetSessionPlaybackState(session).IsPlaying;
     }
 
     private static List<string> NormalizeRecognitionOrder(
@@ -1217,54 +1611,35 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
         return source.Trim();
     }
 
-    private static bool TryInferTrackFromNeteaseProcess(out string title, out string artist)
+    private static bool TryInferTrackFromNeteaseProcess(
+        IReadOnlyList<ProcessSample> processes,
+        out string title,
+        out string artist)
     {
         title = string.Empty;
         artist = string.Empty;
 
-        Process[] allProcesses;
-        try
+        foreach (var process in processes)
         {
-            allProcesses = Process.GetProcesses();
-        }
-        catch
-        {
-            return false;
-        }
-
-        foreach (var process in allProcesses)
-        {
-            string processName;
-            string windowTitle;
-            try
-            {
-                processName = process.ProcessName;
-                windowTitle = process.MainWindowTitle?.Trim() ?? string.Empty;
-            }
-            catch
+            if (string.IsNullOrWhiteSpace(process.WindowTitle))
             {
                 continue;
             }
 
-            if (string.IsNullOrWhiteSpace(windowTitle))
+            if (!(process.Name.Contains("cloudmusic", StringComparison.OrdinalIgnoreCase) ||
+                  process.Name.Contains("netease", StringComparison.OrdinalIgnoreCase) ||
+                  process.Name.Contains("163", StringComparison.OrdinalIgnoreCase)))
             {
                 continue;
             }
 
-            if (!(processName.Contains("cloudmusic", StringComparison.OrdinalIgnoreCase) ||
-                  processName.Contains("netease", StringComparison.OrdinalIgnoreCase) ||
-                  processName.Contains("163", StringComparison.OrdinalIgnoreCase)))
+            if (process.WindowTitle.Contains("网易云音乐", StringComparison.OrdinalIgnoreCase) &&
+                process.WindowTitle.Length <= 12)
             {
                 continue;
             }
 
-            if (windowTitle.Contains("网易云音乐", StringComparison.OrdinalIgnoreCase) &&
-                windowTitle.Length <= 12)
-            {
-                continue;
-            }
-
-            var match = TitleArtistRegex.Match(windowTitle);
+            var match = TitleArtistRegex.Match(process.WindowTitle);
             if (!match.Success)
             {
                 continue;
@@ -1445,6 +1820,7 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
                 $"ReadSucceeded Sequence={readSequence} Track='{ToLogValue(metadataKey)}' Bytes={bytes.Length} " +
                 $"ContentType='{ToLogValue(result.ContentType)}' Signature='{GetByteSignature(bytes)}' " +
                 $"ElapsedMs={result.ElapsedMilliseconds}");
+            Invalidate();
             return;
         }
 
@@ -1457,6 +1833,7 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
             $"ContentType='{ToLogValue(result.ContentType)}' LoadedBytes={result.LoadedBytes} " +
             $"Reason='{ToLogValue(result.FailureReason)}'{exceptionText} ElapsedMs={result.ElapsedMilliseconds} " +
             $"RetryAfterMs={(int)MissingCoverRetryInterval.TotalMilliseconds}");
+        Invalidate();
     }
 
     private static string GetByteSignature(byte[] bytes)
@@ -1472,6 +1849,24 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
             .Trim();
         return normalized.Length <= 240 ? normalized : normalized[..240];
     }
+
+    private sealed record ProcessSample(string Name, string WindowTitle);
+
+    private sealed record SessionPlaybackState(
+        bool IsPlaying,
+        bool CanSeek,
+        bool Previous,
+        bool Next,
+        bool PlayPause);
+
+    private sealed record CachedMediaMetadata(
+        GlobalSystemMediaTransportControlsSession Session,
+        string SourceApp,
+        string Title,
+        string Artist,
+        string Album,
+        string? SongId,
+        IRandomAccessStreamReference? Thumbnail);
 
     private sealed record CoverReadResult(
         byte[]? Bytes,

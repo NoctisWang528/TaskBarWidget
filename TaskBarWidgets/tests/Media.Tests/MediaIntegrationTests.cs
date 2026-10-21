@@ -62,34 +62,128 @@ public sealed class MediaIntegrationTests
     }
 
     [Fact]
-    public void FullSnapshotSurvivesQueueCoalescingAndNewConnectionRestoresHeavyValues()
+    public void FrameFilterReusesStyleAndCoverOnlyOnAnEstablishedConnection()
     {
-        var style = WebViewMessageScriptFactory.Dispatch("taskbarLyrics", "style", new { fontSize = 13 });
-        var cover = WebViewMessageScriptFactory.Dispatch("taskbarLyrics", "cover", new { dataUri = "data:image/png;base64,AAA" });
-        var frame = new MediaFrame(1, "frame", "qq", true, true, false, "track", [style, cover, "position1"]);
+        var frame = CreateFrame(revision: 1);
         var filter = new MediaFrameFilter();
-        Assert.Equal(3, ((MediaFrame)filter.Filter(frame)).scripts.Length);
-        Assert.Single(((MediaFrame)filter.Filter(frame)).scripts);
-        Assert.Equal(3, ((MediaFrame)new MediaFrameFilter().Filter(frame)).scripts.Length);
+        var first = Assert.IsType<MediaFrame>(filter.Filter(frame));
+        Assert.NotNull(first.style);
+        Assert.NotNull(first.cover);
+
+        var second = Assert.IsType<MediaFrame>(filter.Filter(frame with
+        {
+            revision = 2,
+            lyrics = frame.lyrics with { current = "next line" }
+        }));
+        Assert.Null(second.style);
+        Assert.Null(second.cover);
+
+        var third = Assert.IsType<MediaFrame>(filter.Filter(frame with
+        {
+            revision = 3,
+            cover = frame.cover! with { dataUri = "data:image/png;base64,BBB" }
+        }));
+        Assert.Null(third.style);
+        Assert.NotNull(third.cover);
+
+        var cleared = Assert.IsType<MediaFrame>(filter.Filter(frame with
+        {
+            revision = 4,
+            cover = NativeMediaPayloadFactory.EmptyCover()
+        }));
+        Assert.NotNull(cleared.cover);
+        Assert.Equal("", cleared.cover!.dataUri);
+        Assert.Equal("", cleared.cover.trackId);
+
+        var reconnected = Assert.IsType<MediaFrame>(new MediaFrameFilter().Filter(frame));
+        Assert.NotNull(reconnected.style);
+        Assert.NotNull(reconnected.cover);
     }
 
     [Fact]
-    public void LyricTextMatchingHeavySlotNamesCannotSuppressStyleOrCover()
+    public void LatestQueueReplacesUnsentFramesButRetainsCompleteState()
     {
-        var lyric = WebViewMessageScriptFactory.Dispatch("taskbarLyrics", "lyrics", new { current = "style", next = "cover" });
-        var style = WebViewMessageScriptFactory.Dispatch("taskbarLyrics", "style", new { fontSize = 13 });
-        var frame = new MediaFrame(1, "frame", "qq", true, true, false, "track", [lyric, style]);
-        var filter = new MediaFrameFilter();
-        Assert.Equal(2, ((MediaFrame)filter.Filter(frame)).scripts.Length);
-        Assert.Empty(((MediaFrame)filter.Filter(frame)).scripts);
+        var queue = new LatestDisplayQueue();
+        queue.Publish(CreateFrame(revision: 1, sourceId: "one"));
+        queue.Publish(CreateFrame(revision: 2, sourceId: "two"));
+        var latest = CreateFrame(revision: 3, sourceId: "three");
+        queue.Publish(latest);
+
+        Assert.True(queue.TryTake(out var value));
+        var retained = Assert.IsType<MediaFrame>(value);
+        Assert.Equal(3, retained.revision);
+        Assert.Equal("three", retained.sourceId);
+        Assert.NotNull(retained.style);
+        Assert.NotNull(retained.cover);
+        Assert.False(queue.TryTake(out _));
+        Assert.Equal(3, queue.PublishedCount);
+    }
+
+    [Fact]
+    public void NativeFrameSerializationContainsNoScriptsOrHtml()
+    {
+        var json = JsonSerializer.SerializeToElement(CreateFrame());
+        Assert.Equal(1, json.GetProperty("version").GetInt32());
+        Assert.Equal(2, json.GetProperty("renderVersion").GetInt32());
+        Assert.Equal("frame", json.GetProperty("type").GetString());
+        Assert.Equal("line", json.GetProperty("lyrics").GetProperty("current").GetString());
+        Assert.Equal("rgba(67,160,71,1)", json.GetProperty("cover").GetProperty("fallbackColor").GetString());
+        Assert.False(json.TryGetProperty("scripts", out _));
+        Assert.False(json.TryGetProperty("html", out _));
+    }
+
+    [Fact]
+    public void CardSnapshotIsAlwaysComplete()
+    {
+        var snapshot = new PlaybackSnapshot(
+            true,
+            TimeSpan.FromSeconds(2),
+            new TrackInfo("id", "Title", "Artist", "Album", "QQMusic", TimeSpan.FromMinutes(3)));
+        var lyrics = new MediaLyricsFrame(
+            "line", "next", 0.5, 0, "QQMUSIC|TITLE|ARTIST", false, true,
+            "", "", false, true, 0.25, "lyrics");
+        var style = NativeMediaPayloadFactory.CreateStyle(new AppSettings(), 1);
+        var state = new MediaPresentationState();
+        var update = state.Apply(new MediaPresentationInput(
+            snapshot,
+            false,
+            "QQMUSIC|TITLE|ARTIST",
+            lyrics,
+            style,
+            CreateCover(),
+            new MediaBrowserFrame(false, "", "", "qq", true, false, false, true),
+            NativeMediaPayloadFactory.CreateSpectrumTuning(SpectrumTuningSettings.CreateDefault()),
+            [],
+            NativeAppearanceJson.Empty));
+
+        Assert.Equal(MediaProtocol.RenderVersion, update.Card.renderVersion);
+        Assert.Equal(0, update.Card.revision);
+        Assert.Equal(style, update.Card.style);
+        Assert.Equal("line", update.Card.lyrics.current);
+        Assert.Equal(JsonValueKind.Object, update.Card.nativeAppearance.ValueKind);
+        Assert.Same(update.Card, state.CurrentCard);
+
+        var json = JsonSerializer.SerializeToElement(update.Card);
+        Assert.Equal(2, json.GetProperty("renderVersion").GetInt32());
+        Assert.Equal("QQMUSIC|TITLE|ARTIST", json.GetProperty("trackId").GetString());
+        Assert.True(json.GetProperty("available").GetBoolean());
+        Assert.True(json.GetProperty("isPlaying").GetBoolean());
+        Assert.Equal("line", json.GetProperty("lyrics").GetProperty("current").GetString());
+        Assert.Equal(JsonValueKind.Object, json.GetProperty("style").ValueKind);
+        Assert.Equal(JsonValueKind.Object, json.GetProperty("nativeAppearance").ValueKind);
+        Assert.False(json.TryGetProperty("scripts", out _));
     }
 
     [Fact]
     public async Task PipeReconnectAlwaysSendsInitializeAndLatestSnapshot()
     {
         var name = "TaskBarWidgets.Tests." + Guid.NewGuid().ToString("N");
-        var frame = new MediaFrame(1, "frame", "qq", true, true, false, "track", []);
-        await using var server = new MediaPipeServer(name, () => new { version = 1, type = "initialize", html = "<html/>" }, () => frame, _ => Task.CompletedTask);
+        var frame = CreateFrame(revision: 7);
+        await using var server = new MediaPipeServer(
+            name,
+            MediaProtocol.Initialize,
+            () => frame,
+            _ => Task.CompletedTask);
         server.Start();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         for (var attempt = 0; attempt < 2; attempt++)
@@ -100,7 +194,85 @@ public sealed class MediaIntegrationTests
             using var initialize = JsonDocument.Parse((await reader.ReadLineAsync(timeout.Token))!);
             using var snapshot = JsonDocument.Parse((await reader.ReadLineAsync(timeout.Token))!);
             Assert.Equal("initialize", initialize.RootElement.GetProperty("type").GetString());
-            Assert.Equal("track", snapshot.RootElement.GetProperty("trackId").GetString());
+            Assert.Equal(2, initialize.RootElement.GetProperty("renderVersion").GetInt32());
+            Assert.False(initialize.RootElement.TryGetProperty("html", out _));
+            Assert.Equal("qq", snapshot.RootElement.GetProperty("sourceId").GetString());
+            Assert.Equal(7, snapshot.RootElement.GetProperty("revision").GetInt64());
+            Assert.Equal("line", snapshot.RootElement.GetProperty("lyrics").GetProperty("current").GetString());
+            Assert.Equal(JsonValueKind.Object, snapshot.RootElement.GetProperty("style").ValueKind);
+            Assert.Equal(JsonValueKind.Object, snapshot.RootElement.GetProperty("cover").ValueKind);
         }
     }
+
+    [Fact]
+    public async Task DisplayQueueReplacementDoesNotDropQueuedCommands()
+    {
+        var name = "TaskBarWidgets.Tests.Commands." + Guid.NewGuid().ToString("N");
+        var frame = CreateFrame(revision: 1);
+        await using var server = new MediaPipeServer(
+            name,
+            MediaProtocol.Initialize,
+            () => frame,
+            _ => Task.CompletedTask);
+        await server.SendCommandAsync(new
+        {
+            version = 1,
+            type = "command",
+            action = "keep-me",
+            requestId = "command-1"
+        });
+        server.Publish(CreateFrame(revision: 2));
+        server.Publish(CreateFrame(revision: 3));
+        server.Start();
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var client = new NamedPipeClientStream(
+            ".",
+            name,
+            PipeDirection.InOut,
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        await client.ConnectAsync(timeout.Token);
+        using var reader = new StreamReader(client);
+        using var initialize = JsonDocument.Parse((await reader.ReadLineAsync(timeout.Token))!);
+        using var snapshot = JsonDocument.Parse((await reader.ReadLineAsync(timeout.Token))!);
+        using var command = JsonDocument.Parse((await reader.ReadLineAsync(timeout.Token))!);
+
+        Assert.Equal("initialize", initialize.RootElement.GetProperty("type").GetString());
+        Assert.Equal(1, snapshot.RootElement.GetProperty("revision").GetInt64());
+        Assert.Equal("keep-me", command.RootElement.GetProperty("action").GetString());
+        Assert.Equal("command-1", command.RootElement.GetProperty("requestId").GetString());
+    }
+
+    private static MediaFrame CreateFrame(
+        long revision = 1,
+        string sourceId = "qq")
+    {
+        var style = NativeMediaPayloadFactory.CreateStyle(new AppSettings(), 1);
+        return new MediaFrame(
+            MediaProtocol.Version,
+            "frame",
+            MediaProtocol.RenderVersion,
+            revision,
+            sourceId,
+            true,
+            true,
+            false,
+            "QQMUSIC|TITLE|ARTIST",
+            new MediaLyricsFrame(
+                "line", "next", 0.25, 0, "QQMUSIC|TITLE|ARTIST", false, true,
+                "", "", false, true, 0.5, "lyrics"),
+            style,
+            CreateCover(),
+            new MediaBrowserFrame(false, "Title", "Artist", sourceId, true, true, true, true),
+            NativeMediaPayloadFactory.CreateSpectrumTuning(SpectrumTuningSettings.CreateDefault()),
+            []);
+    }
+
+    private static MediaCoverFrame CreateCover() =>
+        NativeMediaPayloadFactory.CreateCover(
+            "data:image/png;base64,AAA",
+            "Q",
+            "rgba(67,160,71,1)",
+            "",
+            "QQMUSIC|TITLE|ARTIST");
 }

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.IO;
 using System.Text.Json;
 using System.Windows.Media.Imaging;
@@ -13,288 +14,660 @@ internal sealed class MediaCoordinator : IDisposable
 {
     internal readonly AppCompositionRoot Composition = new();
     internal readonly TrackLyricOffsetStore Offsets = new();
-    internal readonly SmtcMusicSessionProvider Provider = new();
+    internal SmtcMusicSessionProvider Provider { get; }
     internal LyricSyncService Lyrics { get; private set; }
+
     private readonly SystemAudioSpectrumService _spectrum = new();
     private readonly PlaybackSnapshotStabilityGate _stability = new();
     private readonly CoverVisualTransitionState _coverTransition = new();
     private readonly CoverFallbackIconResolver _fallbackIcon = new();
+    private readonly Dispatcher _dispatcher;
+    private readonly Func<DateTimeOffset> _utcNow;
+    private readonly MediaRenderScheduler _scheduler;
     private readonly DispatcherTimer _timer;
     private readonly DispatcherTimer _spectrumTimer;
     private readonly CancellationTokenSource _stop = new();
+    private readonly MediaPresentationState _presentation = new();
+    private readonly SemaphoreSlim _refreshGate = new(1, 1);
+    private readonly ConcurrentDictionary<string, Task<string>> _sourceIcons =
+        new(StringComparer.OrdinalIgnoreCase);
+
     private LocalMediaCoverProvider? _localCover;
     private AppSettings _settings = new();
     private SpectrumTuningSettings _tuning = SpectrumTuningSettings.CreateDefault();
     private PlaybackSnapshot _playback = new(false, TimeSpan.Zero, null);
-    private bool _busy, _disposed, _visible, _spectrumActive, _preview;
-    private string _coverData = "", _coverIcon = "", _coverTrackId = "";
+    private MediaStyleFrame _style;
+    private MediaSpectrumTuningFrame _tuningFrame;
+    private MediaCoverFrame _coverFrame;
+    private MediaFrame _frame;
+    private CardFrame _card;
+    private JsonElement _nativeAppearance = NativeAppearanceJson.Empty;
+    private float[] _spectrumBars = [];
+    private bool _busy;
+    private bool _disposed;
+    private bool _started;
+    private bool _taskbarVisible;
+    private bool _cardVisible;
+    private bool _spectrumActive;
+    private bool _preview;
+    private bool _showSpectrum;
+    private long _stateVersion;
+    private DateTimeOffset _lastAuthorityUtc;
+    private DateTimeOffset _lastTimelineProjectionUtc;
+    private int _presentationFailureCount;
+    private int _invalidationPosted;
+    private string _coverData = "";
+    private string _coverIcon = "";
+    private string _coverTrackId = "";
     private byte[]? _coverBytes;
     private BitmapSource? _coverBitmap;
     private string? _localCoverIdentity;
     private DateTimeOffset _nextLocalCover;
-    private string _styleScript = "", _tuningScript = "", _coverScript = "", _spectrumScript = "";
-    private object _frame = new { version = 1, type = "frame", sourceId = "", isPlaying = false, hasMedia = false, isBrowser = false, trackId = "", scripts = Array.Empty<string>() };
+
     internal event Action<object>? FrameReady;
     internal event Action<object>? CardFrameReady;
-    private long _cardRevision;
-    private object _cardFrame = new { revision = 0L, trackId = "", available = false, scripts = Array.Empty<string>() };
-    internal object CardSnapshot => _cardFrame;
-    internal string NativeAppearanceScript { get; set; } = "";
-    internal MediaControlState ControlState { get; private set; } = new("没有媒体", "", "", 0, 0, false, false, false, false, false);
-    internal CurrentTrackLyricsContext? CurrentTrackContext => LyricsInput(_playback).Track is not { } track
-        ? null : new(track, Lyrics.CurrentLyricSourceApp ?? "");
 
-    internal MediaCoordinator()
+    internal object Snapshot() => Volatile.Read(ref _frame);
+    internal object CardSnapshot => Volatile.Read(ref _card);
+    internal string CoverDataUrl => _coverData;
+    internal MediaControlState ControlState { get; private set; } =
+        new("没有媒体", "", "", 0, 0, false, false, false, false, false);
+    internal CurrentTrackLyricsContext? CurrentTrackContext => LyricsInput(_playback).Track is not { } track
+        ? null
+        : new(track, Lyrics.CurrentLyricSourceApp ?? "");
+
+    internal JsonElement NativeAppearance
     {
-        Lyrics = Composition.CreateLyricSyncService(_settings, Offsets);
-        _timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(60) };
-        _timer.Tick += Tick;
-        _spectrumTimer = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(Math.Clamp(_tuning.UpdateIntervalMs, 16, 100)) };
-        _spectrumTimer.Tick += SpectrumTick;
-        _styleScript = LyricsStyleScriptFactory.Create(_settings, 1);
-        _tuningScript = LyricsWebViewScriptFactory.SetSpectrumTuning(_tuning);
-        _coverScript = LyricsWebViewScriptFactory.SetCover("", "N", "rgba(67,160,71,1)", "", "");
+        get => _nativeAppearance;
+        set
+        {
+            ApplyNativeAppearance(value);
+        }
     }
 
-    internal void Start() => _timer.Start();
-    internal object Snapshot() => Volatile.Read(ref _frame);
-    internal string CoverDataUrl => _coverData;
-    private readonly Dictionary<string, Task<string>> _sourceIcons = new(StringComparer.OrdinalIgnoreCase);
+    internal void ApplyNativeAppearance(JsonElement appearance)
+    {
+        if (appearance.ValueKind != JsonValueKind.Object) return;
+        var normalized = NativeAppearanceJson.Normalize(appearance);
+        RunOnDispatcher(() =>
+        {
+            if (_disposed || NativeAppearanceJson.Equivalent(_nativeAppearance, normalized)) return;
+            _nativeAppearance = normalized;
+            _scheduler.RequestPresentation();
+            ScheduleNext();
+        });
+    }
+
+    internal MediaCoordinator()
+        : this(new SmtcMusicSessionProvider())
+    {
+    }
+
+    internal MediaCoordinator(SmtcMusicSessionProvider provider)
+    {
+        Provider = provider ?? throw new ArgumentNullException(nameof(provider));
+        _dispatcher = Dispatcher.CurrentDispatcher;
+        _utcNow = () => DateTimeOffset.UtcNow;
+        _scheduler = new MediaRenderScheduler(_utcNow);
+        Lyrics = Composition.CreateLyricSyncService(_settings, Offsets);
+        _style = NativeMediaPayloadFactory.CreateStyle(_settings, 1);
+        _tuningFrame = NativeMediaPayloadFactory.CreateSpectrumTuning(_tuning);
+        _coverFrame = NativeMediaPayloadFactory.EmptyCover();
+
+        var initialSnapshot = new PlaybackSnapshot(false, TimeSpan.Zero, null);
+        var initialDisplay = new LyricDisplayFrame("", "", "", 0, -1);
+        var initialLyrics = LyricsPresentationCalculator.Create(
+            initialSnapshot,
+            initialDisplay,
+            _settings,
+            LyricsPresentationScene.NoPlayback,
+            isBrowser: false,
+            LyricAcquisitionKind.Unknown);
+        var initial = _presentation.Apply(new MediaPresentationInput(
+            initialSnapshot,
+            IsBrowser: false,
+            TrackId: "",
+            initialLyrics,
+            _style,
+            _coverFrame,
+            new MediaBrowserFrame(false, "", "", "", false, false, false, false),
+            _tuningFrame,
+            [],
+            _nativeAppearance));
+        _frame = initial.Frame;
+        _card = initial.Card;
+
+        _timer = new DispatcherTimer(DispatcherPriority.Background);
+        _timer.Tick += Tick;
+        _spectrumTimer = new DispatcherTimer(DispatcherPriority.Render)
+        {
+            Interval = TimeSpan.FromMilliseconds(Math.Clamp(_tuning.UpdateIntervalMs, 16, 100))
+        };
+        _spectrumTimer.Tick += SpectrumTick;
+        Provider.Invalidated += OnProviderInvalidated;
+    }
+
+    internal void Start()
+    {
+        RunOnDispatcher(() =>
+        {
+            if (_disposed || _started) return;
+            _started = true;
+            _scheduler.Initialize();
+            ScheduleNext();
+        });
+    }
+
     internal string SourceIcon(MediaSourceChoice source)
     {
         if (!_sourceIcons.TryGetValue(source.Id, out var pending))
         {
             if (_sourceIcons.Count >= 64) _sourceIcons.Clear();
             var settings = _settings.Clone();
-            pending = Task.Run(() => {
+            pending = Task.Run(() =>
+            {
                 try
                 {
                     // Never borrow the icon of a different, currently audible application.
-                    var icon = PlayerIconResolver.ResolveDataUrl(source.Id, allowActiveSessionFallback: false);
-                    return icon.Length > 0 ? icon : PlayerSourceBadgeResolver.Resolve(source.Name, settings).IconDataUri;
+                    var icon = PlayerIconResolver.ResolveDataUrl(
+                        source.Id,
+                        allowActiveSessionFallback: false);
+                    return icon.Length > 0
+                        ? icon
+                        : PlayerSourceBadgeResolver.Resolve(source.Name, settings).IconDataUri;
                 }
-                catch { return ""; }
+                catch
+                {
+                    return "";
+                }
             });
             _sourceIcons[source.Id] = pending;
         }
         return pending.IsCompletedSuccessfully ? pending.Result : "";
     }
-    internal static bool IsBrowser(TrackInfo? track) => string.Equals(track?.SourceApp, "Browser", StringComparison.OrdinalIgnoreCase);
+
+    internal static bool IsBrowser(TrackInfo? track) =>
+        string.Equals(track?.SourceApp, "Browser", StringComparison.OrdinalIgnoreCase);
+
     internal static PlaybackSnapshot LyricsInput(PlaybackSnapshot snapshot) =>
         NonLyricsMediaPolicy.IsNonLyrics(snapshot) ? snapshot with { Track = null } : snapshot;
 
     internal void ApplySettings(AppSettings settings)
     {
-        if (_disposed) return;
-        var previous = _settings;
-        _settings = settings.Clone();
-        _settings.UseFloatingWindow = false;
-        _styleScript = LyricsStyleScriptFactory.Create(_settings, 1);
-        var changes = AppSettingsChangeSet.Create(previous, _settings);
-        Provider.SetRecognitionOrder(_settings.SourceRecognitionOrder, Composition.GetEnabledPlayerSources(_settings),
-            _settings.CustomPlayerSources.Select(x => x.SourceAppUserModelId).ToArray());
-        if (changes.LyricSyncServiceChanged)
+        RunOnDispatcher(() =>
         {
-            Lyrics.Dispose();
-            Lyrics = Composition.CreateLyricSyncService(_settings, Offsets);
-        }
-        if (changes.LocalMediaLibraryChanged)
-        {
-            _localCover?.Dispose();
-            _localCover = Composition.CreateLocalMediaCoverProvider(_settings);
-            _localCoverIdentity = null;
-        }
-        UpdateSpectrum(false);
+            if (_disposed) return;
+            var previous = _settings;
+            _settings = settings.Clone();
+            _settings.UseFloatingWindow = false;
+            _style = NativeMediaPayloadFactory.CreateStyle(_settings, 1);
+            var changes = AppSettingsChangeSet.Create(previous, _settings);
+            Provider.SetRecognitionOrder(
+                _settings.SourceRecognitionOrder,
+                Composition.GetEnabledPlayerSources(_settings),
+                _settings.CustomPlayerSources
+                    .Select(source => source.SourceAppUserModelId)
+                    .ToArray());
+
+            if (changes.LyricSyncServiceChanged)
+            {
+                Lyrics.Dispose();
+                Lyrics = Composition.CreateLyricSyncService(_settings, Offsets);
+                _stateVersion++;
+            }
+            if (changes.LocalMediaLibraryChanged)
+            {
+                _localCover?.Dispose();
+                _localCover = Composition.CreateLocalMediaCoverProvider(_settings);
+                _localCoverIdentity = null;
+            }
+
+            _stateVersion++;
+            _scheduler.RequestState(full: true);
+            UpdateSpectrum(_showSpectrum);
+            ScheduleNext();
+        });
     }
 
-    internal void SetVisible(bool visible) { _visible = visible; if (!visible) UpdateSpectrum(false); }
-    internal void SetPreview(bool preview) { _preview = preview; if (!preview) UpdateSpectrum(false); }
-    internal void RetrySpectrum() { _spectrum.Stop(); _spectrumActive = false; }
+    internal void SetVisible(bool visible)
+    {
+        RunOnDispatcher(() =>
+        {
+            if (_disposed || _taskbarVisible == visible) return;
+            _taskbarVisible = visible;
+            _scheduler.SetVisibility(_taskbarVisible, _cardVisible);
+            UpdateSpectrum(_showSpectrum);
+            ScheduleNext();
+        });
+    }
+
+    internal void SetCardVisible(bool visible)
+    {
+        RunOnDispatcher(() =>
+        {
+            if (_disposed || _cardVisible == visible) return;
+            _cardVisible = visible;
+            _scheduler.SetVisibility(_taskbarVisible, _cardVisible);
+            ScheduleNext();
+        });
+    }
+
+    internal void SetPreview(bool preview)
+    {
+        RunOnDispatcher(() =>
+        {
+            if (_disposed || _preview == preview) return;
+            _preview = preview;
+            UpdateSpectrum(_showSpectrum);
+            ScheduleNext();
+        });
+    }
+
+    internal void RetrySpectrum()
+    {
+        RunOnDispatcher(() =>
+        {
+            if (_disposed) return;
+            _spectrum.Stop();
+            _spectrumActive = false;
+            _spectrumBars = [];
+            UpdateSpectrum(_showSpectrum);
+            _scheduler.RequestPresentation();
+            ScheduleNext();
+        });
+    }
+
+    internal void RefreshPresentation()
+    {
+        RunOnDispatcher(() =>
+        {
+            if (_disposed) return;
+            _scheduler.RequestPresentation();
+            ScheduleNext();
+        });
+    }
+
     internal void ApplyTuning(SpectrumTuningSettings tuning)
     {
-        _tuning = tuning.Clone();
-        _tuning.UpdateIntervalMs = Math.Clamp(_tuning.UpdateIntervalMs, 16, 100);
-        _spectrumTimer.Interval = TimeSpan.FromMilliseconds(_tuning.UpdateIntervalMs);
-        _spectrum.ApplyTuning(_tuning);
-        _tuningScript = LyricsWebViewScriptFactory.SetSpectrumTuning(_tuning);
+        RunOnDispatcher(() =>
+        {
+            if (_disposed) return;
+            _tuning = tuning.Clone();
+            _tuning.UpdateIntervalMs = Math.Clamp(_tuning.UpdateIntervalMs, 16, 100);
+            _spectrumTimer.Interval = TimeSpan.FromMilliseconds(_tuning.UpdateIntervalMs);
+            _spectrum.ApplyTuning(_tuning);
+            _tuningFrame = NativeMediaPayloadFactory.CreateSpectrumTuning(_tuning);
+            _scheduler.RequestState(full: true);
+            _scheduler.RequestPresentation();
+            ScheduleNext();
+        });
+    }
+
+    private void OnProviderInvalidated()
+    {
+        if (_disposed || Interlocked.Exchange(ref _invalidationPosted, 1) != 0) return;
+        try
+        {
+            _dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+            {
+                Volatile.Write(ref _invalidationPosted, 0);
+                if (_disposed) return;
+                _scheduler.RequestState(full: true);
+                _scheduler.RequestPresentation();
+                ScheduleNext();
+            }));
+        }
+        catch (InvalidOperationException)
+        {
+            Volatile.Write(ref _invalidationPosted, 0);
+        }
     }
 
     private async void Tick(object? sender, EventArgs args)
     {
-        if (_busy || _disposed) return;
+        if (_disposed || _busy) return;
+        var plan = _scheduler.Poll();
+        if (plan.Kind == MediaWorkKind.None)
+        {
+            ScheduleNext();
+            return;
+        }
+
         _busy = true;
+        var held = false;
         try
         {
-            var snapshot = await Provider.GetCurrentAsync(_stop.Token);
-            if (_disposed) return;
-            // Refresh through the provider's same transition boundary before deriving any presentation.
-            snapshot = Provider.RefreshPlaybackState(snapshot);
-            var decision = _stability.Observe(snapshot, PlaybackInputPolicy.Classify(snapshot), DateTimeOffset.UtcNow);
-            if (decision.Action == PlaybackSnapshotGateAction.Hold) return;
-            _playback = snapshot = decision.Snapshot;
-            var track = snapshot.Track;
-            var browser = NonLyricsMediaPolicy.IsNonLyrics(snapshot);
-            var trackId = track is null ? "" : LyricSyncService.BuildStableTrackIdentity(track);
-            // Non-lyrics media must never reach the lyric resolver, including while paused.
-            var frame = await Lyrics.GetDisplayFrameAsync(LyricsInput(snapshot));
-            if (_disposed) return;
-            var scene = ResolveScene(frame, browser, track is not null);
-            var showSpectrum = scene == LyricsPresentationScene.Spectrum;
-            UpdateSpectrum(showSpectrum);
-            await UpdateCoverAsync(snapshot);
-            if (_disposed) return;
-            // Commands can run during lyric/cover awaits. Refresh raw input again and discard
-            // prepared content if it belongs to an earlier effective state.
-            var latest = Provider.RefreshPlaybackState(snapshot);
-            _playback = latest;
-            if (!CanPublishSnapshot(snapshot, latest))
+            if (plan.Kind == MediaWorkKind.Presentation)
             {
-                UpdateSpectrum(false);
-                return;
+                try
+                {
+                    await ApplyPresentationTickAsync(_stop.Token);
+                    _presentationFailureCount = 0;
+                }
+                catch (Exception exception) when (
+                    exception is not OperationCanceledException)
+                {
+                    _presentationFailureCount++;
+                    if (_presentationFailureCount <= 3)
+                    {
+                        TaskbarLyrics.Core.Utilities.Log.Warn(
+                            $"Media presentation tick failed: {exception.Message}");
+                    }
+                }
             }
-            snapshot = latest;
-
-            var scripts = new List<string>
+            else
             {
-                _styleScript, _tuningScript, _coverScript
-            };
-            string current = frame.CurrentLine, next = frame.NextLine;
-            if (scene == LyricsPresentationScene.Searching)
-            {
-                var searching = LyricsSearchingPresentationPolicy.Create(track);
-                current = searching.Current; next = searching.Next;
+                held = await RefreshPresentationAsync(
+                    forceMetadataRefresh: plan.ForceMetadataRefresh,
+                    _stop.Token);
             }
-            if (track is null) { current = "等待播放..."; next = ""; }
-            scripts.Add(LyricsWebViewScriptFactory.SetLyrics(current, next, frame.LineProgress, frame.CurrentLineIndex,
-                trackId, showSpectrum, snapshot.IsPlaying, _settings.EnableWordScanning ? frame.WordScanProgress : null,
-                frame.CurrentTranslation, frame.NextTranslation, _settings.ShowLyricTranslation && frame.HasTrackTranslation,
-                presentationScene: scene));
-            var capabilities = Provider.GetControlCapabilities();
-            ControlState = new MediaControlState(track?.Title ?? "没有媒体", track?.Artist ?? "",
-                NonLyricsMediaPolicy.IsDouyin(snapshot) ? "抖音" : track?.SourceApp ?? "",
-                snapshot.Position.TotalSeconds, track?.Duration.TotalSeconds ?? 0, snapshot.IsPlaying,
-                capabilities.Previous, capabilities.Next, capabilities.PlayPause, snapshot.CanSeek, CreateCover(),
-                Provider.GetSourceChoices(), snapshot.SourceAppUserModelId);
-            scripts.Add(WebViewMessageScriptFactory.Dispatch("taskbarMedia", "browser", new
-            {
-                active = browser, title = track?.Title ?? "", artist = track?.Artist ?? "",
-                source = NonLyricsMediaPolicy.IsDouyin(snapshot) ? "抖音" : snapshot.SourceAppUserModelId,
-                isPlaying = snapshot.IsPlaying, canPrevious = capabilities.Previous, canNext = capabilities.Next, canPlayPause = capabilities.PlayPause
-            }));
-            if (_spectrumActive)
-            {
-                scripts.Add(_spectrumScript);
-            }
-            Provider.SetCurrentLyricSource(Lyrics.CurrentLyricSourceApp);
-            Provider.SetCurrentLyricOffsets(_settings.GetPlayerLyricOffsetMilliseconds(track?.SourceApp),
-                Offsets.GetOffsetMilliseconds(track, Lyrics.CurrentLyricSourceApp));
-            var value = new MediaFrame(1, "frame", snapshot.SourceAppUserModelId,
-                snapshot.IsPlaying, track is not null, browser, trackId, scripts.ToArray());
-            Volatile.Write(ref _frame, value);
-            FrameReady?.Invoke(value);
-            var available = !browser && frame.CurrentLineIndex >= 0 && !frame.IsPureMusic;
-            _cardFrame = new { revision = ++_cardRevision, trackId, available, scripts = available ? new[] {
-                _styleScript, NativeAppearanceScript,
-                LyricsWebViewScriptFactory.SetLyrics(frame.CurrentLine, frame.NextLine, frame.LineProgress, frame.CurrentLineIndex,
-                    trackId, false, snapshot.IsPlaying, _settings.EnableWordScanning ? frame.WordScanProgress : null,
-                    frame.CurrentTranslation, frame.NextTranslation, _settings.ShowLyricTranslation && frame.HasTrackTranslation,
-                    presentationScene: LyricsPresentationScene.Lyrics) } : Array.Empty<string>() };
-            CardFrameReady?.Invoke(_cardFrame);
         }
-        catch (OperationCanceledException) when (_disposed) { }
+        catch (OperationCanceledException) when (_disposed)
+        {
+        }
         catch (Exception exception)
         {
             Log.Warn($"Media coordinator: {exception}");
             UpdateSpectrum(false);
-            var value = new { version = 1, type = "frame", sourceId = "", isPlaying = false,
-                hasMedia = false, isBrowser = false, trackId = "", scripts = Array.Empty<string>() };
-            Volatile.Write(ref _frame, value);
-            FrameReady?.Invoke(value);
-            _cardFrame = new { revision = ++_cardRevision, trackId = "", available = false, scripts = Array.Empty<string>() };
-            CardFrameReady?.Invoke(_cardFrame);
         }
-        finally { _busy = false; }
-    }
-
-    private LyricsPresentationScene ResolveScene(LyricDisplayFrame frame, bool browser, bool hasTrack)
-    {
-        if (!hasTrack) return LyricsPresentationScene.NoPlayback;
-        if (browser) return LyricsPresentationScene.Message;
-        var spectrum = _settings.SpectrumDisplayMode switch
+        finally
         {
-            SpectrumDisplayMode.Always => true,
-            SpectrumDisplayMode.PureMusicOrNoLyrics => frame.IsPureMusic || frame.CurrentLine == LyricSyncService.NoLyricsText,
-            SpectrumDisplayMode.PureMusicOnly => frame.IsPureMusic,
-            _ => false
-        };
-        if (spectrum) return LyricsPresentationScene.Spectrum;
-        if (Lyrics.CurrentLyricAcquisition == LyricAcquisitionKind.Searching) return LyricsPresentationScene.Searching;
-        return frame.CurrentLineIndex >= 0 ? LyricsPresentationScene.Lyrics : LyricsPresentationScene.Message;
+            _scheduler.MarkCompleted(plan);
+            if (held)
+            {
+                _scheduler.RequestPresentation();
+                _scheduler.DeferState(
+                    PlaybackSnapshotStabilityGate.QuietPeriod,
+                    plan.StateRequestGeneration);
+            }
+            _busy = false;
+            ScheduleNext();
+        }
     }
 
-    internal static bool CanPublishSnapshot(PlaybackSnapshot prepared, PlaybackSnapshot latest) =>
-        string.Equals(prepared.SourceAppUserModelId, latest.SourceAppUserModelId, StringComparison.OrdinalIgnoreCase) &&
-        prepared.IsPlaying == latest.IsPlaying &&
-        (prepared.Track is null ? latest.Track is null : latest.Track is not null &&
-            LyricSyncService.BuildStableTrackIdentity(prepared.Track) == LyricSyncService.BuildStableTrackIdentity(latest.Track));
+    private async Task<bool> RefreshPresentationAsync(
+        bool forceMetadataRefresh,
+        CancellationToken cancellationToken)
+    {
+        await _refreshGate.WaitAsync(cancellationToken);
+        try
+        {
+            return await RefreshPresentationCoreAsync(
+                forceMetadataRefresh,
+                cancellationToken);
+        }
+        finally
+        {
+            _refreshGate.Release();
+        }
+    }
 
-    private void UpdateSpectrum(bool showSpectrum)
+    private async Task<bool> RefreshPresentationCoreAsync(
+        bool forceMetadataRefresh,
+        CancellationToken cancellationToken)
+    {
+        var stateVersion = Volatile.Read(ref _stateVersion);
+        var snapshot = await Provider.GetCurrentAsync(forceMetadataRefresh, cancellationToken);
+        if (_disposed) return false;
+
+        // Re-observe the provider's transition boundary before deriving presentation state.
+        snapshot = Provider.RefreshPlaybackState(snapshot);
+        var decision = _stability.Observe(
+            snapshot,
+            PlaybackInputPolicy.Classify(snapshot),
+            _utcNow());
+        if (decision.Action == PlaybackSnapshotGateAction.Hold) return true;
+
+        _playback = snapshot = decision.Snapshot;
+        _lastAuthorityUtc = _utcNow();
+        _lastTimelineProjectionUtc = _lastAuthorityUtc;
+        var track = snapshot.Track;
+        var isBrowser = NonLyricsMediaPolicy.IsNonLyrics(snapshot);
+        var trackId = track is null ? "" : LyricSyncService.BuildStableTrackIdentity(track);
+
+        // Start or advance lyric acquisition before cover I/O, while keeping
+        // browser and other non-lyric media on a strict no-query path.
+        await Lyrics.GetDisplayFrameAsync(LyricsInput(snapshot));
+        if (_disposed) return false;
+        _scheduler.SetPlaybackState(snapshot.IsPlaying);
+
+        await UpdateCoverAsync(snapshot, cancellationToken);
+        if (_disposed) return false;
+
+        var latest = Provider.RefreshPlaybackState(snapshot);
+        _playback = latest;
+        if (!CanPublishSnapshot(snapshot, latest))
+        {
+            UpdateSpectrum(false);
+            _scheduler.RequestState();
+            return false;
+        }
+        snapshot = latest;
+
+        var display = await Lyrics.GetDisplayFrameAsync(LyricsInput(snapshot));
+        // Settings and commands invalidate in-flight presentation calculations.
+        if (_disposed || stateVersion != Volatile.Read(ref _stateVersion)) return false;
+        var scene = LyricsPresentationCalculator.ResolveScene(
+            _settings,
+            display,
+            isBrowser,
+            snapshot.Track is not null,
+            Lyrics.CurrentLyricAcquisition);
+        _showSpectrum = scene == LyricsPresentationScene.Spectrum;
+        UpdateSpectrum(_showSpectrum);
+
+        var lyrics = LyricsPresentationCalculator.Create(
+            snapshot,
+            display,
+            _settings,
+            scene,
+            isBrowser,
+            Lyrics.CurrentLyricAcquisition);
+        var capabilities = Provider.GetControlCapabilities();
+        var sources = Provider.GetSourceChoices();
+        ControlState = new MediaControlState(
+            snapshot.Track?.Title ?? "没有媒体",
+            snapshot.Track?.Artist ?? "",
+            NonLyricsMediaPolicy.IsDouyin(snapshot)
+                ? "抖音"
+                : snapshot.Track?.SourceApp ?? "",
+            snapshot.Position.TotalSeconds,
+            snapshot.Track?.Duration.TotalSeconds ?? 0,
+            snapshot.IsPlaying,
+            capabilities.Previous,
+            capabilities.Next,
+            capabilities.PlayPause,
+            snapshot.CanSeek,
+            CreateCover(),
+            sources,
+            snapshot.SourceAppUserModelId);
+
+        Provider.SetCurrentLyricSource(Lyrics.CurrentLyricSourceApp);
+        Provider.SetCurrentLyricOffsets(
+            _settings.GetPlayerLyricOffsetMilliseconds(snapshot.Track?.SourceApp),
+            Offsets.GetOffsetMilliseconds(snapshot.Track, Lyrics.CurrentLyricSourceApp));
+
+        var browser = new MediaBrowserFrame(
+            isBrowser,
+            snapshot.Track?.Title ?? "",
+            snapshot.Track?.Artist ?? "",
+            NonLyricsMediaPolicy.IsDouyin(snapshot)
+                ? "抖音"
+                : snapshot.SourceAppUserModelId,
+            snapshot.IsPlaying,
+            capabilities.Previous,
+            capabilities.Next,
+            capabilities.PlayPause);
+        var update = _presentation.Apply(new MediaPresentationInput(
+            snapshot,
+            isBrowser,
+            trackId,
+            lyrics,
+            _style,
+            _coverFrame,
+            browser,
+            _tuningFrame,
+            _spectrumActive ? _spectrumBars : [],
+            _nativeAppearance));
+        Volatile.Write(ref _frame, update.Frame);
+        Volatile.Write(ref _card, update.Card);
+        _scheduler.SetPlaybackState(snapshot.IsPlaying);
+
+        if (update.MediaFrameChanged && _taskbarVisible)
+        {
+            FrameReady?.Invoke(update.Frame);
+        }
+        if (update.CardFrameChanged && _cardVisible)
+        {
+            CardFrameReady?.Invoke(update.Card);
+        }
+        // Timeline changes can move the lyrics before another SMTC event arrives.
+        // Keep authoritative reads low-frequency, then smooth only within the
+        // current lyric line's own interval.
+        return Lyrics.CurrentLyricAcquisition == LyricAcquisitionKind.Searching;
+    }
+
+    internal static bool CanPublishSnapshot(
+        PlaybackSnapshot prepared,
+        PlaybackSnapshot latest) =>
+        string.Equals(
+            prepared.SourceAppUserModelId,
+            latest.SourceAppUserModelId,
+            StringComparison.OrdinalIgnoreCase) &&
+        prepared.IsPlaying == latest.IsPlaying &&
+        (prepared.Track is null
+            ? latest.Track is null
+            : latest.Track is not null &&
+              LyricSyncService.BuildStableTrackIdentity(prepared.Track) ==
+              LyricSyncService.BuildStableTrackIdentity(latest.Track));
+
+    private void UpdateSpectrum(bool spectrumContentVisible)
     {
         if (_disposed) return;
-        var capture = _settings.SpectrumAudioAccessGranted && (_preview || (_visible && showSpectrum && _playback.IsPlaying));
-        if (capture == _spectrumActive) return;
-        _spectrumActive = capture;
-        if (capture) { _spectrum.Start(); _spectrumTimer.Start(); }
-        else { _spectrumTimer.Stop(); _spectrum.Stop(); }
+        var shouldCapture = _playback.IsPlaying &&
+            SpectrumCapturePolicy.ShouldCapture(
+                _settings.SpectrumAudioAccessGranted,
+                _preview,
+                _taskbarVisible,
+                spectrumContentVisible);
+        if (shouldCapture == _spectrumActive) return;
+
+        _spectrumActive = shouldCapture;
+        if (shouldCapture)
+        {
+            _spectrum.Start();
+            _spectrumTimer.Start();
+        }
+        else
+        {
+            _spectrumTimer.Stop();
+            _spectrum.Stop();
+            _spectrumBars = [];
+            _scheduler.RequestPresentation();
+        }
     }
 
     private void SpectrumTick(object? sender, EventArgs args)
     {
         if (_disposed || !_spectrumActive) return;
         var bars = _spectrum.GetSpectrum();
-        _spectrumScript = LyricsWebViewScriptFactory.SetSpectrum(bars);
+        _spectrumBars = bars;
         var capture = _spectrum.GetDiagnostics();
-        SpectrumDiagnosticsState.Update(new(DateTimeOffset.UtcNow, true, _playback.IsPlaying, capture.IsAvailable,
-            capture.SampleRate, capture.Channels, capture.Format, capture.InputPeak,
-            bars.Length == 0 ? 0 : bars.Max(), bars, capture.LastAudioUtc, capture.LastError));
-        if (Snapshot() is not MediaFrame frame) return;
-        frame = frame with { scripts = frame.scripts.Where(script => !script.Contains("\"type\":\"spectrum\"", StringComparison.Ordinal)).Append(_spectrumScript).ToArray() };
-        Volatile.Write(ref _frame, frame);
-        FrameReady?.Invoke(frame);
+        SpectrumDiagnosticsState.Update(new(
+            _utcNow(),
+            true,
+            _playback.IsPlaying,
+            capture.IsAvailable,
+            capture.SampleRate,
+            capture.Channels,
+            capture.Format,
+            capture.InputPeak,
+            bars.Length == 0 ? 0 : bars.Max(),
+            bars,
+            capture.LastAudioUtc,
+            capture.LastError));
+
+        var updated = _presentation.UpdateSpectrum(bars);
+        if (updated is null) return;
+        Volatile.Write(ref _frame, updated);
+        if (_taskbarVisible || _preview) FrameReady?.Invoke(updated);
     }
 
-    private async Task UpdateCoverAsync(PlaybackSnapshot snapshot)
+    private async Task UpdateCoverAsync(
+        PlaybackSnapshot snapshot,
+        CancellationToken cancellationToken)
     {
         var identity = CoverIdentity.FromTrack(snapshot.Track);
         var changed = _coverTransition.Begin(identity);
-        if (!changed && _coverTransition.IsVisualFor(identity) && _coverBytes is { Length: > 0 }) return;
+        if (!changed &&
+            _coverTransition.IsVisualFor(identity) &&
+            _coverBytes is { Length: > 0 })
+        {
+            return;
+        }
+
         var bytes = snapshot.CoverImageBytes;
-        if (bytes is not { Length: > 0 } && _localCover is not null && snapshot.Track is not null &&
-            (identity != _localCoverIdentity || DateTimeOffset.UtcNow >= _nextLocalCover))
+        if (bytes is not { Length: > 0 } &&
+            _localCover is not null &&
+            snapshot.Track is not null &&
+            (identity != _localCoverIdentity || _utcNow() >= _nextLocalCover))
         {
             _localCoverIdentity = identity;
-            _nextLocalCover = DateTimeOffset.UtcNow.AddSeconds(5);
-            bytes = await Task.Run(() => _localCover.TryGetCover(snapshot.Track));
+            _nextLocalCover = _utcNow().AddSeconds(5);
+            bytes = await Task.Run(
+                () => _localCover.TryGetCover(snapshot.Track),
+                cancellationToken);
         }
+
         if (bytes is { Length: > 0 } && bytes.Length <= 512 * 1024)
         {
             _coverBytes = bytes;
             _coverBitmap = null;
-            var mime = bytes.Length > 3 && bytes[0] == 0xff && bytes[1] == 0xd8 ? "image/jpeg" : "image/png";
+            var mime = bytes.Length > 3 && bytes[0] == 0xff && bytes[1] == 0xd8
+                ? "image/jpeg"
+                : "image/png";
             _coverData = $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
             _coverIcon = "";
         }
         else
         {
-            if (snapshot.Track is not null && ((snapshot.IsCoverLoading && _coverTransition.ShouldRetainPreviousVisual()) ||
-                _coverTransition.ShouldDebounceFallback())) return;
-            _coverBytes = null; _coverBitmap = null; _coverData = "";
-            _coverIcon = snapshot.Track is null ? "" : _fallbackIcon.Resolve(snapshot.SourceAppUserModelId, snapshot.Track.SourceApp);
+            if (snapshot.Track is not null &&
+                ((snapshot.IsCoverLoading && _coverTransition.ShouldRetainPreviousVisual()) ||
+                 _coverTransition.ShouldDebounceFallback()))
+            {
+                return;
+            }
+            _coverBytes = null;
+            _coverBitmap = null;
+            _coverData = "";
+            _coverIcon = snapshot.Track is null
+                ? ""
+                : _fallbackIcon.Resolve(
+                    snapshot.SourceAppUserModelId,
+                    snapshot.Track.SourceApp);
+            _coverFrame = snapshot.Track is null
+                ? NativeMediaPayloadFactory.EmptyCover()
+                : NativeMediaPayloadFactory.CreateCover(
+                    "",
+                    snapshot.Track.SourceApp == "QQMusic" ? "Q" : "N",
+                    "rgba(67,160,71,1)",
+                    _coverIcon,
+                    LyricSyncService.BuildStableTrackIdentity(snapshot.Track));
         }
-        _coverTrackId = snapshot.Track is null ? "" : LyricSyncService.BuildStableTrackIdentity(snapshot.Track);
+
+        _coverTrackId = snapshot.Track is null
+            ? ""
+            : LyricSyncService.BuildStableTrackIdentity(snapshot.Track);
         _coverTransition.MarkVisual(identity);
-        _coverScript = LyricsWebViewScriptFactory.SetCover(_coverData, snapshot.Track?.SourceApp == "QQMusic" ? "Q" : "N",
-            "rgba(67,160,71,1)", _coverIcon, _coverTrackId);
+        if (_coverData.Length > 0 || _coverIcon.Length > 0)
+        {
+            _coverFrame = NativeMediaPayloadFactory.CreateCover(
+                _coverData,
+                snapshot.Track?.SourceApp == "QQMusic" ? "Q" : "N",
+                "rgba(67,160,71,1)",
+                _coverIcon,
+                _coverTrackId);
+        }
     }
 
     private BitmapSource? CreateCover()
@@ -304,39 +677,176 @@ internal sealed class MediaCoordinator : IDisposable
         try
         {
             var image = new BitmapImage();
-            image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad; image.DecodePixelWidth = 120;
-            image.StreamSource = new MemoryStream(_coverBytes); image.EndInit(); image.Freeze();
+            image.BeginInit();
+            image.CacheOption = BitmapCacheOption.OnLoad;
+            image.DecodePixelWidth = 120;
+            image.StreamSource = new MemoryStream(_coverBytes);
+            image.EndInit();
+            image.Freeze();
             return _coverBitmap = image;
         }
-        catch (Exception exception) when (exception is NotSupportedException or IOException) { return null; }
+        catch (Exception exception) when (exception is NotSupportedException or IOException)
+        {
+            return null;
+        }
     }
 
     internal async Task CommandAsync(string action, double? position)
     {
         if (_disposed) return;
-        if (action.StartsWith("selectSource:", StringComparison.Ordinal)) { Provider.SelectSource(action[13..]); return; }
-        if (action == "seek" && position.HasValue && double.IsFinite(position.Value))
-            await Provider.SeekToAsync(TimeSpan.FromSeconds(Math.Max(0, position.Value)), _stop.Token);
-        else if (action is "playPause" or "previous" or "next")
-            await Provider.ExecuteAsync(action switch { "previous" => MediaControlAction.PreviousTrack, "next" => MediaControlAction.NextTrack, _ => MediaControlAction.TogglePlayPause }, _stop.Token);
+        if (action.StartsWith("selectSource:", StringComparison.Ordinal))
+        {
+            Provider.SelectSource(action[13..]);
+            InvalidateAfterCommand();
+            return;
+        }
+
+        try
+        {
+            if (action == "seek" && position.HasValue && double.IsFinite(position.Value))
+            {
+                await Provider.SeekToAsync(
+                    TimeSpan.FromSeconds(Math.Max(0, position.Value)),
+                    _stop.Token);
+            }
+            else if (action is "playPause" or "previous" or "next")
+            {
+                await Provider.ExecuteAsync(
+                    action switch
+                    {
+                        "previous" => MediaControlAction.PreviousTrack,
+                        "next" => MediaControlAction.NextTrack,
+                        _ => MediaControlAction.TogglePlayPause
+                    },
+                    _stop.Token);
+            }
+        }
+        finally
+        {
+            InvalidateAfterCommand();
+        }
     }
 
-    internal bool TryApplyResolvedLyrics(TrackInfo track, ResolvedLyrics resolved) =>
-        !NonLyricsMediaPolicy.IsNonLyrics(_playback) && Lyrics.TryApplyResolvedLyrics(track, resolved);
-    internal static string GetHtml()
+    internal bool TryApplyResolvedLyrics(TrackInfo track, ResolvedLyrics resolved)
     {
-        var directory = Path.Combine(AppContext.BaseDirectory, "Web", "Lyrics");
-        var script = string.Join("\n", new[] { "bridge.js", "state.js", "presentation.js", "app.js", "browser.js" }.Select(file => File.ReadAllText(Path.Combine(directory, file))));
-        return File.ReadAllText(Path.Combine(directory, "index.html"))
-            .Replace("{{STYLE_CSS}}", File.ReadAllText(Path.Combine(directory, "style.css")))
-            .Replace("{{APP_JS}}", script);
+        var applied = !NonLyricsMediaPolicy.IsNonLyrics(_playback) &&
+            Lyrics.TryApplyResolvedLyrics(track, resolved);
+        if (applied) InvalidateAfterCommand();
+        return applied;
+    }
+
+    private void InvalidateAfterCommand()
+    {
+        RunOnDispatcher(() =>
+        {
+            if (_disposed) return;
+            _stateVersion++;
+            _scheduler.RequestState(full: true);
+            ScheduleNext();
+        });
+    }
+
+    private Task ApplyPresentationTickAsync(CancellationToken cancellationToken)
+    {
+        if (!_taskbarVisible && !_cardVisible) return Task.CompletedTask;
+        if (_presentation.CurrentFrame is not { isPlaying: true } previous ||
+            !_playback.IsPlaying ||
+            previous.lyrics.scene != "lyrics")
+        {
+            return Task.CompletedTask;
+        }
+
+        var now = _utcNow();
+        if (now - _lastAuthorityUtc >= MediaRenderScheduler.FallbackInterval)
+        {
+            _scheduler.RequestState(full: true);
+            return Task.CompletedTask;
+        }
+
+        var elapsed = now - _lastTimelineProjectionUtc;
+        if (elapsed <= TimeSpan.Zero) return Task.CompletedTask;
+
+        var lyrics = LyricsPresentationCalculator.CreateTimelineProjection(
+            previous.lyrics,
+            Math.Min(
+                elapsed.TotalMilliseconds,
+                MediaRenderScheduler.PresentationInterval.TotalMilliseconds),
+            currentLineDurationMilliseconds: 2500);
+        if (lyrics == previous.lyrics) return Task.CompletedTask;
+        _lastTimelineProjectionUtc = now;
+
+        var update = _presentation.Apply(new MediaPresentationInput(
+            _playback,
+            previous.isBrowser,
+            lyrics.trackId,
+            lyrics,
+            previous.style ?? _style,
+            previous.cover ?? _coverFrame,
+            previous.browser,
+            previous.spectrumTuning,
+            _spectrumActive ? _spectrumBars : [],
+            _nativeAppearance));
+        Volatile.Write(ref _frame, update.Frame);
+        Volatile.Write(ref _card, update.Card);
+        if (update.MediaFrameChanged && _taskbarVisible) FrameReady?.Invoke(update.Frame);
+        if (update.CardFrameChanged && _cardVisible) CardFrameReady?.Invoke(update.Card);
+        return Task.CompletedTask;
+    }
+
+    private void RunOnDispatcher(Action action)
+    {
+        if (_disposed) return;
+        if (_dispatcher.CheckAccess())
+        {
+            action();
+            return;
+        }
+        try
+        {
+            _dispatcher.BeginInvoke(DispatcherPriority.Background, action);
+        }
+        catch (InvalidOperationException)
+        {
+            // The dispatcher may have shut down concurrently with helper shutdown.
+        }
+    }
+
+    private void ScheduleNext()
+    {
+        if (_disposed || !_started) return;
+        var delay = _scheduler.TimeUntilNext();
+        _timer.Stop();
+        _timer.Interval = delay <= TimeSpan.Zero
+            ? TimeSpan.FromMilliseconds(1)
+            : delay;
+        _timer.Start();
     }
 
     public void Dispose()
     {
         if (_disposed) return;
-        _disposed = true; _stop.Cancel(); _timer.Stop(); _timer.Tick -= Tick;
-        _spectrumTimer.Stop(); _spectrumTimer.Tick -= SpectrumTick;
-        _spectrum.Dispose(); Lyrics.Dispose(); Provider.Dispose(); _localCover?.Dispose(); Composition.Dispose(); Offsets.Dispose();
+        _disposed = true;
+        Provider.Invalidated -= OnProviderInvalidated;
+        foreach (var sourceIcon in _sourceIcons.Values.Where(task => !task.IsCompleted))
+        {
+            _ = sourceIcon.ContinueWith(
+                static task => _ = task.Exception,
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted |
+                    TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+        _stop.Cancel();
+        _timer.Stop();
+        _timer.Tick -= Tick;
+        _spectrumTimer.Stop();
+        _spectrumTimer.Tick -= SpectrumTick;
+        _spectrum.Dispose();
+        Lyrics.Dispose();
+        Provider.Dispose();
+        _localCover?.Dispose();
+        Composition.Dispose();
+        Offsets.Dispose();
+        _stop.Dispose();
     }
 }
