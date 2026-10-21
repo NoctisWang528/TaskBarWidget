@@ -10,6 +10,7 @@
   <ItemGroup>
     <Compile Include="../../UI/Settings/SettingsDraft.cs" Link="WinUi/SettingsDraft.cs" />
     <Compile Include="../../UI/Settings/ReorderSequence.cs" Link="WinUi/ReorderSequence.cs" />
+    <Compile Include="../../UI/PendingPanelToggle.cs" Link="WinUi/PendingPanelToggle.cs" />
     <ProjectReference Include="..\..\Media\TaskBarWidgets.Media.csproj" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="xunit" Version="2.9.2" />

@@ -394,6 +394,7 @@ public sealed partial class CardGroup
             Grid.SetRow(rowGrid, row);
 
             var label = Text(WeatherDayLabels[row], 11);
+            label.FontFamily = _cardFontFamily;
             label.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
             label.VerticalAlignment = VerticalAlignment.Center;
             Add(rowGrid, label, 0);
@@ -402,6 +403,7 @@ public sealed partial class CardGroup
             Add(rowGrid, icon, 1);
 
             var min = Text(NormalizeTemperature(String(day, "min")), 11);
+            min.FontFamily = _cardFontFamily;
             min.FontWeight = Microsoft.UI.Text.FontWeights.Light;
             Secondary(min);
             min.VerticalAlignment = VerticalAlignment.Center;
@@ -436,6 +438,7 @@ public sealed partial class CardGroup
             Add(rowGrid, bar, 3);
 
             var max = Text(NormalizeTemperature(String(day, "max")), 11);
+            max.FontFamily = _cardFontFamily;
             max.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
             max.VerticalAlignment = VerticalAlignment.Center;
             max.HorizontalAlignment = HorizontalAlignment.Right;
@@ -474,14 +477,14 @@ public sealed partial class CardGroup
             var type = FirstNonEmpty(String(alert, "typeName"), String(alert, "type"), "天气预警");
             var level = String(alert, "level");
             var title = Text(HasValue(level) ? level + " · " + type : type, 11);
-            title.FontFamily = WeatherFontFamily;
+            title.FontFamily = _cardFontFamily;
             title.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
             title.TextWrapping = TextWrapping.Wrap;
             title.MaxLines = 1;
             block.Children.Add(title);
 
             var text = Text(String(alert, "text"), 10);
-            text.FontFamily = WeatherFontFamily;
+            text.FontFamily = _cardFontFamily;
             text.TextWrapping = TextWrapping.Wrap;
             text.MaxLines = 2;
             Secondary(text);

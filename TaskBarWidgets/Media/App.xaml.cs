@@ -182,7 +182,7 @@ public partial class App : System.Windows.Application
                 return new { state.Title, state.Artist, state.Source, state.PositionSeconds, state.DurationSeconds,
                     state.IsPlaying, state.CanPrevious, state.CanNext, state.CanPlayPause, state.CanSeek,
                     coverDataUrl = _media.CoverDataUrl, sources = (state.Sources ?? []).Select(source => new { source.Id,
-                        label = source.Name switch { "QQMusic" => "QQ 音乐", "Netease" => "网易云音乐", "Kugou" => "酷狗音乐", "Browser" => BrowserSourceName(source.Id), _ => source.Name },
+                        label = source.Name switch { "QQMusic" => "QQ 音乐", "Netease" => "网易云音乐", "Kugou" => "酷狗音乐", "Douyin" => "抖音", "Browser" => BrowserSourceName(source.Id), _ => source.Name },
                         iconDataUrl = _media.SourceIcon(source) }),
                     state.SelectedSourceId, toolWindowTheme = (int)Settings.ToolWindowTheme };
             case "openPanel": OpenAudioPanel(); return new { success = true };

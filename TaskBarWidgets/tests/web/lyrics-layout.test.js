@@ -848,6 +848,50 @@ describe("lyrics responsive layout", () => {
     expect(pendingAnimationFrames).toHaveLength(0);
   });
 
+  it("preserves fractional quiet spectrum heights and returns to the silence baseline", async () => {
+    const [html, bridge, state, presentation, script] = await Promise.all([
+      read("Media/Web/Lyrics/index.html"),
+      read("Media/Web/Lyrics/bridge.js"),
+      read("Media/Web/Lyrics/state.js"),
+      read("Media/Web/Lyrics/presentation.js"),
+      read("Media/Web/Lyrics/app.js")
+    ]);
+    const dom = new JSDOM(html.replace("{{STYLE_CSS}}", "").replace("{{APP_JS}}", ""), {
+      runScripts: "outside-only"
+    });
+    const animationFrames = [];
+    dom.window.CSS = { supports: () => true };
+    dom.window.requestAnimationFrame = callback => {
+      animationFrames.push(callback);
+      return animationFrames.length;
+    };
+    dom.window.cancelAnimationFrame = () => {};
+    dom.window.eval(bridge);
+    dom.window.eval(state);
+    dom.window.eval(presentation);
+    dom.window.eval(script);
+    const receive = (type, payload) => dom.window.taskbarLyrics.receive({ version: 1, type, payload });
+    receive("spectrumTuning", { rise: 1, fall: 1, minHeight: 6, heightRange: 26 });
+    receive("lyrics", {
+      current: "", next: "", progress: 0, currentLineIndex: -1, trackId: "quiet-track",
+      isPureMusic: true, isPlaying: true, animateTransition: false, scene: "spectrum"
+    });
+    const height = () => Number.parseFloat(dom.window.document.querySelector(".spectrum span").style.height);
+    let now = 0;
+    const render = level => {
+      receive("spectrum", Array(32).fill(level));
+      now += 16.67;
+      for (const callback of animationFrames.splice(0)) callback(now);
+      return height();
+    };
+
+    const quietHeight = render(0.001);
+    expect(quietHeight).toBeCloseTo(6.026, 6);
+    expect(render(0.002)).toBeGreaterThan(quietHeight);
+    expect(render(0)).toBe(6);
+    dom.window.close();
+  });
+
   it("caps visible spectrum bars to the available width and restores them on resize", async () => {
     const [html, bridge, state, presentation, script] = await Promise.all([
       read("Media/Web/Lyrics/index.html"),

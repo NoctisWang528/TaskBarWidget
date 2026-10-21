@@ -13,6 +13,7 @@ public sealed class SystemAudioSpectrumService : IDisposable
     private const int DefaultDeviceCheckIntervalMs = 500;
     private const int CaptureRetryBaseDelayMs = 100;
     private const int CaptureRetryMaxDelayMs = 2000;
+    private const int PacketExpiryMs = 250;
     private const short WaveFormatPcm = 1;
     private const short WaveFormatIeeeFloat = 3;
     private const short WaveFormatExtensibleTag = -2;
@@ -23,14 +24,16 @@ public sealed class SystemAudioSpectrumService : IDisposable
 
     private readonly object _lifecycleSync = new();
     private readonly object _sync = new();
-    private readonly float[] _ringBuffer = new float[RingBufferSize];
+    private float[][] _ringBuffers = [new float[RingBufferSize]];
     private float[] _smoothedBars = new float[SpectrumTuningSettings.DefaultBarCount];
     private CancellationTokenSource? _captureCancellation;
     private Thread? _captureThread;
     private int _consecutiveCaptureFailures;
     private int _writeIndex;
     private int _sampleRate = 48000;
-    private float _adaptivePeak = 0.035f;
+    private float _adaptivePeak = (float)SpectrumTuningSettings.CreateDefault().PeakInitial;
+    private long? _lastPacketTick;
+    private int _signalGeneration;
     private SpectrumTuningSettings _tuningSettings = SpectrumTuningSettings.CreateDefault();
     private volatile bool _isAvailable;
     private int _diagnosticSampleRate;
@@ -96,12 +99,15 @@ public sealed class SystemAudioSpectrumService : IDisposable
 
         lock (_sync)
         {
+            var resetPeak = _lastPacketTick is null || snapshot.PeakInitial != _tuningSettings.PeakInitial;
+            _signalGeneration++;
             _tuningSettings = snapshot;
             if (_smoothedBars.Length != snapshot.BarCount)
             {
                 _smoothedBars = new float[snapshot.BarCount];
             }
-            _adaptivePeak = Math.Clamp(_adaptivePeak, (float)snapshot.PeakFloor, (float)snapshot.PeakCeiling);
+            _adaptivePeak = Math.Clamp(resetPeak ? (float)snapshot.PeakInitial : _adaptivePeak,
+                (float)snapshot.PeakFloor, (float)snapshot.PeakCeiling);
         }
     }
 
@@ -115,6 +121,10 @@ public sealed class SystemAudioSpectrumService : IDisposable
                 return;
             }
 
+            lock (_sync)
+            {
+                ResetSignal();
+            }
             _captureCancellation = new CancellationTokenSource();
             var cancellationToken = _captureCancellation.Token;
             _captureThread = new Thread(() => CaptureLoop(cancellationToken))
@@ -135,31 +145,50 @@ public sealed class SystemAudioSpectrumService : IDisposable
         }
     }
 
-    public float[] GetSpectrum()
+    public float[] GetSpectrum() => GetSpectrum(Environment.TickCount64);
+
+    internal float[] GetSpectrum(long now, Action? beforeCommit = null)
     {
         SpectrumTuningSettings settings;
+        float[][] samples;
+        int sampleRate;
+        int generation;
+
         lock (_sync)
         {
             settings = _tuningSettings.Clone();
-        }
-
-        var sampleWindow = CoerceSampleWindow(settings.SampleWindow);
-        var samples = new float[sampleWindow];
-        int sampleRate;
-
-        lock (_sync)
-        {
+            var sampleWindow = CoerceSampleWindow(settings.SampleWindow);
             sampleRate = _sampleRate;
-            var start = (_writeIndex - sampleWindow + RingBufferSize) % RingBufferSize;
-            for (var i = 0; i < sampleWindow; i++)
+            if (_lastPacketTick is { } lastPacket && now - lastPacket >= PacketExpiryMs)
             {
-                samples[i] = _ringBuffer[(start + i) % RingBufferSize];
+                foreach (var channel in _ringBuffers) Array.Clear(channel);
+                _lastPacketTick = null;
+                _diagnosticInputPeak = 0;
+                _signalGeneration++;
+            }
+
+            generation = _signalGeneration;
+            samples = new float[_ringBuffers.Length][];
+            var start = (_writeIndex - sampleWindow + RingBufferSize) % RingBufferSize;
+            for (var channel = 0; channel < samples.Length; channel++)
+            {
+                samples[channel] = new float[sampleWindow];
+                for (var i = 0; i < sampleWindow; i++)
+                {
+                    samples[channel][i] = _ringBuffers[channel][(start + i) % RingBufferSize];
+                }
             }
         }
 
-        var bars = CalculateBars(samples, sampleRate, settings);
+        var magnitudes = CalculateFftMagnitudes(samples);
+        // The internal callback lets the signal test reproduce a reset during FFT
+        // without starting a real audio endpoint or relying on thread timing.
+        beforeCommit?.Invoke();
+        float[] bars;
         lock (_sync)
         {
+            if (generation != _signalGeneration) return (float[])_smoothedBars.Clone();
+            bars = CalculateBars(magnitudes, samples[0].Length, sampleRate, settings);
             if (_smoothedBars.Length != bars.Length)
             {
                 _smoothedBars = new float[bars.Length];
@@ -219,6 +248,11 @@ public sealed class SystemAudioSpectrumService : IDisposable
 
         try
         {
+            // Every endpoint/retry starts fresh, even if its format is unchanged.
+            lock (_sync)
+            {
+                ResetSignal();
+            }
             enumerator = (IMMDeviceEnumerator)(object)new MMDeviceEnumerator();
             Marshal.ThrowExceptionForHR(enumerator.GetDefaultAudioEndpoint(EDataFlow.Render, ERole.Console, out device));
             var activeDeviceId = GetDeviceId(device);
@@ -227,9 +261,9 @@ public sealed class SystemAudioSpectrumService : IDisposable
             audioClient = (IAudioClient)audioClientObject;
             Marshal.ThrowExceptionForHR(audioClient.GetMixFormat(out mixFormatPtr));
             var format = AudioFormat.FromWaveFormat(mixFormatPtr);
-            _sampleRate = format.SampleRate;
             lock (_sync)
             {
+                _sampleRate = format.SampleRate;
                 _diagnosticSampleRate = format.SampleRate;
                 _diagnosticChannels = format.Channels;
                 _diagnosticFormat = $"{format.SampleRate} Hz, {format.Channels} ch, {format.BytesPerSample * 8}-bit" +
@@ -346,7 +380,7 @@ public sealed class SystemAudioSpectrumService : IDisposable
             {
                 if ((flags & AudclntBufferflagsSilent) != 0)
                 {
-                    AppendSilence(frameCount);
+                    AppendSilence(frameCount, Environment.TickCount64);
                 }
                 else
                 {
@@ -362,14 +396,15 @@ public sealed class SystemAudioSpectrumService : IDisposable
         }
     }
 
-    private void AppendSilence(int frameCount)
+    internal void AppendSilence(int frameCount, long packetTick)
     {
         lock (_sync)
         {
+            if (frameCount > 0) _lastPacketTick = packetTick;
             _diagnosticInputPeak = 0;
             for (var i = 0; i < frameCount; i++)
             {
-                _ringBuffer[_writeIndex] = 0;
+                foreach (var channel in _ringBuffers) channel[_writeIndex] = 0;
                 _writeIndex = (_writeIndex + 1) % RingBufferSize;
             }
         }
@@ -380,22 +415,31 @@ public sealed class SystemAudioSpectrumService : IDisposable
         var byteCount = frameCount * format.BlockAlign;
         var bytes = new byte[byteCount];
         Marshal.Copy(data, bytes, 0, byteCount);
+        AppendSamples(bytes, frameCount, format, Environment.TickCount64);
+    }
 
+    internal void AppendSamples(byte[] bytes, int frameCount, AudioFormat format, long packetTick)
+    {
         lock (_sync)
         {
+            if (_ringBuffers.Length != format.Channels || _sampleRate != format.SampleRate)
+            {
+                _ringBuffers = Enumerable.Range(0, format.Channels).Select(_ => new float[RingBufferSize]).ToArray();
+                ResetSignal();
+            }
+            _sampleRate = format.SampleRate;
+            if (frameCount > 0) _lastPacketTick = packetTick;
             var peak = 0f;
             for (var frame = 0; frame < frameCount; frame++)
             {
-                var sum = 0f;
                 var frameOffset = frame * format.BlockAlign;
                 for (var channel = 0; channel < format.Channels; channel++)
                 {
-                    sum += ReadSample(bytes, frameOffset + (channel * format.BytesPerSample), format);
+                    var sample = ReadSample(bytes, frameOffset + (channel * format.BytesPerSample), format);
+                    peak = Math.Max(peak, Math.Abs(sample));
+                    _ringBuffers[channel][_writeIndex] = sample;
                 }
 
-                var sample = sum / Math.Max(1, format.Channels);
-                peak = Math.Max(peak, Math.Abs(sample));
-                _ringBuffer[_writeIndex] = sample;
                 _writeIndex = (_writeIndex + 1) % RingBufferSize;
             }
 
@@ -434,14 +478,13 @@ public sealed class SystemAudioSpectrumService : IDisposable
         return Math.Clamp(sample / 8388608f, -1f, 1f);
     }
 
-    private float[] CalculateBars(float[] samples, int sampleRate, SpectrumTuningSettings settings)
+    private float[] CalculateBars(float[] magnitudes, int sampleWindow, int sampleRate, SpectrumTuningSettings settings)
     {
         var barCount = Math.Clamp(
             settings.BarCount,
             SpectrumTuningSettings.MinBarCount,
             SpectrumTuningSettings.MaxBarCount);
         var bars = new float[barCount];
-        var magnitudes = CalculateFftMagnitudes(samples);
         var nyquist = Math.Max(1000, sampleRate / 2);
         var maximumAvailableFrequency = Math.Min(SpectrumTuningSettings.MaximumFrequency, nyquist * 0.92);
         var maxFrequency = Math.Clamp(
@@ -464,21 +507,23 @@ public sealed class SystemAudioSpectrumService : IDisposable
             var mappedEndRatio = Math.Pow(endRatio, distributionExponent);
             var startFrequency = minFrequency * Math.Pow(maxFrequency / minFrequency, mappedStartRatio);
             var endFrequency = minFrequency * Math.Pow(maxFrequency / minFrequency, mappedEndRatio);
-            var startBin = Math.Max(1, (int)Math.Floor(startFrequency * samples.Length / sampleRate));
-            var endBin = Math.Min(magnitudes.Length - 1, (int)Math.Ceiling(endFrequency * samples.Length / sampleRate));
-            var weightedSum = 0.0;
+            var startBin = Math.Max(1, (int)Math.Floor(startFrequency * sampleWindow / sampleRate));
+            var endBin = Math.Min(magnitudes.Length - 1, (int)Math.Ceiling(endFrequency * sampleWindow / sampleRate));
+            var weightedPower = 0.0;
             var weightTotal = 0.0;
 
             for (var bin = startBin; bin <= endBin; bin++)
             {
-                var frequency = bin * sampleRate / (double)samples.Length;
+                var frequency = bin * sampleRate / (double)sampleWindow;
                 var frequencyWeight = settings.FrequencyWeightBase +
                     (Math.Log2(Math.Max(2, frequency) / minFrequency) * settings.FrequencyWeightSlope);
-                weightedSum += magnitudes[bin] * Math.Max(0.75, frequencyWeight);
+                var weightedMagnitude = magnitudes[bin] * Math.Max(0.75, frequencyWeight);
+                weightedPower += weightedMagnitude * weightedMagnitude;
                 weightTotal += 1.0;
             }
 
-            var magnitude = weightTotal > 0 ? (float)(weightedSum / weightTotal) : 0f;
+            // RMS retains narrow note energy without the saturation of a peak-only band.
+            var magnitude = weightTotal > 0 ? (float)Math.Sqrt(weightedPower / weightTotal) : 0f;
             var bandGain = (float)(settings.LowBandGain + (band * settings.BandGainStep));
             bars[band] = magnitude * bandGain;
             peak = Math.Max(peak, bars[band]);
@@ -509,25 +554,33 @@ public sealed class SystemAudioSpectrumService : IDisposable
         };
     }
 
-    private static float[] CalculateFftMagnitudes(float[] samples)
+    private static float[] CalculateFftMagnitudes(float[][] channels)
     {
-        var length = samples.Length;
-        var real = new double[length];
-        var imaginary = new double[length];
-
-        for (var i = 0; i < samples.Length; i++)
+        var length = channels[0].Length;
+        var powers = new double[(length / 2) + 1];
+        foreach (var samples in channels)
         {
-            var window = 0.5 - (0.5 * Math.Cos((2.0 * Math.PI * i) / (samples.Length - 1)));
-            real[i] = samples[i] * window;
+            var real = new double[length];
+            var imaginary = new double[length];
+            for (var i = 0; i < length; i++)
+            {
+                var window = 0.5 - (0.5 * Math.Cos((2.0 * Math.PI * i) / (length - 1)));
+                real[i] = samples[i] * window;
+            }
+
+            FastFourierTransform(real, imaginary);
+            for (var i = 1; i < powers.Length; i++)
+            {
+                powers[i] += (real[i] * real[i]) + (imaginary[i] * imaginary[i]);
+            }
         }
 
-        FastFourierTransform(real, imaginary);
-
+        // Combine power after FFT so channel phase cannot cancel or create harmonics.
         var magnitudes = new float[(length / 2) + 1];
         var scale = 2.0 / length;
         for (var i = 1; i < magnitudes.Length; i++)
         {
-            magnitudes[i] = (float)(Math.Sqrt((real[i] * real[i]) + (imaginary[i] * imaginary[i])) * scale);
+            magnitudes[i] = (float)(Math.Sqrt(powers[i] / channels.Length) * scale);
         }
 
         return magnitudes;
@@ -630,9 +683,7 @@ public sealed class SystemAudioSpectrumService : IDisposable
         _consecutiveCaptureFailures = 0;
         lock (_sync)
         {
-            Array.Clear(_ringBuffer);
-            Array.Clear(_smoothedBars);
-            _writeIndex = 0;
+            ResetSignal();
             _diagnosticSampleRate = 0;
             _diagnosticChannels = 0;
             _diagnosticInputPeak = 0;
@@ -642,9 +693,21 @@ public sealed class SystemAudioSpectrumService : IDisposable
         }
     }
 
-    private sealed class AudioFormat
+    private void ResetSignal()
     {
-        private AudioFormat(int channels, int sampleRate, int blockAlign, int bytesPerSample, bool isFloat)
+        _signalGeneration++;
+        foreach (var channel in _ringBuffers) Array.Clear(channel);
+        Array.Clear(_smoothedBars);
+        _writeIndex = 0;
+        _lastPacketTick = null;
+        _diagnosticInputPeak = 0;
+        _adaptivePeak = Math.Clamp((float)_tuningSettings.PeakInitial,
+            (float)_tuningSettings.PeakFloor, (float)_tuningSettings.PeakCeiling);
+    }
+
+    internal sealed class AudioFormat
+    {
+        internal AudioFormat(int channels, int sampleRate, int blockAlign, int bytesPerSample, bool isFloat)
         {
             Channels = channels;
             SampleRate = sampleRate;

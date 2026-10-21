@@ -140,6 +140,7 @@ public sealed partial class CardGroup
             var day = traffic.Days[week * 7];
             if (week > 0 && day.Date.Month == traffic.Days[(week - 1) * 7].Date.Month) continue;
             var label = Text(day.Date.Month + "月", 9); Secondary(label); label.Margin = new Thickness(2, 0, 0, 0);
+            label.FontFamily = _cardFontFamily;
             Add(_months, label, week);
         }
         for (var index = 0; index < _days.Length; index++)

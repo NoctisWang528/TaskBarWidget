@@ -38,6 +38,7 @@ public sealed partial class CardGroup : IDisposable
         { ["weather"] = false, ["traffic"] = true, ["device"] = true, ["media"] = true };
     private bool _onDemand;
     private FontFamily _cardFontFamily = new("Microsoft YaHei UI");
+    private string? _appliedCardFont;
     private CardMicaAppearance _cardMica = CardMicaAppearance.Default;
     private CardMicaAppearance? _micaPreview;
     private readonly Dictionary<string, CardSlot> _slots;
@@ -297,9 +298,10 @@ public sealed partial class CardGroup : IDisposable
         _openQueued = TimeSpan.Zero;
         foreach (var card in cards) card.Show();
         _ = ObserveFirstFrameAsync(cards[0], timing, openElapsed, queuedWait);
-        CardTimingLog.Write($"shown cards={cards.Length} elapsedMs={openElapsed.TotalMilliseconds:0.0} firstAfterColdStart={_firstOpenAfterColdStart}");
+        CardTimingLog.Write($"shown cards={cards.Length} elapsedMs={timing.Elapsed.TotalMilliseconds:0.0} firstAfterColdStart={_firstOpenAfterColdStart}");
+        var activationStarted = timing.Elapsed;
         (EnabledCards.LastOrDefault() ?? _updateCard).Window.Activate();
-        CardTimingLog.Write($"activated elapsedMs={openElapsed.TotalMilliseconds:0.0}");
+        CardTimingLog.Write($"activated elapsedMs={timing.Elapsed.TotalMilliseconds:0.0} operationMs={(timing.Elapsed - activationStarted).TotalMilliseconds:0.0}");
         var generation = _generation;
         _outsideClicks.Start(entryWindow, click =>
         {
@@ -554,7 +556,7 @@ public sealed partial class CardGroup : IDisposable
         if (state.ValueKind != JsonValueKind.Object || !state.TryGetProperty("toolWindowTheme", out var value) || value.ValueKind == JsonValueKind.Null) return;
         ApplyTheme(_themePreview ?? UiThemeStyles.ParseTheme(value.ToString()));
     }
-    internal void ApplyQuickCards(JsonElement value)
+    internal void ApplyQuickCards(JsonElement value, bool reposition = true)
     {
         if (_disposed || value.ValueKind != JsonValueKind.Object) return;
         var order = ReadStringArray(value, "order");
@@ -586,10 +588,11 @@ public sealed partial class CardGroup : IDisposable
         if (value.TryGetProperty("font", out var font) && font.ValueKind == JsonValueKind.String)
         {
             var family = font.GetString();
-            if (!string.IsNullOrWhiteSpace(family) && family!.Length < 32)
+            if (!string.IsNullOrWhiteSpace(family) && family!.Length < 32 && family != _appliedCardFont)
             {
                 _cardFontFamily = new FontFamily(family);
                 ApplyCardFont(_slots.Values.Select(slot => slot.Content).Append(_updateCard.Content));
+                _appliedCardFont = family;
                 FitWeatherTemperature();
                 RefreshWeatherLayout();
             }
@@ -603,8 +606,11 @@ public sealed partial class CardGroup : IDisposable
             ApplyMicaAppearance();
         }
         ReconcileCardWindows();
-        if (_visible) { Position(_anchorX, _anchorY); RenderWeatherModules(); }
-        else if (_placedAnchorSet) Place(_anchorX, _anchorY);
+        if (reposition)
+        {
+            if (_visible) { Position(_anchorX, _anchorY); RenderWeatherModules(); }
+            else if (_placedAnchorSet) Place(_anchorX, _anchorY);
+        }
     }
 
     // Media owns the quick-card configuration. This shape maps that settings
@@ -681,7 +687,7 @@ public sealed partial class CardGroup : IDisposable
     }
     private void ApplyTheme(ElementTheme theme)
     {
-        if (_disposed) return;
+        if (_disposed || _requestedTheme == theme) return;
         _requestedTheme = theme;
         foreach (var card in AllCards)
         {
@@ -1235,40 +1241,12 @@ public sealed partial class CardGroup : IDisposable
 
 internal static class CardLifecycleLog
 {
-    private static readonly object Gate = new();
-    internal static void Write(string message)
-    {
-        try
-        {
-            lock (Gate)
-            {
-                var path = Path.Combine(AppContext.BaseDirectory, "card-lifecycle.log");
-                if (File.Exists(path) && new FileInfo(path).Length >= 128 * 1024) File.Move(path, path + ".1", true);
-                File.AppendAllText(path, $"{DateTimeOffset.Now:o} pid={Environment.ProcessId} {message[..Math.Min(message.Length, 512)]}\n");
-            }
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
-    }
+    internal static void Write(string message) => UiDiagnosticLog.Write("card-lifecycle.log", message);
 }
 
 // Phase timing for card opens. Bounded like the lifecycle log and never given
 // titles, lyrics, paths, or credentials; used to verify the open budget.
 internal static class CardTimingLog
 {
-    private static readonly object Gate = new();
-    private static int _records;
-    internal static void Write(string message)
-    {
-        if (Interlocked.Increment(ref _records) > 256) return;
-        try
-        {
-            lock (Gate)
-            {
-                var path = Path.Combine(AppContext.BaseDirectory, "card-timing.log");
-                if (File.Exists(path) && new FileInfo(path).Length >= 128 * 1024) File.Move(path, path + ".1", true);
-                File.AppendAllText(path, $"{DateTimeOffset.Now:o} pid={Environment.ProcessId} {message[..Math.Min(message.Length, 512)]}\n");
-            }
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
-    }
+    internal static void Write(string message) => UiDiagnosticLog.Write("card-timing.log", message);
 }

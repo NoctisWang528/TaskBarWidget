@@ -1069,7 +1069,7 @@ function renderSpectrumFrame(now) {
     }
 
     const level = spectrumVisuals[i];
-    const height = Math.max(1, Math.round((spectrumTuning.minHeight + (level * spectrumTuning.heightRange)) * layoutScaleFactor));
+    const height = Math.max(1, (spectrumTuning.minHeight + (level * spectrumTuning.heightRange)) * layoutScaleFactor);
     const bar = spectrumBarEls[i];
     bar.style.height = `${height}px`;
     bar.style.transform = "scaleY(1)";

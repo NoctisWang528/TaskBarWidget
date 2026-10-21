@@ -20,6 +20,7 @@ public partial class App : Application
     private bool _installConfirmationOpen, _uiReadyReported, _installAfterDownload;
     private JsonElement _quickCards;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _prewarmTimer;
+    private readonly PendingPanelToggle _pendingPanel = new();
 
     public App()
     {
@@ -120,6 +121,19 @@ public partial class App : Application
         // Timestamped on the receiving thread so the timing log separates pipe
         // and dispatcher wait from UI-thread work.
         var receivedAt = DateTimeOffset.Now;
+        if (message.TryGetProperty("action", out var action) && action.GetString() == "togglePanel")
+        {
+            // Repeated clicks while the UI is busy are retries of the pending
+            // gesture. Do not replay an entire open/close storm after recovery.
+            if (_pendingPanel.Post(message, receivedAt))
+            {
+                if (_dispatcher?.TryEnqueue(() =>
+                {
+                    if (_pendingPanel.Take() is { } panel) HandleBackendEvent(panel.Message, panel.ReceivedAt);
+                }) != true) _pendingPanel.Take();
+            }
+            return;
+        }
         _dispatcher?.TryEnqueue(() => HandleBackendEvent(message, receivedAt));
     }
 
@@ -130,6 +144,7 @@ public partial class App : Application
         switch (action.GetString())
         {
             case "togglePanel":
+                var prepareTiming = Stopwatch.StartNew();
                 CardLifecycleLog.Write($"toggle-received gesture={(message.TryGetProperty("gestureId", out var gesture) ? gesture.ToString() : "0")}");
                 if (payload.ValueKind == JsonValueKind.Object &&
                     payload.TryGetProperty("x", out var x) && x.TryGetDouble(out var px) && double.IsFinite(px) &&
@@ -138,7 +153,10 @@ public partial class App : Application
                     if (payload.TryGetProperty("quickCards", out var quickCards) && quickCards.ValueKind == JsonValueKind.Object)
                         _quickCards = quickCards.Clone();
                     _cards ??= new CardGroup(_connection, OpenSettings);
-                    _cards.ApplyQuickCards(_quickCards);
+                    // ToggleAtPhysicalPoint positions an opening group once;
+                    // a closing group needs no hidden layout rebuild.
+                    _cards.ApplyQuickCards(_quickCards, reposition: false);
+                    CardTimingLog.Write($"configured elapsedMs={prepareTiming.Elapsed.TotalMilliseconds:0.0}");
                     if (_settings?.ActiveMicaPreview is { } micaPreview)
                         _cards.SetMicaPreview(micaPreview.Preview, micaPreview.Committed);
                     _cards.UpdateActionRequested -= OnUpdateActionRequested;
@@ -150,6 +168,7 @@ public partial class App : Application
                         entry.TryGetInt64(out var entryValue) && entryValue != 0 ? (nint)entryValue : 0;
                     var gestureId = message.TryGetProperty("gestureId", out var gestureValue) && gestureValue.TryGetInt64(out var id) ? id : 0;
                     _cards.BeginOpenTiming(gestureId, DateTimeOffset.Now - receivedAt);
+                    CardTimingLog.Write($"prepared gesture={gestureId} elapsedMs={prepareTiming.Elapsed.TotalMilliseconds:0.0}");
                     _cards.ToggleAtPhysicalPoint(px, py, entryWindow);
                 }
                 break;

@@ -190,16 +190,21 @@ internal sealed class ProcessFallbackDetectionCache
 public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlaybackController, IPlayerRecognitionController, IDisposable
 {
     private string? _selectedSourceId;
+    private readonly Func<long> _tickCount;
+
+    public SmtcMusicSessionProvider() : this(() => Environment.TickCount64) { }
+    internal SmtcMusicSessionProvider(Func<long> tickCount) => _tickCount = tickCount;
 
     internal void SelectSource(string sourceId)
     {
         _selectedSourceId = string.IsNullOrWhiteSpace(sourceId) ? null : sourceId;
-        _activeSessionCache.Clear();
+        ResetPlaybackTransition();
     }
 
     internal IReadOnlyList<TaskBarWidgets.Media.Integration.MediaSourceChoice> GetSourceChoices() =>
         _manager?.GetSessions().Select(session => new TaskBarWidgets.Media.Integration.MediaSourceChoice(
-            session.SourceAppUserModelId, ResolveSource(session.SourceAppUserModelId)))
+            session.SourceAppUserModelId, NonLyricsMediaPolicy.IsDouyin(session.SourceAppUserModelId)
+                ? "抖音" : ResolveSource(session.SourceAppUserModelId)))
             .DistinctBy(source => source.Id).ToArray() ?? [];
 
     internal (bool Previous, bool Next, bool PlayPause) GetControlCapabilities()
@@ -219,6 +224,9 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
     private readonly SemaphoreSlim _managerLock = new(1, 1);
     private readonly TimelinePositionStrategyRegistry _timelineStrategyRegistry = TimelinePositionStrategyRegistry.CreateDefault();
     private readonly ActiveSessionCache<GlobalSystemMediaTransportControlsSession> _activeSessionCache = new();
+    private readonly DouyinPlaybackGate _douyinPlayback = new();
+    private PlaybackSnapshot? _lastRawSnapshot;
+    private int _playbackRevision;
     private readonly ProcessFallbackDetectionCache _processFallbackDetectionCache = new();
     private GlobalSystemMediaTransportControlsSessionManager? _manager;
     private SmtcTimelineDiagnostics? _lastTimelineDiagnostics;
@@ -258,8 +266,22 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
             : new HashSet<string>(customSources, StringComparer.OrdinalIgnoreCase);
         var normalized = NormalizeRecognitionOrder(order, _enabledSources);
         _recognitionOrder = normalized.ToArray();
-        _activeSessionCache.Clear();
+        ResetPlaybackTransition();
         _processFallbackDetectionCache.Invalidate();
+    }
+
+    private void ResetPlaybackTransition()
+    {
+        _douyinPlayback.Reset();
+        _lastRawSnapshot = new(false, TimeSpan.Zero, null);
+        _activeSessionCache.Clear();
+        Interlocked.Increment(ref _playbackRevision);
+    }
+
+    internal PlaybackSnapshot CommitPlaybackSnapshot(PlaybackSnapshot raw)
+    {
+        _lastRawSnapshot = raw;
+        return _douyinPlayback.Observe(raw, _tickCount());
     }
 
     public SmtcTimelineDiagnostics? GetLastTimelineDiagnostics()
@@ -269,10 +291,13 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
 
     internal PlaybackSnapshot RefreshPlaybackState(PlaybackSnapshot snapshot)
     {
+        // The incoming snapshot may be retained Douyin output while the raw session is QQ or absent.
+        // Reobserve raw input so a refresh cannot cancel or restart the loss deadline.
+        var raw = _lastRawSnapshot ?? snapshot;
         var session = _activeSessionCache.Current;
         if (session is null)
         {
-            return snapshot;
+            return CommitPlaybackSnapshot(raw);
         }
 
         try
@@ -280,7 +305,7 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
             var playbackInfo = session.GetPlaybackInfo();
             var isPlaying = playbackInfo?.PlaybackStatus ==
                 GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
-            return ApplyLatestPlaybackState(snapshot, isPlaying);
+            return CommitPlaybackSnapshot(ApplyLatestPlaybackState(raw, isPlaying));
         }
         catch (Exception exception)
         {
@@ -300,7 +325,7 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
                     $"HResult=0x{exception.HResult:X8}");
             }
 
-            return snapshot;
+            return CommitPlaybackSnapshot(raw);
         }
     }
 
@@ -353,13 +378,19 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
                 case MediaControlAction.TogglePlayPause:
                     var playback = session.GetPlaybackInfo();
                     cancellationToken.ThrowIfCancellationRequested();
-                    if (playback?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
+                    var displayedDouyin = _douyinPlayback.ControlSourceId is { } controlId &&
+                        string.Equals(controlId, session.SourceAppUserModelId, StringComparison.OrdinalIgnoreCase);
+                    // During a transition the displayed pause button must not resume a temporarily paused video.
+                    if (displayedDouyin ? _douyinPlayback.Current!.IsPlaying :
+                        playback?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
                     {
                         EnsureCommandAccepted(await session.TryPauseAsync());
+                        if (displayedDouyin) ConfirmDouyinPlayback(session, false);
                     }
                     else
                     {
                         EnsureCommandAccepted(await session.TryPlayAsync());
+                        if (displayedDouyin) ConfirmDouyinPlayback(session, true);
                     }
                     break;
                 case MediaControlAction.PreviousTrack:
@@ -391,6 +422,16 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
 
     public Task ExecuteAsync(MediaControlAction action, CancellationToken cancellationToken) =>
         TryControlAsync(action, cancellationToken);
+
+    private void ConfirmDouyinPlayback(GlobalSystemMediaTransportControlsSession session, bool isPlaying)
+    {
+        if (!string.Equals(_douyinPlayback.ControlSourceId, session.SourceAppUserModelId,
+            StringComparison.OrdinalIgnoreCase)) return; // Selection may have changed while awaiting the command.
+        _douyinPlayback.ConfirmPlayback(isPlaying, _tickCount());
+        _lastRawSnapshot = _douyinPlayback.Current;
+        _activeSessionCache.Remember(session);
+        Interlocked.Increment(ref _playbackRevision);
+    }
 
     public async Task SeekToAsync(TimeSpan position, CancellationToken cancellationToken)
     {
@@ -472,17 +513,27 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
         EnsureCommandAccepted(await session.TryChangePlaybackPositionAsync(target.Ticks));
     }
 
-    public Task<PlaybackSnapshot> GetCurrentAsync(CancellationToken cancellationToken = default) =>
-        SmtcSessionReadBoundary.ReadAsync(
-            ReadCurrentSnapshotAsync,
-            () =>
-            {
-                _activeSessionCache.Clear();
-                _manager = null;
-                return BuildProcessFallbackSnapshot();
-            },
-            LogSessionReadUnavailable,
-            cancellationToken);
+    public async Task<PlaybackSnapshot> GetCurrentAsync(CancellationToken cancellationToken = default)
+    {
+        PlaybackSnapshot raw;
+        int revision;
+        do
+        {
+            revision = Volatile.Read(ref _playbackRevision);
+            raw = await SmtcSessionReadBoundary.ReadAsync(
+                ReadCurrentSnapshotAsync,
+                () =>
+                {
+                    _activeSessionCache.Clear();
+                    _manager = null;
+                    return BuildProcessFallbackSnapshot();
+                },
+                LogSessionReadUnavailable,
+                cancellationToken);
+            // Explicit selection/pause wins over metadata that was already being read.
+        } while (revision != Volatile.Read(ref _playbackRevision));
+        return CommitPlaybackSnapshot(raw);
+    }
 
     private void LogSessionReadUnavailable(Exception? exception)
     {
@@ -795,6 +846,10 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
         GlobalSystemMediaTransportControlsSessionManager manager)
     {
         var sessions = manager.GetSessions();
+        // Never send a retained Douyin display's commands to a paused fallback player.
+        // Look up by source ID because SMTC may recreate the session object between videos.
+        if (_douyinPlayback.ControlSourceId is not null)
+            return _douyinPlayback.FindControlSession(sessions, session => session.SourceAppUserModelId);
         var activeSession = _activeSessionCache.FindIn(sessions);
         if (activeSession is not null)
         {
@@ -815,8 +870,10 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
         var candidates = available.Select(session => new TaskBarWidgets.Media.Integration.MediaSessionCandidate(
             session.SourceAppUserModelId, ResolveSource(session.SourceAppUserModelId), IsSessionPlaying(session),
             GetRecognitionPriority(ResolveSource(session.SourceAppUserModelId)))).ToArray();
-        var selected = TaskBarWidgets.Media.Integration.MediaSourcePolicy.Select(candidates, _selectedSourceId, current?.SourceAppUserModelId);
-        if (!available.Any(session => session.SourceAppUserModelId == _selectedSourceId)) _selectedSourceId = null;
+        var selected = TaskBarWidgets.Media.Integration.MediaSourcePolicy.Select(candidates, _selectedSourceId,
+            _douyinPlayback.ControlSourceId ?? current?.SourceAppUserModelId);
+        if (!available.Any(session => session.SourceAppUserModelId == _selectedSourceId) &&
+            !string.Equals(_selectedSourceId, _douyinPlayback.ControlSourceId, StringComparison.OrdinalIgnoreCase)) _selectedSourceId = null;
         return available.FirstOrDefault(session => session.SourceAppUserModelId == selected);
     }
     private async Task<GlobalSystemMediaTransportControlsSessionManager?> GetManagerAsync(CancellationToken cancellationToken)
@@ -903,6 +960,7 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
             return "Kugou";
         }
 
+        if (NonLyricsMediaPolicy.IsDouyin(sourceAppUserModelId)) return "Douyin";
         if (IsBrowserSource(sourceAppUserModelId)) return "Browser";
 
         return sourceAppUserModelId;

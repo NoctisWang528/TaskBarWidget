@@ -49,7 +49,7 @@ internal sealed class MediaCoordinator : IDisposable
         Lyrics = Composition.CreateLyricSyncService(_settings, Offsets);
         _timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(60) };
         _timer.Tick += Tick;
-        _spectrumTimer = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(33) };
+        _spectrumTimer = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(Math.Clamp(_tuning.UpdateIntervalMs, 16, 100)) };
         _spectrumTimer.Tick += SpectrumTick;
         _styleScript = LyricsStyleScriptFactory.Create(_settings, 1);
         _tuningScript = LyricsWebViewScriptFactory.SetSpectrumTuning(_tuning);
@@ -80,8 +80,8 @@ internal sealed class MediaCoordinator : IDisposable
         return pending.IsCompletedSuccessfully ? pending.Result : "";
     }
     internal static bool IsBrowser(TrackInfo? track) => string.Equals(track?.SourceApp, "Browser", StringComparison.OrdinalIgnoreCase);
-    internal static PlaybackSnapshot LyricsInput(PlaybackSnapshot snapshot) => IsBrowser(snapshot.Track) ||
-        SmtcMusicSessionProvider.IsBrowserSource(snapshot.SourceAppUserModelId) ? snapshot with { Track = null } : snapshot;
+    internal static PlaybackSnapshot LyricsInput(PlaybackSnapshot snapshot) =>
+        NonLyricsMediaPolicy.IsNonLyrics(snapshot) ? snapshot with { Track = null } : snapshot;
 
     internal void ApplySettings(AppSettings settings)
     {
@@ -110,7 +110,14 @@ internal sealed class MediaCoordinator : IDisposable
     internal void SetVisible(bool visible) { _visible = visible; if (!visible) UpdateSpectrum(false); }
     internal void SetPreview(bool preview) { _preview = preview; if (!preview) UpdateSpectrum(false); }
     internal void RetrySpectrum() { _spectrum.Stop(); _spectrumActive = false; }
-    internal void ApplyTuning(SpectrumTuningSettings tuning) { _tuning = tuning.Clone(); _spectrum.ApplyTuning(_tuning); _tuningScript = LyricsWebViewScriptFactory.SetSpectrumTuning(_tuning); }
+    internal void ApplyTuning(SpectrumTuningSettings tuning)
+    {
+        _tuning = tuning.Clone();
+        _tuning.UpdateIntervalMs = Math.Clamp(_tuning.UpdateIntervalMs, 16, 100);
+        _spectrumTimer.Interval = TimeSpan.FromMilliseconds(_tuning.UpdateIntervalMs);
+        _spectrum.ApplyTuning(_tuning);
+        _tuningScript = LyricsWebViewScriptFactory.SetSpectrumTuning(_tuning);
+    }
 
     private async void Tick(object? sender, EventArgs args)
     {
@@ -120,22 +127,32 @@ internal sealed class MediaCoordinator : IDisposable
         {
             var snapshot = await Provider.GetCurrentAsync(_stop.Token);
             if (_disposed) return;
+            // Refresh through the provider's same transition boundary before deriving any presentation.
+            snapshot = Provider.RefreshPlaybackState(snapshot);
             var decision = _stability.Observe(snapshot, PlaybackInputPolicy.Classify(snapshot), DateTimeOffset.UtcNow);
             if (decision.Action == PlaybackSnapshotGateAction.Hold) return;
             _playback = snapshot = decision.Snapshot;
             var track = snapshot.Track;
-            var browser = IsBrowser(track) || SmtcMusicSessionProvider.IsBrowserSource(snapshot.SourceAppUserModelId);
+            var browser = NonLyricsMediaPolicy.IsNonLyrics(snapshot);
             var trackId = track is null ? "" : LyricSyncService.BuildStableTrackIdentity(track);
-            // A browser snapshot must never reach the lyric resolver, including while paused.
+            // Non-lyrics media must never reach the lyric resolver, including while paused.
             var frame = await Lyrics.GetDisplayFrameAsync(LyricsInput(snapshot));
             if (_disposed) return;
-            snapshot = Provider.RefreshPlaybackState(snapshot);
-            _playback = snapshot;
             var scene = ResolveScene(frame, browser, track is not null);
             var showSpectrum = scene == LyricsPresentationScene.Spectrum;
             UpdateSpectrum(showSpectrum);
             await UpdateCoverAsync(snapshot);
             if (_disposed) return;
+            // Commands can run during lyric/cover awaits. Refresh raw input again and discard
+            // prepared content if it belongs to an earlier effective state.
+            var latest = Provider.RefreshPlaybackState(snapshot);
+            _playback = latest;
+            if (!CanPublishSnapshot(snapshot, latest))
+            {
+                UpdateSpectrum(false);
+                return;
+            }
+            snapshot = latest;
 
             var scripts = new List<string>
             {
@@ -153,13 +170,15 @@ internal sealed class MediaCoordinator : IDisposable
                 frame.CurrentTranslation, frame.NextTranslation, _settings.ShowLyricTranslation && frame.HasTrackTranslation,
                 presentationScene: scene));
             var capabilities = Provider.GetControlCapabilities();
-            ControlState = new MediaControlState(track?.Title ?? "没有媒体", track?.Artist ?? "", track?.SourceApp ?? "",
+            ControlState = new MediaControlState(track?.Title ?? "没有媒体", track?.Artist ?? "",
+                NonLyricsMediaPolicy.IsDouyin(snapshot) ? "抖音" : track?.SourceApp ?? "",
                 snapshot.Position.TotalSeconds, track?.Duration.TotalSeconds ?? 0, snapshot.IsPlaying,
                 capabilities.Previous, capabilities.Next, capabilities.PlayPause, snapshot.CanSeek, CreateCover(),
                 Provider.GetSourceChoices(), snapshot.SourceAppUserModelId);
             scripts.Add(WebViewMessageScriptFactory.Dispatch("taskbarMedia", "browser", new
             {
-                active = browser, title = track?.Title ?? "", artist = track?.Artist ?? "", source = snapshot.SourceAppUserModelId,
+                active = browser, title = track?.Title ?? "", artist = track?.Artist ?? "",
+                source = NonLyricsMediaPolicy.IsDouyin(snapshot) ? "抖音" : snapshot.SourceAppUserModelId,
                 isPlaying = snapshot.IsPlaying, canPrevious = capabilities.Previous, canNext = capabilities.Next, canPlayPause = capabilities.PlayPause
             }));
             if (_spectrumActive)
@@ -212,6 +231,12 @@ internal sealed class MediaCoordinator : IDisposable
         if (Lyrics.CurrentLyricAcquisition == LyricAcquisitionKind.Searching) return LyricsPresentationScene.Searching;
         return frame.CurrentLineIndex >= 0 ? LyricsPresentationScene.Lyrics : LyricsPresentationScene.Message;
     }
+
+    internal static bool CanPublishSnapshot(PlaybackSnapshot prepared, PlaybackSnapshot latest) =>
+        string.Equals(prepared.SourceAppUserModelId, latest.SourceAppUserModelId, StringComparison.OrdinalIgnoreCase) &&
+        prepared.IsPlaying == latest.IsPlaying &&
+        (prepared.Track is null ? latest.Track is null : latest.Track is not null &&
+            LyricSyncService.BuildStableTrackIdentity(prepared.Track) == LyricSyncService.BuildStableTrackIdentity(latest.Track));
 
     private void UpdateSpectrum(bool showSpectrum)
     {
@@ -296,8 +321,8 @@ internal sealed class MediaCoordinator : IDisposable
             await Provider.ExecuteAsync(action switch { "previous" => MediaControlAction.PreviousTrack, "next" => MediaControlAction.NextTrack, _ => MediaControlAction.TogglePlayPause }, _stop.Token);
     }
 
-    internal bool TryApplyResolvedLyrics(TrackInfo track, ResolvedLyrics resolved) => !IsBrowser(_playback.Track) &&
-        !SmtcMusicSessionProvider.IsBrowserSource(_playback.SourceAppUserModelId) && Lyrics.TryApplyResolvedLyrics(track, resolved);
+    internal bool TryApplyResolvedLyrics(TrackInfo track, ResolvedLyrics resolved) =>
+        !NonLyricsMediaPolicy.IsNonLyrics(_playback) && Lyrics.TryApplyResolvedLyrics(track, resolved);
     internal static string GetHtml()
     {
         var directory = Path.Combine(AppContext.BaseDirectory, "Web", "Lyrics");
