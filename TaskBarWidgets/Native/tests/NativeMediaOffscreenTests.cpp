@@ -392,6 +392,32 @@ int main(int argc, char** argv)
         state.frame.isBrowser = true;
         state.frame.browser = NativeMedia::Browser{ true, L"Browser fixture",
             L"Fixture artist", L"Chrome", true, true, true, true };
+        NativeMedia::BrowserPaint hitPaint{ &state, 400, 48, 1 };
+        const auto browserLayout = NativeMedia::CalculateLayout(400, 48, 1,
+            state.style, false);
+        NativeMedia::HitAction hitAction{};
+        Require(painter.HitTest(hitPaint,
+            (browserLayout.browser.previous.left + browserLayout.browser.previous.right) / 2,
+            (browserLayout.browser.previous.top + browserLayout.browser.previous.bottom) / 2,
+            hitAction) && hitAction == NativeMedia::HitAction::Previous,
+            "Previous browser control hit testing.");
+        Require(painter.HitTest(hitPaint,
+            (browserLayout.browser.playPause.left + browserLayout.browser.playPause.right) / 2,
+            (browserLayout.browser.playPause.top + browserLayout.browser.playPause.bottom) / 2,
+            hitAction) && hitAction == NativeMedia::HitAction::PlayPause,
+            "Play/pause browser control hit testing.");
+        Require(painter.HitTest(hitPaint,
+            (browserLayout.browser.next.left + browserLayout.browser.next.right) / 2,
+            (browserLayout.browser.next.top + browserLayout.browser.next.bottom) / 2,
+            hitAction) && hitAction == NativeMedia::HitAction::Next,
+            "Next browser control hit testing.");
+        state.frame.browser.canPrevious = false;
+        Require(painter.HitTest(hitPaint,
+            (browserLayout.browser.previous.left + browserLayout.browser.previous.right) / 2,
+            (browserLayout.browser.previous.top + browserLayout.browser.previous.bottom) / 2,
+            hitAction) && hitAction == NativeMedia::HitAction::None,
+            "Disabled browser control consumes hit testing without an action.");
+        state.frame.browser.canPrevious = true;
         painter.BeginPaintFrame();
         context->SetTarget(target.Get());
         context->BeginDraw();
