@@ -20,25 +20,25 @@
 
 ## 效果展示
 
-### 卡片与任务栏实机效果
+以下为用户提供的当前版本桌面实机截图，展示快捷卡片、任务栏和设置窗口的实际 Mica 效果；材质颜色会随壁纸和主题变化。
 
-![流量、音频设备、媒体卡片与任务栏歌词实机截图](TaskBarWidgets/docs/images/cards-live.png)
+### 快捷卡片与任务栏监测
 
-用户提供的实机截图：从上到下为流量热力图、输入输出设备和媒体卡片，底部为任务栏歌词。
+![流量热力图、音频设备、媒体和天气卡片，以及任务栏系统监测](TaskBarWidgets/docs/images/cards-live.png)
 
-以下设置页面和流量日历图片由实际 WinUI 控件离屏渲染，使用示例数据；这些示例图不是桌面实机截图，系统 Mica 和独立 Composition 柔光以实际运行效果为准。
+流量、音频设备、媒体和天气四张卡片可按需启停与分列排列，底部任务栏显示网络、硬件和天气信息。
 
-### 任务栏布局与预览
+### 媒体播放与任务栏歌词
 
-![模块组合与双行预览](TaskBarWidgets/docs/images/settings-layout.png)
+![QQ 音乐播放控制卡片与任务栏歌词](TaskBarWidgets/docs/images/media-live.png)
 
-### 字体与外观
+媒体卡片显示封面、播放来源、控制按钮和进度，任务栏随音乐播放显示歌词。
 
-![共用外观与响应式设置](TaskBarWidgets/docs/images/settings-appearance.png)
+### 任务栏布局与设置
 
-### 流量日历
+![Mica 设置窗口中的任务栏双行预览、显示组合与可用模块](TaskBarWidgets/docs/images/settings-layout.png)
 
-<p><img src="TaskBarWidgets/docs/images/traffic-light.png" width="46%" alt="浅色流量日历示例"> <img src="TaskBarWidgets/docs/images/traffic-dark.png" width="46%" alt="深色流量日历示例"></p>
+通过模块组合调整单行／双行布局。设置页上方的任务栏预览使用示例数值，实际监测读数显示在桌面任务栏中。
 
 ## 下载与运行
 
