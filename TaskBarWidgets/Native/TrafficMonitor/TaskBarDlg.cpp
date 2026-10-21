@@ -577,9 +577,15 @@ bool CTaskBarDlg::SetMediaPresentation(bool visible)
         return false;
     }
     m_media_presented = visible;
+    if (m_media_host) m_media_host->GeometryChanged();
     // Switching surfaces never changes HWND layering or its hit-test region.
     RedrawWindow(nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW);
     return true;
+}
+
+void CTaskBarDlg::MediaGeometryChanged()
+{
+    if (m_media_host) m_media_host->GeometryChanged();
 }
 
 //bool CTaskBarDlg::IsTaskbarChanged()
@@ -786,6 +792,7 @@ void CTaskBarDlg::ApplySettings()
 {
     SetTextFont();
     CalculateWindowSize();
+    if (m_media_host) m_media_host->AppearanceChanged();
 }
 
 void CTaskBarDlg::CalculateWindowSize()
@@ -1108,7 +1115,6 @@ BOOL CTaskBarDlg::OnInitDialog()
     theApp.m_taskbar_data.show_tool_tip = false;
 
     SetTimer(TASKBAR_TIMER, 1000, NULL);
-    SetTimer(1243, 33, NULL);
     m_media_host = std::make_unique<NativeMediaHost>(GetSafeHwnd());
 
     return TRUE;  // return TRUE unless you set the focus to a control
@@ -1236,6 +1242,26 @@ void CTaskBarDlg::OnInitMenu(CMenu* pMenu)
 
 LRESULT CTaskBarDlg::WindowProc(UINT message, WPARAM wParam, LPARAM lParam)
 {
+    if (message == WM_MEDIA_HOST_WAKE)
+    {
+        if (m_media_host) m_media_host->Tick();
+        return 0;
+    }
+    if (message == WM_SIZE)
+    {
+        if (m_media_host) m_media_host->GeometryChanged();
+        return CDialogEx::WindowProc(message, wParam, lParam);
+    }
+    if (message == WM_DPICHANGED || message == WM_DISPLAYCHANGE)
+    {
+        if (m_media_host) m_media_host->GeometryChanged();
+    }
+    if (message == WM_THEMECHANGED ||
+        (message == WM_SETTINGCHANGE && (wParam == SPI_SETCLIENTAREAANIMATION ||
+            wParam == SPI_SETHIGHCONTRAST)))
+    {
+        if (m_media_host) m_media_host->AppearanceChanged();
+    }
     // Both queued pointer input and synchronous capture/cancel notifications use this path.
     if (m_media_host && m_media_host->MouseInput(message, wParam, lParam)) return 0;
     return CDialogEx::WindowProc(message, wParam, lParam);
@@ -1293,7 +1319,7 @@ void CTaskBarDlg::OnLButtonDblClk(UINT nFlags, CPoint point)
 
 void CTaskBarDlg::OnTimer(UINT_PTR nIDEvent)
 {
-    if (nIDEvent == 1243 && m_media_host) m_media_host->Tick();
+    if (nIDEvent == MEDIA_ANIMATION_TIMER && m_media_host) m_media_host->Tick();
 
     // TODO: 在此添加消息处理程序代码和/或调用默认值
     if (nIDEvent == TASKBAR_TIMER)

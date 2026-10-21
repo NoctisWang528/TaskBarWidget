@@ -39,6 +39,7 @@ public:
     bool AdjustWindowPos(bool force_adjust = false);	//设置窗口在任务栏中的位置（如果force_adjust为true，则会强制调整一次任务栏窗口的位置）
     void ApplyWindowTransparentColor();
     bool SetMediaPresentation(bool visible);
+    void MediaGeometryChanged();
 
     //bool IsTaskbarChanged();
 

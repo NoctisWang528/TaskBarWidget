@@ -12,12 +12,12 @@ $object = Join-Path $output 'NativeSettingsValidationTests.obj'
 $command = 'call "{0}" >nul && cl /nologo /EHsc /std:c++20 /W4 /Fe:"{1}" /Fo:"{2}" "{3}" && "{1}"' -f $vcvars, $executable, $object, $source
 & $env:ComSpec /d /s /c $command
 if ($LASTEXITCODE -ne 0) { throw "Native validation tests failed ($LASTEXITCODE)." }
-$source = Join-Path $PSScriptRoot 'MediaNavigationTests.cpp'
-$executable = Join-Path $output 'MediaNavigationTests.exe'
-$object = Join-Path $output 'MediaNavigationTests.obj'
+$source = Join-Path $PSScriptRoot 'NativeMediaTests.cpp'
+$executable = Join-Path $output 'NativeMediaTests.exe'
+$object = Join-Path $output 'NativeMediaTests.obj'
 $command = 'call "{0}" >nul && cl /nologo /EHsc /std:c++20 /W4 /Fe:"{1}" /Fo:"{2}" "{3}" && "{1}"' -f $vcvars, $executable, $object, $source
 & $env:ComSpec /d /s /c $command
-if ($LASTEXITCODE -ne 0) { throw "Observed WebView navigation regression tests failed ($LASTEXITCODE)." }
+if ($LASTEXITCODE -ne 0) { throw "Native media frame/layout regression tests failed ($LASTEXITCODE)." }
 $source = Join-Path $PSScriptRoot 'PluginIniOptionsTests.cpp'
 $executable = Join-Path $output 'PluginIniOptionsTests.exe'
 $object = Join-Path $output 'PluginIniOptionsTests.obj'
@@ -45,3 +45,24 @@ $object = Join-Path $output 'TaskbarRowLayoutTests.obj'
 $command = 'call "{0}" >nul && cl /nologo /EHsc /std:c++20 /W4 /Fe:"{1}" /Fo:"{2}" "{3}" && "{1}"' -f $vcvars, $executable, $object, $source
 & $env:ComSpec /d /s /c $command
 if ($LASTEXITCODE -ne 0) { throw "Native taskbar shared-column geometry regression failed ($LASTEXITCODE)." }
+
+$source = Join-Path $PSScriptRoot 'NativeMediaOffscreenTests.cpp'
+$painter = Join-Path $nativeRoot 'TrafficMonitor\NativeMediaPainter.cpp'
+$executable = Join-Path $output 'NativeMediaOffscreenTests.exe'
+$offscreenOutput = Join-Path $output 'Offscreen'
+$command = 'call "{0}" >nul && cl /nologo /EHsc /std:c++20 /W4 /MD /Fe:"{1}" "{2}" "{3}" && "{1}" "{4}"' -f $vcvars, $executable, $source, $painter, $offscreenOutput
+& $env:ComSpec /d /s /c $command
+if ($LASTEXITCODE -ne 0) { throw "Native media offscreen rendering validation failed ($LASTEXITCODE)." }
+Write-Host "Native media offscreen images: $offscreenOutput"
+
+$mediaHost = Get-Content -LiteralPath (Join-Path $nativeRoot 'TrafficMonitor\NativeMediaHost.cpp') -Raw
+if ($mediaHost -match 'PeekNamedPipe|ExecuteScript|NavigateToString|CoreWebView2|chrome\.webview') {
+    throw 'Native media host still contains WebView2 or idle pipe polling code.'
+}
+if ($mediaHost -notmatch 'WaitForMultipleObjects' -or $mediaHost -notmatch 'SECURITY_IDENTIFICATION') {
+    throw 'Native media pipe must use cancelable waits and current-user pipe security.'
+}
+$taskbar = Get-Content -LiteralPath (Join-Path $nativeRoot 'TrafficMonitor\TaskBarDlg.cpp') -Raw
+if ($taskbar -match 'SetTimer\(1243, 33' -or $taskbar -match 'nIDEvent == 1243') {
+    throw 'Taskbar still contains the unconditional 33 ms media tick.'
+}

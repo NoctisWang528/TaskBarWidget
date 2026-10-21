@@ -797,7 +797,7 @@ CTrafficMonitorApp theApp;
 
 BOOL CTrafficMonitorApp::InitInstance()
 {
-    // WebView2 and the WinRT JSON/package APIs share this STA UI thread.
+    // WinRT JSON/package APIs share this STA taskbar UI thread.
     // Initialize exactly once here: the default winrt::init_apartment() uses MTA
     // and would make this STA initialization fail with RPC_E_CHANGED_MODE.
     const HRESULT runtime_result = RoInitialize(RO_INIT_SINGLETHREADED);

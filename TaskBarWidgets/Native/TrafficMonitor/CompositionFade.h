@@ -19,6 +19,7 @@ public:
         return animation && !(contrast.dwFlags & HCF_HIGHCONTRASTON);
     }
     bool Active() const { return m_duration>0 && (GetTickCount64()-m_started)/1000.0<m_duration; }
+    bool Finished() const { return !Active(); }
     HRESULT Set(IDCompositionDevice* device, IDCompositionVisual* visual, bool show, bool animate=true)
     {
         const auto now=GetTickCount64();

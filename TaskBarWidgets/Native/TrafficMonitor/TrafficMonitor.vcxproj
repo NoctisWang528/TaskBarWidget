@@ -1028,16 +1028,26 @@
   </ItemGroup>
   <PropertyGroup>
     <TargetName>TaskBarWidgets</TargetName>
-    <WebView2Package>$(ProjectDir)..\..\.packages\microsoft.web.webview2\1.0.2903.40\build\native</WebView2Package>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <Manifest><AdditionalManifestFiles>$(ProjectDir)SharedRuntime.compat.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles></Manifest>
     <ResourceCompile><AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ResourceCompile>
     <PreBuildEvent><Command>powershell.exe -NoProfile -Command "[IO.File]::WriteAllText('$(IntDir)TaskBarWidgets-build-time.txt', (Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz'), [Text.Encoding]::ASCII)"</Command></PreBuildEvent>
-    <ClCompile><AdditionalIncludeDirectories>$(ProjectDir)..\..\.packages\microsoft.windowsappsdk.runtime\2.5.1\include;$(WebView2Package)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ClCompile>
-    <Link><AdditionalDependencies>$(WebView2Package)\x64\WebView2LoaderStatic.lib;windowsapp.lib;version.lib;%(AdditionalDependencies)</AdditionalDependencies><UACExecutionLevel>RequireAdministrator</UACExecutionLevel></Link>
+    <ClCompile><AdditionalIncludeDirectories>$(ProjectDir)..\..\.packages\microsoft.windowsappsdk.runtime\2.5.1\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ClCompile>
+    <Link><AdditionalDependencies>windowsapp.lib;version.lib;%(AdditionalDependencies)</AdditionalDependencies><UACExecutionLevel>RequireAdministrator</UACExecutionLevel></Link>
   </ItemDefinitionGroup>
-  <ItemGroup><ClCompile Include="NativeMediaHost.cpp" /><ClInclude Include="NativeMediaHost.h" /><ClInclude Include="MediaDisplayState.h" /></ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="NativeMediaHost.cpp" />
+    <ClCompile Include="NativeMediaPainter.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="NativeMediaRenderer.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClInclude Include="NativeMediaHost.h" />
+    <ClInclude Include="NativeMediaPainter.h" />
+    <ClInclude Include="NativeMediaRenderer.h" />
+    <ClInclude Include="MediaFrameContract.h" />
+    <ClInclude Include="MediaLayoutModel.h" />
+    <ClInclude Include="MediaAnimation.h" />
+    <ClInclude Include="MediaDisplayState.h" />
+  </ItemGroup>
   <ItemDefinitionGroup Condition="'$(TaskBarWidgetsBuildVersion)' != ''">
     <ClCompile>
       <PreprocessorDefinitions>TBW_USE_GENERATED_VERSION;%(PreprocessorDefinitions)</PreprocessorDefinitions>
