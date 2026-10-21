@@ -28,7 +28,7 @@ On 2026-10-18 the user additionally authorized documenting, committing and pushi
 
 ## Architecture and code
 
-`Native/` owns the single taskbar window, lifecycle, monitoring and DirectComposition/WebView2 rendering. `Media/` owns headless .NET lyric/SMTC/audio/settings services, retaining WPF dispatcher and an unshown settings compatibility adapter. `UI/` owns WinUI3 windows. Do not show old WPF or HTML settings. Children exit with their parent; only the native root is a user entry point.
+`Native/` owns the single taskbar window, lifecycle, monitoring and DirectComposition rendering. `Media/` owns headless .NET lyric/SMTC/audio/settings services, retaining the WPF dispatcher for timer/composition affinity and a windowless settings service. `UI/` owns WinUI3 windows. Do not show old WPF or HTML settings. Children exit with their parent; only the native root is a user entry point.
 
 Pipes are current-user-only, versioned, bounded and correlated. Keep UI threads responsive; validate typed writes, preserve newer edits during async save/readback, cancel stale operations, and release resources on shutdown. See [IPC.md](IPC.md).
 

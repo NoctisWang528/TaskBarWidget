@@ -69,10 +69,7 @@ internal static class UpdatePackage
                 throw new InvalidDataException("Unmanaged root file in update.");
             return path;
         }
-        var settingsResource = path.Equals("UI/Settings/SettingsThemeResources.xbf", StringComparison.OrdinalIgnoreCase) ||
-            (parts.Length == 4 && parts[0].Equals("Media", StringComparison.OrdinalIgnoreCase) &&
-             parts[1].Equals("Web", StringComparison.OrdinalIgnoreCase) && parts[2].Equals("Settings", StringComparison.OrdinalIgnoreCase) &&
-             new[] { "bridge.js", "hotkeys.js", "integration.js", "settings.css", "settings.html", "settings.js", "state.js", "track-offsets-page.js" }.Contains(parts[3], StringComparer.OrdinalIgnoreCase));
+        var settingsResource = path.Equals("UI/Settings/SettingsThemeResources.xbf", StringComparison.OrdinalIgnoreCase);
         if (!ProgramDirectories.Contains(parts[0]) || (!settingsResource && parts.Skip(1).Any(PersonalDirectories.Contains)))
             throw new InvalidDataException("Personal data cannot be included in updates.");
         var name = parts[^1];

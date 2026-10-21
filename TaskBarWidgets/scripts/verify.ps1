@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([ValidateSet('Debug', 'Release')][string]$Configuration = 'Release', [switch]$SkipWeb)
+param([ValidateSet('Debug', 'Release')][string]$Configuration = 'Release')
 $ErrorActionPreference = 'Stop'
 $productRoot = Split-Path -Parent $PSScriptRoot
 $logDirectory = Join-Path $productRoot 'artifacts\logs'
@@ -17,16 +17,6 @@ try {
         & dotnet test $project.FullName -c $Configuration -p:BuildInParallel=false --verbosity minimal *> $log
         if ($LASTEXITCODE -ne 0) { Get-Content -LiteralPath $log -Tail 35 | Write-Host; throw "Tests failed: $($project.Name). See $log" }
         Get-Content -LiteralPath $log -Tail 4 | Write-Host
-    }
-    if (-not $SkipWeb) {
-        $npm = (Get-Command npm.cmd -ErrorAction Stop).Source
-        if (-not (Test-Path -LiteralPath 'node_modules')) {
-            & $npm ci *> (Join-Path $logDirectory 'npm-ci.log')
-            if ($LASTEXITCODE -ne 0) { throw 'npm ci failed; see artifacts/logs/npm-ci.log' }
-        }
-        & $npm run test:web *> (Join-Path $logDirectory 'web-tests.log')
-        if ($LASTEXITCODE -ne 0) { Get-Content (Join-Path $logDirectory 'web-tests.log') -Tail 35 | Write-Host; throw 'Web tests failed.' }
-        Get-Content (Join-Path $logDirectory 'web-tests.log') -Tail 8 | Write-Host
     }
     Write-Host 'Automated verification passed. Run scripts/smoke-media.ps1 after packaging for helper IPC validation. Real desktop behavior still requires user acceptance.'
 }

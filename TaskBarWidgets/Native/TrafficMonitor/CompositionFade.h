@@ -3,7 +3,7 @@
 #include <wrl/client.h>
 #include <algorithm>
 
-// Native and WebView surfaces share one short, reversible opacity transition.
+// Native media and panel surfaces share one short, reversible opacity transition.
 class CompositionFade
 {
     float m_from{1}, m_to{1};

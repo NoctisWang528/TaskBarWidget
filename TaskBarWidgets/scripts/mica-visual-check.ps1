@@ -37,13 +37,6 @@ if ($SamplesFile) {
     $samples = @(Get-Content -LiteralPath $samplesPath -Raw | ConvertFrom-Json)
     $sampleCount = $samples.Count
     if ($sampleCount -eq 0) { throw 'Sample file is empty.' }
-    if ($samples | Where-Object { $_.lyrics }) {
-        $lyricsTarget = Join-Path $run 'Media/Web/Lyrics'
-        New-Item -ItemType Directory -Path $lyricsTarget -Force | Out-Null
-        foreach ($name in @('index.html', 'style.css', 'bridge.js', 'state.js', 'presentation.js', 'app.js', 'browser.js')) {
-            Copy-Item -LiteralPath (Join-Path $directory "Media/Web/Lyrics/$name") -Destination (Join-Path $lyricsTarget $name)
-        }
-    }
 }
 
 # These are genuine desktop pixels, not a XAML/offscreen render. Thread DPI
@@ -135,7 +128,7 @@ try {
             if ($null -ne $probe) {
                 try {
                     if (-not $probe.HasExited) {
-                        # Kill only the diagnostic process and its own WebView
+                        # Kill only the diagnostic process
                         # children, never any daily product process.
                         $probe.Kill($true)
                         if (-not $probe.WaitForExit(5000)) { Write-Warning 'Diagnostic process termination timed out.' }

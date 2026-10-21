@@ -122,7 +122,7 @@ Check (([IO.File]::ReadAllText((Join-Path $case.install 'UI\my-note.txt'))) -eq 
 Check (([IO.File]::ReadAllText((Join-Path $case.install 'Media\custom.json'))) -eq 'unknown user file') 'Success deleted an unknown Media file.'
 Write-Host 'PASS successful transaction and personal data preservation'
 $case=New-Case 'exact-settings-program-resources';$inventory=Get-Content (Join-Path $case.stage 'app-files.json') -Raw|ConvertFrom-Json
-foreach($path in @('UI/Settings/SettingsThemeResources.xbf','UI/Resources/SettingsNavigationResources.xbf','Media/Web/Settings/bridge.js','Media/Web/Settings/hotkeys.js','Media/Web/Settings/integration.js','Media/Web/Settings/settings.css','Media/Web/Settings/settings.html','Media/Web/Settings/settings.js','Media/Web/Settings/state.js','Media/Web/Settings/track-offsets-page.js','vccorlib140.dll','release-manifest.json')){
+foreach($path in @('UI/Settings/SettingsThemeResources.xbf','UI/Resources/SettingsNavigationResources.xbf','vccorlib140.dll','release-manifest.json')){
     $target=Join-Path $case.stage $path;New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force|Out-Null;[IO.File]::WriteAllText($target,'program resource');$file=Get-Item $target
     $inventory.files+=@{path=$path;bytes=$file.Length;sha256=(Get-FileHash $target).Hash}
 }

@@ -26,9 +26,10 @@ try {
     $writer = [IO.StreamWriter]::new($pipe, [Text.UTF8Encoding]::new($false), 8192, $true)
     $writer.AutoFlush = $true
     $initial = Read-ProtocolMessage
-    if ($initial.version -ne 1 -or $initial.type -ne 'initialize' -or $initial.html -notmatch 'taskbarLyrics') { throw 'Invalid renderer initialization.' }
+    if ($initial.version -ne 1 -or $initial.type -ne 'initialize' -or $initial.renderVersion -ne 2) { throw 'Invalid native renderer initialization.' }
+    if ($initial.PSObject.Properties.Name -contains 'html') { throw 'Renderer initialization must not carry HTML.' }
     $frame = Read-ProtocolMessage
-    if ($frame.version -ne 1 -or $frame.type -ne 'frame') { throw 'Missing initial media snapshot.' }
+    if ($frame.version -ne 1 -or $frame.type -ne 'frame' -or $frame.renderVersion -ne 2 -or $null -eq $frame.lyrics) { throw 'Missing structured media snapshot.' }
     # Invalid version types must be ignored without terminating the connection.
     $writer.WriteLine('{"version":"invalid","type":"command","action":"unknown-smoke-test"}')
     $writer.WriteLine('{"version":1,"type":"command","action":"mediaVisible","visible":false}')

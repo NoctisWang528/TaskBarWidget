@@ -84,7 +84,7 @@ https://dotnet.microsoft.com/download/dotnet/8.0
 https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads
 只需运行库，无需开发 SDK。启动时检查缺失依赖并提供下载入口，不会自动安装。
 本目录含个人设置、历史和插件凭据，请勿作为公开 Release 上传或分享。
-Data/ 未包含 WebView 登录信息、Cookie 或运行日志。源安装目录与共享 AppData 未被覆盖。
+Data/ 未包含网页缓存、Cookie 或运行日志。源安装目录与共享 AppData 未被覆盖。
 公开分发请使用相邻 release/ 内的干净 ZIP；源码状态见 release-manifest.json。
 "@ | Set-Content -LiteralPath (Join-Path $build 'README.txt') -Encoding utf8
 Write-Host "Personal build: $build"

@@ -53,7 +53,7 @@ TaskBarWidgets $version — Windows 11 x64
 - .NET 8 Desktop Runtime x64（安装最新 8.0 补丁；无需 SDK）：https://dotnet.microsoft.com/zh-cn/download/dotnet/8.0
 - Windows App Runtime 2.5.1 x64 或兼容的更新 2.x：https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads
 启动时检查依赖，缺失或无法加载时显示下载入口，不会自动安装。环境就绪后重新启动程序。
-需要管理员权限和 Microsoft Edge WebView2 Runtime；请先退出旧版或其他任务栏监测工具。
+需要管理员权限；媒体与歌词卡片由原生渲染，不再需要 WebView2 Runtime。请先退出旧版或其他任务栏监测工具。
 此发行 ZIP 不包含个人配置；更新会保留已有数据，首次启动使用默认设置。运行后的目录可能含个人配置、记录和凭据，分享前请检查。升级前请自行备份配置与流量历史。
 
 源码、用法、许可证与来源：https://github.com/NoctisWang528/TaskBarWidget
