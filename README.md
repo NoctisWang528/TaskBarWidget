@@ -24,19 +24,19 @@
 
 ### 快捷卡片与任务栏监测
 
-![流量热力图、音频设备、媒体和天气卡片，以及任务栏系统监测](TaskBarWidgets/docs/images/cards-live.png)
+![流量热力图、音频设备、媒体和天气卡片，以及任务栏系统监测](TaskBarWidgets/docs/images/cards-live-20261021.png)
 
 流量、音频设备、媒体和天气四张卡片可按需启停与分列排列，底部任务栏显示网络、硬件和天气信息。
 
 ### 媒体播放与任务栏歌词
 
-![QQ 音乐播放控制卡片与任务栏歌词](TaskBarWidgets/docs/images/media-live.png)
+![QQ 音乐播放控制卡片与任务栏歌词](TaskBarWidgets/docs/images/media-live-20261021.png)
 
 媒体卡片显示封面、播放来源、控制按钮和进度，任务栏随音乐播放显示歌词。
 
 ### 任务栏布局与设置
 
-![Mica 设置窗口中的任务栏双行预览、显示组合与可用模块](TaskBarWidgets/docs/images/settings-layout.png)
+![Mica 设置窗口中的任务栏双行预览、显示组合与可用模块](TaskBarWidgets/docs/images/settings-layout-20261021.png)
 
 通过模块组合调整单行／双行布局。设置页上方的任务栏预览使用示例数值，实际监测读数显示在桌面任务栏中。
 
