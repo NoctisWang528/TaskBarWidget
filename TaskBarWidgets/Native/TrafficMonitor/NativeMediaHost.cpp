@@ -3,6 +3,7 @@
 #include "MediaAnimation.h"
 #include "MediaDisplayState.h"
 #include "MediaFrameContract.h"
+#include "NativeMediaJson.h"
 #include "NativeMediaRenderer.h"
 #include "ManagedRuntimeEnvironment.h"
 #include "UpdateHealth.h"
@@ -680,47 +681,7 @@ struct NativeMediaHost::Impl
 
     NativeMedia::Style ReadStyle(const JsonObject& object)
     {
-        NativeMedia::Style style;
-        style.fontFamily = Text(object, L"fontFamily", style.fontFamily);
-        style.layoutScalePercent = Number(object, L"layoutScalePercent", style.layoutScalePercent);
-        style.fontSize = Number(object, L"fontSize", style.fontSize);
-        style.showCover = Boolean(object, L"showCover", style.showCover);
-        style.coverPosition = Text(object, L"coverPosition", style.coverPosition);
-        style.enableControlPanel = Boolean(object, L"enableControlPanel", style.enableControlPanel);
-        style.coverSize = Number(object, L"coverSize", style.coverSize);
-        style.coverGap = Number(object, L"coverGap", style.coverGap);
-        style.coverCornerRadius = Number(object, L"coverCornerRadius", style.coverCornerRadius);
-        style.viewportDescenderBuffer = Number(object, L"viewportDescenderBuffer",
-            style.viewportDescenderBuffer);
-        style.layoutHorizontalPadding = Number(object, L"layoutHorizontalPadding",
-            style.layoutHorizontalPadding);
-        style.lyricsPaneTopPadding = Number(object, L"lyricsPaneTopPadding", style.lyricsPaneTopPadding);
-        style.lyricsPaneRightPadding = Number(object, L"lyricsPaneRightPadding", style.lyricsPaneRightPadding);
-        style.lyricsPaneLeftPadding = Number(object, L"lyricsPaneLeftPadding", style.lyricsPaneLeftPadding);
-        style.primaryOffsetY = Number(object, L"primaryOffsetY", style.primaryOffsetY);
-        style.secondaryOffsetY = Number(object, L"secondaryOffsetY", style.secondaryOffsetY);
-        style.lineTextBottomPadding = Number(object, L"lineTextBottomPadding", style.lineTextBottomPadding);
-        style.surfaceRadius = Number(object, L"surfaceRadius", style.surfaceRadius);
-        style.layerTransitionOffset = Number(object, L"layerTransitionOffset", style.layerTransitionOffset);
-        style.coverFallbackFontSize = Number(object, L"coverFallbackFontSize", style.coverFallbackFontSize);
-        style.spectrumWidth = Number(object, L"spectrumWidth", style.spectrumWidth);
-        style.spectrumHeight = Number(object, L"spectrumHeight", style.spectrumHeight);
-        style.spectrumGap = Number(object, L"spectrumGap", style.spectrumGap);
-        style.spectrumBarWidth = Number(object, L"spectrumBarWidth", style.spectrumBarWidth);
-        style.spectrumBarHeight = Number(object, L"spectrumBarHeight", style.spectrumBarHeight);
-        style.spectrumLowHeight = Number(object, L"spectrumLowHeight", style.spectrumLowHeight);
-        style.spectrumHighHeight = Number(object, L"spectrumHighHeight", style.spectrumHighHeight);
-        style.spectrumMiddleHeight = Number(object, L"spectrumMiddleHeight", style.spectrumMiddleHeight);
-        style.fontWeight = static_cast<int>(Number(object, L"fontWeight", style.fontWeight));
-        style.primaryColor = Text(object, L"primaryColor", style.primaryColor);
-        style.secondaryColor = Text(object, L"secondaryColor", style.secondaryColor);
-        style.translationColor = Text(object, L"translationColor", style.translationColor);
-        style.wordScanOverlayColor = Text(object, L"wordScanOverlayColor", style.wordScanOverlayColor);
-        style.surfaceColor = Text(object, L"surfaceColor", style.surfaceColor);
-        style.surfaceShadow = Text(object, L"surfaceShadow", style.surfaceShadow);
-        style.textShadow = Text(object, L"textShadow", style.textShadow);
-        style.textAlignment = Text(object, L"textAlignment", style.textAlignment);
-        return style;
+        return NativeMedia::Json::ReadStyle(object);
     }
 
     NativeMedia::Cover ReadCover(const JsonObject& object, bool& emptyObject)

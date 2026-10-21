@@ -134,6 +134,17 @@ namespace NativeMedia
                 left.browser.canPlayPause == right.browser.canPlayPause;
         }
 
+        bool SameTransitionIdentity(const Frame& left, const Frame& right)
+        {
+            return EffectiveTrackId(left) == EffectiveTrackId(right) &&
+                left.lyrics.scene == right.lyrics.scene &&
+                left.lyrics.currentLineIndex == right.lyrics.currentLineIndex &&
+                left.lyrics.translationMode == right.lyrics.translationMode &&
+                left.lyrics.isPureMusic == right.lyrics.isPureMusic &&
+                left.isBrowser == right.isBrowser &&
+                left.browser.active == right.browser.active;
+        }
+
         bool SameTuning(const SpectrumTuning& left, const SpectrumTuning& right)
         {
             return SameDouble(left.rise, right.rise) &&
@@ -260,6 +271,56 @@ namespace NativeMedia
     {
         m_nextRetry = 0;
         if (!m_ready) ReleaseDevice();
+    }
+
+    void NativeMediaRenderer::BeginHeadlessTest()
+    {
+        m_headlessTest = true;
+        m_requestedVisible = true;
+        m_hasState = false;
+        m_framePending = false;
+        m_displayedFrame = {};
+        m_pendingFrame = {};
+        m_transition.Reset();
+        m_layerTransitionActive = false;
+        m_coverCrossPending = false;
+        m_coverFadeActive = false;
+        m_wordScan.Reset();
+        m_displayedScan.reset();
+        m_scanTrack.clear();
+        m_scanLine = -1;
+        m_scanPlaying = false;
+        m_scanInitialized = false;
+        m_scanTarget.reset();
+        m_secondaryOpacity = 0.72;
+        m_secondaryTarget = 0.72;
+        m_lastPresent = 0;
+        m_animationActive = false;
+        m_styleDirty = m_coverDirty = m_tuningDirty = m_spectrumDirty = true;
+        m_frameDirty = m_geometryDirty = m_browserDirty = m_lyricsDirty = true;
+        m_width = 400;
+        m_height = 48;
+        m_dpiScale = 1;
+    }
+
+    RendererProbe NativeMediaRenderer::AdvanceHeadlessTest(std::uint64_t now)
+    {
+        const bool needsAnimation = Present(now);
+        RendererProbe probe;
+        probe.needsAnimation = needsAnimation;
+        probe.transitionActive = m_transition.active;
+        probe.transitionKind = m_transition.kind;
+        if (m_transition.active)
+        {
+            probe.transitionDeadline = m_transition.started +
+                static_cast<std::uint64_t>((std::max)(0, m_transition.durationMs));
+            probe.transitionProgress = m_transition.Progress(now);
+        }
+        else if (m_layerTransitionActive)
+            probe.transitionDeadline = m_layerTransitionUntil;
+        probe.displayedScan = m_displayedScan;
+        probe.scanActive = m_wordScan.Active(now);
+        return probe;
     }
 
     void NativeMediaRenderer::SetAppearance(const NativeAppearance& appearance)
@@ -919,18 +980,35 @@ namespace NativeMedia
 
     void NativeMediaRenderer::BeginFrameTransition(const Frame& next, std::uint64_t now)
     {
+        const Frame& previousTarget = m_transition.active
+            ? m_transition.to : m_displayedFrame;
+        if (m_transition.active && SameTransitionIdentity(previousTarget, next))
+        {
+            const bool contentChanged = !SameVisualContent(previousTarget, next);
+            const bool playbackChanged = previousTarget.lyrics.isPlaying !=
+                next.lyrics.isPlaying;
+            m_transition.to = next;
+            if (contentChanged)
+            {
+                m_lyricsDirty = true;
+                m_frameDirty = true;
+            }
+            if (playbackChanged && next.lyrics.scene == Scene::Spectrum)
+                m_spectrumDirty = true;
+            return;
+        }
         const bool browser = next.isBrowser && next.browser.active;
-        const bool wasBrowser = m_displayedFrame.isBrowser &&
-            m_displayedFrame.browser.active;
-        const bool playbackChanged = m_displayedFrame.lyrics.isPlaying !=
+        const bool wasBrowser = previousTarget.isBrowser &&
+            previousTarget.browser.active;
+        const bool playbackChanged = previousTarget.lyrics.isPlaying !=
             next.lyrics.isPlaying;
-        const bool contentChanged = !SameVisualContent(m_displayedFrame, next);
-        const bool sceneChanged = m_displayedFrame.lyrics.scene != next.lyrics.scene ||
-            m_displayedFrame.isBrowser != next.isBrowser ||
-            m_displayedFrame.browser.active != next.browser.active;
+        const bool contentChanged = !SameVisualContent(previousTarget, next);
+        const bool sceneChanged = previousTarget.lyrics.scene != next.lyrics.scene ||
+            previousTarget.isBrowser != next.isBrowser ||
+            previousTarget.browser.active != next.browser.active;
         const auto plan = browser
             ? TransitionPlan{ TransitionKind::Immediate, 0 }
-            : PlanTransition(m_displayedFrame, next, next.lyrics.animateTransition,
+            : PlanTransition(previousTarget, next, next.lyrics.animateTransition,
                 m_reducedMotion);
         if (plan.kind == TransitionKind::Immediate ||
             plan.kind == TransitionKind::ReplaceInPlace)
@@ -946,7 +1024,7 @@ namespace NativeMedia
         }
         else
         {
-            m_transition.Begin(plan.kind, m_displayedFrame, next, now, plan.durationMs);
+            m_transition.Begin(plan.kind, previousTarget, next, now, plan.durationMs);
             if (plan.kind == TransitionKind::LayerSwitch)
             {
                 StartLayerTransition(next.lyrics.scene == Scene::Spectrum, now,
@@ -988,9 +1066,9 @@ namespace NativeMedia
     void NativeMediaRenderer::StartLayerTransition(bool toSpectrum, std::uint64_t now,
         int durationMs)
     {
-        if (!m_ready || !m_lyrics.visual || !m_spectrum.visual) return;
         m_layerTransitionActive = true;
         m_layerTransitionUntil = now + static_cast<std::uint64_t>((std::max)(0, durationMs));
+        if (!m_ready || !m_lyrics.visual || !m_spectrum.visual) return;
         const float duration = static_cast<float>((std::max)(0, durationMs)) / 1000.0f;
         (void)duration;
         if (toSpectrum)
@@ -1078,8 +1156,9 @@ namespace NativeMedia
 
     bool NativeMediaRenderer::Present(std::uint64_t now)
     {
-        if (!m_ready || !m_hasState) return false;
-        if (!m_requestedVisible && !m_fade.Active())
+        if (!m_hasState) return false;
+        if (!m_headlessTest && !m_ready) return false;
+        if (!m_headlessTest && !m_requestedVisible && !m_fade.Active())
         {
             m_framePending = false;
             m_displayedFrame = m_pendingFrame;
@@ -1107,22 +1186,48 @@ namespace NativeMedia
             if (now >= m_layerTransitionUntil) CompleteLayerTransition(now);
             else animation = true;
         }
+        const bool rollActive = m_transition.active &&
+            (m_transition.kind == TransitionKind::SingleRoll ||
+                m_transition.kind == TransitionKind::TranslationRoll);
+        if (rollActive)
+        {
+            // A roll is authored by the painter, not by a Composition
+            // animation, so it must receive a fresh frame on every tick.
+            m_lyricsDirty = true;
+        }
         const auto& frame = m_pendingFrame;
         std::optional<double> targetScan;
         if (frame.lyrics.hasWordScanProgress)
             targetScan = Clamp01(frame.lyrics.wordScanProgress);
         if (frame.lyrics.scene == Scene::Spectrum || frame.isBrowser)
             targetScan.reset();
+        const auto trackId = EffectiveTrackId(frame);
         const auto previousScan = m_displayedScan;
-        if (m_reducedMotion && targetScan)
+        const bool scanSignalChanged = !m_scanInitialized ||
+            m_scanTrack != trackId || m_scanLine != frame.lyrics.currentLineIndex ||
+            m_scanPlaying != frame.lyrics.isPlaying ||
+            m_scanTarget != targetScan;
+        if (scanSignalChanged)
         {
-            m_wordScan.Reset();
-            m_displayedScan = targetScan;
+            m_scanInitialized = true;
+            m_scanTrack = trackId;
+            m_scanLine = frame.lyrics.currentLineIndex;
+            m_scanPlaying = frame.lyrics.isPlaying;
+            m_scanTarget = targetScan;
+            if (m_reducedMotion && targetScan)
+            {
+                m_wordScan.Reset();
+                m_displayedScan = targetScan;
+            }
+            else
+            {
+                m_wordScan.Observe(trackId, frame.lyrics.currentLineIndex,
+                    frame.lyrics.isPlaying, targetScan, now);
+                m_displayedScan = m_wordScan.Current(now);
+            }
         }
         else
         {
-            m_wordScan.Observe(EffectiveTrackId(frame), frame.lyrics.currentLineIndex,
-                frame.lyrics.isPlaying, targetScan, now);
             m_displayedScan = m_wordScan.Current(now);
         }
         if (previousScan != m_displayedScan)
@@ -1135,7 +1240,7 @@ namespace NativeMedia
         if (std::abs(m_secondaryTarget - m_secondaryOpacity) > 0.002) animation = true;
         UpdateSpectrum(now);
         if (m_spectrumDirty && frame.lyrics.scene == Scene::Spectrum) animation = true;
-        if (m_coverCrossPending) UpdateCover(now);
+        if (m_coverCrossPending && !m_headlessTest) UpdateCover(now);
         if (m_coverFadeActive)
         {
             if (now >= m_coverFadeUntil) CompleteCoverTransition(now);
@@ -1143,61 +1248,65 @@ namespace NativeMedia
         }
         if (m_fade.Active()) animation = true;
 
-        m_painter.BeginPaintFrame();
-        bool painted = false;
-        bool textPainted = false;
-        bool paintOk = true;
-        const bool geometryDirty = m_geometryDirty || m_styleDirty;
-        const bool spectrumScene = !frame.isBrowser && frame.lyrics.scene == Scene::Spectrum;
-        if (geometryDirty)
+        if (!m_headlessTest)
         {
-            if (PaintBackground()) painted = true;
-            else paintOk = false;
-        }
-        if (geometryDirty || m_frameDirty ||
-            (m_lyricsDirty && (m_lyricsTargetOpacity > 0.001f || m_transition.active ||
-                (m_layerTransitionActive && m_spectrumTargetOpacity > 0.001f))))
-        {
-            if (PaintLyricsLayer())
+            m_painter.BeginPaintFrame();
+            bool painted = false;
+            bool textPainted = false;
+            bool paintOk = true;
+            const bool geometryDirty = m_geometryDirty || m_styleDirty;
+            const bool spectrumScene = !frame.isBrowser &&
+                frame.lyrics.scene == Scene::Spectrum;
+            if (geometryDirty)
             {
-                painted = true;
-                textPainted = true;
-                m_frameDirty = false;
+                if (PaintBackground()) painted = true;
+                else paintOk = false;
             }
-            else paintOk = false;
-        }
-        if (geometryDirty || (m_spectrumDirty && (spectrumScene || m_layerTransitionActive)))
-        {
-            if (PaintSpectrumLayer()) painted = true;
-            else paintOk = false;
-        }
-        if (m_browserDirty || geometryDirty)
-        {
-            if (PaintBrowserLayer())
+            if (geometryDirty || m_frameDirty ||
+                (m_lyricsDirty && (m_lyricsTargetOpacity > 0.001f || m_transition.active ||
+                    (m_layerTransitionActive && m_spectrumTargetOpacity > 0.001f))))
             {
-                painted = true;
-                textPainted = true;
+                if (PaintLyricsLayer())
+                {
+                    painted = true;
+                    textPainted = true;
+                    m_frameDirty = false;
+                }
+                else paintOk = false;
             }
-            else paintOk = false;
-        }
-        if ((m_coverDirty || geometryDirty) && !m_coverFadeActive)
-        {
-            if (PaintCoverLayer(m_coverFrontIsActive,
-                m_cover ? &*m_cover : nullptr, m_coverKey))
+            if (geometryDirty || (m_spectrumDirty && (spectrumScene || m_layerTransitionActive)))
             {
-                painted = true;
-                textPainted = true;
+                if (PaintSpectrumLayer()) painted = true;
+                else paintOk = false;
             }
-            else paintOk = false;
+            if (m_browserDirty || geometryDirty)
+            {
+                if (PaintBrowserLayer())
+                {
+                    painted = true;
+                    textPainted = true;
+                }
+                else paintOk = false;
+            }
+            if ((m_coverDirty || geometryDirty) && !m_coverFadeActive)
+            {
+                if (PaintCoverLayer(m_coverFrontIsActive,
+                    m_cover ? &*m_cover : nullptr, m_coverKey))
+                {
+                    painted = true;
+                    textPainted = true;
+                }
+                else paintOk = false;
+            }
+            if (paintOk) m_geometryDirty = false;
+            m_painter.EndPaintFrame();
+            if (m_releaseTextAfterPaint && textPainted)
+            {
+                m_painter.ReleaseInactiveTextLayouts();
+                m_releaseTextAfterPaint = false;
+            }
+            if (painted && m_compositionDevice) m_compositionDevice->Commit();
         }
-        if (paintOk) m_geometryDirty = false;
-        m_painter.EndPaintFrame();
-        if (m_releaseTextAfterPaint && textPainted)
-        {
-            m_painter.ReleaseInactiveTextLayouts();
-            m_releaseTextAfterPaint = false;
-        }
-        if (painted && m_compositionDevice) m_compositionDevice->Commit();
         m_lastPresent = now;
         m_animationActive = animation || m_transition.active || m_layerTransitionActive ||
             m_coverFadeActive || m_fade.Active();

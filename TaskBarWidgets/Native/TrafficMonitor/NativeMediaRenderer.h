@@ -31,6 +31,17 @@ namespace NativeMedia
         bool coverChanged{};
     };
 
+    struct RendererProbe
+    {
+        bool needsAnimation{};
+        bool transitionActive{};
+        TransitionKind transitionKind{ TransitionKind::Immediate };
+        std::uint64_t transitionDeadline{};
+        double transitionProgress{ 1.0 };
+        std::optional<double> displayedScan;
+        bool scanActive{};
+    };
+
     class NativeMediaRenderer
     {
     public:
@@ -62,6 +73,10 @@ namespace NativeMedia
         bool NeedsAnimation() const { return m_animationActive; }
         void DetachHost();
         void RetryNow();
+        // Deterministic lifecycle harness for native tests. It exercises the
+        // same Present/transition scheduler without creating GPU resources.
+        void BeginHeadlessTest();
+        RendererProbe AdvanceHeadlessTest(std::uint64_t now);
 
     private:
         struct Layer
@@ -102,6 +117,7 @@ namespace NativeMedia
         NativeMediaPainter m_painter;
         CompositionFade m_fade;
         bool m_ready{};
+        bool m_headlessTest{};
         bool m_requestedVisible{};
         std::wstring m_diagnostic;
         std::uint64_t m_nextRetry{};
@@ -140,6 +156,11 @@ namespace NativeMedia
         WordScanSmoother m_wordScan;
         SpectrumAnimator m_spectrumAnimator;
         std::optional<double> m_displayedScan;
+        std::wstring m_scanTrack;
+        int m_scanLine{ -1 };
+        bool m_scanPlaying{};
+        bool m_scanInitialized{};
+        std::optional<double> m_scanTarget;
         double m_secondaryOpacity{ 0.72 };
         double m_secondaryTarget{ 0.72 };
         std::uint64_t m_lastPresent{};

@@ -58,6 +58,12 @@ namespace NativeMedia
                 return;
             }
 
+            // Observing the same authoritative target again must not restart
+            // an in-flight interpolation. The renderer calls Observe only when
+            // the frame's target changes, but keep this guard for other callers.
+            if (m_target && *m_target == target && m_wasPlaying == isPlaying)
+                return;
+
             if (!isPlaying)
             {
                 if (!m_frozen || m_wasPlaying)

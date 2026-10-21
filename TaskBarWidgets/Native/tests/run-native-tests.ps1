@@ -18,6 +18,13 @@ $object = Join-Path $output 'NativeMediaTests.obj'
 $command = 'call "{0}" >nul && cl /nologo /EHsc /std:c++20 /W4 /Fe:"{1}" /Fo:"{2}" "{3}" && "{1}"' -f $vcvars, $executable, $object, $source
 & $env:ComSpec /d /s /c $command
 if ($LASTEXITCODE -ne 0) { throw "Native media frame/layout regression tests failed ($LASTEXITCODE)." }
+
+$source = Join-Path $PSScriptRoot 'NativeMediaProtocolTests.cpp'
+$executable = Join-Path $output 'NativeMediaProtocolTests.exe'
+$object = Join-Path $output 'NativeMediaProtocolTests.obj'
+$command = 'call "{0}" >nul && cl /nologo /EHsc /std:c++20 /W4 /MD /Fe:"{1}" /Fo:"{2}" "{3}" windowsapp.lib ole32.lib && "{1}"' -f $vcvars, $executable, $object, $source
+& $env:ComSpec /d /s /c $command
+if ($LASTEXITCODE -ne 0) { throw "Native media protocol fixture tests failed ($LASTEXITCODE)." }
 $source = Join-Path $PSScriptRoot 'PluginIniOptionsTests.cpp'
 $executable = Join-Path $output 'PluginIniOptionsTests.exe'
 $object = Join-Path $output 'PluginIniOptionsTests.obj'
@@ -54,6 +61,14 @@ $command = 'call "{0}" >nul && cl /nologo /EHsc /std:c++20 /W4 /MD /Fe:"{1}" "{2
 & $env:ComSpec /d /s /c $command
 if ($LASTEXITCODE -ne 0) { throw "Native media offscreen rendering validation failed ($LASTEXITCODE)." }
 Write-Host "Native media offscreen images: $offscreenOutput"
+
+$source = Join-Path $PSScriptRoot 'NativeMediaRendererLifecycleTests.cpp'
+$renderer = Join-Path $nativeRoot 'TrafficMonitor\NativeMediaRenderer.cpp'
+$painter = Join-Path $nativeRoot 'TrafficMonitor\NativeMediaPainter.cpp'
+$executable = Join-Path $output 'NativeMediaRendererLifecycleTests.exe'
+$command = 'call "{0}" >nul && cl /nologo /EHsc /std:c++20 /W4 /MD /Fe:"{1}" "{2}" "{3}" "{4}" /link d2d1.lib dwrite.lib d3d11.lib dcomp.lib dxgi.lib windowscodecs.lib ole32.lib user32.lib && "{1}"' -f $vcvars, $executable, $source, $renderer, $painter
+& $env:ComSpec /d /s /c $command
+if ($LASTEXITCODE -ne 0) { throw "Native renderer lifecycle validation failed ($LASTEXITCODE)." }
 
 $mediaHost = Get-Content -LiteralPath (Join-Path $nativeRoot 'TrafficMonitor\NativeMediaHost.cpp') -Raw
 if ($mediaHost -match 'PeekNamedPipe|ExecuteScript|NavigateToString|CoreWebView2|chrome\.webview') {

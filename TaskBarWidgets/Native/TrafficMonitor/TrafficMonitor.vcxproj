@@ -1041,6 +1041,7 @@
     <ClCompile Include="NativeMediaPainter.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="NativeMediaRenderer.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClInclude Include="NativeMediaHost.h" />
+    <ClInclude Include="NativeMediaJson.h" />
     <ClInclude Include="NativeMediaPainter.h" />
     <ClInclude Include="NativeMediaRenderer.h" />
     <ClInclude Include="MediaFrameContract.h" />
