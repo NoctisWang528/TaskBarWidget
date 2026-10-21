@@ -893,6 +893,8 @@ struct NativeMediaHost::Impl
             state.Disconnect();
             firstFramePending = true;
             stateDirty = true;
+            rendererNeedsState = true;
+            coverDirty = true;
             announcePending = true;
             appearancePending = true;
             renderer.SetVisible(false, false);
