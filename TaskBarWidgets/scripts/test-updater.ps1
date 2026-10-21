@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([switch]$SkipBuild)
+param([switch]$SkipBuild, [string]$PackageStage, [string]$PreviousInventory)
 $ErrorActionPreference = 'Stop'
 $productRoot = Split-Path -Parent $PSScriptRoot
 $testRoot = Join-Path $productRoot ('artifacts\updater-tests\' + [guid]::NewGuid().ToString('N'))
@@ -122,7 +122,7 @@ Check (([IO.File]::ReadAllText((Join-Path $case.install 'UI\my-note.txt'))) -eq 
 Check (([IO.File]::ReadAllText((Join-Path $case.install 'Media\custom.json'))) -eq 'unknown user file') 'Success deleted an unknown Media file.'
 Write-Host 'PASS successful transaction and personal data preservation'
 $case=New-Case 'exact-settings-program-resources';$inventory=Get-Content (Join-Path $case.stage 'app-files.json') -Raw|ConvertFrom-Json
-foreach($path in @('UI/Settings/SettingsThemeResources.xbf','Media/Web/Settings/bridge.js','Media/Web/Settings/hotkeys.js','Media/Web/Settings/integration.js','Media/Web/Settings/settings.css','Media/Web/Settings/settings.html','Media/Web/Settings/settings.js','Media/Web/Settings/state.js','Media/Web/Settings/track-offsets-page.js','vccorlib140.dll','release-manifest.json')){
+foreach($path in @('UI/Settings/SettingsThemeResources.xbf','UI/Resources/SettingsNavigationResources.xbf','Media/Web/Settings/bridge.js','Media/Web/Settings/hotkeys.js','Media/Web/Settings/integration.js','Media/Web/Settings/settings.css','Media/Web/Settings/settings.html','Media/Web/Settings/settings.js','Media/Web/Settings/state.js','Media/Web/Settings/track-offsets-page.js','vccorlib140.dll','release-manifest.json')){
     $target=Join-Path $case.stage $path;New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force|Out-Null;[IO.File]::WriteAllText($target,'program resource');$file=Get-Item $target
     $inventory.files+=@{path=$path;bytes=$file.Length;sha256=(Get-FileHash $target).Hash}
 }
@@ -132,6 +132,39 @@ Write-Host 'PASS exact Settings program resources, vccorlib and release manifest
 $case=New-Case 'unknown-settings-file';$inventory=Get-Content (Join-Path $case.stage 'app-files.json') -Raw|ConvertFrom-Json;$inventory.files[0].path='UI/Settings/my-note.txt';Write-Json (Join-Path $case.stage 'app-files.json') $inventory;$case.job.fileManifestSha256=(Get-FileHash (Join-Path $case.stage 'app-files.json')).Hash;Write-Json $case.path $case.job;$status=Invoke-Case $case
 Check ($status.phase -eq 'error') 'Settings resource exceptions must not allow unrelated personal files.';Assert-Original $case
 Write-Host 'PASS unrelated Settings subtree file remains protected'
+$case=New-Case 'blocked-new-settings-resource';$inventory=Get-Content (Join-Path $case.stage 'app-files.json') -Raw|ConvertFrom-Json;$inventory.files[0].path='UI/Settings/SettingsNavigationResources.xbf';Write-Json (Join-Path $case.stage 'app-files.json') $inventory;$case.job.fileManifestSha256=(Get-FileHash (Join-Path $case.stage 'app-files.json')).Hash;Write-Json $case.path $case.job;$status=Invoke-Case $case
+Check ($status.phase -eq 'error' -and $status.message -match 'Protected data directory') 'The old protected Settings path must remain forbidden.';Assert-Original $case
+Write-Host 'PASS new resource relocated without widening the old Settings allowlist'
+if ($PackageStage) {
+    $fullStage = [IO.Path]::GetFullPath($PackageStage)
+    $artifactPrefix = [IO.Path]::GetFullPath((Join-Path $productRoot 'artifacts')).TrimEnd('\') + '\'
+    Check ($fullStage.StartsWith($artifactPrefix, [StringComparison]::OrdinalIgnoreCase)) 'Full package fixture must be inside product artifacts.'
+    $case = New-Case 'full-package-preflight'
+    if ($PreviousInventory) {
+        Copy-Item -LiteralPath ([IO.Path]::GetFullPath($PreviousInventory)) -Destination (Join-Path $case.install 'app-files.json')
+    }
+    foreach ($file in Get-ChildItem -LiteralPath $fullStage -Recurse -File) {
+        Check (-not ($file.Attributes -band [IO.FileAttributes]::ReparsePoint)) 'Linked fixture input is forbidden.'
+        $destination = Join-Path $case.stage ([IO.Path]::GetRelativePath($fullStage, $file.FullName))
+        New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+        Copy-Item -LiteralPath $file.FullName -Destination $destination -Force
+    }
+    $inventory = Get-Content (Join-Path $case.stage 'app-files.json') -Raw | ConvertFrom-Json
+    $case.job.version = $inventory.version
+    $case.job.fileManifestSha256 = (Get-FileHash (Join-Path $case.stage 'app-files.json')).Hash
+    Write-Json $case.path $case.job
+    # No approval means Run must stop before Backup/Apply/Launch. The full real
+    # executable is hashed and checked but is NEVER run, even in this test fixture.
+    Remove-Item -LiteralPath (Join-Path $case.work 'shutdown-approved.json')
+    $status = Invoke-Case $case -OnReady { param($readyCase); Write-Host 'PASS full package reached native readyToExit' }
+    Check ($status.phase -eq 'error' -and $status.message -match 'did not approve shutdown') 'Full package did not stop safely before installation.'
+    Check (-not (Test-Path (Join-Path $case.work 'journal.json'))) 'Full package fixture unexpectedly began replacement.'
+    Assert-Original $case
+    if ($PreviousInventory) {
+        Check ((Get-FileHash (Join-Path $case.install 'app-files.json')).Hash -eq (Get-FileHash -LiteralPath $PreviousInventory).Hash) 'Previous inventory was changed during preflight.'
+    }
+    Write-Host "PASS full published inventory ($($inventory.files.Count) files), no product launch or installation"
+}
 $case=New-Case 'bad-hash'; [IO.File]::AppendAllText((Join-Path $case.stage 'OpenHardwareMonitorApi.dll'),'bad');$status=Invoke-Case $case
 Check ($status.phase -eq 'error') 'Bad staged hash accepted.';Assert-Original $case
 Write-Host 'PASS staged hash rejected before exit/replacement'

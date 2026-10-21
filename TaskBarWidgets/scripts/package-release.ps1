@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$OutputDirectory, [string]$ReleaseDirectory, [switch]$AllowDirtyLocal)
+param([string]$OutputDirectory, [string]$ReleaseDirectory, [switch]$AllowDirtyLocal, [string]$CompatibilityDirectory)
 $ErrorActionPreference = 'Stop'
 $productRoot = Split-Path -Parent $PSScriptRoot
 $repoRoot = Split-Path -Parent $productRoot
@@ -98,3 +98,10 @@ $sha = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant(
     ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $releaseRoot 'update.json') -Encoding utf8
 Write-Host "ZIP: $zip"
 Write-Host "SHA256: $sha"
+# Never declare a package ready based on hashes alone. Use the actual updater
+# implementation in isolated pwsh processes, optionally including an older build.
+$validatorScript = Join-Path $PSScriptRoot 'test-release-package.ps1'
+foreach ($validator in @($source, $CompatibilityDirectory) | Where-Object { $_ } | Select-Object -Unique) {
+    & pwsh -NoProfile -File $validatorScript -ReleaseDirectory $releaseRoot -ValidatorDirectory $validator
+    if ($LASTEXITCODE -ne 0) { throw 'The complete ZIP failed updater validation; do not publish this package.' }
+}

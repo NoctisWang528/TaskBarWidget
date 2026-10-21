@@ -90,7 +90,7 @@ public sealed partial class SettingsWindow : Window
         SystemBackdrop = _cardMicaPreviewBackdrop;
         _cardMicaPreviewBackdrop.StatusChanged += OnMicaStatusChanged;
         _navigation.Resources.MergedDictionaries.Add(new ResourceDictionary
-        { Source = new Uri("ms-appx:///Settings/SettingsNavigationResources.xaml") });
+        { Source = new Uri("ms-appx:///Resources/SettingsNavigationResources.xaml") });
         if (_cardMicaPreviewBackdrop.NeedsSolidFallback) UiThemeStyles.Apply(_root, "MicaFallbackRoot");
         if (new Windows.UI.ViewManagement.UISettings().AnimationsEnabled)
             _page.ChildrenTransitions = new Microsoft.UI.Xaml.Media.Animation.TransitionCollection { new Microsoft.UI.Xaml.Media.Animation.EntranceThemeTransition { IsStaggeringEnabled = false } };
