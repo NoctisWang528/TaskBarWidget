@@ -66,6 +66,16 @@
       "sha256": "b60b2912da28eaa6518593c9e2efb5334ee062d3c42e80d8fdfa806b3dc52977"
     },
     {
+      "file": "managed/Microsoft.Web.WebView2-1.0.3719.77-LICENSE.txt",
+      "source": "https://www.nuget.org/packages/Microsoft.Web.WebView2/1.0.3719.77",
+      "sha256": "0af8f1b807512aae39c2ac1aa4d0cae65cabecb6fd554b8439a5162a0d6eca55"
+    },
+    {
+      "file": "managed/Microsoft.Web.WebView2-1.0.3719.77-NOTICE.txt",
+      "source": "https://www.nuget.org/packages/Microsoft.Web.WebView2/1.0.3719.77",
+      "sha256": "106423785c5b7eba0a8e61d1837f2132e9c828e20ad530f565d981c1df60dd90"
+    },
+    {
       "file": "managed/Microsoft.Windows.AI.MachineLearning-2.1.74-license.txt",
       "source": "https://www.nuget.org/packages/Microsoft.Windows.AI.MachineLearning/2.1.74",
       "sha256": "66395f8cb219087fae2bd025010bd9076b736c14f03b48f20295471c0c376814"
