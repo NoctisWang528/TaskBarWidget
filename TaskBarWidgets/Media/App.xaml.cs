@@ -59,12 +59,15 @@ public partial class App : System.Windows.Application
             _media.ApplySettings(Settings);
             _media.ApplyTuning(Settings.SpectrumTuning ?? SpectrumTuningSettings.CreateDefault());
             _pipe = new MediaPipeServer(_pipeName, MediaProtocol.Initialize,
-                _media.Snapshot, command => Dispatcher.InvokeAsync(() => HandleCommandAsync(command)).Task.Unwrap());
+                _media.Snapshot, (command, _) => Dispatcher.InvokeAsync(() => HandleCommandAsync(command)).Task.Unwrap());
             _media.FrameReady += _pipe.Publish;
             _nativeSettings = new NativeSettingsClient((message, token) => _pipe.SendCommandAsync(message, token));
             var currentVersion = typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion?.Split('+')[0] ?? "";
-            _ui = new UiHostBridge((command, token) => Dispatcher.InvokeAsync(() => HandleUiRequestAsync(command, token)).Task.Unwrap());
-            _ui.CardLyricsReleased += () => _media?.SetCardVisible(false);
+            _ui = new UiHostBridge((command, generation, token) => Dispatcher.InvokeAsync(() => HandleUiRequestAsync(command, generation, token)).Task.Unwrap());
+            // The signal only says "re-read the bridge". Applying the authoritative
+            // state on the dispatcher keeps a late release from overriding a newer
+            // subscription that was accepted after the disconnect.
+            _ui.CardLyricsReleased += () => _ = Dispatcher.InvokeAsync(ApplyCardLyricsVisibility);
             try
             {
                 _updates = new UpdateCoordinator(applicationRoot, currentVersion, Settings.ProductAutomaticUpdatesEnabled,
@@ -147,9 +150,17 @@ public partial class App : System.Windows.Application
     [DllImport("user32.dll")] private static extern bool IsWindow(nint window);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
 
-    private async Task<object?> HandleUiRequestAsync(JsonElement request, CancellationToken token)
+    // Runs on the dispatcher. Reading the bridge's visible flag here, instead of
+    // pushing a captured boolean from the pipe thread, makes the last state win.
+    private void ApplyCardLyricsVisibility() => _media?.SetCardVisible(_ui?.CardLyricsVisible == true);
+
+    private async Task<object?> HandleUiRequestAsync(JsonElement request, long generation, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
+        // The generation was captured by the pipe reader. Re-checking the captured
+        // value here closes the gap between admission and dispatcher execution.
+        if (_ui is null || !_ui.IsConnectionCurrent(generation))
+            throw new OperationCanceledException("界面连接已失效。");
         if (_media is null) throw new InvalidOperationException("媒体服务尚未准备好。");
         var action = request.GetProperty("action").GetString();
         var payload = request.TryGetProperty("payload", out var body) ? body : default;
@@ -174,11 +185,11 @@ public partial class App : System.Windows.Application
             case "subscribeCardLyrics":
                 var cardVisible = payload.GetProperty("visible").GetBoolean();
                 var cardSession = payload.GetProperty("session").GetInt64();
-                // The bridge owns the session epoch. A stale request must not move
-                // the coordinator either, or a superseded panel could pin lyric work.
-                if (_ui is null || !_ui.SetCardLyricsVisible(cardVisible, cardSession))
+                // The bridge ties ownership to the connection generation; the client
+                // session still orders subscriptions inside one connection.
+                if (_ui is null || !_ui.TrySubscribeCardLyrics(cardVisible, cardSession, generation))
                     return new { snapshot = (object?)null };
-                _media.SetCardVisible(cardVisible);
+                ApplyCardLyricsVisibility();
                 return new { snapshot = cardVisible ? _media.CardSnapshot : null };
             case "getState":
                 var state = _media.ControlState;

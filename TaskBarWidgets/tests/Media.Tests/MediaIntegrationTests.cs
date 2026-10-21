@@ -184,7 +184,7 @@ public sealed class MediaIntegrationTests
             name,
             MediaProtocol.Initialize,
             () => frame,
-            _ => Task.CompletedTask);
+            (_, _) => Task.CompletedTask);
         server.Start();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         for (var attempt = 0; attempt < 2; attempt++)
@@ -214,7 +214,7 @@ public sealed class MediaIntegrationTests
             name,
             MediaProtocol.Initialize,
             () => frame,
-            _ => Task.CompletedTask);
+            (_, _) => Task.CompletedTask);
         await server.SendCommandAsync(new
         {
             version = 1,

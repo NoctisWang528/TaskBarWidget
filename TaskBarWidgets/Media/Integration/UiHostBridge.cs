@@ -15,8 +15,14 @@ internal sealed class UiHostBridge : IAsyncDisposable
     private volatile bool _disposed;
     private int _timingLogs;
     private int _pollLogs;
+    // Card lyric ownership is tied to a server connection generation, never to a
+    // client session alone: a request that was queued for an earlier connection
+    // must not become authoritative after the UI reconnects with a low session.
+    private readonly object _cardGate = new();
     private bool _cardLyricsVisible;
     private long _cardLyricsSession;
+    private long _cardLyricsOwner;
+    private int _uiProcessEpoch;
     // Raised whenever the UI can no longer own a card subscription: the client
     // disconnected, the UI process exited, or a new UI epoch starts. The owner
     // drops the coordinator's card visibility with it so a dead session can
@@ -26,6 +32,12 @@ internal sealed class UiHostBridge : IAsyncDisposable
     private JsonElement? _pendingUpdate;
     private bool _sendingUpdate;
     internal int ProcessId => _process is { HasExited: false } process ? process.Id : 0;
+    internal long ConnectionGeneration => _server.ConnectionGeneration;
+    internal bool IsConnectionCurrent(long generation) => _server.IsConnectionCurrent(generation);
+    internal bool CardLyricsVisible
+    {
+        get { lock (_cardGate) return _cardLyricsVisible; }
+    }
 
     internal void PublishUpdateState(object snapshot)
     {
@@ -55,42 +67,109 @@ internal sealed class UiHostBridge : IAsyncDisposable
         }
         catch { lock (_updateGate) _sendingUpdate = false; throw; }
     }
-    // Returns false for a superseded request so the caller cannot switch the
-    // coordinator's card visibility on behalf of a stale session.
-    internal bool SetCardLyricsVisible(bool visible, long session)
+    // The caller must pass the generation captured when the request arrived. The
+    // session still orders subscriptions inside one connection; a connection that
+    // owns no subscription starts that ordering over at the UI's session 1.
+    internal bool TrySubscribeCardLyrics(bool visible, long session, long generation)
     {
-        if (session < _cardLyricsSession) return false;
-        _cardLyricsSession = session; _cardLyricsVisible = visible;
-        return true;
+        lock (_cardGate)
+        {
+            if (_disposed || !_server.IsConnectionCurrent(generation)) return false;
+            if (generation != _cardLyricsOwner) _cardLyricsSession = 0;
+            if (session < _cardLyricsSession) return false;
+            _cardLyricsSession = session;
+            _cardLyricsOwner = generation;
+            _cardLyricsVisible = visible;
+            return true;
+        }
+    }
+    internal void BeginConnection(long generation)
+    {
+        var released = false;
+        lock (_cardGate)
+        {
+            if (_cardLyricsOwner == generation) return;
+            _cardLyricsOwner = 0;
+            _cardLyricsSession = 0;
+            if (_cardLyricsVisible) { _cardLyricsVisible = false; released = true; }
+        }
+        if (released) CardLyricsReleased?.Invoke();
+    }
+    // A delayed close callback is scoped to the connection that produced it. It
+    // may clear that connection's own subscription, but never a newer owner's.
+    internal void EndConnection(long generation)
+    {
+        var released = false;
+        lock (_cardGate)
+        {
+            if (_cardLyricsOwner == 0 || _cardLyricsOwner > generation) return;
+            _cardLyricsOwner = 0;
+            _cardLyricsSession = 0;
+            if (_cardLyricsVisible) { _cardLyricsVisible = false; released = true; }
+        }
+        if (released) CardLyricsReleased?.Invoke();
     }
     internal void ReleaseCardLyrics()
     {
-        _cardLyricsSession = 0;
-        if (!_cardLyricsVisible) return;
-        _cardLyricsVisible = false;
-        CardLyricsReleased?.Invoke();
+        var released = false;
+        lock (_cardGate)
+        {
+            _cardLyricsOwner = 0;
+            _cardLyricsSession = 0;
+            if (_cardLyricsVisible) { _cardLyricsVisible = false; released = true; }
+        }
+        if (released) CardLyricsReleased?.Invoke();
+    }
+    // Only the exit callback of the current UI process may release the card. A
+    // late Exited event from a replaced process must leave the new UI untouched.
+    // The epoch is checked under the card gate so a replacement process cannot
+    // start a new subscription between the check and the release.
+    internal void ReleaseCardLyricsForProcess(int epoch)
+    {
+        var released = false;
+        lock (_cardGate)
+        {
+            if (Volatile.Read(ref _uiProcessEpoch) != epoch) return;
+            _cardLyricsOwner = 0;
+            _cardLyricsSession = 0;
+            if (_cardLyricsVisible) { _cardLyricsVisible = false; released = true; }
+        }
+        if (released) CardLyricsReleased?.Invoke();
     }
     internal void PublishCardLyrics(object frame)
     {
-        if (!_disposed && _cardLyricsVisible)
-            _server.Publish(new { version = 1, type = "command", action = "cardLyricsFrame", session = _cardLyricsSession, payload = frame });
+        if (_disposed) return;
+        long session;
+        lock (_cardGate)
+        {
+            if (!_cardLyricsVisible) return;
+            session = _cardLyricsSession;
+        }
+        _server.Publish(new { version = 1, type = "command", action = "cardLyricsFrame", session, payload = frame });
     }
-    private readonly string _name = $"TaskBarWidgets.UI.{Environment.ProcessId}";
-    internal UiHostBridge(Func<JsonElement, CancellationToken, Task<object?>> request)
+    private readonly string _name;
+    internal UiHostBridge(Func<JsonElement, long, CancellationToken, Task<object?>> request, bool startUiProcess = true, string? pipeName = null)
     {
-        _requests = new UiRequestDispatcher(request, RecordTiming);
+        _name = pipeName ?? $"TaskBarWidgets.UI.{Environment.ProcessId}";
         _server = new MediaPipeServer(_name,
             () => new { version = 1, type = "command", action = "uiReady" },
             () => new { version = 1, type = "command", action = "uiReady" }, HandleRequestAsync,
-            connected => { if (connected) _cardLyricsSession = 0; else ReleaseCardLyrics(); });
+            OnConnectionChanged);
+        _requests = new UiRequestDispatcher(request, RecordTiming, isCurrent: IsConnectionCurrent);
         _server.Start();
-        EnsureProcess();
+        if (startUiProcess) EnsureProcess();
+    }
+    private void OnConnectionChanged(bool connected, long generation)
+    {
+        if (connected) BeginConnection(generation);
+        else EndConnection(generation);
     }
     private void EnsureProcess()
     {
         if (_disposed || _process is { HasExited: false }) return;
         _process?.Dispose();
-        // A restarted UI starts a new subscription epoch at session 1.
+        // A restarted UI is a new process epoch and a new subscription epoch.
+        var epoch = Interlocked.Increment(ref _uiProcessEpoch);
         ReleaseCardLyrics();
         var root = Directory.GetParent(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar))!.FullName;
         var executable = Path.Combine(root, "UI", "TaskBarWidgets.UI.exe");
@@ -109,7 +188,7 @@ internal sealed class UiHostBridge : IAsyncDisposable
         launched.EnableRaisingEvents = true;
         launched.Exited += (_, _) =>
         {
-            ReleaseCardLyrics();
+            ReleaseCardLyricsForProcess(epoch);
             if (_disposed) return;
             try { Log.Warn($"WinUI process exited: {launched.ExitCode}. See UI/ui-error.log if present."); }
             catch (InvalidOperationException) { }
@@ -122,22 +201,24 @@ internal sealed class UiHostBridge : IAsyncDisposable
         if (_process is { HasExited: false }) AllowSetForegroundWindow(_process.Id);
         return _server.SendCommandAsync(new { version = 1, type = "command", action, x, y, page, entryWindow, gestureId, toolWindowTheme, quickCards });
     }
-    private Task HandleRequestAsync(JsonElement message)
+    private Task HandleRequestAsync(JsonElement message, long generation)
     {
         if (_disposed || !message.TryGetProperty("requestId", out var id) || id.ValueKind != JsonValueKind.String || id.GetString() is not { Length: > 0 and <= 128 } requestId) return Task.CompletedTask;
-        if (_requests.TryPost(message, CompleteRequestAsync)) return Task.CompletedTask;
+        if (_requests.TryPost(message, generation, CompleteRequestAsync)) return Task.CompletedTask;
         // Only overload replies are awaited by the reader, keeping transport
         // backpressure bounded even if a client stops consuming responses.
-        return _server.SendCommandAsync(new { version = 1, type = "command", action = "uiResult", requestId, success = false, error = "请求队列已满，请稍后重试。" });
+        return _server.SendCommandAsync(generation, new { version = 1, type = "command", action = "uiResult", requestId, success = false, error = "请求队列已满，请稍后重试。" });
     }
     private Task CompleteRequestAsync(UiRequestResult result, CancellationToken cancellationToken)
     {
-        if (_disposed) return Task.CompletedTask;
+        // A result produced for a retired connection is dropped instead of being
+        // delivered to whichever UI connected in the meantime.
+        if (_disposed || !_server.IsConnectionCurrent(result.ConnectionGeneration)) return Task.CompletedTask;
         var requestId = result.Request.GetProperty("requestId").GetString();
         if (result.Error is not null)
-            return _server.SendCommandAsync(new { version = 1, type = "command", action = "uiResult", requestId, success = false, error = result.Error.Message }, cancellationToken);
+            return _server.SendCommandAsync(result.ConnectionGeneration, new { version = 1, type = "command", action = "uiResult", requestId, success = false, error = result.Error.Message }, cancellationToken);
         var payload = JsonSerializer.SerializeToElement(result.Value, new JsonSerializerOptions(JsonSerializerDefaults.Web));
-        return _server.SendCommandAsync(new { version = 1, type = "command", action = "uiResult", requestId, success = true, payload }, cancellationToken);
+        return _server.SendCommandAsync(result.ConnectionGeneration, new { version = 1, type = "command", action = "uiResult", requestId, success = true, payload }, cancellationToken);
     }
     private void RecordTiming(UiRequestTiming timing)
     {

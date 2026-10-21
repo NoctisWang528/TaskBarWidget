@@ -11,19 +11,24 @@ internal sealed class MediaPipeServer : IAsyncDisposable
     private readonly string _name;
     private readonly Func<object> _initialize;
     private readonly Func<object> _snapshot;
-    private readonly Func<JsonElement, Task> _command;
-    private readonly Action<bool>? _connectionChanged;
+    private readonly Func<JsonElement, long, Task> _command;
+    private readonly Action<bool, long>? _connectionChanged;
     private readonly CancellationTokenSource _stop = new();
     // Display snapshots are complete. Replacing one never loses state; commands use
     // a separate reliable bounded queue and are never coalesced.
     private readonly LatestDisplayQueue _outgoing = new();
     private Task? _run;
-    private readonly Channel<object> _commands = Channel.CreateBounded<object>(16);
+    // A scoped entry is a reply addressed to one connection generation. A zero
+    // generation keeps the old behaviour for protocol notices that any current or
+    // next client may consume.
+    private readonly record struct OutboundCommand(object Payload, long Generation);
+    private readonly Channel<OutboundCommand> _commands = Channel.CreateBounded<OutboundCommand>(16);
     private readonly Channel<bool> _wake = Channel.CreateBounded<bool>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
+    private long _connectionGeneration;
     private bool _disposed;
 
-    internal MediaPipeServer(string name, Func<object> initialize, Func<object> snapshot, Func<JsonElement, Task> command,
-        Action<bool>? connectionChanged = null)
+    internal MediaPipeServer(string name, Func<object> initialize, Func<object> snapshot, Func<JsonElement, long, Task> command,
+        Action<bool, long>? connectionChanged = null)
     {
         _name = name;
         _initialize = initialize;
@@ -32,12 +37,20 @@ internal sealed class MediaPipeServer : IAsyncDisposable
         _connectionChanged = connectionChanged;
     }
 
+    internal long ConnectionGeneration => Volatile.Read(ref _connectionGeneration);
+    internal bool IsConnectionCurrent(long generation) => generation != 0 && ConnectionGeneration == generation;
     internal void Start() => _run = RunAsync(_stop.Token);
     internal void Publish(object frame) { _outgoing.Publish(frame); _wake.Writer.TryWrite(true); }
     internal async Task SendCommandAsync(object command, CancellationToken cancellationToken = default)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token, cancellationToken);
-        await _commands.Writer.WriteAsync(command, linked.Token).ConfigureAwait(false);
+        await _commands.Writer.WriteAsync(new OutboundCommand(command, 0), linked.Token).ConfigureAwait(false);
+        _wake.Writer.TryWrite(true);
+    }
+    internal async Task SendCommandAsync(long generation, object command, CancellationToken cancellationToken = default)
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token, cancellationToken);
+        await _commands.Writer.WriteAsync(new OutboundCommand(command, generation), linked.Token).ConfigureAwait(false);
         _wake.Writer.TryWrite(true);
     }
 
@@ -50,16 +63,20 @@ internal sealed class MediaPipeServer : IAsyncDisposable
                 using var pipe = new NamedPipeServerStream(_name, PipeDirection.InOut, 1,
                     PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
                 await pipe.WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
+                // Every accepted connection owns a server-side generation. Requests
+                // capture it on the reader; retiring it on close makes their admission
+                // stale without re-reading the current generation at execution time.
+                var generation = Interlocked.Increment(ref _connectionGeneration);
                 using var connection = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                _outgoing.Clear();
-                await WriteAsync(pipe, _initialize(), connection.Token).ConfigureAwait(false);
-                var filter = new MediaFrameFilter();
-                await WriteAsync(pipe, filter.Filter(_snapshot()), connection.Token).ConfigureAwait(false);
-                _connectionChanged?.Invoke(true);
                 try
                 {
-                    var reader = ReadCommandsAsync(pipe, connection.Token);
-                    var writer = WriteFramesAsync(pipe, filter, connection.Token);
+                    _outgoing.Clear();
+                    await WriteAsync(pipe, _initialize(), connection.Token).ConfigureAwait(false);
+                    var filter = new MediaFrameFilter();
+                    await WriteAsync(pipe, filter.Filter(_snapshot()), connection.Token).ConfigureAwait(false);
+                    _connectionChanged?.Invoke(true, generation);
+                    var reader = ReadCommandsAsync(pipe, generation, connection.Token);
+                    var writer = WriteFramesAsync(pipe, filter, generation, connection.Token);
                     await Task.WhenAny(reader, writer).ConfigureAwait(false);
                     connection.Cancel();
                     try { await Task.WhenAll(reader, writer).ConfigureAwait(false); }
@@ -67,7 +84,10 @@ internal sealed class MediaPipeServer : IAsyncDisposable
                 }
                 finally
                 {
-                    _connectionChanged?.Invoke(false);
+                    // Retire before notifying: once the bridge hears about the close,
+                    // queued work from this generation must already be rejectable.
+                    Interlocked.CompareExchange(ref _connectionGeneration, generation + 1, generation);
+                    _connectionChanged?.Invoke(false, generation);
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
@@ -79,12 +99,17 @@ internal sealed class MediaPipeServer : IAsyncDisposable
         }
     }
 
-    private async Task WriteFramesAsync(Stream pipe, MediaFrameFilter filter, CancellationToken cancellationToken)
+    private async Task WriteFramesAsync(Stream pipe, MediaFrameFilter filter, long generation, CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
             while (_commands.Reader.TryRead(out var command))
-                await WriteAsync(pipe, command, cancellationToken).ConfigureAwait(false);
+            {
+                // A reply produced for a retired connection is dropped instead of
+                // being delivered to the client that reconnected in the meantime.
+                if (command.Generation != 0 && command.Generation != generation) continue;
+                await WriteAsync(pipe, command.Payload, cancellationToken).ConfigureAwait(false);
+            }
             if (_outgoing.TryTake(out var frame) && frame is not null)
             {
                 await WriteAsync(pipe, filter.Filter(frame), cancellationToken).ConfigureAwait(false);
@@ -103,7 +128,7 @@ internal sealed class MediaPipeServer : IAsyncDisposable
         await pipe.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task ReadCommandsAsync(Stream pipe, CancellationToken cancellationToken)
+    private async Task ReadCommandsAsync(Stream pipe, long generation, CancellationToken cancellationToken)
     {
         var buffer = new byte[8192];
         using var message = new MemoryStream();
@@ -120,7 +145,7 @@ internal sealed class MediaPipeServer : IAsyncDisposable
                     try
                     {
                         using var json = JsonDocument.Parse(bytes);
-                        if (IsCommand(json.RootElement)) await _command(json.RootElement.Clone()).ConfigureAwait(false);
+                        if (IsCommand(json.RootElement)) await _command(json.RootElement.Clone(), generation).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
                     catch (Exception exception) when (exception is JsonException or InvalidOperationException or ArgumentException or System.Runtime.InteropServices.COMException)
