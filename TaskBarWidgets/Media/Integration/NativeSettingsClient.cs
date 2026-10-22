@@ -7,6 +7,7 @@ internal sealed class NativeSettingsClient : IDisposable
 {
     private readonly Func<object, CancellationToken, Task> _send;
     private readonly TimeSpan _timeout;
+    private readonly TimeSpan _lifetime;
     private readonly CancellationTokenSource _stop = new();
     private int _disposed;
     private readonly ConcurrentDictionary<string, TaskCompletionSource<JsonElement>> _pending = new();
@@ -14,12 +15,34 @@ internal sealed class NativeSettingsClient : IDisposable
     internal NativeSettingsClient(Func<object, CancellationToken, Task> send, TimeSpan? timeout = null)
     {
         _send = send;
-        _timeout = timeout ?? TimeSpan.FromSeconds(12);
+        _timeout = timeout ?? TimeSpan.FromSeconds(30);
+        // The native host validates expiresAt when it dequeues a request, after the previous one
+        // finished. Advertise a lifetime several times longer than the wait below so a queued
+        // settings write is never discarded before it is attempted; the caller still stops waiting
+        // at _timeout, and an expired rejection is retried once below.
+        _lifetime = TimeSpan.FromTicks(Math.Max(_timeout.Ticks * 3, TimeSpan.FromSeconds(90).Ticks));
     }
 
     internal async Task<JsonElement> RequestAsync(string action, JsonElement? values = null, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        try
+        {
+            return await RequestOnceAsync(action, values, cancellationToken);
+        }
+        catch (InvalidOperationException error) when (IsExpiredRejection(error))
+        {
+            // Settings writes are absolute assignments, so re-sending once after the native host
+            // dropped an expired request keeps a stalled queue from surfacing as a failed save.
+            return await RequestOnceAsync(action, values, cancellationToken);
+        }
+    }
+
+    private static bool IsExpiredRejection(InvalidOperationException error) =>
+        error.Message.Contains("expired", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<JsonElement> RequestOnceAsync(string action, JsonElement? values, CancellationToken cancellationToken)
+    {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token, cancellationToken);
         timeout.CancelAfter(_timeout);
         var id = Guid.NewGuid().ToString("N");
@@ -28,7 +51,7 @@ internal sealed class NativeSettingsClient : IDisposable
         try
         {
             await _send(new { version = 1, type = "command", action, requestId = id,
-                expiresAt = DateTimeOffset.UtcNow.Add(_timeout).ToUnixTimeMilliseconds(), payload = values }, timeout.Token);
+                expiresAt = DateTimeOffset.UtcNow.Add(_lifetime).ToUnixTimeMilliseconds(), payload = values }, timeout.Token);
             return await completion.Task.WaitAsync(timeout.Token);
         }
         catch (OperationCanceledException) when (!_stop.IsCancellationRequested && !cancellationToken.IsCancellationRequested)

@@ -455,7 +455,9 @@ void CTaskBarDlg::DisableRenderFeatureIfNecessary(CSupportedRenderEnums& ref_sup
         ref_supported_render_enums.DisableD2D1();
     }
     // 不符合条件则启用Default（MFC）
-    if (!is_transparent || theApp.m_taskbar_data.auto_set_background_color || theApp.m_taskbar_data.disable_d2d)
+    // A transparent window must keep the alpha (D2D) renderer: forcing the default renderer paints an
+    // opaque background whose color key can no longer match after the transparency colors are paired.
+    if (!is_transparent || theApp.m_taskbar_data.disable_d2d)
     {
         ref_supported_render_enums.EnableDefaultOnly();
     }

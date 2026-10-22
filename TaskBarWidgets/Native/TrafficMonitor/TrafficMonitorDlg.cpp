@@ -718,13 +718,23 @@ bool CTrafficMonitorDlg::ApplyUnifiedSettings(const TaskBarSettingData& taskbar,
     if (error) error->clear();
     const auto previous_taskbar = theApp.m_taskbar_data;
     const auto previous_general = theApp.m_general_data;
+    // Enabling Direct2D implies a transparent background with manual colors. Resolve that
+    // mutation here so the configuration written to disk is the state that actually runs,
+    // and so a transparency toggle can never be persisted as an opaque background.
+    const bool d2d_turned_on = (previous_taskbar.disable_d2d && !taskbar.disable_d2d);
+    TaskBarSettingData applied_taskbar = taskbar;
+    applied_taskbar.show_tool_tip = false;
+    if (d2d_turned_on)
+    {
+        applied_taskbar.SetTaskabrTransparent(true);
+        applied_taskbar.auto_set_background_color = false;
+    }
     const bool auto_run_changed = general.auto_run != previous_general.auto_run
         || general.auto_run_by_task_scheduler != previous_general.auto_run_by_task_scheduler;
     const bool interface_changed = general.show_all_interface != previous_general.show_all_interface;
     const bool interval_changed = general.monitor_time_span != previous_general.monitor_time_span;
     // Check persistence before applying renderer/timer/hardware changes.
-    theApp.m_taskbar_data = taskbar;
-    theApp.m_taskbar_data.show_tool_tip = false;
+    theApp.m_taskbar_data = applied_taskbar;
     theApp.m_general_data = general;
     const bool previous_warning = theApp.m_cannot_save_config_warning;
     theApp.m_cannot_save_config_warning = false;
@@ -733,30 +743,28 @@ bool CTrafficMonitorDlg::ApplyUnifiedSettings(const TaskBarSettingData& taskbar,
     theApp.m_taskbar_data = previous_taskbar;
     theApp.m_general_data = previous_general;
     if (!saved) { if (error) *error = L"无法保存监测配置；未应用修改。"; return false; }
-    const bool colors_changed = previous_taskbar.text_colors != taskbar.text_colors || previous_taskbar.back_color != taskbar.back_color
-        || previous_taskbar.transparent_color != taskbar.transparent_color || previous_taskbar.status_bar_color != taskbar.status_bar_color
-        || previous_taskbar.specify_each_item_color != taskbar.specify_each_item_color;
-    if (colors_changed && taskbar.auto_adapt_light_theme && taskbar.auto_save_taskbar_color_settings_to_preset)
+    const bool colors_changed = previous_taskbar.text_colors != applied_taskbar.text_colors || previous_taskbar.back_color != applied_taskbar.back_color
+        || previous_taskbar.transparent_color != applied_taskbar.transparent_color || previous_taskbar.status_bar_color != applied_taskbar.status_bar_color
+        || previous_taskbar.specify_each_item_color != applied_taskbar.specify_each_item_color;
+    if (colors_changed && applied_taskbar.auto_adapt_light_theme && applied_taskbar.auto_save_taskbar_color_settings_to_preset)
     {
-        auto preset_data = taskbar;
-        int preset = CWindowsSettingHelper::IsWindows10LightTheme() ? taskbar.light_default_style : taskbar.dark_default_style;
+        auto preset_data = applied_taskbar;
+        int preset = CWindowsSettingHelper::IsWindows10LightTheme() ? applied_taskbar.light_default_style : applied_taskbar.dark_default_style;
         theApp.m_taskbar_default_style.ModifyDefaultStyle(preset, preset_data);
         theApp.m_taskbar_default_style.SaveConfig();
     }
     bool is_hardware_monitor_item_changed = (general.hardware_monitor_item != theApp.m_general_data.hardware_monitor_item);
     bool is_show_notify_icon_changed = (general.show_notify_icon != theApp.m_general_data.show_notify_icon);
     bool is_connections_hide_changed = (general.connections_hide.ToVector() != theApp.m_general_data.connections_hide.ToVector());
-    bool d2d_turned_on = (theApp.m_taskbar_data.disable_d2d && !taskbar.disable_d2d);
     //需要重新关闭再打开任务栏窗口的情况
-    bool taskbar_changed = (theApp.m_taskbar_data.show_taskbar_wnd_in_secondary_display != taskbar.show_taskbar_wnd_in_secondary_display
-        || theApp.m_taskbar_data.secondary_display_index != taskbar.secondary_display_index
-        || theApp.m_taskbar_data.disable_d2d != taskbar.disable_d2d
-        || theApp.m_taskbar_data.IsTaskbarTransparent() != taskbar.IsTaskbarTransparent()
-        || theApp.m_taskbar_data.auto_set_background_color != taskbar.auto_set_background_color
+    bool taskbar_changed = (previous_taskbar.show_taskbar_wnd_in_secondary_display != applied_taskbar.show_taskbar_wnd_in_secondary_display
+        || previous_taskbar.secondary_display_index != applied_taskbar.secondary_display_index
+        || previous_taskbar.disable_d2d != applied_taskbar.disable_d2d
+        || previous_taskbar.IsTaskbarTransparent() != applied_taskbar.IsTaskbarTransparent()
+        || previous_taskbar.auto_set_background_color != applied_taskbar.auto_set_background_color
         );
 
-    theApp.m_taskbar_data = taskbar;
-    theApp.m_taskbar_data.show_tool_tip = false;
+    theApp.m_taskbar_data = applied_taskbar;
     theApp.m_general_data = general;
     if (applied) *applied = true;
     theApp.SendSettingsToPlugin();
@@ -764,13 +772,6 @@ bool CTrafficMonitorDlg::ApplyUnifiedSettings(const TaskBarSettingData& taskbar,
     CGeneralSettingsDlg::CheckTaskbarDisplayItem();
 
     SetTextFont();
-
-    //打开了D2D渲染后自动开启“背景透明”并关闭“根据任务栏颜色自动设置背景色”
-    if (d2d_turned_on)
-    {
-        theApp.m_taskbar_data.SetTaskabrTransparent(true);
-        theApp.m_taskbar_data.auto_set_background_color = false;
-    }
 
     //CTaskBarDlg::SaveConfig();
     if (IsTaskbarWndValid())
@@ -1730,9 +1731,13 @@ void CTrafficMonitorDlg::OnTimer(UINT_PTR nIDEvent)
         }
 
         //根据任务栏颜色自动设置任务栏窗口背景色
+        // Sampling is only meaningful for an opaque window: writing a sampled desktop color while the
+        // taskbar background is transparent would silently replace the user's color and re-pair the
+        // transparency sentinel, which is what made the background reappear under a transparent taskbar.
         if (theApp.m_taskbar_data.auto_set_background_color && theApp.m_win_version.IsWindows8OrLater()
             && IsTaskbarWndValid() && theApp.m_taskbar_data.transparent_color != 0
-            && !m_is_foreground_fullscreen && theApp.m_taskbar_data.disable_d2d)
+            && !m_is_foreground_fullscreen && theApp.m_taskbar_data.disable_d2d
+            && !theApp.m_taskbar_data.IsTaskbarTransparent())
         {
             CRect rect;
             ::GetWindowRect(m_tBarDlg->GetSafeHwnd(), rect);

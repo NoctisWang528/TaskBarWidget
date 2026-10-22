@@ -69,6 +69,50 @@ public sealed class NativeSettingsClientTests
     }
 
     [Fact]
+    public async Task ExpiredRejectionIsRetriedOnceWithoutFailingTheSave()
+    {
+        var sent = new List<(string Id, long ExpiresAt)>();
+        using var client = new NativeSettingsClient((message, _) =>
+        {
+            var element = JsonSerializer.SerializeToElement(message);
+            sent.Add((element.GetProperty("requestId").GetString()!,
+                element.GetProperty("expiresAt").GetInt64()));
+            return Task.CompletedTask;
+        });
+        var request = client.RequestAsync("applyNativeSettings", JsonSerializer.SerializeToElement(new { taskbar_transparent = true }));
+        client.Receive(JsonSerializer.SerializeToElement(new
+        {
+            requestId = sent[0].Id, success = false, error = "Native settings request expired; retry the operation."
+        }));
+        // The retry runs on the awaiting continuation, so let it observe the rejection first.
+        for (var attempt = 0; attempt < 200 && sent.Count < 2; attempt++) await Task.Delay(10);
+        Assert.Equal(2, sent.Count);
+        Assert.NotEqual(sent[0].Id, sent[1].Id);
+        client.Receive(JsonSerializer.SerializeToElement(new
+        {
+            requestId = sent[1].Id, success = true, payload = new { fields = new[] { new { key = "taskbar.transparent", value = true } } }
+        }));
+        var payload = await request;
+        Assert.True(payload.GetProperty("fields")[0].GetProperty("value").GetBoolean());
+    }
+
+    [Fact]
+    public async Task RequestLifetimeOutlivesTheResponseWait()
+    {
+        var sent = new List<JsonElement>();
+        using var client = new NativeSettingsClient((message, _) =>
+        {
+            sent.Add(JsonSerializer.SerializeToElement(message));
+            return Task.CompletedTask;
+        });
+        _ = client.RequestAsync("getNativeSettings");
+        await Task.Delay(50);
+        var expiresAt = sent[0].GetProperty("expiresAt").GetInt64();
+        var remaining = expiresAt - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        Assert.True(remaining > 60_000, $"A queued request must stay valid well past the 30s response wait (got {remaining} ms).");
+    }
+
+    [Fact]
     public async Task DisposalCancelsOutstandingRequests()
     {
         using var client = new NativeSettingsClient((_, _) => Task.CompletedTask);
