@@ -17,6 +17,7 @@ public:
     void AppearanceChanged();
     bool MouseInput(UINT message, WPARAM keys, LPARAM position);
     bool IsVisible() const;
+    static void TickShared();
     static void Shutdown();
     static void OpenSettings(const wchar_t* page = nullptr);
 private:

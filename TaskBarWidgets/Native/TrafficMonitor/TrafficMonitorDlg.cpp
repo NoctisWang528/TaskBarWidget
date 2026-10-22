@@ -780,8 +780,9 @@ bool CTrafficMonitorDlg::ApplyUnifiedSettings(const TaskBarSettingData& taskbar,
         //如果更改了任务栏窗口字体或显示的文本，则任务栏窗口可能要变化，于是关闭再打开任务栏窗口
         if (taskbar_changed)
         {
-            CloseTaskBarWnd();
-            OpenTaskBarWnd();
+            //设置应用同步执行在任务栏窗口自身的 WindowProc 栈上（唤醒 → Tick → ProcessIncoming），
+            //内联重建会 delete 栈上仍在执行的 CTaskBarDlg 并销毁其 HWND；投递到消息循环后再重建。
+            PostMessage(WM_REOPEN_TASKBAR_WND, 0, 0);
         }
         else
         {
