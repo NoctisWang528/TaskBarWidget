@@ -227,6 +227,14 @@ struct NativeMediaHost::Impl
     {
         const HWND hwnd = wakeOwner.load();
         if (!hwnd) return;
+        if (!::IsWindow(hwnd))
+        {
+            // The owner died before its wake could be delivered. Drop the pending flag so the
+            // next live owner can post a fresh wake instead of being blocked by this one.
+            uiWakePosted = false;
+            wakeWindow = nullptr;
+            return;
+        }
         // A posted wake dies with the window it was queued for. Settings apply destroys and
         // recreates the taskbar window, so a pending flag from the old window must not block
         // the wake the new window needs, otherwise the queue is never drained again.
@@ -1349,6 +1357,14 @@ NativeMediaHost::~NativeMediaHost()
     m_impl->mediaPresented = false;
     m_impl->owner = nullptr;
     m_impl->wakeOwner = nullptr;
+}
+
+void NativeMediaHost::TickShared()
+{
+    // The queue is process-wide and outlives any window: drain it even when a wake reached a
+    // window whose per-window host is not (or no longer) bound, so a consumed wake can never
+    // leave uiWakePosted stuck and block every later request until restart.
+    if (auto instance = Shared()) instance->Tick();
 }
 
 void NativeMediaHost::Shutdown()

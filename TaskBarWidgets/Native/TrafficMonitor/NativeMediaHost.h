@@ -17,6 +17,7 @@ public:
     void AppearanceChanged();
     bool MouseInput(UINT message, WPARAM keys, LPARAM position);
     bool IsVisible() const;
+    static void TickShared();
     static void Shutdown();
     static void OpenSettings(const wchar_t* page = nullptr);
     // kind: 0 = MAIN_TIMER, 1 = MONITOR_TIMER, 2 = TASKBAR_TIMER.
