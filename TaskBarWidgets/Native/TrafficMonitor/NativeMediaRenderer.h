@@ -55,6 +55,51 @@ namespace NativeMedia
         std::uint64_t coverBytes{};
     };
 
+    // Failure site of the composition pipeline. The value names the operation that
+    // returned the failing HRESULT, so the log says what failed instead of only 0x.
+    enum class FailureOp : unsigned char
+    {
+        None,
+        CreateD3DDevice,
+        GetDxgiDevice,
+        CreateD2DDevice,
+        CreateDeviceContext,
+        CreateWriteFactory,
+        InitializePainter,
+        CreateCompositionDevice,
+        CreateCompositionTarget,
+        CreateCompositionVisual,
+        CreateSwapChain,
+        AddCompositionVisual,
+        ApplyVisualTree,
+        ResizeBuffers,
+        AcquireBuffer,
+        CreateTargetBitmap,
+        Draw,
+        Present
+    };
+
+    // Stable lowercase identifier of a failure site. Written to diagnostics and
+    // metrics, so it must stay a fixed token without paths, sizes or media text.
+    const wchar_t* FailureOpName(FailureOp op);
+
+    // Read-only failure attribution. POD only: recording a repeat on the paint path
+    // touches no heap, takes no lock and formats no string.
+    struct FailureSnapshot
+    {
+        std::uint64_t failedOps{};       // failures reported by a checked call site
+        std::uint64_t suppressedOps{};   // repeats folded into the 5 s log window
+        std::uint64_t silentOps{};       // failures swallowed by an unchecked HRESULT
+        std::uint64_t deviceLost{};      // failures classified as device loss
+        std::uint64_t invalidCall{};     // DXGI_ERROR_INVALID_CALL (0x887A0001)
+        std::uint32_t lastFailureHr{};   // HRESULT of the last failure, as raw bits
+        FailureOp lastFailureOp{ FailureOp::None };
+        std::uint32_t width{};           // swap-chain width at the last failure
+        std::uint32_t height{};          // swap-chain height at the last failure
+        std::uint32_t buffers{};         // swap-chain buffer count (2)
+        bool targetBound{};              // the layer had a bound D2D bitmap
+    };
+
     class NativeMediaRenderer
     {
     public:
@@ -92,6 +137,7 @@ namespace NativeMedia
         RendererProbe AdvanceHeadlessTest(std::uint64_t now);
         // Renderer state only changes on the UI thread, so no lock is needed.
         FootprintSnapshot Footprint() const;
+        FailureSnapshot Failures() const { return m_failures; }
 
     private:
         friend struct NativeMediaRendererTestAccess;
@@ -138,6 +184,18 @@ namespace NativeMedia
         std::wstring m_diagnostic;
         std::uint64_t m_nextRetry{};
         unsigned m_retryAttempt{};
+
+        FailureSnapshot m_failures;
+        // Last failure line actually written. A repeat of the same operation and
+        // HRESULT inside the 5 s window is only counted, never formatted or logged.
+        FailureOp m_loggedOp{ FailureOp::None };
+        HRESULT m_loggedHr{ S_OK };
+        std::uint64_t m_loggedTick{};
+        std::uint64_t m_pendingRepeats{};
+        // Failure of a step that only reports success or failure; the caller's Fail
+        // consumes it to name the real operation and HRESULT.
+        FailureOp m_stepOp{ FailureOp::None };
+        HRESULT m_stepHr{ S_OK };
 
         Layer m_background;
         Layer m_lyrics;
@@ -221,9 +279,14 @@ namespace NativeMedia
         bool UpdateCover(std::uint64_t now);
         void ApplyVisualTree();
         void Log(const std::wstring& message, HRESULT result);
-        void Fail(const std::wstring& message, HRESULT result);
+        // Records one failure and returns true when the log line should be written.
+        // layer is the failing layer, or null when the failure is device wide.
+        bool RecordFailure(FailureOp op, HRESULT result, const Layer* layer);
+        std::wstring FailureContext();
+        void NoteStepFailure(FailureOp op, HRESULT result);
+        void Fail(FailureOp op, const std::wstring& message, HRESULT result);
         void ScheduleRetry(std::uint64_t now, HRESULT result);
-        void HandleDeviceLost(HRESULT result, const wchar_t* operation);
+        void HandleDeviceLost(HRESULT result, FailureOp op, const wchar_t* operation, const Layer* layer);
         bool IsDeviceLost(HRESULT result) const;
         void SetEffectiveScene();
         bool LayerNeedsPaint(Layer& layer) const;

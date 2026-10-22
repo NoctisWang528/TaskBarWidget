@@ -1832,8 +1832,20 @@ void CTrafficMonitorDlg::OnTimer(UINT_PTR nIDEvent)
                                                                 p_TaskBarDlg->CalculateWindowSize(); });
             }
 
+            //归因统计：只读取调整前后的窗口矩形，不改变 AdjustWindowPos 和 Invalidate 的调用时机
+            HWND taskbar_wnd = m_tBarDlg->GetSafeHwnd();
+            RECT taskbar_rect_before{}, taskbar_rect_after{};
+            ::GetWindowRect(taskbar_wnd, &taskbar_rect_before);
             m_tBarDlg->AdjustWindowPos();
+            ::GetWindowRect(taskbar_wnd, &taskbar_rect_after);
             m_tBarDlg->Invalidate(FALSE);
+            const bool taskbar_rect_changed =
+                taskbar_rect_before.left != taskbar_rect_after.left ||
+                taskbar_rect_before.top != taskbar_rect_after.top ||
+                taskbar_rect_before.right != taskbar_rect_after.right ||
+                taskbar_rect_before.bottom != taskbar_rect_after.bottom;
+            //每轮都记一次失效请求，并记录其中调整后几何真正变化了几次
+            NativeMediaHost::NoteTaskbarRefresh(1, taskbar_rect_changed ? 1 : 0);
         }
     }
 

@@ -320,7 +320,8 @@ $windowStart = $samplingStartedAt.AddSeconds(-1)
 $windowEnd = $samplingFinishedAt.AddSeconds(1)
 $counterKeys = @('allocBytes','gen0','gen1','gen2','fft','frames','pipeWrites','pipeBytes','getStateCount',
     'getStateTotalMs','getStateTextBytes','getStateCoverBytes','getStateIconBytes','opens','firstFrames',
-    'timeouts','mainTicks','monitorTicks','taskbarTicks','seconds')
+    'timeouts','mainTicks','monitorTicks','taskbarTicks','seconds','deviceLost','invalidCall',
+    'failedOps','suppressedOps','silentOps','invalidates','adjustRectChanged')
 
 function ConvertTo-MetricTable {
     param([string[]]$Lines, [string]$Source)

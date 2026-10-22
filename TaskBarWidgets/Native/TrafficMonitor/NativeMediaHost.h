@@ -22,6 +22,10 @@ public:
     static void OpenSettings(const wchar_t* page = nullptr);
     // kind: 0 = MAIN_TIMER, 1 = MONITOR_TIMER, 2 = TASKBAR_TIMER.
     static void NoteTimer(unsigned kind);
+    // Attribution of one TASKBAR_TIMER pass: how often the taskbar was invalidated
+    // and how often AdjustWindowPos actually moved the window. Aggregated into the
+    // next METRICS line; the caller's timing is unchanged.
+    static void NoteTaskbarRefresh(unsigned invalidations, unsigned geometryChanges);
     static void WriteFootprintMetrics();
 private:
     struct Impl;

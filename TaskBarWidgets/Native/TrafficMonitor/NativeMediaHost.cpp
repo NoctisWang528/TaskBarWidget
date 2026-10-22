@@ -116,6 +116,10 @@ namespace
 static std::atomic<unsigned long long> main_timer_ticks{};
 static std::atomic<unsigned long long> monitor_timer_ticks{};
 static std::atomic<unsigned long long> taskbar_timer_ticks{};
+// Taskbar repaint attribution: one increment per TASKBAR_TIMER pass and per pass
+// whose AdjustWindowPos actually changed the window rectangle.
+static std::atomic<unsigned long long> taskbar_invalidates{};
+static std::atomic<unsigned long long> taskbar_rect_changes{};
 static ULONGLONG last_metrics_write{};
 
 struct NativeMediaHost::Impl
@@ -1423,8 +1427,15 @@ void NativeMediaHost::NoteTimer(unsigned kind)
     else if (kind == 2) ++taskbar_timer_ticks;
 }
 
+void NativeMediaHost::NoteTaskbarRefresh(unsigned invalidations, unsigned geometryChanges)
+{
+    if (invalidations) taskbar_invalidates += invalidations;
+    if (geometryChanges) taskbar_rect_changes += geometryChanges;
+}
+
 // Appends one METRICS line to native-metrics.log at most every 5000 ms.
-// Only cache footprint counters are recorded; no media content, track
+// Cache footprint, timer, failure attribution and taskbar repaint counters are
+// recorded. Failure sites are fixed identifiers, so no media content, track
 // information or file path ever reaches this file.
 void NativeMediaHost::WriteFootprintMetrics()
 {
@@ -1439,6 +1450,7 @@ void NativeMediaHost::WriteFootprintMetrics()
     unsigned long long brushes{};
     unsigned long long covers{};
     unsigned long long coverBytes{};
+    NativeMedia::FailureSnapshot failures{};
     const auto& instance = Shared();
     if (instance)
     {
@@ -1450,6 +1462,7 @@ void NativeMediaHost::WriteFootprintMetrics()
         brushes = footprint.brushes;
         covers = footprint.covers;
         coverBytes = footprint.coverBytes;
+        failures = instance->renderer.Failures();
     }
 
     SYSTEMTIME time{}; GetLocalTime(&time);
@@ -1466,7 +1479,20 @@ void NativeMediaHost::WriteFootprintMetrics()
         L" coverBytes=" + std::to_wstring(coverBytes) +
         L" mainTicks=" + std::to_wstring(main_timer_ticks.load()) +
         L" monitorTicks=" + std::to_wstring(monitor_timer_ticks.load()) +
-        L" taskbarTicks=" + std::to_wstring(taskbar_timer_ticks.load()) + L"\r\n";
+        L" taskbarTicks=" + std::to_wstring(taskbar_timer_ticks.load()) +
+        L" deviceLost=" + std::to_wstring(failures.deviceLost) +
+        L" invalidCall=" + std::to_wstring(failures.invalidCall) +
+        L" failedOps=" + std::to_wstring(failures.failedOps) +
+        L" suppressedOps=" + std::to_wstring(failures.suppressedOps) +
+        L" silentOps=" + std::to_wstring(failures.silentOps) +
+        L" lastFailureHr=" + std::to_wstring(failures.lastFailureHr) +
+        L" lastFailureOp=" + NativeMedia::FailureOpName(failures.lastFailureOp) +
+        L" lastFailureWidth=" + std::to_wstring(failures.width) +
+        L" lastFailureHeight=" + std::to_wstring(failures.height) +
+        L" lastFailureBuffers=" + std::to_wstring(failures.buffers) +
+        L" lastFailureTargetBound=" + std::to_wstring(failures.targetBound ? 1 : 0) +
+        L" invalidates=" + std::to_wstring(taskbar_invalidates.load()) +
+        L" adjustRectChanged=" + std::to_wstring(taskbar_rect_changes.load()) + L"\r\n";
 
     const std::wstring path = theApp.m_appdata_dir + L"native-metrics.log";
     WIN32_FILE_ATTRIBUTE_DATA attributes{};
