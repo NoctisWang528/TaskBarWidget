@@ -191,6 +191,8 @@ namespace NativeMedia
         FailureOp m_loggedOp{ FailureOp::None };
         HRESULT m_loggedHr{ S_OK };
         std::uint64_t m_loggedTick{};
+        // Last line actually written; caps every failure key at one line per second.
+        std::uint64_t m_lastFailureLogTick{};
         std::uint64_t m_pendingRepeats{};
         // Failure of a step that only reports success or failure; the caller's Fail
         // consumes it to name the real operation and HRESULT.

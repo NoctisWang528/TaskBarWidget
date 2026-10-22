@@ -267,6 +267,23 @@ namespace NativeMedia
         return hash;
     }
 
+    // One derivation for cover cache keys: the selected uri hash mixed with the
+    // decode edge and the app-icon constant.
+    std::uint64_t NativeMediaPainter::CoverCacheKey(const Cover& cover, UINT coverEdgePx)
+    {
+        const bool appIcon = cover.dataUri.empty() && !cover.fallbackIconDataUri.empty();
+        const auto& uri = appIcon ? cover.fallbackIconDataUri : cover.dataUri;
+        if (uri.empty()) return 0;
+        std::uint64_t key = HashText(uri);
+        // The decode edge is part of the key: a DPI or cover size change must miss the
+        // cache instead of reusing a bitmap decoded at the old size. The FNV-1a prime
+        // is odd, so distinct edges always produce distinct mixes, and its XOR with the
+        // app icon constant only coincides at an edge far above UINT range.
+        key ^= static_cast<std::uint64_t>((std::max)(1u, coverEdgePx)) * 0x100000001b3ull;
+        if (appIcon) key ^= 0x9e3779b97f4a7c15ull;
+        return key;
+    }
+
     Microsoft::WRL::ComPtr<IDWriteTextFormat> NativeMediaPainter::GetTextFormat(
         const EffectiveStyle& style, float fontSize, int alignment)
     {
@@ -841,13 +858,7 @@ namespace NativeMedia
         const auto& uri = appIcon ? cover.fallbackIconDataUri : cover.dataUri;
         if (uri.empty()) return false;
         const UINT coverEdge = (std::max)(1u, coverEdgePx);
-        auto key = HashText(uri);
-        // The decode edge is part of the key: a DPI or cover size change must miss the
-        // cache instead of reusing a bitmap decoded at the old size. The FNV-1a prime
-        // is odd, so distinct edges always produce distinct mixes, and its XOR with the
-        // app icon constant only coincides at an edge far above UINT range.
-        key ^= static_cast<std::uint64_t>(coverEdge) * 0x100000001b3ull;
-        if (appIcon) key ^= 0x9e3779b97f4a7c15ull;
+        const auto key = CoverCacheKey(cover, coverEdge);
         const auto found = m_covers.find(key);
         if (found != m_covers.end())
         {
@@ -915,9 +926,14 @@ namespace NativeMedia
     void NativeMediaPainter::ReleaseCoverBitmapsExcept(
         const std::unordered_set<std::uint64_t>& keys)
     {
+        // A bitmap the current frame still draws survives regardless of the caller's
+        // set: a decode-failure fallback key may match no entry at all, and the
+        // in-use bitmap must never be released along with it.
         for (auto iter = m_covers.begin(); iter != m_covers.end();)
         {
-            if (keys.find(iter->first) == keys.end()) iter = m_covers.erase(iter);
+            if (keys.find(iter->first) == keys.end() &&
+                m_usedCoverKeys.find(iter->first) == m_usedCoverKeys.end())
+                iter = m_covers.erase(iter);
             else ++iter;
         }
     }

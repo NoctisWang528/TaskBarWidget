@@ -338,7 +338,7 @@ function ConvertTo-MetricTable {
         if ($pairs.Count -gt 0) { $entries += , $pairs }
     }
     if ($entries.Count -eq 0) { return $null }
-    $keys = @($entries[0].Keys | Sort-Object)
+    $keys = @($entries | ForEach-Object { $_.Keys } | Sort-Object -Unique)
     $summary = @{}
     foreach ($key in $keys) {
         $series = @($entries | ForEach-Object { if ($_.ContainsKey($key)) { [double]$_[$key] } })
@@ -379,19 +379,35 @@ if (-not $SkipInternalMetrics) {
         foreach ($line in $mediaLines) { [void]$rawMetricLines.Add("MEDIA $line") }
     }
 
-    # Native host: shared appdata directory, so the window filter is mandatory.
+    # Native host: shared appdata directory, so the window filter is mandatory. Host
+    # lines may carry a pid= token; keep only the sampled TaskBarWidgets instance so a
+    # second installation cannot mix its counters into the window. Lines without pid=
+    # predate that key and stay eligible.
     $nativePath = Join-Path $env:APPDATA 'TaskBarWidgets\native-metrics.log'
     if (Test-Path -LiteralPath $nativePath -PathType Leaf) {
+        $nativeTarget = $targets | Where-Object { $_.Name -eq 'TaskBarWidgets' } | Select-Object -First 1
         $nativeLines = New-Object System.Collections.ArrayList
+        $nativeLegacyLines = 0
         foreach ($line in @(Get-Content -LiteralPath $nativePath -ErrorAction SilentlyContinue)) {
             if ($line -match '^(?<ts>\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) METRICS ') {
                 $stamp = [datetime]::ParseExact($Matches['ts'], 'yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture)
-                if ($stamp -ge $windowStart -and $stamp -le $windowEnd) { [void]$nativeLines.Add($line) }
+                if ($stamp -ge $windowStart -and $stamp -le $windowEnd) {
+                    if ($line -match '(?:^|\s)pid=(?<pid>\d+)(?=\s|$)') {
+                        if ($nativeTarget -and [int]$Matches['pid'] -ne $nativeTarget.Id) { continue }
+                    }
+                    else {
+                        $nativeLegacyLines++
+                    }
+                    [void]$nativeLines.Add($line)
+                }
             }
         }
         if ($nativeLines.Count -gt 0) {
             $internal['Native'] = ConvertTo-MetricTable -Lines $nativeLines -Source 'Native native-metrics.log'
             foreach ($line in $nativeLines) { [void]$rawMetricLines.Add("NATIVE $line") }
+            if ($nativeLegacyLines -gt 0) {
+                [void]$warnings.Add("Native native-metrics.log: 含无 pid 旧条目 $nativeLegacyLines of $($nativeLines.Count) kept lines; those entries are not pid-filtered.")
+            }
         }
     }
 

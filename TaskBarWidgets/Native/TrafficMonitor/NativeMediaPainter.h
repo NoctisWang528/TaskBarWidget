@@ -112,6 +112,9 @@ namespace NativeMedia
 
         static D2D1_COLOR_F ParseColor(const std::wstring& value, D2D1_COLOR_F fallback);
         static std::uint64_t HashText(const std::wstring& value);
+        // Single derivation for cover cache keys: PrepareCover and the renderer's
+        // decode-failure fallback must agree on the key for a cover and decode edge.
+        static std::uint64_t CoverCacheKey(const Cover& cover, UINT coverEdgePx);
 
         // Built-in footprint counters sampled by the native metrics line.
         std::size_t TextLayoutCount() const { return m_layouts.size(); }

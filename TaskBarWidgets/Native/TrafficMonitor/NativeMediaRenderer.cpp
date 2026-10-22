@@ -163,6 +163,10 @@ namespace NativeMedia
         // HRESULT pair only bumps counters instead of formatting another log line.
         constexpr std::uint64_t FailureLogWindowMs = 5000;
 
+        // Global cap shared by every failure key: however many distinct keys fail,
+        // at most one failure line per second is written.
+        constexpr std::uint64_t FailureLogMinIntervalMs = 1000;
+
         bool IsDeviceLostResult(HRESULT result)
         {
             return result == DXGI_ERROR_DEVICE_REMOVED || result == DXGI_ERROR_DEVICE_RESET ||
@@ -297,12 +301,23 @@ namespace NativeMedia
             ++m_pendingRepeats;
             return false;
         }
+        // Alternating failure keys must not become a per-frame log storm, so the
+        // global cap suppresses every key for one second after the last written
+        // line. Suppressed calls only count; the five second window above is
+        // unchanged and still wins for same-key repeats.
+        if (now - m_lastFailureLogTick < FailureLogMinIntervalMs)
+        {
+            ++m_failures.suppressedOps;
+            if (sameKey) ++m_pendingRepeats;
+            return false;
+        }
         // Repeats counted above belong to the previously logged site, so a different
         // failure never reports them as its own.
         if (!sameKey) m_pendingRepeats = 0;
         m_loggedOp = op;
         m_loggedHr = result;
         m_loggedTick = now;
+        m_lastFailureLogTick = now;
         return true;
     }
 
@@ -330,8 +345,18 @@ namespace NativeMedia
 
     void NativeMediaRenderer::Fail(FailureOp op, const std::wstring& message, HRESULT result)
     {
-        m_diagnostic = message;
+        // Consume a pending step first: it names the real failing operation and
+        // HRESULT and must never outlive its own failure path to label another one.
+        if (m_stepOp != FailureOp::None)
+        {
+            op = m_stepOp;
+            result = m_stepHr;
+            m_stepOp = FailureOp::None;
+        }
         if (!RecordFailure(op, result, nullptr)) return;
+        // Updated only when a line is actually written, matching HandleDeviceLost:
+        // a suppressed repeat keeps the previously reported diagnostic text.
+        m_diagnostic = message;
         Log(message + L" (" + FormatHResult(result) + L")" + FailureContext(), result);
     }
 
@@ -348,6 +373,9 @@ namespace NativeMedia
         {
             if (!CreateCompositionTarget())
             {
+                // This path never reaches Fail(), so consume a pending step here
+                // instead of letting it label a later, unrelated failure.
+                m_stepOp = FailureOp::None;
                 ScheduleRetry(GetTickCount64(), E_FAIL);
                 return;
             }
@@ -1104,8 +1132,12 @@ namespace NativeMedia
         if (!decoded && !cover->dataUri.empty())
             Log(L"Media cover image could not be decoded; using its fallback.",
                 E_FAIL);
-        const std::uint64_t key = decoded ? bitmap.key : NativeMediaPainter::HashText(
-            cover->dataUri.empty() ? cover->fallbackIconDataUri : cover->dataUri);
+        // The fallback derives exactly the key a successful decode would use (same
+        // uri selection, decode edge and app-icon mix), so a later successful decode
+        // of the same cover is a cache hit and the keep set never holds a key
+        // outside the cache's key space.
+        const std::uint64_t key = decoded ? bitmap.key : NativeMediaPainter::CoverCacheKey(*cover,
+            static_cast<UINT>(std::lround((std::max)(1.0, m_effectiveStyle.coverSizePx))));
         if (!m_ready || !m_coverFront.visual || !m_coverBack.visual) return false;
         Layer& active = m_coverFrontIsActive ? m_coverFront : m_coverBack;
         Layer& standby = m_coverFrontIsActive ? m_coverBack : m_coverFront;
@@ -1540,6 +1572,14 @@ namespace NativeMedia
     void NativeMediaRenderer::HandleDeviceLost(HRESULT result, FailureOp op,
         const wchar_t* operation, const Layer* layer)
     {
+        // Consume a pending step exactly like Fail(): it names the real failing
+        // operation and HRESULT and must not outlive its own failure path.
+        if (m_stepOp != FailureOp::None)
+        {
+            op = m_stepOp;
+            result = m_stepHr;
+            m_stepOp = FailureOp::None;
+        }
         const bool lost = IsDeviceLost(result);
         // A repeat inside the dedup window returns before any string is built, so a
         // failing frame still allocates nothing.

@@ -1492,7 +1492,8 @@ void NativeMediaHost::WriteFootprintMetrics()
         L" lastFailureBuffers=" + std::to_wstring(failures.buffers) +
         L" lastFailureTargetBound=" + std::to_wstring(failures.targetBound ? 1 : 0) +
         L" invalidates=" + std::to_wstring(taskbar_invalidates.load()) +
-        L" adjustRectChanged=" + std::to_wstring(taskbar_rect_changes.load()) + L"\r\n";
+        L" adjustRectChanged=" + std::to_wstring(taskbar_rect_changes.load()) +
+        L" pid=" + std::to_wstring(GetCurrentProcessId()) + L"\r\n";
 
     const std::wstring path = theApp.m_appdata_dir + L"native-metrics.log";
     WIN32_FILE_ATTRIBUTE_DATA attributes{};

@@ -130,7 +130,13 @@ internal sealed class MediaPipeServer : IAsyncDisposable
         }
 
         var (peerPath, clientProcessId, stage, error) = ClientImagePath(pipe);
-        switch (EvaluatePeer(_expectedPeerPath, File.Exists(_expectedPeerPath), peerPath, SelfImagePath()))
+        // A separate process can present this image's own path - a second instance of
+        // TaskBarWidgets.Media.exe reports an identical one - so the self-image shortcut
+        // is scoped to a pipe client that is this very process (an in-process harness).
+        // Any other client is judged against the expected peer path even when it runs
+        // this image.
+        var selfPath = clientProcessId == Environment.ProcessId ? SelfImagePath() : string.Empty;
+        switch (EvaluatePeer(_expectedPeerPath, File.Exists(_expectedPeerPath), peerPath, selfPath))
         {
             case PeerVerdict.Accepted:
                 return true;
@@ -143,9 +149,9 @@ internal sealed class MediaPipeServer : IAsyncDisposable
                 NotePeerGuard("fallback", "ui-executable-missing");
                 return true;
             case PeerVerdict.SelfConnection:
-                // An in-process harness (tests) connects from the helper image itself. A
-                // separate process cannot present its own image path, so this is a test
-                // accommodation rather than a production bypass.
+                // Only a pipe client that is this very process reaches here (see the PID
+                // gate above). A separate instance of the same image is judged against
+                // the expected peer path instead and is rejected there.
                 NotePeerGuard("skip", "self-connection");
                 return true;
             default:
