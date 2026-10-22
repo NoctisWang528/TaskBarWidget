@@ -10,6 +10,7 @@ internal static class AudioSessionProcessResolver
     private const int ClassContextAll = 0x17;
 
     private static readonly Guid AudioSessionManager2InterfaceId = new("77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F");
+    private static readonly Guid DeviceEnumeratorClassId = new("BCDE0395-E52F-467C-8E3D-C4579291692E");
 
     public static string? TryResolveSingleActiveSessionExecutablePath() =>
         SelectSingleSessionExecutablePath(
@@ -33,7 +34,15 @@ internal static class AudioSessionProcessResolver
         IAudioSessionEnumerator? sessionEnumerator = null;
         try
         {
-            deviceEnumerator = (IMMDeviceEnumerator)(object)new MMDeviceEnumerator();
+            // Request the interface directly: another audio feature can register a different
+            // managed coclass for this CLSID, making a typed coclass constructor cast fail.
+            var classId = DeviceEnumeratorClassId;
+            var deviceEnumeratorInterfaceId = typeof(IMMDeviceEnumerator).GUID;
+            if (CoCreateInstance(ref classId, IntPtr.Zero, ClassContextAll, ref deviceEnumeratorInterfaceId, out deviceEnumerator) != 0 ||
+                deviceEnumerator is null)
+            {
+                return processIds;
+            }
             if (deviceEnumerator.GetDefaultAudioEndpoint(RenderDataFlow, MultimediaRole, out device) != 0 ||
                 device is null)
             {
@@ -96,11 +105,13 @@ internal static class AudioSessionProcessResolver
         }
     }
 
-    [ComImport]
-    [Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
-    private sealed class MMDeviceEnumerator
-    {
-    }
+    [DllImport("ole32.dll", ExactSpelling = true)]
+    private static extern int CoCreateInstance(
+        ref Guid classId,
+        IntPtr outer,
+        uint classContext,
+        ref Guid interfaceId,
+        [MarshalAs(UnmanagedType.Interface)] out IMMDeviceEnumerator? enumerator);
 
     [ComImport]
     [Guid("A95664D2-9614-4F35-A746-DE8DB63617E6")]

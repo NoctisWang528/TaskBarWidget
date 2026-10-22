@@ -23,6 +23,7 @@ public sealed class SystemAudioSpectrumService : IDisposable
     private static readonly Guid IAudioClientId = new("1CB9AD4C-DBFA-4c32-B178-C2F568A703B2");
     private static readonly Guid IAudioCaptureClientId = new("C8ADBD64-E71E-48a0-A4DE-185C395CD317");
     private static readonly Guid IeeeFloatSubFormat = new("00000003-0000-0010-8000-00aa00389b71");
+    private static readonly Guid MMDeviceEnumeratorClassId = new("BCDE0395-E52F-467C-8E3D-C4579291692E");
     // Hann windows depend only on the coerced sample window, which is 512, 1024 or 2048,
     // so this cache stays bounded at three immutable arrays for the process lifetime.
     private static readonly ConcurrentDictionary<int, double[]> HannWindows = new();
@@ -273,7 +274,15 @@ public sealed class SystemAudioSpectrumService : IDisposable
             {
                 ResetSignal();
             }
-            enumerator = (IMMDeviceEnumerator)(object)new MMDeviceEnumerator();
+            // Request the interface directly: another audio feature can register a different
+            // managed coclass for this CLSID, making a typed coclass constructor cast fail.
+            var classId = MMDeviceEnumeratorClassId;
+            var enumeratorInterfaceId = typeof(IMMDeviceEnumerator).GUID;
+            Marshal.ThrowExceptionForHR(CoCreateInstance(ref classId, IntPtr.Zero, ClsctxAll, ref enumeratorInterfaceId, out enumerator));
+            if (enumerator is null)
+            {
+                throw new InvalidOperationException("CoCreateInstance did not return the IMMDeviceEnumerator interface.");
+            }
             Marshal.ThrowExceptionForHR(enumerator.GetDefaultAudioEndpoint(EDataFlow.Render, ERole.Console, out device));
             var activeDeviceId = GetDeviceId(device);
             var audioClientId = IAudioClientId;
@@ -684,6 +693,14 @@ public sealed class SystemAudioSpectrumService : IDisposable
         }
     }
 
+    [DllImport("ole32.dll", ExactSpelling = true)]
+    private static extern int CoCreateInstance(
+        ref Guid classId,
+        IntPtr outer,
+        uint classContext,
+        ref Guid interfaceId,
+        [MarshalAs(UnmanagedType.Interface)] out IMMDeviceEnumerator? enumerator);
+
     private static void ReleaseCom(object? value)
     {
         if (value is not null && Marshal.IsComObject(value))
@@ -852,12 +869,6 @@ public sealed class SystemAudioSpectrumService : IDisposable
         Console,
         Multimedia,
         Communications
-    }
-
-    [ComImport]
-    [Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
-    private sealed class MMDeviceEnumerator
-    {
     }
 
     [ComImport]
