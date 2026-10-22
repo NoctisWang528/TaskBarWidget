@@ -1,9 +1,11 @@
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using System.Text.Json;
 using System.Runtime.InteropServices;
 using System.Windows;
 using Microsoft.Win32;
+using TaskBarWidgets.Media.Diagnostics;
 using TaskBarWidgets.Media.Integration;
 using TaskbarLyrics.Core.Database;
 using TaskbarLyrics.Core.Utilities;
@@ -30,6 +32,8 @@ public partial class App : System.Windows.Application
     private MediaSettingsService? _settingsService;
     private readonly CancellationTokenSource _stop = new();
     private bool _shutdownRequested;
+    // Per-connection artwork version memory for getState: see the artworkDelta branch.
+    private readonly ArtworkDeltaState _artwork = new();
     internal AppSettings Settings { get; private set; } = new();
 
     internal App(Process host, string pipeName, bool? portableData = null)
@@ -88,6 +92,7 @@ public partial class App : System.Windows.Application
             if (_updateInstaller is not null) TaskObserver.Observe(_updateInstaller.ReportPreviousFailureAsync(_stop.Token), "previous update outcome");
             TaskObserver.Observe(WatchHostAsync(), "parent lifecycle");
             SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
+            FootprintMetrics.Start();
         }
         catch (Exception exception)
         {
@@ -192,13 +197,56 @@ public partial class App : System.Windows.Application
                 ApplyCardLyricsVisibility();
                 return new { snapshot = cardVisible ? _media.CardSnapshot : null };
             case "getState":
+            {
                 var state = _media.ControlState;
-                return new { state.Title, state.Artist, state.Source, state.PositionSeconds, state.DurationSeconds,
-                    state.IsPlaying, state.CanPrevious, state.CanNext, state.CanPlayPause, state.CanSeek,
-                    coverDataUrl = _media.CoverDataUrl, sources = (state.Sources ?? []).Select(source => new { source.Id,
-                        label = source.Name switch { "QQMusic" => "QQ 音乐", "Netease" => "网易云音乐", "Kugou" => "酷狗音乐", "Douyin" => "抖音", "Browser" => BrowserSourceName(source.Id), _ => source.Name },
-                        iconDataUrl = _media.SourceIcon(source) }),
-                    state.SelectedSourceId, toolWindowTheme = (int)Settings.ToolWindowTheme };
+                var coverDataUrl = _media.CoverDataUrl;
+                // The card polls every 400 ms and the source icons dominate the reply, so the
+                // client may opt into artwork delta: unchanged cover/icon strings are omitted.
+                // Version memory belongs to one connection; a reconnect always gets a complete
+                // reply so a re-created client can never keep stale artwork. Clients that do not
+                // send the flag (older builds, other callers) still receive the full payload.
+                var delta = _artwork.Begin(generation, payload.ValueKind == JsonValueKind.Object
+                    && payload.TryGetProperty("artworkDelta", out var artworkDelta)
+                    && artworkDelta.ValueKind == JsonValueKind.True);
+                var coverChanged = _artwork.CoverChanged(coverDataUrl, delta);
+                long textBytes = Encoding.UTF8.GetByteCount(state.Title) + Encoding.UTF8.GetByteCount(state.Artist) + Encoding.UTF8.GetByteCount(state.Source);
+                long iconBytes = 0;
+                // Read the cover and each source icon once, then measure the text payload
+                // directly instead of serializing the whole reply.
+                var sourceItems = (state.Sources ?? []).Select(source =>
+                {
+                    var label = source.Name switch { "QQMusic" => "QQ 音乐", "Netease" => "网易云音乐", "Kugou" => "酷狗音乐", "Douyin" => "抖音", "Browser" => BrowserSourceName(source.Id), _ => source.Name };
+                    var icon = _media.SourceIcon(source) ?? string.Empty;
+                    var item = new Dictionary<string, object?> { ["id"] = source.Id, ["label"] = label };
+                    textBytes += Encoding.UTF8.GetByteCount(label);
+                    if (_artwork.IconChanged(source.Id, icon, delta))
+                    {
+                        item["iconDataUrl"] = icon;
+                        iconBytes += Encoding.UTF8.GetByteCount(icon);
+                    }
+                    return item;
+                }).ToList();
+                FootprintMetrics.NoteStatePayload(textBytes, coverChanged ? Encoding.UTF8.GetByteCount(coverDataUrl) : 0, iconBytes);
+                if (coverChanged) _artwork.CommitCover(coverDataUrl);
+                var reply = new Dictionary<string, object?>
+                {
+                    ["title"] = state.Title,
+                    ["artist"] = state.Artist,
+                    ["source"] = state.Source,
+                    ["positionSeconds"] = state.PositionSeconds,
+                    ["durationSeconds"] = state.DurationSeconds,
+                    ["isPlaying"] = state.IsPlaying,
+                    ["canPrevious"] = state.CanPrevious,
+                    ["canNext"] = state.CanNext,
+                    ["canPlayPause"] = state.CanPlayPause,
+                    ["canSeek"] = state.CanSeek
+                };
+                if (coverChanged) reply["coverDataUrl"] = coverDataUrl;
+                reply["sources"] = sourceItems;
+                reply["selectedSourceId"] = state.SelectedSourceId;
+                reply["toolWindowTheme"] = (int)Settings.ToolWindowTheme;
+                return reply;
+            }
             case "openPanel": OpenAudioPanel(); return new { success = true };
             case "getNativeSettings": return await GetNativeSettingsAsync();
             case "applyNativeSettings": return await ApplyNativeSettingsAsync(payload);
@@ -352,6 +400,7 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs args)
     {
+        FootprintMetrics.Stop();
         _nativeSettings?.Dispose();
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
         _stop.Cancel();

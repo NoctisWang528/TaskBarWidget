@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using TaskbarLyrics.Core.Utilities;
 using TaskbarLyrics.App;
+using TaskBarWidgets.Media.Diagnostics;
 
 namespace TaskBarWidgets.Media.Integration;
 
@@ -222,6 +223,8 @@ internal sealed class UiHostBridge : IAsyncDisposable
     }
     private void RecordTiming(UiRequestTiming timing)
     {
+        // Counted before the existing log throttling so every getState is measured.
+        if (timing.Action == "getState") FootprintMetrics.NoteStateTiming(timing.OperationMilliseconds);
         if ((timing.Action is "getAudio" or "getState") && timing.QueueMilliseconds + timing.OperationMilliseconds < 100 && Interlocked.Increment(ref _pollLogs) > 4) return;
         if (Volatile.Read(ref _timingLogs) >= 128 || Interlocked.Increment(ref _timingLogs) > 128) return;
         Log.Diagnostic("UIREQUEST", $"action={timing.Action} lane={timing.Lane} queueMs={timing.QueueMilliseconds:F1} operationMs={timing.OperationMilliseconds:F1} outcome={timing.Outcome}");

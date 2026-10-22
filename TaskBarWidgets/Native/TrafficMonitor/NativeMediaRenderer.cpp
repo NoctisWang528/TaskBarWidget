@@ -155,11 +155,38 @@ namespace NativeMedia
                 left.barCount == right.barCount;
         }
 
+        // Buffer count of every composition swap chain. The failure context reports
+        // the same value so the description and the diagnostics cannot drift apart.
+        constexpr UINT SwapChainBuffers = 2;
+
+        // Same window as NativeMediaHost::Failure. Inside it a repeated operation and
+        // HRESULT pair only bumps counters instead of formatting another log line.
+        constexpr std::uint64_t FailureLogWindowMs = 5000;
+
+        // Global cap shared by every failure key: however many distinct keys fail,
+        // at most one failure line per second is written.
+        constexpr std::uint64_t FailureLogMinIntervalMs = 1000;
+
         bool IsDeviceLostResult(HRESULT result)
         {
             return result == DXGI_ERROR_DEVICE_REMOVED || result == DXGI_ERROR_DEVICE_RESET ||
                 result == D2DERR_RECREATE_TARGET || result == D2DERR_WRONG_STATE ||
                 result == static_cast<HRESULT>(0x8899000CUL);
+        }
+
+        // DXGI_ERROR_INVALID_CALL is deliberately not device loss: it is a caller side
+        // argument or state error, so it is counted and reported on its own until the
+        // desktop log proves which class the observed 0x887A0001 belongs to.
+        const wchar_t* FailureKindName(HRESULT result)
+        {
+            if (IsDeviceLostResult(result)) return L"device_lost";
+            if (result == DXGI_ERROR_INVALID_CALL) return L"invalid_call";
+            return L"failure";
+        }
+
+        std::uint32_t SizeToPixels(float value)
+        {
+            return value > 0.0f ? static_cast<std::uint32_t>(value + 0.5f) : 0u;
         }
 
         std::wstring FormatHResult(HRESULT result)
@@ -216,6 +243,32 @@ namespace NativeMedia
         }
     }
 
+    const wchar_t* FailureOpName(FailureOp op)
+    {
+        switch (op)
+        {
+        case FailureOp::CreateD3DDevice: return L"create_d3d_device";
+        case FailureOp::GetDxgiDevice: return L"get_dxgi_device";
+        case FailureOp::CreateD2DDevice: return L"create_d2d_device";
+        case FailureOp::CreateDeviceContext: return L"create_device_context";
+        case FailureOp::CreateWriteFactory: return L"create_write_factory";
+        case FailureOp::InitializePainter: return L"initialize_painter";
+        case FailureOp::CreateCompositionDevice: return L"create_composition_device";
+        case FailureOp::CreateCompositionTarget: return L"create_composition_target";
+        case FailureOp::CreateCompositionVisual: return L"create_composition_visual";
+        case FailureOp::CreateSwapChain: return L"create_swap_chain";
+        case FailureOp::AddCompositionVisual: return L"add_composition_visual";
+        case FailureOp::ApplyVisualTree: return L"apply_visual_tree";
+        case FailureOp::ResizeBuffers: return L"resize_buffers";
+        case FailureOp::AcquireBuffer: return L"acquire_buffer";
+        case FailureOp::CreateTargetBitmap: return L"create_target_bitmap";
+        case FailureOp::Draw: return L"draw";
+        case FailureOp::Present: return L"present";
+        case FailureOp::None: break;
+        }
+        return L"none";
+    }
+
     NativeMediaRenderer::~NativeMediaRenderer()
     {
         DetachHost();
@@ -226,10 +279,85 @@ namespace NativeMedia
         if (m_logger) m_logger(message, result);
     }
 
-    void NativeMediaRenderer::Fail(const std::wstring& message, HRESULT result)
+    // Attribution only: POD writes and one GetTickCount64, no allocation, no lock.
+    // Returns true when this failure has to be formatted and logged.
+    bool NativeMediaRenderer::RecordFailure(FailureOp op, HRESULT result, const Layer* layer)
     {
+        ++m_failures.failedOps;
+        m_failures.lastFailureHr = static_cast<std::uint32_t>(result);
+        m_failures.lastFailureOp = op;
+        m_failures.width = layer ? layer->width : SizeToPixels(m_width);
+        m_failures.height = layer ? layer->height : SizeToPixels(m_height);
+        m_failures.buffers = SwapChainBuffers;
+        m_failures.targetBound = layer && layer->target != nullptr;
+        if (result == DXGI_ERROR_INVALID_CALL) ++m_failures.invalidCall;
+        if (IsDeviceLostResult(result)) ++m_failures.deviceLost;
+
+        const std::uint64_t now = GetTickCount64();
+        const bool sameKey = op == m_loggedOp && result == m_loggedHr;
+        if (sameKey && now - m_loggedTick < FailureLogWindowMs)
+        {
+            ++m_failures.suppressedOps;
+            ++m_pendingRepeats;
+            return false;
+        }
+        // Alternating failure keys must not become a per-frame log storm, so the
+        // global cap suppresses every key for one second after the last written
+        // line. Suppressed calls only count; the five second window above is
+        // unchanged and still wins for same-key repeats.
+        if (now - m_lastFailureLogTick < FailureLogMinIntervalMs)
+        {
+            ++m_failures.suppressedOps;
+            if (sameKey) ++m_pendingRepeats;
+            return false;
+        }
+        // Repeats counted above belong to the previously logged site, so a different
+        // failure never reports them as its own.
+        if (!sameKey) m_pendingRepeats = 0;
+        m_loggedOp = op;
+        m_loggedHr = result;
+        m_loggedTick = now;
+        m_lastFailureLogTick = now;
+        return true;
+    }
+
+    // Called only where a log line is produced, never per frame and never per repeat.
+    std::wstring NativeMediaRenderer::FailureContext()
+    {
+        const std::uint64_t repeats = m_pendingRepeats;
+        m_pendingRepeats = 0;
+        wchar_t size[48]{};
+        swprintf_s(size, L"%ux%u", m_failures.width, m_failures.height);
+        const HRESULT result = static_cast<HRESULT>(m_failures.lastFailureHr);
+        return std::wstring(L" op=") + FailureOpName(m_failures.lastFailureOp) +
+            L" kind=" + FailureKindName(result) +
+            L" size=" + size +
+            L" buffers=" + std::to_wstring(m_failures.buffers) +
+            L" targetBound=" + (m_failures.targetBound ? L"1" : L"0") +
+            L" repeats=" + std::to_wstring(repeats);
+    }
+
+    void NativeMediaRenderer::NoteStepFailure(FailureOp op, HRESULT result)
+    {
+        m_stepOp = op;
+        m_stepHr = result;
+    }
+
+    void NativeMediaRenderer::Fail(FailureOp op, const std::wstring& message, HRESULT result)
+    {
+        // Consume a pending step first: it names the real failing operation and
+        // HRESULT and must never outlive its own failure path to label another one.
+        if (m_stepOp != FailureOp::None)
+        {
+            op = m_stepOp;
+            result = m_stepHr;
+            m_stepOp = FailureOp::None;
+        }
+        if (!RecordFailure(op, result, nullptr)) return;
+        // Updated only when a line is actually written, matching HandleDeviceLost:
+        // a suppressed repeat keeps the previously reported diagnostic text.
         m_diagnostic = message;
-        Log(message + L" (" + FormatHResult(result) + L")", result);
+        Log(message + L" (" + FormatHResult(result) + L")" + FailureContext(), result);
     }
 
     void NativeMediaRenderer::SetHost(HWND host)
@@ -245,6 +373,9 @@ namespace NativeMedia
         {
             if (!CreateCompositionTarget())
             {
+                // This path never reaches Fail(), so consume a pending step here
+                // instead of letting it label a later, unrelated failure.
+                m_stepOp = FailureOp::None;
                 ScheduleRetry(GetTickCount64(), E_FAIL);
                 return;
             }
@@ -451,13 +582,28 @@ namespace NativeMedia
     bool NativeMediaRenderer::CreateCompositionTarget()
     {
         if (!m_host || !m_compositionDevice) return false;
-        if (!m_rootVisual && FAILED(m_compositionDevice->CreateVisual(&m_rootVisual)))
-            return false;
+        if (!m_rootVisual)
+        {
+            const HRESULT visual = m_compositionDevice->CreateVisual(&m_rootVisual);
+            if (FAILED(visual))
+            {
+                NoteStepFailure(FailureOp::CreateCompositionVisual, visual);
+                return false;
+            }
+        }
         HRESULT result = m_compositionDevice->CreateTargetForHwnd(m_host, TRUE,
             &m_compositionTarget);
-        if (FAILED(result)) return false;
+        if (FAILED(result))
+        {
+            NoteStepFailure(FailureOp::CreateCompositionTarget, result);
+            return false;
+        }
         result = m_compositionTarget->SetRoot(m_rootVisual.Get());
-        if (FAILED(result)) return false;
+        if (FAILED(result))
+        {
+            NoteStepFailure(FailureOp::ApplyVisualTree, result);
+            return false;
+        }
         if (!CreateLayers()) return false;
         ApplyVisualTree();
         m_fade.Set(m_compositionDevice.Get(), m_rootVisual.Get(), m_requestedVisible, false);
@@ -500,14 +646,14 @@ namespace NativeMedia
                 &m_d3dDevice, &level, nullptr);
         if (FAILED(result))
         {
-            Fail(L"Direct3D device creation failed.", result);
+            Fail(FailureOp::CreateD3DDevice, L"Direct3D device creation failed.", result);
             ScheduleRetry(GetTickCount64(), result);
             return false;
         }
         result = m_d3dDevice.As(&m_dxgiDevice);
         if (FAILED(result))
         {
-            Fail(L"DXGI device could not be obtained.", result);
+            Fail(FailureOp::GetDxgiDevice, L"DXGI device could not be obtained.", result);
             ScheduleRetry(GetTickCount64(), result);
             return false;
         }
@@ -518,7 +664,7 @@ namespace NativeMedia
         if (FAILED(result) ||
             FAILED(m_d2dFactory->CreateDevice(m_dxgiDevice.Get(), &m_d2dDevice)))
         {
-            Fail(L"Direct2D device creation failed.", result);
+            Fail(FailureOp::CreateD2DDevice, L"Direct2D device creation failed.", result);
             ScheduleRetry(GetTickCount64(), result);
             return false;
         }
@@ -526,7 +672,7 @@ namespace NativeMedia
             &m_context);
         if (FAILED(result))
         {
-            Fail(L"Direct2D device context creation failed.", result);
+            Fail(FailureOp::CreateDeviceContext, L"Direct2D device context creation failed.", result);
             ScheduleRetry(GetTickCount64(), result);
             return false;
         }
@@ -536,7 +682,7 @@ namespace NativeMedia
             reinterpret_cast<IUnknown**>(m_writeFactory.GetAddressOf()));
         if (FAILED(result))
         {
-            Fail(L"DirectWrite factory creation failed.", result);
+            Fail(FailureOp::CreateWriteFactory, L"DirectWrite factory creation failed.", result);
             ScheduleRetry(GetTickCount64(), result);
             return false;
         }
@@ -544,7 +690,7 @@ namespace NativeMedia
         if (!m_painter.Initialize(m_d2dFactory.Get(), m_d2dDevice.Get(),
             m_writeFactory.Get(), painterError))
         {
-            Fail(painterError, E_FAIL);
+            Fail(FailureOp::InitializePainter, painterError, E_FAIL);
             ScheduleRetry(GetTickCount64(), E_FAIL);
             return false;
         }
@@ -552,13 +698,19 @@ namespace NativeMedia
             IID_PPV_ARGS(&m_compositionDevice));
         if (FAILED(result))
         {
-            Fail(L"DirectComposition device creation failed.", result);
+            Fail(FailureOp::CreateCompositionDevice, L"DirectComposition device creation failed.", result);
             ScheduleRetry(GetTickCount64(), result);
             return false;
         }
         if (!CreateCompositionTarget())
         {
-            Fail(L"DirectComposition target creation failed.", result);
+            // The step that really failed records its own HRESULT; result still holds
+            // the successful DCompositionCreateDevice value and is the fallback.
+            const FailureOp op = m_stepOp != FailureOp::None
+                ? m_stepOp : FailureOp::CreateCompositionTarget;
+            const HRESULT step = m_stepOp != FailureOp::None ? m_stepHr : result;
+            m_stepOp = FailureOp::None;
+            Fail(op, L"DirectComposition target creation failed.", step);
             ScheduleRetry(GetTickCount64(), E_FAIL);
             return false;
         }
@@ -594,9 +746,13 @@ namespace NativeMedia
         if (!m_compositionDevice || !m_rootVisual) return false;
         ComPtr<IDXGIAdapter> adapter;
         ComPtr<IDXGIFactory2> factory;
-        if (FAILED(m_dxgiDevice->GetAdapter(&adapter)) ||
-            FAILED(adapter->GetParent(IID_PPV_ARGS(&factory))))
+        HRESULT queryResult = m_dxgiDevice->GetAdapter(&adapter);
+        if (SUCCEEDED(queryResult)) queryResult = adapter->GetParent(IID_PPV_ARGS(&factory));
+        if (FAILED(queryResult))
+        {
+            NoteStepFailure(FailureOp::CreateSwapChain, queryResult);
             return false;
+        }
         const UINT width = static_cast<UINT>((std::max)(1.0f, std::round(m_width)));
         const UINT height = static_cast<UINT>((std::max)(1.0f, std::round(m_height)));
         DXGI_SWAP_CHAIN_DESC1 description{};
@@ -605,23 +761,36 @@ namespace NativeMedia
         description.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
         description.SampleDesc.Count = 1;
         description.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-        description.BufferCount = 2;
+        description.BufferCount = SwapChainBuffers;
         description.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
         description.AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED;
         description.Scaling = DXGI_SCALING_STRETCH;
 
         const auto create = [&](Layer& layer, bool above, float opacity)
         {
-            if (FAILED(m_compositionDevice->CreateVisual(&layer.visual))) return false;
-            if (FAILED(factory->CreateSwapChainForComposition(m_d3dDevice.Get(),
-                &description, nullptr, &layer.swapChain)))
+            HRESULT stepResult = m_compositionDevice->CreateVisual(&layer.visual);
+            if (FAILED(stepResult))
+            {
+                NoteStepFailure(FailureOp::CreateCompositionVisual, stepResult);
                 return false;
+            }
+            stepResult = factory->CreateSwapChainForComposition(m_d3dDevice.Get(),
+                &description, nullptr, &layer.swapChain);
+            if (FAILED(stepResult))
+            {
+                NoteStepFailure(FailureOp::CreateSwapChain, stepResult);
+                return false;
+            }
             layer.width = width;
             layer.height = height;
             layer.visual->SetContent(layer.swapChain.Get());
             SetLayerOpacity(layer, opacity);
-            if (FAILED(m_rootVisual->AddVisual(layer.visual.Get(), above, nullptr)))
+            stepResult = m_rootVisual->AddVisual(layer.visual.Get(), above, nullptr);
+            if (FAILED(stepResult))
+            {
+                NoteStepFailure(FailureOp::AddCompositionVisual, stepResult);
                 return false;
+            }
             return true;
         };
         if (!create(m_background, true, 1.0f)) return false;
@@ -648,7 +817,8 @@ namespace NativeMedia
                 DXGI_FORMAT_UNKNOWN, 0);
             if (FAILED(result))
             {
-                HandleDeviceLost(result, L"resizing media composition layers");
+                HandleDeviceLost(result, FailureOp::ResizeBuffers,
+                    L"resizing media composition layers", layer);
                 return false;
             }
             layer->width = width;
@@ -677,9 +847,12 @@ namespace NativeMedia
     void NativeMediaRenderer::ApplyVisualTree()
     {
         if (!m_rootVisual || !m_compositionTarget) return;
-        m_compositionTarget->SetRoot(m_rootVisual.Get());
+        // The visual tree is applied on every present; a failed call used to be
+        // dropped silently. Only the failure count is recorded here so the render
+        // path stays free of logging, allocation and locks.
+        if (FAILED(m_compositionTarget->SetRoot(m_rootVisual.Get()))) ++m_failures.silentOps;
         m_fade.Set(m_compositionDevice.Get(), m_rootVisual.Get(), m_requestedVisible, false);
-        m_compositionDevice->Commit();
+        if (FAILED(m_compositionDevice->Commit())) ++m_failures.silentOps;
     }
 
     Frame NativeMediaRenderer::FrameForLyrics() const
@@ -699,7 +872,8 @@ namespace NativeMedia
         HRESULT result = layer.swapChain->GetBuffer(0, IID_PPV_ARGS(&surface));
         if (FAILED(result))
         {
-            HandleDeviceLost(result, L"acquiring a composition buffer");
+            HandleDeviceLost(result, FailureOp::AcquireBuffer,
+                L"acquiring a composition buffer", &layer);
             return false;
         }
         if (!layer.target)
@@ -712,7 +886,8 @@ namespace NativeMedia
                 &layer.target);
             if (FAILED(result))
             {
-                HandleDeviceLost(result, L"creating a composition target bitmap");
+                HandleDeviceLost(result, FailureOp::CreateTargetBitmap,
+                    L"creating a composition target bitmap", &layer);
                 return false;
             }
         }
@@ -724,14 +899,17 @@ namespace NativeMedia
         m_context->SetTarget(nullptr);
         if (FAILED(result))
         {
+            // Report before the bitmap is released so the diagnostics can say that a
+            // target was bound; the reset below still runs on every failing path.
+            HandleDeviceLost(result, FailureOp::Draw, L"drawing media composition", &layer);
             layer.target.Reset();
-            HandleDeviceLost(result, L"drawing media composition");
             return false;
         }
         result = layer.swapChain->Present(0, 0);
         if (FAILED(result))
         {
-            HandleDeviceLost(result, L"presenting media composition");
+            HandleDeviceLost(result, FailureOp::Present,
+                L"presenting media composition", &layer);
             return false;
         }
         layer.hasContent = true;
@@ -844,7 +1022,10 @@ namespace NativeMedia
         if (!cover) cover = &fallback;
         auto state = MakePaintState(m_effectiveStyle, m_pendingFrame, cover, m_tuning);
         CoverBitmap bitmap;
-        const bool hasBitmap = m_painter.PrepareCover(*cover, m_dpiScale, bitmap);
+        // Decode covers at the physical edge they are drawn at, not at the source extent.
+        const bool hasBitmap = m_painter.PrepareCover(*cover,
+            static_cast<UINT>(std::lround((std::max)(1.0, m_effectiveStyle.coverSizePx))),
+            bitmap);
         CoverPaint paint;
         paint.state = &state;
         paint.width = m_width;
@@ -859,7 +1040,14 @@ namespace NativeMedia
         if (painted)
         {
             m_coverDirty = false;
-            if (!m_coverFadeActive && key) m_coverKey = key;
+            // Record the key the cached bitmap is actually stored under: a DPI or cover
+            // size change decodes a different size, and keeping the older edge in
+            // m_coverKey would make ReleaseCoverBitmapsExcept drop the on-screen bitmap.
+            if (!m_coverFadeActive)
+            {
+                if (hasBitmap) m_coverKey = bitmap.key;
+                else if (key) m_coverKey = key;
+            }
         }
         return painted;
     }
@@ -938,12 +1126,18 @@ namespace NativeMedia
         fallback.fallbackText = L"N";
         if (!cover) cover = &fallback;
         CoverBitmap bitmap;
-        const bool decoded = m_painter.PrepareCover(*cover, m_dpiScale, bitmap);
+        const bool decoded = m_painter.PrepareCover(*cover,
+            static_cast<UINT>(std::lround((std::max)(1.0, m_effectiveStyle.coverSizePx))),
+            bitmap);
         if (!decoded && !cover->dataUri.empty())
             Log(L"Media cover image could not be decoded; using its fallback.",
                 E_FAIL);
-        const std::uint64_t key = decoded ? bitmap.key : NativeMediaPainter::HashText(
-            cover->dataUri.empty() ? cover->fallbackIconDataUri : cover->dataUri);
+        // The fallback derives exactly the key a successful decode would use (same
+        // uri selection, decode edge and app-icon mix), so a later successful decode
+        // of the same cover is a cache hit and the keep set never holds a key
+        // outside the cache's key space.
+        const std::uint64_t key = decoded ? bitmap.key : NativeMediaPainter::CoverCacheKey(*cover,
+            static_cast<UINT>(std::lround((std::max)(1.0, m_effectiveStyle.coverSizePx))));
         if (!m_ready || !m_coverFront.visual || !m_coverBack.visual) return false;
         Layer& active = m_coverFrontIsActive ? m_coverFront : m_coverBack;
         Layer& standby = m_coverFrontIsActive ? m_coverBack : m_coverFront;
@@ -1187,6 +1381,24 @@ namespace NativeMedia
         return true;
     }
 
+    FootprintSnapshot NativeMediaRenderer::Footprint() const
+    {
+        const Layer* const all[] = { &m_background, &m_lyrics, &m_spectrum,
+            &m_browser, &m_coverFront, &m_coverBack };
+        FootprintSnapshot snapshot;
+        for (const Layer* layer : all)
+        {
+            if (layer->visual) ++snapshot.layers;
+            if (layer->swapChain) ++snapshot.swapChains;
+        }
+        snapshot.textLayouts = m_painter.TextLayoutCount();
+        snapshot.textFormats = m_painter.TextFormatCount();
+        snapshot.brushes = m_painter.BrushCount();
+        snapshot.covers = m_painter.CoverCount();
+        snapshot.coverBytes = m_painter.CoverCacheBytes();
+        return snapshot;
+    }
+
     bool NativeMediaRenderer::Present(std::uint64_t now)
     {
         if (!m_hasState) return false;
@@ -1357,14 +1569,29 @@ namespace NativeMedia
         return IsDeviceLostResult(result);
     }
 
-    void NativeMediaRenderer::HandleDeviceLost(HRESULT result, const wchar_t* operation)
+    void NativeMediaRenderer::HandleDeviceLost(HRESULT result, FailureOp op,
+        const wchar_t* operation, const Layer* layer)
     {
-        if (!IsDeviceLost(result))
+        // Consume a pending step exactly like Fail(): it names the real failing
+        // operation and HRESULT and must not outlive its own failure path.
+        if (m_stepOp != FailureOp::None)
         {
-            Fail(std::wstring(L"Native media rendering failed while ") + operation, result);
-            return;
+            op = m_stepOp;
+            result = m_stepHr;
+            m_stepOp = FailureOp::None;
         }
-        Fail(std::wstring(L"Native media device was lost while ") + operation, result);
+        const bool lost = IsDeviceLost(result);
+        // A repeat inside the dedup window returns before any string is built, so a
+        // failing frame still allocates nothing.
+        if (RecordFailure(op, result, layer))
+        {
+            const std::wstring message = std::wstring(lost
+                ? L"Native media device was lost while "
+                : L"Native media rendering failed while ") + operation;
+            m_diagnostic = message;
+            Log(message + L" (" + FormatHResult(result) + L")" + FailureContext(), result);
+        }
+        if (!lost) return;
         ReleaseDevice();
         ScheduleRetry(GetTickCount64(), result);
         if (m_compositionTarget) m_compositionTarget->SetRoot(nullptr);

@@ -31,6 +31,23 @@ namespace
         return winrt::to_string(value);
     }
 
+    // FNV-1a 64 over the UTF-16 code units of a track identity. Diagnostics only need
+    // an opaque, irreversible marker: the identity is SourceApp|Title|Artist, so the
+    // text itself must never reach native-media.log.
+    static inline unsigned long long TrackHash64(const std::wstring& value)
+    {
+        constexpr unsigned long long Offset = 14695981039346656037ull;
+        constexpr unsigned long long Prime = 1099511628211ull;
+        unsigned long long hash = Offset;
+        for (const wchar_t unit : value)
+        {
+            const unsigned code = static_cast<unsigned short>(unit);
+            hash = (hash ^ (code & 0xFFu)) * Prime;
+            hash = (hash ^ (code >> 8)) * Prime;
+        }
+        return hash;
+    }
+
     JsonObject Command(const wchar_t* action)
     {
         JsonObject result;
@@ -94,6 +111,16 @@ namespace
         catch (...) { return false; }
     }
 }
+
+// Built-in footprint counters. Only the UI thread touches them.
+static std::atomic<unsigned long long> main_timer_ticks{};
+static std::atomic<unsigned long long> monitor_timer_ticks{};
+static std::atomic<unsigned long long> taskbar_timer_ticks{};
+// Taskbar repaint attribution: one increment per TASKBAR_TIMER pass and per pass
+// whose AdjustWindowPos actually changed the window rectangle.
+static std::atomic<unsigned long long> taskbar_invalidates{};
+static std::atomic<unsigned long long> taskbar_rect_changes{};
+static ULONGLONG last_metrics_write{};
 
 struct NativeMediaHost::Impl
 {
@@ -920,8 +947,19 @@ struct NativeMediaHost::Impl
             state.Frame(update.frame.sourceId, update.frame.isPlaying,
                 update.frame.hasMedia);
             if (update.style) Log(L"Media style applied.");
-            if (update.cover) Log(update.cover->cleared ? L"Media cover cleared." :
-                L"Media cover updated for track " + update.cover->trackId + L".");
+            if (update.cover)
+            {
+                if (update.cover->cleared) Log(L"Media cover cleared.");
+                else
+                {
+                    // The identity is SourceApp|Title|Artist; keep only its length and an
+                    // opaque hash so no track text reaches native-media.log.
+                    wchar_t marker[80]{};
+                    swprintf_s(marker, L"track=len:%zu hash:%016llx",
+                        update.cover->trackId.size(), TrackHash64(update.cover->trackId));
+                    Log(L"Media cover updated for " + std::wstring(marker) + L".");
+                }
+            }
             return true;
         }
         if (type == L"disconnected")
@@ -1380,6 +1418,96 @@ void NativeMediaHost::OpenSettings(const wchar_t* page)
         if (page) command.SetNamedValue(L"page", JsonValue::CreateStringValue(page));
         instance->Send(command);
     }
+}
+
+void NativeMediaHost::NoteTimer(unsigned kind)
+{
+    if (kind == 0) ++main_timer_ticks;
+    else if (kind == 1) ++monitor_timer_ticks;
+    else if (kind == 2) ++taskbar_timer_ticks;
+}
+
+void NativeMediaHost::NoteTaskbarRefresh(unsigned invalidations, unsigned geometryChanges)
+{
+    if (invalidations) taskbar_invalidates += invalidations;
+    if (geometryChanges) taskbar_rect_changes += geometryChanges;
+}
+
+// Appends one METRICS line to native-metrics.log at most every 5000 ms.
+// Cache footprint, timer, failure attribution and taskbar repaint counters are
+// recorded. Failure sites are fixed identifiers, so no media content, track
+// information or file path ever reaches this file.
+void NativeMediaHost::WriteFootprintMetrics()
+{
+    const ULONGLONG now = GetTickCount64();
+    if (last_metrics_write && now - last_metrics_write < 5000) return;
+    last_metrics_write = now;
+
+    unsigned layers{};
+    unsigned swapChains{};
+    unsigned long long textLayouts{};
+    unsigned long long textFormats{};
+    unsigned long long brushes{};
+    unsigned long long covers{};
+    unsigned long long coverBytes{};
+    NativeMedia::FailureSnapshot failures{};
+    const auto& instance = Shared();
+    if (instance)
+    {
+        const auto footprint = instance->renderer.Footprint();
+        layers = footprint.layers;
+        swapChains = footprint.swapChains;
+        textLayouts = footprint.textLayouts;
+        textFormats = footprint.textFormats;
+        brushes = footprint.brushes;
+        covers = footprint.covers;
+        coverBytes = footprint.coverBytes;
+        failures = instance->renderer.Failures();
+    }
+
+    SYSTEMTIME time{}; GetLocalTime(&time);
+    wchar_t prefix[32];
+    swprintf_s(prefix, L"%04u-%02u-%02u %02u:%02u:%02u",
+        time.wYear, time.wMonth, time.wDay, time.wHour, time.wMinute, time.wSecond);
+    const std::wstring line = std::wstring(prefix) + L" METRICS" +
+        L" layers=" + std::to_wstring(layers) +
+        L" swapChains=" + std::to_wstring(swapChains) +
+        L" textLayouts=" + std::to_wstring(textLayouts) +
+        L" textFormats=" + std::to_wstring(textFormats) +
+        L" brushes=" + std::to_wstring(brushes) +
+        L" covers=" + std::to_wstring(covers) +
+        L" coverBytes=" + std::to_wstring(coverBytes) +
+        L" mainTicks=" + std::to_wstring(main_timer_ticks.load()) +
+        L" monitorTicks=" + std::to_wstring(monitor_timer_ticks.load()) +
+        L" taskbarTicks=" + std::to_wstring(taskbar_timer_ticks.load()) +
+        L" deviceLost=" + std::to_wstring(failures.deviceLost) +
+        L" invalidCall=" + std::to_wstring(failures.invalidCall) +
+        L" failedOps=" + std::to_wstring(failures.failedOps) +
+        L" suppressedOps=" + std::to_wstring(failures.suppressedOps) +
+        L" silentOps=" + std::to_wstring(failures.silentOps) +
+        L" lastFailureHr=" + std::to_wstring(failures.lastFailureHr) +
+        L" lastFailureOp=" + NativeMedia::FailureOpName(failures.lastFailureOp) +
+        L" lastFailureWidth=" + std::to_wstring(failures.width) +
+        L" lastFailureHeight=" + std::to_wstring(failures.height) +
+        L" lastFailureBuffers=" + std::to_wstring(failures.buffers) +
+        L" lastFailureTargetBound=" + std::to_wstring(failures.targetBound ? 1 : 0) +
+        L" invalidates=" + std::to_wstring(taskbar_invalidates.load()) +
+        L" adjustRectChanged=" + std::to_wstring(taskbar_rect_changes.load()) +
+        L" pid=" + std::to_wstring(GetCurrentProcessId()) + L"\r\n";
+
+    const std::wstring path = theApp.m_appdata_dir + L"native-metrics.log";
+    WIN32_FILE_ATTRIBUTE_DATA attributes{};
+    if (GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &attributes) &&
+        (attributes.nFileSizeHigh || attributes.nFileSizeLow > 512 * 1024))
+        MoveFileExW(path.c_str(), (path + L".1").c_str(), MOVEFILE_REPLACE_EXISTING);
+    HANDLE file = CreateFileW(path.c_str(), FILE_APPEND_DATA,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return;
+    const auto text = Utf8(line);
+    DWORD written{};
+    WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &written, nullptr);
+    CloseHandle(file);
 }
 
 void NativeMediaHost::Tick() { if (m_impl) m_impl->Tick(); }

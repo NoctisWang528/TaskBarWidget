@@ -96,9 +96,13 @@ public sealed partial class CardGroup : IDisposable
     private long _audioRequestSequence, _audioAppliedSequence;
     private int _audioGeneration;
     private int _generation, _ticks, _flyoutsOpen;
+    private int _metricsTicks;
     private long _lyricsSession;
     private string? _outputId, _inputId, _lastCover, _selectedSourceId;
     private bool _outputMuted, _inputMuted;
+    // Set when local artwork was released or re-created: the next getState must ask for the
+    // complete cover/icon payload instead of the artworkDelta form that omits unchanged data.
+    private bool _forceArtworkSync;
     private ElementTheme? _themePreview;
     private ElementTheme _requestedTheme;
     private string? _lastWeatherSnapshotKey;
@@ -107,7 +111,11 @@ public sealed partial class CardGroup : IDisposable
     private readonly DateTimeOffset _createdAt = DateTimeOffset.UtcNow;
     private DateTimeOffset _lastHiddenAt = DateTimeOffset.UtcNow;
     private bool _residentResourcesReleased;
-    private readonly DispatcherTimer _idleReleaseTimer = new() { Interval = TimeSpan.FromSeconds(30) };
+    // Both resource modes release only rebuildable media/lyrics resources, and only
+    // after the cards have been hidden this long. The timer arms once for the
+    // remaining wait, so a hidden group never polls while nothing can change.
+    private const int IdleReleaseMinutes = 10;
+    private readonly DispatcherTimer _idleReleaseTimer = new() { Interval = TimeSpan.FromMinutes(IdleReleaseMinutes) };
     private sealed class CardSlot(string id, string title, FrameworkElement content, double height, bool autoHeight, double width)
     {
         internal string Id { get; } = id;
@@ -144,13 +152,22 @@ public sealed partial class CardGroup : IDisposable
         _previous.IsEnabled = _play.IsEnabled = _next.IsEnabled = _seek.IsEnabled = _source.IsEnabled = false;
         _timer.Tick += async (_, _) =>
         {
+            // Cumulative footprint snapshot every ~10 s on the existing 400 ms
+            // timer, plus one line per open and per hide (see WriteMetrics).
+            if (++_metricsTicks >= 25)
+            {
+                _metricsTicks = 0;
+                WriteMetrics();
+            }
             if (_visible) await RefreshAsync(++_ticks % 8 == 0, _ticks % 25 == 0);
         };
         _volumeTimer.Tick += async (_, _) => await FlushVolumesAsync();
         _idleReleaseTimer.Tick += (_, _) =>
         {
-            if (_visible) _idleReleaseTimer.Stop();
-            else ReleaseResidentResourcesIfNeeded();
+            // One shot per hidden period: the release pass re-arms only when it has to
+            // wait again, so a hidden group never polls an idle timer.
+            _idleReleaseTimer.Stop();
+            if (!_visible) ReleaseResidentResourcesIfNeeded();
         };
         _seekTimer.Tick += async (_, _) =>
         {
@@ -237,6 +254,7 @@ public sealed partial class CardGroup : IDisposable
             _sourceImageCache.Clear();
             _lastCover = null;
             _lastSourceIcon = "";
+            _forceArtworkSync = true;
         }
         else if (slot.Id == "traffic")
         {
@@ -304,6 +322,7 @@ public sealed partial class CardGroup : IDisposable
             _lyrics.Activate();
         }
         var openElapsed = timing.Elapsed;
+        FootprintMetrics.RecordOpen(openElapsed.TotalMilliseconds);
         var queuedWait = _openQueued;
         _openTiming = null;
         _openQueued = TimeSpan.Zero;
@@ -322,6 +341,8 @@ public sealed partial class CardGroup : IDisposable
         });
         CardLifecycleLog.Write($"shown generation={_generation} entry=0x{entryWindow:X}");
         _timer.Start();
+        _metricsTicks = 0;
+        WriteMetrics();
         _idleReleaseTimer.Stop();
         _ = RefreshAsync(_quickCardEnabled.GetValueOrDefault("device"), _quickCardEnabled.GetValueOrDefault("traffic"));
         if (_quickCardEnabled.GetValueOrDefault("media")) _ = SubscribeLyricsAsync(_lyricsSession, true);
@@ -337,9 +358,13 @@ public sealed partial class CardGroup : IDisposable
             await card.VisibleFrame.WaitAsync(TimeSpan.FromMilliseconds(600));
             CardTimingLog.Write($"first-frame openMs={openElapsed.TotalMilliseconds:0.0} " +
                 $"firstFrameMs={timing.Elapsed.TotalMilliseconds:0.0} totalMs={(queuedWait + timing.Elapsed).TotalMilliseconds:0.0}");
+            FootprintMetrics.RecordFirstFrame(timing.Elapsed.TotalMilliseconds);
         }
         catch (TimeoutException)
-        { CardTimingLog.Write($"first-frame-timeout openMs={openElapsed.TotalMilliseconds:0.0} totalMs={(queuedWait + timing.Elapsed).TotalMilliseconds:0.0}"); }
+        {
+            CardTimingLog.Write($"first-frame-timeout openMs={openElapsed.TotalMilliseconds:0.0} totalMs={(queuedWait + timing.Elapsed).TotalMilliseconds:0.0}");
+            FootprintMetrics.RecordFirstFrameTimeout();
+        }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         { CardLifecycleLog.Write($"timing-observe-failed hr=0x{exception.HResult:X8}"); }
     }
@@ -353,6 +378,11 @@ public sealed partial class CardGroup : IDisposable
         if (queued.TotalMilliseconds >= 30)
             CardTimingLog.Write($"queued gesture={gestureId} waitMs={queued.TotalMilliseconds:0.0}");
     }
+
+    // One line per lifecycle boundary keeps a 60 s desktop window analysable even
+    // when the poll timer stops while the card is hidden.
+    private void WriteMetrics()
+        => CardMetricsLog.Write(FootprintMetrics.Snapshot(_cover.Source is null ? 0 : 1, _cover.Source is not null, _sourceImageCache.Count));
 
     public void Hide() => Hide("explicit");
 
@@ -372,8 +402,10 @@ public sealed partial class CardGroup : IDisposable
         _visibleLifetime?.Dispose();
         _visibleLifetime = null;
         _lastHiddenAt = DateTimeOffset.UtcNow;
-        _idleReleaseTimer.Start();
+        // Arms the one-shot idle release for the remaining hidden time; both resource
+        // modes take this path so Resident no longer keeps lyric layout forever.
         ReleaseResidentResourcesIfNeeded();
+        WriteMetrics();
         foreach (var flyout in _flyouts) flyout.Hide();
         foreach (var card in AllCards) HideCard(card);
     }
@@ -743,7 +775,9 @@ public sealed partial class CardGroup : IDisposable
         var token = _visibleLifetime.Token;
         try
         {
-            var stateTask = _connection.RequestAsync("getState", cancellationToken: token);
+            // artworkDelta lets Media omit unchanged cover/icon strings; after a local release
+            // ask for one complete payload again (null payload means no delta).
+            var stateTask = _connection.RequestAsync("getState", _forceArtworkSync ? null : new { artworkDelta = true }, token);
             var trafficTask = traffic ? _connection.RequestAsync("getTrafficHistory", cancellationToken: token) : Task.FromResult(default(JsonElement));
             await Task.WhenAll(stateTask, trafficTask);
             var state = await stateTask;
@@ -785,7 +819,13 @@ public sealed partial class CardGroup : IDisposable
             _title.Text = String(state, "title", "暂无媒体");
             _artist.Text = String(state, "artist");
             var source = String(state, "source");
-            _sources = Array(state, "sources").Select(value => new SourceChoice(String(value, "id"), String(value, "label"), String(value, "iconDataUrl"))).ToArray();
+            _sources = Array(state, "sources").Select(value =>
+            {
+                var id = String(value, "id");
+                // artworkDelta omits an unchanged icon; keep the previously decoded URI for that source.
+                var icon = OptionalString(value, "iconDataUrl") ?? _sources.FirstOrDefault(choice => choice.Id == id)?.IconDataUrl ?? "";
+                return new SourceChoice(id, String(value, "label"), icon);
+            }).ToArray();
             _selectedSourceId = String(state, "selectedSourceId");
             var selected = _sources.FirstOrDefault(choice => choice.Id == _selectedSourceId);
             _sourceLabel.Text = selected?.Label ?? source;
@@ -800,8 +840,12 @@ public sealed partial class CardGroup : IDisposable
             if (!_seekPending) { _seek.Maximum = Math.Max(1, duration); _seek.Value = Math.Clamp(Number(state, "positionSeconds"), 0, _seek.Maximum); }
             _position.Text = Time(Number(state, "positionSeconds")); _duration.Text = Time(duration);
             ApplyBackendTheme(state);
-            var cover = String(state, "coverDataUrl");
-            if (_lastCover != cover) { _lastCover = cover; _ = RenderCoverAsync(cover); }
+            var cover = OptionalString(state, "coverDataUrl");
+            if (cover is not null)
+            {
+                _forceArtworkSync = false;
+                if (_lastCover != cover) { _lastCover = cover; _ = RenderCoverAsync(cover); }
+            }
         }
         finally { _rendering = false; }
     }
@@ -852,7 +896,10 @@ public sealed partial class CardGroup : IDisposable
             using (var writer = new DataWriter(stream.GetOutputStreamAt(0)))
             { writer.WriteBytes(bytes); await writer.StoreAsync(); writer.DetachStream(); }
             stream.Seek(0);
-            var image = new BitmapImage();
+            // Decode at the displayed edge (64 DIP) times the rasterization scale so a large
+            // source cover never inflates into a full-size surface that is then downscaled.
+            var edge = (int)Math.Round(64 * Math.Clamp(_cover.XamlRoot?.RasterizationScale ?? 1.0, 1.0, 3.0));
+            var image = new BitmapImage { DecodePixelWidth = edge };
             await image.SetSourceAsync(stream);
             if (!_disposed && _lastCover == data) _cover.Source = image;
         }
@@ -1178,24 +1225,48 @@ public sealed partial class CardGroup : IDisposable
     }
     private void ReleaseResidentResourcesIfNeeded()
     {
-        if (!_onDemand || _visible || _residentResourcesReleased) return;
-        if (DateTimeOffset.UtcNow - _lastHiddenAt < TimeSpan.FromMinutes(10)) return;
+        if (_disposed || _visible || _residentResourcesReleased) return;
+        var idle = TimeSpan.FromMinutes(IdleReleaseMinutes);
+        var hiddenFor = DateTimeOffset.UtcNow - _lastHiddenAt;
+        if (hiddenFor < idle)
+        {
+            // Woken early by timer granularity: keep the single shot armed instead of
+            // leaving the release unreachable until the cards are hidden again.
+            ArmIdleRelease(idle - hiddenFor);
+            return;
+        }
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
         _residentResourcesReleased = true;
         // Release only media-card imagery and lyric layout, not unrelated card
-        // visuals. The next open recreates both from the latest snapshot.
+        // visuals, and never the current track's cover bitmap: that bitmap is the last
+        // visible media state, and dropping it made the next open re-decode and flash an
+        // empty frame. _forceArtworkSync still asks the next getState for the complete
+        // payload so the cleared source icon is rebuilt from the latest snapshot.
         _lyrics.ReleaseResources();
-        _cover.Source = null;
         _sourceImage.Source = null;
         _sourceImageCache.Clear();
-        _lastCover = null;
         _lastSourceIcon = "";
-        CardLifecycleLog.Write("resident-resources-released reason=on-demand-idle");
+        _forceArtworkSync = true;
+        CardLifecycleLog.Write($"resident-resources-released reason=idle-hidden " +
+            $"mode={(_onDemand ? "on-demand" : "resident")} hiddenS={hiddenFor.TotalSeconds:0} " +
+            $"elapsedMs={System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}");
+    }
+    private void ArmIdleRelease(TimeSpan delay)
+    {
+        if (_disposed) return;
+        if (delay < TimeSpan.FromSeconds(1)) delay = TimeSpan.FromSeconds(1);
+        _idleReleaseTimer.Stop();
+        _idleReleaseTimer.Interval = delay;
+        _idleReleaseTimer.Start();
     }
     private void RestoreResidentResources()
     {
         if (!_residentResourcesReleased) return;
         _residentResourcesReleased = false;
-        CardLifecycleLog.Write("resident-resources-restored");
+        // Nothing is rebuilt here: the open path recreates lyric layout through
+        // Activate() and refetches icons through _forceArtworkSync, so the synchronous
+        // part of the first open stays unchanged.
+        CardLifecycleLog.Write($"resident-resources-restored hiddenS={(DateTimeOffset.UtcNow - _lastHiddenAt).TotalSeconds:0}");
     }
     private sealed record AudioChoice(string Id, string Name, bool IsDefault, bool IsCommunications, double Volume, bool IsMuted, bool CanControl);
     private sealed record SourceChoice(string Id, string Label, string IconDataUrl);
@@ -1207,6 +1278,8 @@ public sealed partial class CardGroup : IDisposable
         value.TryGetProperty(name, out var items) && items.ValueKind == JsonValueKind.Array
         ? items.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String).Select(item => item.GetString() ?? "").Where(item => item.Length > 0).ToArray()
         : null;
+    // Distinguishes "field omitted" (artworkDelta: keep the previous value) from "field empty".
+    private static string? OptionalString(JsonElement value, string name) => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var item) && item.ValueKind == JsonValueKind.String ? item.GetString() : null;
     private static string String(JsonElement value, string name, string fallback = "") => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var item) && item.ValueKind == JsonValueKind.String ? item.GetString() ?? fallback : fallback;
     private static bool Bool(JsonElement value, string name) => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var item) && item.ValueKind == JsonValueKind.True;
     private static double Number(JsonElement value, string name) => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var item) && item.ValueKind == JsonValueKind.Number && item.TryGetDouble(out var number) && double.IsFinite(number) ? number : 0;

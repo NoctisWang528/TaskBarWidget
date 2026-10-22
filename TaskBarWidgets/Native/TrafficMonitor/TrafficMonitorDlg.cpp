@@ -1503,12 +1503,15 @@ void CTrafficMonitorDlg::OnTimer(UINT_PTR nIDEvent)
     // TODO: 在此添加消息处理程序代码和/或调用默认值
     if (nIDEvent == MONITOR_TIMER)
     {
+        NativeMediaHost::NoteTimer(1);
         //通知线程获取监控数据
         m_monitor_data_required = true;
     }
 
     if (nIDEvent == MAIN_TIMER)
     {
+        NativeMediaHost::NoteTimer(0);
+        NativeMediaHost::WriteFootprintMetrics();
         m_timer_cnt++;
         if (m_first_start)      //这个if语句在程序启动后1秒执行
         {
@@ -1792,6 +1795,7 @@ void CTrafficMonitorDlg::OnTimer(UINT_PTR nIDEvent)
 
     if (nIDEvent == TASKBAR_TIMER)
     {
+        NativeMediaHost::NoteTimer(2);
         ++m_taskbar_timer_cnt;
         if (m_taskbar_timer_cnt % 5 == 0 && theApp.m_cfg_data.m_show_task_bar_wnd && theApp.m_taskbar_data.show_taskbar_wnd_in_secondary_display)
         {
@@ -1828,8 +1832,20 @@ void CTrafficMonitorDlg::OnTimer(UINT_PTR nIDEvent)
                                                                 p_TaskBarDlg->CalculateWindowSize(); });
             }
 
+            //归因统计：只读取调整前后的窗口矩形，不改变 AdjustWindowPos 和 Invalidate 的调用时机
+            HWND taskbar_wnd = m_tBarDlg->GetSafeHwnd();
+            RECT taskbar_rect_before{}, taskbar_rect_after{};
+            ::GetWindowRect(taskbar_wnd, &taskbar_rect_before);
             m_tBarDlg->AdjustWindowPos();
+            ::GetWindowRect(taskbar_wnd, &taskbar_rect_after);
             m_tBarDlg->Invalidate(FALSE);
+            const bool taskbar_rect_changed =
+                taskbar_rect_before.left != taskbar_rect_after.left ||
+                taskbar_rect_before.top != taskbar_rect_after.top ||
+                taskbar_rect_before.right != taskbar_rect_after.right ||
+                taskbar_rect_before.bottom != taskbar_rect_after.bottom;
+            //每轮都记一次失效请求，并记录其中调整后几何真正变化了几次
+            NativeMediaHost::NoteTaskbarRefresh(1, taskbar_rect_changed ? 1 : 0);
         }
     }
 

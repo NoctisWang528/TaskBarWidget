@@ -1,7 +1,93 @@
 # 验收状态
 
-更新：2026-10-21。最近成功完整构建的路径由本机 `artifacts/latest-build.txt` 提供；构建产物、布局检查图、日志和用户配置不提交到仓库。
+更新：2026-10-22。最近成功完整构建的路径由本机 `artifacts/latest-build.txt` 提供；构建产物、布局检查图、日志和用户配置不提交到仓库。
 
+## 资源占用优化阶段 5：UI 管道对端校验（2026-10-22）
+
+OPT-009 单独提交落地，构建 `artifacts/builds/20261022-134854`。
+
+- 校验只作用于 UI 桥管道 `TaskBarWidgets.UI.{mediaPid}`：[Media/Integration/MediaPipeServer.cs:40-49](Media/Integration/MediaPipeServer.cs) 推导期望对端为 `../UI/TaskBarWidgets.UI.exe`，`:76-81` 在握手与 generation 自增前调用 `AcceptClient`；`:124-157` 决定放行／拒绝。原生宿主管道 `TaskBarWidgets.{nativePid}` 的客户端是原生 exe，统一按 UI 校验会全部拒绝，故保持 `CurrentUserOnly` 并记一次 `skip/no-expected-peer`。
+- 对端路径经 `GetNamedPipeClientProcessId` + `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` + `QueryFullProcessImageName` 获取（`:161-197`），比较时大小写不敏感、归一尾分隔符并展开 8.3 短名（`:245-285`）；失败按 stage 打标，日志不含路径。
+- 拒绝发生在 generation 自增前，不握手、不发帧、不触发 `_connectionChanged`；客户端首读 EOF，UI 500 ms 重连接管，协议版本与重连语义未变。
+- 回退边界：同级 UI exe 缺失时 fail-open（记 `event=fallback`）；测试进程自连记 `skip/self-connection`。
+
+验证：完整硬件 Release 构建 `artifacts/builds/20261022-134854` 通过；`tests/Media.Tests` 310/310（新增 `PipePeerTests` 7 测试／13 用例）。
+
+未验证：真实第三方进程在断线窗口内连接 UI 桥管道 `TaskBarWidgets.UI.{mediaPid}` 被拒、被拒后 UI 重连时序、更新器替换 UI exe 期间的连接。残留缺口：原生宿主管道 `TaskBarWidgets.{nativePid}` 仅 `CurrentUserOnly`、无对端校验，断线窗口内同用户进程可占槽收发；对端路径比较不解析重解析点（目录 junction／8.3 短名可使 `QueryFullProcessImageName` 呈现期望路径字符串），同用户威胁模型内仅纵深价值；非标准发布布局会被拒；拒绝日志未限流。
+
+## 资源占用优化阶段 4：Native 失败归因与任务栏刷新计数（2026-10-22）
+
+OPT-005／OPT-006 单独提交落地，构建 `artifacts/builds/20261022-134854`。
+
+- OPT-006 只加证据不改行为：[NativeMediaRenderer.h:60-84](Native/TrafficMonitor/NativeMediaRenderer.h) 新增 `FailureOp` 枚举，[NativeMediaRenderer.cpp:278-307](Native/TrafficMonitor/NativeMediaRenderer.cpp) 的 `RecordFailure` 以"操作名＋HRESULT"5 s 去重并累计 `failedOps`／`suppressedOps`；`FailureContext()`（`:310-322`）只在写日志时构造，一次日志带操作名、HRESULT、交换链尺寸、buffer 数与 `targetBound`。`IsDeviceLostResult` 仍未收录 `DXGI_ERROR_INVALID_CALL`，`Fail` 仍不排重试。
+- 失败点补操作名（`CreateD3DDevice`／`ResizeBuffers`／`AcquireBuffer`／`CreateTargetBitmap`／`Draw`／`Present`／`SetContent`／`AddVisual` 等），`ApplyVisualTree` 的 `SetRoot`／`Commit` 失败计 `silentOps`，调用序列不变；`HandleDeviceLost`（`:1540-1558`）的判定与重试顺序不变。
+- OPT-005 归因：[NativeMediaHost.cpp:1440-1495](Native/TrafficMonitor/NativeMediaHost.cpp) 的 `native-metrics.log` 行追加 `deviceLost`／`invalidCall`／`failedOps`／`suppressedOps`／`silentOps`／`lastFailureHr`／`lastFailureOp`／`lastFailureWidth`／`Height`／`Buffers`／`TargetBound` 与任务栏 `invalidates`／`adjustRectChanged`；后者由 [TrafficMonitorDlg.cpp:1835-1848](Native/TrafficMonitor/TrafficMonitorDlg.cpp) 在 `AdjustWindowPos` 前后各取一次窗口矩形得出。
+- 本轮未调整任何节拍：三个定时器与 2 秒兜底发现机制原样保留。
+
+验证：完整硬件 Release 构建 `artifacts/builds/20261022-134854` 通过；`Native/tests/run-native-tests.ps1` 全部通过（含 `NativeMediaRendererLifecycleTests`、`CompositionResizeTests`、`NativePipeTransportTests` PASS A–E）；`scripts/measure-footprint.ps1` 已把新累计字段加入计数器键表。
+
+未验证：`0x887A0001` 的真实来源仍未定位（需真机出现时读 `native-metrics.log`）；100 ms 任务栏刷新与 1 s 主定时器能否降频尚未量化；`m_diagnostic` 只在真正写日志时更新，去重窗口内的重复失败不刷新诊断文本。
+
+## 资源占用优化阶段 3：UI 常驻资源边界（2026-10-22）
+
+OPT-003 单独提交落地，构建 `artifacts/builds/20261022-134854`。
+
+- 释放门槛改为"资源类型＋隐藏时长"：[UI/CardGroup.cs:1226-1252](UI/CardGroup.cs) 只判 `_disposed || _visible || _residentResourcesReleased`，Resident 模式隐藏满 10 分钟（`:117`）同样释放；不足 10 分钟则按剩余时间重新武装单发定时器（`:1254-1260`）。
+- `_idleReleaseTimer` 由 30 s 周期改为 10 分钟单发（`:165-171`），打开时 `Stop()`（`:346`）、隐藏时交由释放判定决定是否武装（`:407`），Resident 下定时器空转消失。
+- 释放集合按优先级重排：保留 `_cover.Source`（当前曲目封面位图），释放歌词排版、来源图标位图与缓存并置 `_forceArtworkSync`；删除原 `_cover.Source = null`／`_lastCover = null`，避免首开重新解码并闪空白帧。
+- 设置页关闭释放内容树：[UI/SettingsWindow.cs:306-359](UI/SettingsWindow.cs) 两个静默关闭分支统一 `CloseToHiddenWindow()`，`Hide()` 后 `ReleasePageContent()`（`:363-388`）清空页面子树并置空预览面，保留窗口壳；有未应用草稿时跳过。重建走 `Activated`／`ShowPage` → `RenderPage()`（`:183-189`、`:654-660`）。
+- 日志：`resident-resources-released reason=idle-hidden mode=… hiddenS=… elapsedMs=…`、`settings-content-released`、`settings-shown reused=`（[UI/App.xaml.cs:234-251](UI/App.xaml.cs)）。
+
+验证：完整硬件 Release 构建 `artifacts/builds/20261022-134854` 通过；`scripts/validate-winui.ps1` 通过（含"关闭后仍是隐藏窗口"的模板断言）；`dotnet build` UI 项目 0 warning 0 error。
+
+未验证（桌面验收）：隐藏 10 分钟后首次打开的 p50／p95 与内存回落幅度；关闭瞬间在途 `SaveAsync` 的 `finally → RenderPage()` 是否把树重建回隐藏窗口；清空焦点控件后的焦点回落；更新卡与真实换曲路径。
+
+## 资源占用优化阶段 2：频谱分配（2026-10-22）
+
+OPT-004 单独提交落地，构建 `artifacts/builds/20261022-134854`。
+
+- [Media/SystemAudioSpectrumService.cs:156-228](Media/SystemAudioSpectrumService.cs) 的 `GetSpectrum` 改为每帧从 `_idleScratch` 租借 scratch 缓冲（`Interlocked.Exchange` 取、`finally` 归还），`SpectrumScratch`（`:756-802`）仅在声道数或采样窗变化时重建；`powers`／`real`／`imaginary`／`magnitudes`／`bars` 全部复用到一次性分配的缓冲里。
+- 整帧只在第一段 `lock (_sync)` 内捕获一次 `_tuningSettings` 引用（`:172`），删掉每次 `GetSpectrum` 的 `Clone()`；`ApplyTuning` 仍是"先 Clone 再整体替换引用"，语义不变。
+- Hann 窗按长度缓存在静态 `ConcurrentDictionary<int, double[]>`（`:28`、`:582-592`），不再逐样本重算余弦。
+- 输出仍 `Clone()` 一次（`:222`），因为 `MediaCoordinator.cs:621` 会把数组跨帧保留。
+
+收益（分配器口径折算，**非**桌面复测；2 声道、2048 窗、32 bars，对象头 24 B、double 8 B/元素、float 4 B/元素）：每帧分配 `samples` 40 B＋每声道 `float[2048]` ×2 共 16,432 B＋`powers` `double[1025]` 8,224 B＋两声道 `real`／`imaginary` `double[2048]` ×4 共 65,632 B＋`magnitudes` `float[1025]` 4,124 B＋输出 `bars` `float[32]` 152 B＋调参 `Clone()` 196 B＝94,800 B → 152 B（62.5 fps 时约 5.65 MiB/s → 9.3 KiB/s）；形状变化才付一次约 61.8 KB（61,788 B）的 scratch 重建。
+
+验证：完整硬件 Release 构建 `artifacts/builds/20261022-134854` 通过；`tests/Media.Tests` 310/310（新增 `SpectrumSignalTests` 5 项：逐帧对照新实例、同输入两次一致、声道形状变化、窗口长度切换、返回数组归调用方）；`Native/tests/run-native-tests.ps1` 全部通过。
+
+未验证：真实设备切换、系统音频授权后首次起采、静音／停止播放的节拍与听感未做桌面复测；分配数字来自 `GC.GetTotalAllocatedBytes`，不含原生侧分配。
+
+## 资源占用优化阶段 1：封面与状态增量（2026-10-22）
+
+OPT-001／OPT-002／OPT-007／OPT-008 一次提交落地，构建 `artifacts/builds/20261022-131902`。
+
+- OPT-001 Native 封面按显示尺寸解码：`PrepareCover` 改收 `coverEdgePx`（[NativeMediaPainter.h:105](Native/TrafficMonitor/NativeMediaPainter.h)），解码边取 `m_effectiveStyle.coverSizePx`（物理像素），由 [NativeMediaRenderer.cpp:847-850](Native/TrafficMonitor/NativeMediaRenderer.cpp)／`:951-953` 传入；[NativeMediaPainter.cpp:948-1023](Native/TrafficMonitor/NativeMediaPainter.cpp) 的 `DecodeBitmap` 只在源图更大时用 `IWICBitmapScaler`（`HighQualityCubic`）等比缩小，2048 边／4 MPx 拒绝原样保留；缓存键混入解码边长（`:844-850`），淘汰由"最多 4 条"改为 4 MiB 字节预算（`:864-882`）。
+- OPT-002 `getState` 增量：新增 [Media/Integration/ArtworkDeltaState.cs](Media/Integration/ArtworkDeltaState.cs)，[Media/App.xaml.cs:199-230](Media/App.xaml.cs) 按连接 generation 省略未变的 `coverDataUrl` 与 `sources[].iconDataUrl`；新连接与不声明 `artworkDelta` 的客户端仍收全量，旧客户端不会因缺字段清空封面。[UI/CardGroup.cs:773](UI/CardGroup.cs) 声明 delta，`:836-839` 与 `:1252` 把缺失字段当"未变"，本地释放资源后 `:1232` 强制一次全量。
+- OPT-007 隐私：[NativeMediaHost.cpp:34-49](Native/TrafficMonitor/NativeMediaHost.cpp) 用 FNV-1a 64 `TrackHash64` 替代 `trackId` 全文，`:946-958` 只写长度与哈希标记；日志不再含标题或艺人。
+- OPT-008：删除 `MediaCoordinator.CreateCover()`、`_coverBitmap` 与 `MediaControlState.Cover`（无消费者的检索证据见[方案 §5](docs/2026-10-22-资源占用优化方案.md)）。
+
+收益（折算自阶段 0 实测口径，**非**本轮实测）：`getState` 稳态不再发送约 88 KB 图标 + 5.3 KB 封面（卡片可见时 2.34 次/s ≈ 0.28 MB/s 管道字节）；Native 单张封面 360,000 B → 34×34×4 = 4,624 B（100% DPI，200% 为 18,496 B）；封面缓存上限从 4 条 × 2048² × 4 B 的理论 64 MiB 收到 4 MiB 硬预算。
+
+验证：完整硬件 Release 构建 `artifacts/builds/20261022-131902` 通过；`tests/Media.Tests` 292/292（新增 `ArtworkDeltaTests` 5 项）；`Native/tests/run-native-tests.ps1` 全部通过（含新增缩放／缓存键断言 [NativeMediaOffscreenTests.cpp:321-343](Native/tests/NativeMediaOffscreenTests.cpp)）；`scripts/validate-winui.ps1` 通过。
+
+未验证：本轮未做桌面复测（用户选择先提交、复测留到桌面验收）。换曲 20 次后的 PWS/Commit 斜率、100% 以外 DPI 的重解码与交叉淡入、索引色 GIF/BMP 的缩放回退、任务栏很窄时 `min(coverSizePx, shellWidth)` 的多余解码、`appIcon` 透明边在 `HighQualityCubic` 下的暗边、重连后封面正确性（仅单元测试覆盖）均未在桌面确认。
+
+## 资源占用优化阶段 0：测量仪表与基线（2026-10-22）
+
+Optimization 分支的阶段 0 只加观察能力，不改产品行为：新增外部采样脚本与三进程内建计数，用于后续 OPT 编号工作项的 Δ 与斜率判据。
+
+- 新增 [scripts/measure-footprint.ps1](scripts/measure-footprint.ps1)：按固定 1 s × 60 s 窗口对 `TaskBarWidgets`、`TaskBarWidgets.Media`、`TaskBarWidgets.UI` 采集 Working Set、Private Working Set、Commit、线程数、句柄数与 CPU 时间增量，输出首末值、Δ、均值与最小二乘斜率，并解析三进程的内建计数行；产物写入忽略目录 `artifacts/measurements/`。默认拒绝采样路径不在目标构建目录内的进程，避免把日常安装当成基线。
+- Private Working Set 改走 PDH `\Process(*)\Working Set - Private`（按 `ID Process` 关联 PID）。`QueryWorkingSetEx` 在本机对 explorer 与自身进程都返回成功但缓冲区全 0，已弃用；实测 explorer 339.3 MB / 97.3 MB、当前 shell 163 MB / 70.7 MB 与任务管理器一致。
+- Media 内建计数（`Media/Diagnostics/FootprintMetrics.cs`，5 s 一行 `[METRICS]`）：每秒分配字节、gen0/1/2、FFT 次数、发布帧数、管道写入次数与字节、`getState` 次数／总耗时／最大耗时／文本字节／封面字节／图标字节。
+- Native 内建计数（`NativeMediaHost::WriteFootprintMetrics()`，5 s 一行，写 `%APPDATA%\TaskBarWidgets\native-metrics.log`）：活动图层数、交换链数、文字排版／格式／画刷条数、封面缓存条数与字节、`MAIN_TIMER`／`MONITOR_TIMER`／`TASKBAR_TIMER` 触发次数。该文件不含曲目、路径或媒体内容。
+- UI 内建计数（`UI/FootprintMetrics.cs` 与 `CardMetricsLog`）：首开次数、首开与首帧的累计／均值／最大、首帧超时次数、图片缓存条目数、封面与来源图标是否在位。每 10 s 一行，打开与关闭时各补一行。
+- 计划文档新增 [§3.5 阶段 0 实施结果](docs/2026-10-22-资源占用优化方案.md)，记录字段、采集点与统计口径，并列出与方案原文不一致处（Native `Diagnostic()` 不承载计数、UI 未加 HWND 计数）。
+
+- 阶段 0 基线已实采（同一实例 12:35:48–12:42:30，403 点/进程）：待机三进程 PWS 合计 147 MB；播放歌词后 Native +25.1 MB 且停止播放后不回落；设置页首次打开一次抬升 UI +75.3 MB PWS／+85.1 MB Commit／+626 句柄，关闭后不回落；最高状态为"播放过并开过设置之后的待机"295 MB；频谱把 Media 分配从 0.40 抬到 4.75 MB/s。明细与未采集项见 [§3.5](docs/2026-10-22-资源占用优化方案.md)。
+
+验证：完整硬件 Release 构建 `artifacts/builds/20261022-120729` 通过；`tests/Media.Tests` 287 项通过（须先执行 `Native/tests/run-native-tests.ps1` 生成 `NativePipeIntegrationClient.exe`，否则该集成用例报缺失）；`Native/tests/run-native-tests.ps1` 全部通过；`scripts/validate-winui.ps1` 实际模板加载通过。
+
+未验证：11 个状态里"换曲"未采集（窗口内无换曲特征）与"隐藏十分钟"未采集（压缩为 60 s 并并入停止播放段）；启动态窗口比进程创建晚约 20 s，冷启动峰值未覆盖。真实切歌、Explorer 重建、音频设备切换、多显示器混合 DPI、输入延迟属桌面验收，本轮未做。用户报告的"获取系统音频信息失败"提示在仓库中检索不到原文，其触发路径未复现；仅确认重新授权后 FFT 起采（§3.5 附表）。
 ## 当前结论：Mica 观感已获用户认可（2026-10-21）
 
 用户明确反馈“现在的 mica 我比较满意了”，当前环境下的 Mica 视觉效果据此记为已认可，本轮视觉调校收尾。保留 Mica 以及现有个人参数和出厂默认值；未提供的实际个人参数不作推断，实验候选不自动成为默认。

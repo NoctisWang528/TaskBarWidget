@@ -47,6 +47,8 @@ public sealed partial class SettingsWindow : Window
     private bool _shutdown;
     private bool _closed;
     private bool _closeDialogOpen;
+    // Set while the closed window holds no page tree; the next show rebuilds it.
+    private bool _contentTreeReleased;
     private bool _micaPreviewActive;
     private bool _micaPreviewQueued;
     private bool _updatingNavigationSelection;
@@ -178,7 +180,13 @@ public sealed partial class SettingsWindow : Window
         InitializeModuleGestures();
         _root.ActualThemeChanged += (_, _) => { UpdateTitleBarTheme(); UpdateMicaStatus(); };
         _root.Loaded += (_, _) => { TrySubscribeSettingsHighContrast(); UpdateTitleBarTheme(); };
-        Activated += (_, _) => { if (!_closed) UpdateTitleBarTheme(); };
+        Activated += (_, _) => {
+            if (_closed) return;
+            // Activation can show the same HWND again without ShowPage (update prompt);
+            // rebuild the page tree that closing dropped so the window never looks empty.
+            if (_contentTreeReleased) ShowPage(_currentPage);
+            UpdateTitleBarTheme();
+        };
         _navigation.Loaded += async (_, _) => {
             SelectNavigationItem(NavigationPages().FirstOrDefault(item => (string)item.Tag == _currentPage));
             if (!_loaded && _connection.IsConnected) await GuardAsync(() => ReloadAsync());
@@ -301,10 +309,7 @@ public sealed partial class SettingsWindow : Window
         var pending = _native.Pending.Count + _media.Pending.Count > 0 || weatherBusy || HasWeatherDraft();
         if (!pending || _root.XamlRoot is null)
         {
-            CancelWeatherPage();
-            DeactivateCardMicaPreview();
-            AppWindow.Hide();
-            Dismissed?.Invoke();
+            CloseToHiddenWindow();
             return;
         }
         if (_closeDialogOpen) return;
@@ -337,11 +342,49 @@ public sealed partial class SettingsWindow : Window
         }
         _native.Pending.Clear();
         _media.Pending.Clear();
+        CloseToHiddenWindow();
+    }
+    // The HWND stays reusable (the template probe and the update prompt both expect a
+    // hidden window that can be shown again), but a closed window no longer keeps a
+    // whole settings page in memory: the page tree is dropped and rebuilt on the next
+    // ShowPage/activation.
+    private void CloseToHiddenWindow()
+    {
         CancelWeatherPage();
         CancelModulePointerDrag();
         DeactivateCardMicaPreview();
         AppWindow.Hide();
+        ReleasePageContent();
         Dismissed?.Invoke();
+    }
+    // Only the page-level tree is released: _root stays attached to Content, so
+    // _root.IsLoaded and _root.XamlRoot keep working for dialogs that run over the
+    // hidden window. Drafts (pending edits) keep the tree, matching the close prompt.
+    private void ReleasePageContent()
+    {
+        if (_contentTreeReleased) return;
+        if (HasPendingChanges)
+        {
+            CardLifecycleLog.Write($"settings-content-release-skipped reason=pending page={_currentPage}");
+            return;
+        }
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        _contentTreeReleased = true;
+        if (_currentPage == "trackOffsets") LeaveOffsetsPage();
+        CancelPendingOffsetEntry();
+        // Page-level containers keep their subtrees alive on their own, so they are
+        // dropped too. Each renderer re-creates them; all readers of these three
+        // fields already null-check, and the update page's control fields stay because
+        // RefreshUpdateControls dereferences them while the about page is open.
+        _preview = null;
+        _previewFrame = null;
+        _sourceOrderSurface = null;
+        _micaStatus = null;
+        _page.Children.Clear();
+        _properties.Children.Clear();
+        _split.IsPaneOpen = false;
+        CardLifecycleLog.Write($"settings-content-released page={_currentPage} " +
+            $"elapsedMs={System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}");
     }
     internal void LoadValidationData(JsonObject native, JsonObject media)
     {
@@ -611,6 +654,11 @@ public sealed partial class SettingsWindow : Window
     private void RenderPage()
     {
         PageRenderCount++;
+        if (_contentTreeReleased)
+        {
+            _contentTreeReleased = false;
+            CardLifecycleLog.Write($"settings-content-restored page={_currentPage}");
+        }
         CancelModulePointerDrag();
         if (_currentPage != "quickCardsWeather") CancelWeatherPage();
         _page.Children.Clear(); _preview = null; _split.IsPaneOpen = false;
