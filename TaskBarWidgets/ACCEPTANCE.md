@@ -2,6 +2,21 @@
 
 更新：2026-10-22。最近成功完整构建的路径由本机 `artifacts/latest-build.txt` 提供；构建产物、布局检查图、日志和用户配置不提交到仓库。
 
+## 资源占用优化阶段 2：频谱分配（2026-10-22）
+
+OPT-004 单独提交落地，构建 `artifacts/builds/20261022-134854`。
+
+- [Media/SystemAudioSpectrumService.cs:156-228](Media/SystemAudioSpectrumService.cs) 的 `GetSpectrum` 改为每帧从 `_idleScratch` 租借 scratch 缓冲（`Interlocked.Exchange` 取、`finally` 归还），`SpectrumScratch`（`:756-802`）仅在声道数或采样窗变化时重建；`powers`／`real`／`imaginary`／`magnitudes`／`bars` 全部复用到一次性分配的缓冲里。
+- 整帧只在第一段 `lock (_sync)` 内捕获一次 `_tuningSettings` 引用（`:172`），删掉每次 `GetSpectrum` 的 `Clone()`；`ApplyTuning` 仍是"先 Clone 再整体替换引用"，语义不变。
+- Hann 窗按长度缓存在静态 `ConcurrentDictionary<int, double[]>`（`:28`、`:582-592`），不再逐样本重算余弦。
+- 输出仍 `Clone()` 一次（`:222`），因为 `MediaCoordinator.cs:621` 会把数组跨帧保留。
+
+收益（分配器口径折算，**非**桌面复测）：每帧分配约 94,788 B → 152 B（62.5 fps 时约 5.65 MiB/s → 9.3 KiB/s）；形状变化才付一次约 61.7 KB 的重建。
+
+验证：完整硬件 Release 构建 `artifacts/builds/20261022-134854` 通过；`tests/Media.Tests` 310/310（新增 `SpectrumSignalTests` 5 项：逐帧对照新实例、同输入两次一致、声道形状变化、窗口长度切换、返回数组归调用方）；`Native/tests/run-native-tests.ps1` 全部通过。
+
+未验证：真实设备切换、系统音频授权后首次起采、静音／停止播放的节拍与听感未做桌面复测；分配数字来自 `GC.GetTotalAllocatedBytes`，不含原生侧分配。
+
 ## 资源占用优化阶段 1：封面与状态增量（2026-10-22）
 
 OPT-001／OPT-002／OPT-007／OPT-008 一次提交落地，构建 `artifacts/builds/20261022-131902`。
