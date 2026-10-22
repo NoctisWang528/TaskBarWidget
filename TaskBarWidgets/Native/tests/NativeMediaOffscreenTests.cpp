@@ -319,8 +319,26 @@ int main(int argc, char** argv)
         NativeMedia::Cover cover;
         auto state = MakeState(coverUri, cover);
         NativeMedia::CoverBitmap coverBitmap;
-        Require(painter.PrepareCover(*state.cover, 1.0f, coverBitmap),
+        Require(painter.PrepareCover(*state.cover, 96u, coverBitmap),
             "Decode offscreen cover.");
+        // The cover source is 12x12, so a 96 px edge keeps the native extent and the cache
+        // holds one entry for this size only.
+        D2D1_SIZE_U decoded{};
+        if (coverBitmap.bitmap) decoded = coverBitmap.bitmap->GetPixelSize();
+        Require(decoded.width == 12 && decoded.height == 12,
+            "Cover keeps its extent when it is smaller than the display edge.");
+        Require(painter.CoverCacheBytes() == 12 * 12 * 4, "Cover cache accounts decoded bytes.");
+
+        NativeMedia::CoverBitmap smallBitmap;
+        Require(painter.PrepareCover(*state.cover, 6u, smallBitmap),
+            "Decode offscreen cover at a smaller edge.");
+        D2D1_SIZE_U smallDecoded{};
+        if (smallBitmap.bitmap) smallDecoded = smallBitmap.bitmap->GetPixelSize();
+        Require(smallDecoded.width == 6 && smallDecoded.height == 6,
+            "Cover is scaled down to the display edge.");
+        // Both sizes coexist: the cache is keyed by edge as well as by source.
+        Require(painter.CoverCacheBytes() == 12 * 12 * 4 + 6 * 6 * 4,
+            "Cover cache keeps one entry per decoded edge.");
 
         painter.BeginPaintFrame();
         context->SetTarget(target.Get());

@@ -31,6 +31,23 @@ namespace
         return winrt::to_string(value);
     }
 
+    // FNV-1a 64 over the UTF-16 code units of a track identity. Diagnostics only need
+    // an opaque, irreversible marker: the identity is SourceApp|Title|Artist, so the
+    // text itself must never reach native-media.log.
+    static inline unsigned long long TrackHash64(const std::wstring& value)
+    {
+        constexpr unsigned long long Offset = 14695981039346656037ull;
+        constexpr unsigned long long Prime = 1099511628211ull;
+        unsigned long long hash = Offset;
+        for (const wchar_t unit : value)
+        {
+            const unsigned code = static_cast<unsigned short>(unit);
+            hash = (hash ^ (code & 0xFFu)) * Prime;
+            hash = (hash ^ (code >> 8)) * Prime;
+        }
+        return hash;
+    }
+
     JsonObject Command(const wchar_t* action)
     {
         JsonObject result;
@@ -926,8 +943,19 @@ struct NativeMediaHost::Impl
             state.Frame(update.frame.sourceId, update.frame.isPlaying,
                 update.frame.hasMedia);
             if (update.style) Log(L"Media style applied.");
-            if (update.cover) Log(update.cover->cleared ? L"Media cover cleared." :
-                L"Media cover updated for track " + update.cover->trackId + L".");
+            if (update.cover)
+            {
+                if (update.cover->cleared) Log(L"Media cover cleared.");
+                else
+                {
+                    // The identity is SourceApp|Title|Artist; keep only its length and an
+                    // opaque hash so no track text reaches native-media.log.
+                    wchar_t marker[80]{};
+                    swprintf_s(marker, L"track=len:%zu hash:%016llx",
+                        update.cover->trackId.size(), TrackHash64(update.cover->trackId));
+                    Log(L"Media cover updated for " + std::wstring(marker) + L".");
+                }
+            }
             return true;
         }
         if (type == L"disconnected")

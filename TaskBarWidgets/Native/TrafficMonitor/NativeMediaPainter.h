@@ -102,7 +102,7 @@ namespace NativeMedia
         void PaintCover(ID2D1DeviceContext* context, const CoverPaint& paint);
         void PaintBrowser(ID2D1DeviceContext* context, const BrowserPaint& paint);
 
-        bool PrepareCover(const Cover& cover, float dpiScale, CoverBitmap& result);
+        bool PrepareCover(const Cover& cover, UINT coverEdgePx, CoverBitmap& result);
         bool HitTest(const BrowserPaint& paint, float x, float y, HitAction& action) const;
 
         void BeginPaintFrame();
@@ -238,6 +238,7 @@ namespace NativeMedia
         void TrimLayouts();
         void TrimBrushes();
         static Microsoft::WRL::ComPtr<ID2D1Bitmap1> DecodeBitmap(ID2D1DeviceContext* context,
-            IWICImagingFactory* wic, const std::wstring& uri, bool appIcon, std::wstring& error);
+            IWICImagingFactory* wic, const std::wstring& uri, UINT coverEdgePx, bool appIcon,
+            std::wstring& error);
     };
 }

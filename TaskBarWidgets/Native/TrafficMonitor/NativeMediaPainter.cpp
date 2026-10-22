@@ -1,6 +1,7 @@
 #include "NativeMediaPainter.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cwctype>
 #include <cstring>
 #include <string_view>
@@ -18,6 +19,19 @@ namespace NativeMedia
     {
         constexpr std::wstring_view SearchingFallback = L"\u6b63\u5728\u68c0\u7d22\u6b4c\u8bcd...";
         constexpr std::wstring_view BrowserFallback = L"\u6d4f\u89c8\u5668\u5a92\u4f53";
+
+        // Upper bound for the decoded cover cache. Covers are decoded at the size
+        // they are drawn at, so a handful of 34-200 DIP covers fit comfortably;
+        // the budget only has to stop a pathological track list from growing it.
+        constexpr std::uint64_t kCoverCacheBudgetBytes = 4 * 1024 * 1024;
+
+        // Cached cover bitmaps are 32bpp PBGRA, so each pixel costs 4 bytes.
+        std::uint64_t BitmapBytes(const ID2D1Bitmap1* bitmap)
+        {
+            if (!bitmap) return 0;
+            const D2D1_SIZE_U size = bitmap->GetPixelSize();
+            return static_cast<std::uint64_t>(size.width) * size.height * 4;
+        }
 
         DWRITE_FONT_WEIGHT FontWeight(int value)
         {
@@ -819,14 +833,20 @@ namespace NativeMedia
         return false;
     }
 
-    bool NativeMediaPainter::PrepareCover(const Cover& cover, float dpiScale,
+    bool NativeMediaPainter::PrepareCover(const Cover& cover, UINT coverEdgePx,
         CoverBitmap& result)
     {
         if (!m_context) return false;
         const bool appIcon = cover.dataUri.empty() && !cover.fallbackIconDataUri.empty();
         const auto& uri = appIcon ? cover.fallbackIconDataUri : cover.dataUri;
         if (uri.empty()) return false;
+        const UINT coverEdge = (std::max)(1u, coverEdgePx);
         auto key = HashText(uri);
+        // The decode edge is part of the key: a DPI or cover size change must miss the
+        // cache instead of reusing a bitmap decoded at the old size. The FNV-1a prime
+        // is odd, so distinct edges always produce distinct mixes, and its XOR with the
+        // app icon constant only coincides at an edge far above UINT range.
+        key ^= static_cast<std::uint64_t>(coverEdge) * 0x100000001b3ull;
         if (appIcon) key ^= 0x9e3779b97f4a7c15ull;
         const auto found = m_covers.find(key);
         if (found != m_covers.end())
@@ -839,13 +859,25 @@ namespace NativeMedia
             return true;
         }
         std::wstring error;
-        auto bitmap = DecodeBitmap(m_context.Get(), m_wic.Get(), uri, appIcon, error);
+        auto bitmap = DecodeBitmap(m_context.Get(), m_wic.Get(), uri, coverEdge, appIcon,
+            error);
         if (!bitmap) return false;
-        if (m_covers.size() >= 4)
+        // Keep the decoded cover cache inside a fixed byte budget. Least recently
+        // used entries go first, but a bitmap that this frame still draws is never
+        // evicted: going slightly over budget is preferable to a mid-frame decode.
+        const std::uint64_t incoming = BitmapBytes(bitmap.Get());
+        std::uint64_t total = CoverCacheBytes();
+        while (total + incoming > kCoverCacheBudgetBytes)
         {
-            auto oldest = m_covers.begin();
+            auto oldest = m_covers.end();
             for (auto iter = m_covers.begin(); iter != m_covers.end(); ++iter)
-                if (iter->second.lastUsed < oldest->second.lastUsed) oldest = iter;
+            {
+                if (m_usedCoverKeys.find(iter->first) != m_usedCoverKeys.end()) continue;
+                if (oldest == m_covers.end() ||
+                    iter->second.lastUsed < oldest->second.lastUsed) oldest = iter;
+            }
+            if (oldest == m_covers.end()) break;
+            total -= BitmapBytes(oldest->second.bitmap.Get());
             m_covers.erase(oldest);
         }
         CoverCacheEntry cache;
@@ -857,7 +889,6 @@ namespace NativeMedia
         result.bitmap = bitmap;
         result.key = key;
         result.appIcon = appIcon;
-        (void)dpiScale;
         return true;
     }
 
@@ -894,12 +925,7 @@ namespace NativeMedia
     std::uint64_t NativeMediaPainter::CoverCacheBytes() const
     {
         std::uint64_t bytes{};
-        for (const auto& entry : m_covers)
-        {
-            if (!entry.second.bitmap) continue;
-            const D2D1_SIZE_U size = entry.second.bitmap->GetPixelSize();
-            bytes += static_cast<std::uint64_t>(size.width) * size.height * 4;
-        }
+        for (const auto& entry : m_covers) bytes += BitmapBytes(entry.second.bitmap.Get());
         return bytes;
     }
 
@@ -921,7 +947,7 @@ namespace NativeMedia
 
     Microsoft::WRL::ComPtr<ID2D1Bitmap1> NativeMediaPainter::DecodeBitmap(
         ID2D1DeviceContext* context, IWICImagingFactory* wic, const std::wstring& uri,
-        bool appIcon, std::wstring& error)
+        UINT coverEdgePx, bool appIcon, std::wstring& error)
     {
         std::vector<unsigned char> bytes;
         if (!DataUriBytes(uri, bytes))
@@ -951,7 +977,33 @@ namespace NativeMedia
             error = L"Cover image dimensions are unsupported.";
             return {};
         }
-        if (FAILED(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppPBGRA,
+        // Decode at the size the cover is drawn at instead of uploading the source
+        // extent. Only oversized artwork is scaled, never enlarged, and the aspect
+        // ratio is kept so the cover is not distorted.
+        IWICBitmapSource* source = frame.Get();
+        ComPtr<IWICBitmapScaler> scaler;
+        const UINT coverEdge = (std::max)(1u, coverEdgePx);
+        if (width > coverEdge || height > coverEdge)
+        {
+            const double scale = (std::min)(static_cast<double>(coverEdge) / width,
+                static_cast<double>(coverEdge) / height);
+            const auto scaledExtent = [scale](UINT extent)
+            {
+                const auto value = std::lround(static_cast<double>(extent) * scale);
+                return static_cast<UINT>((std::max)(1L, value));
+            };
+            const UINT scaledWidth = scaledExtent(width);
+            const UINT scaledHeight = scaledExtent(height);
+            if (FAILED(wic->CreateBitmapScaler(&scaler)) ||
+                FAILED(scaler->Initialize(frame.Get(), scaledWidth, scaledHeight,
+                    WICBitmapInterpolationModeHighQualityCubic)))
+            {
+                error = L"Cover image could not be scaled.";
+                return {};
+            }
+            source = scaler.Get();
+        }
+        if (FAILED(converter->Initialize(source, GUID_WICPixelFormat32bppPBGRA,
             WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom)))
         {
             error = L"Cover image could not be converted.";

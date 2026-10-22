@@ -844,7 +844,10 @@ namespace NativeMedia
         if (!cover) cover = &fallback;
         auto state = MakePaintState(m_effectiveStyle, m_pendingFrame, cover, m_tuning);
         CoverBitmap bitmap;
-        const bool hasBitmap = m_painter.PrepareCover(*cover, m_dpiScale, bitmap);
+        // Decode covers at the physical edge they are drawn at, not at the source extent.
+        const bool hasBitmap = m_painter.PrepareCover(*cover,
+            static_cast<UINT>(std::lround((std::max)(1.0, m_effectiveStyle.coverSizePx))),
+            bitmap);
         CoverPaint paint;
         paint.state = &state;
         paint.width = m_width;
@@ -859,7 +862,14 @@ namespace NativeMedia
         if (painted)
         {
             m_coverDirty = false;
-            if (!m_coverFadeActive && key) m_coverKey = key;
+            // Record the key the cached bitmap is actually stored under: a DPI or cover
+            // size change decodes a different size, and keeping the older edge in
+            // m_coverKey would make ReleaseCoverBitmapsExcept drop the on-screen bitmap.
+            if (!m_coverFadeActive)
+            {
+                if (hasBitmap) m_coverKey = bitmap.key;
+                else if (key) m_coverKey = key;
+            }
         }
         return painted;
     }
@@ -938,7 +948,9 @@ namespace NativeMedia
         fallback.fallbackText = L"N";
         if (!cover) cover = &fallback;
         CoverBitmap bitmap;
-        const bool decoded = m_painter.PrepareCover(*cover, m_dpiScale, bitmap);
+        const bool decoded = m_painter.PrepareCover(*cover,
+            static_cast<UINT>(std::lround((std::max)(1.0, m_effectiveStyle.coverSizePx))),
+            bitmap);
         if (!decoded && !cover->dataUri.empty())
             Log(L"Media cover image could not be decoded; using its fallback.",
                 E_FAIL);

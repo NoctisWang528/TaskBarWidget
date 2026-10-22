@@ -100,6 +100,9 @@ public sealed partial class CardGroup : IDisposable
     private long _lyricsSession;
     private string? _outputId, _inputId, _lastCover, _selectedSourceId;
     private bool _outputMuted, _inputMuted;
+    // Set when local artwork was released or re-created: the next getState must ask for the
+    // complete cover/icon payload instead of the artworkDelta form that omits unchanged data.
+    private bool _forceArtworkSync;
     private ElementTheme? _themePreview;
     private ElementTheme _requestedTheme;
     private string? _lastWeatherSnapshotKey;
@@ -245,6 +248,7 @@ public sealed partial class CardGroup : IDisposable
             _sourceImageCache.Clear();
             _lastCover = null;
             _lastSourceIcon = "";
+            _forceArtworkSync = true;
         }
         else if (slot.Id == "traffic")
         {
@@ -764,7 +768,9 @@ public sealed partial class CardGroup : IDisposable
         var token = _visibleLifetime.Token;
         try
         {
-            var stateTask = _connection.RequestAsync("getState", cancellationToken: token);
+            // artworkDelta lets Media omit unchanged cover/icon strings; after a local release
+            // ask for one complete payload again (null payload means no delta).
+            var stateTask = _connection.RequestAsync("getState", _forceArtworkSync ? null : new { artworkDelta = true }, token);
             var trafficTask = traffic ? _connection.RequestAsync("getTrafficHistory", cancellationToken: token) : Task.FromResult(default(JsonElement));
             await Task.WhenAll(stateTask, trafficTask);
             var state = await stateTask;
@@ -806,7 +812,13 @@ public sealed partial class CardGroup : IDisposable
             _title.Text = String(state, "title", "暂无媒体");
             _artist.Text = String(state, "artist");
             var source = String(state, "source");
-            _sources = Array(state, "sources").Select(value => new SourceChoice(String(value, "id"), String(value, "label"), String(value, "iconDataUrl"))).ToArray();
+            _sources = Array(state, "sources").Select(value =>
+            {
+                var id = String(value, "id");
+                // artworkDelta omits an unchanged icon; keep the previously decoded URI for that source.
+                var icon = OptionalString(value, "iconDataUrl") ?? _sources.FirstOrDefault(choice => choice.Id == id)?.IconDataUrl ?? "";
+                return new SourceChoice(id, String(value, "label"), icon);
+            }).ToArray();
             _selectedSourceId = String(state, "selectedSourceId");
             var selected = _sources.FirstOrDefault(choice => choice.Id == _selectedSourceId);
             _sourceLabel.Text = selected?.Label ?? source;
@@ -821,8 +833,12 @@ public sealed partial class CardGroup : IDisposable
             if (!_seekPending) { _seek.Maximum = Math.Max(1, duration); _seek.Value = Math.Clamp(Number(state, "positionSeconds"), 0, _seek.Maximum); }
             _position.Text = Time(Number(state, "positionSeconds")); _duration.Text = Time(duration);
             ApplyBackendTheme(state);
-            var cover = String(state, "coverDataUrl");
-            if (_lastCover != cover) { _lastCover = cover; _ = RenderCoverAsync(cover); }
+            var cover = OptionalString(state, "coverDataUrl");
+            if (cover is not null)
+            {
+                _forceArtworkSync = false;
+                if (_lastCover != cover) { _lastCover = cover; _ = RenderCoverAsync(cover); }
+            }
         }
         finally { _rendering = false; }
     }
@@ -873,7 +889,10 @@ public sealed partial class CardGroup : IDisposable
             using (var writer = new DataWriter(stream.GetOutputStreamAt(0)))
             { writer.WriteBytes(bytes); await writer.StoreAsync(); writer.DetachStream(); }
             stream.Seek(0);
-            var image = new BitmapImage();
+            // Decode at the displayed edge (64 DIP) times the rasterization scale so a large
+            // source cover never inflates into a full-size surface that is then downscaled.
+            var edge = (int)Math.Round(64 * Math.Clamp(_cover.XamlRoot?.RasterizationScale ?? 1.0, 1.0, 3.0));
+            var image = new BitmapImage { DecodePixelWidth = edge };
             await image.SetSourceAsync(stream);
             if (!_disposed && _lastCover == data) _cover.Source = image;
         }
@@ -1210,6 +1229,7 @@ public sealed partial class CardGroup : IDisposable
         _sourceImageCache.Clear();
         _lastCover = null;
         _lastSourceIcon = "";
+        _forceArtworkSync = true;
         CardLifecycleLog.Write("resident-resources-released reason=on-demand-idle");
     }
     private void RestoreResidentResources()
@@ -1228,6 +1248,8 @@ public sealed partial class CardGroup : IDisposable
         value.TryGetProperty(name, out var items) && items.ValueKind == JsonValueKind.Array
         ? items.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String).Select(item => item.GetString() ?? "").Where(item => item.Length > 0).ToArray()
         : null;
+    // Distinguishes "field omitted" (artworkDelta: keep the previous value) from "field empty".
+    private static string? OptionalString(JsonElement value, string name) => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var item) && item.ValueKind == JsonValueKind.String ? item.GetString() : null;
     private static string String(JsonElement value, string name, string fallback = "") => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var item) && item.ValueKind == JsonValueKind.String ? item.GetString() ?? fallback : fallback;
     private static bool Bool(JsonElement value, string name) => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var item) && item.ValueKind == JsonValueKind.True;
     private static double Number(JsonElement value, string name) => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var item) && item.ValueKind == JsonValueKind.Number && item.TryGetDouble(out var number) && double.IsFinite(number) ? number : 0;
