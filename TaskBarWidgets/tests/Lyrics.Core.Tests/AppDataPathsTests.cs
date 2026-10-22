@@ -6,35 +6,40 @@ namespace TaskbarLyrics.Core.Tests;
 public sealed class AppDataPathsTests
 {
     [Fact]
-    public void NativeFirstRunAndUnwritableDirectoryDecisionOverridesIni()
-    {
-        var root = Path.Combine(Path.GetTempPath(), "tbw-missing-" + Guid.NewGuid().ToString("N"));
-        Assert.Equal(Path.Combine(root, "Data"), AppDataPaths.ResolveForApplicationRoot(root, true));
-        Directory.CreateDirectory(root);
-        try
-        {
-            File.WriteAllText(Path.Combine(root, "global_cfg.ini"), "[config]\nportable_mode=true\n");
-            Assert.Equal(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TaskBarWidgets"), AppDataPaths.ResolveForApplicationRoot(root, false));
-        }
-        finally { Directory.Delete(root, recursive: true); }
-    }
-    [Theory]
-    [InlineData("true", true)]
-    [InlineData("1", true)]
-    [InlineData("false", false)]
-    [InlineData("0", false)]
-    public void PortableFlagSelectsOnlyPackageDataDirectory(string value, bool portable)
+    public void ApplicationRootAlwaysResolvesToItsDataDirectory()
     {
         var root = Path.Combine(Path.GetTempPath(), "tbw-path-test-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        Assert.Equal(Path.Combine(root, "Data"), AppDataPaths.ResolveForApplicationRoot(root));
+    }
+
+    [Fact]
+    public void ConfiguredDataRootExposesTheSingleLayout()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "tbw-data-test-" + Guid.NewGuid().ToString("N"));
+        var data = Path.Combine(root, "Data");
         try
         {
-            File.WriteAllText(Path.Combine(root, "global_cfg.ini"), $"[other]\nportable_mode=true\n[config]\nportable_mode = {value}\n");
-            var expected = portable ? Path.Combine(root, "Data") : Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TaskBarWidgets");
-            Assert.Equal(expected, AppDataPaths.ResolveForApplicationRoot(root));
-            Assert.False(Directory.Exists(Path.Combine(root, "Data")));
+            AppDataPaths.ResetForTests();
+            AppDataPaths.ConfigureForDataRoot(data);
+            Assert.Equal(data, AppDataPaths.RootDirectory);
+            Assert.Equal(Path.Combine(data, "config", "app.ini"), AppDataPaths.NativeConfigPath);
+            Assert.Equal(Path.Combine(data, "lyrics"), AppDataPaths.LyricsDirectory);
+            Assert.Equal(Path.Combine(data, "cache", "lyrics"), AppDataPaths.LyricCacheDirectory);
+            AppDataPaths.EnsureDirectories();
+            Assert.True(Directory.Exists(AppDataPaths.LogsDirectory));
         }
-        finally { Directory.Delete(root, recursive: true); }
+        finally
+        {
+            AppDataPaths.ResetForTests();
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void RejectsAnUnrelatedDataDirectory()
+    {
+        AppDataPaths.ResetForTests();
+        Assert.Throws<ArgumentException>(() =>
+            AppDataPaths.ConfigureForDataRoot(Path.Combine(Path.GetTempPath(), "not-data")));
     }
 }

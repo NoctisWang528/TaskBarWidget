@@ -1,6 +1,6 @@
 # Internal media protocol
 
-Transport: local named pipe `TaskBarWidgets.<native PID>`, UTF-8 JSON objects separated by LF, version 1. C# helper is a current-user-only server, native host is client. Native host launches `TaskBarWidgets.Media.exe --host-pid <PID> --pipe-name TaskBarWidgets.<PID> --portable-data <0|1>` from its adjacent `Media/` directory. The optional portable argument is the host's resolved first-run/writability decision; older four-argument launches retain INI lookup compatibility. Helper exits when parent exits. Serialize writes, cap messages at 4 MiB, observe disconnects and cancellation. No remote clients.
+Transport: local named pipe `TaskBarWidgets.<native PID>`, UTF-8 JSON objects separated by LF, version 1. C# helper is a current-user-only server, native host is client. Native host launches `TaskBarWidgets.Media.exe --host-pid <PID> --pipe-name TaskBarWidgets.<PID> --data-root <安装目录>\Data` from its adjacent `Media/` directory. The data root is always the native host's `Data` directory; there is no portable/AppData mode argument or fallback. Helper exits when parent exits. Serialize writes, cap messages at 4 MiB, observe disconnects and cancellation. No remote clients.
 
 Helper to native:
 

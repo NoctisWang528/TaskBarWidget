@@ -37,7 +37,7 @@ public sealed class UiConnection : IDisposable
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
-            timeout.CancelAfter(TimeSpan.FromSeconds(action == "settingsCommand" ? 90 : 15));
+            timeout.CancelAfter(TimeSpan.FromSeconds(action is "settingsCommand" or "storageCommand" ? 90 : 15));
             var id = Guid.NewGuid().ToString("N");
             var completion = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
             var bytes = JsonSerializer.SerializeToUtf8Bytes(new { version = 1, type = "command", action, requestId = id, payload });

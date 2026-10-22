@@ -48,9 +48,9 @@ public sealed class MediaIntegrationTests
     {
         Assert.True(Program.TryGetHostArguments(["--host-pid", "42", "--pipe-name", "TaskBarWidgets.42"], out _, out _));
         Assert.False(Program.TryGetHostArguments([], out _, out _));
-        Assert.True(Program.TryGetHostArguments(["--host-pid", "42", "--pipe-name", "TaskBarWidgets.42", "--portable-data", "1"], out _, out _, out var portable));
-        Assert.True(portable);
-        Assert.False(Program.TryGetHostArguments(["--host-pid", "42", "--pipe-name", "TaskBarWidgets.42", "--portable-data", "arbitrary"], out _, out _));
+        var dataRoot = Path.Combine(Path.GetTempPath(), "TaskBarWidgets", "Data");
+        Assert.True(Program.TryGetHostArguments(["--host-pid", "42", "--pipe-name", "TaskBarWidgets.42", "--data-root", dataRoot], out _, out _, out var parsed));
+        Assert.Equal(Path.GetFullPath(dataRoot), parsed);
         Assert.False(Program.TryGetHostArguments(["--host-pid", "42", "--pipe-name", "another"], out _, out _));
     }
 

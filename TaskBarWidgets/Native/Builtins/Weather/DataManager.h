@@ -75,6 +75,7 @@ public:
 
     SConfiguration GetConfig() const;
     std::wstring ConfigPath() const;
+    std::wstring CredentialPath() const;
     void ReloadConfigs();
     bool RefreshWeather();
 

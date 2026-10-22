@@ -64,9 +64,11 @@ int wmain(int argc, wchar_t** argv)
         Require(AfxWinInit(GetModuleHandleW(nullptr), nullptr, GetCommandLineW(), SW_HIDE), "MFC init failed");
         AfxSetResourceHandle(GetModuleHandleW(nullptr));
         const std::filesystem::path directory(argv[1]); std::filesystem::create_directories(directory);
-        const auto ini = directory / L"WeatherPro.ini";
+        const auto configDirectory = directory / L"config";
+        const auto ini = configDirectory / L"weather.ini";
+        std::filesystem::create_directories(configDirectory);
         { std::ofstream file(ini, std::ios::binary); file << "\xEF\xBB\xBF; preserved comment\r\n[config]\r\napi_type=0\r\ncity_no=101010100\r\ncity_name=北京\r\nwit=0\r\nshow_weather_icon=1\r\nshow_weather_alerts=0\r\n[hfw]\r\nAppKey=fixture-key\r\nunknown=x\r\n[custom]\r\nkeep=unchanged\r\n"; }
-        auto& data = WeatherCDataManager::InstanceRef(); data.LoadConfigs(directory.wstring());
+        auto& data = WeatherCDataManager::InstanceRef(); data.LoadConfigs(configDirectory.wstring());
         if (argc > 2 && std::wstring(argv[2]) == L"--live-nanjing") {
             auto& service = WeatherService::Instance();
             const auto query = Wait(service.StartSearch(0, L"南京"));
@@ -95,7 +97,10 @@ int wmain(int argc, wchar_t** argv)
         const auto saved = Wait(service.StartConfigure(credentials));
         Require(saved.state == L"success" && saved.status.provider == 0 && saved.status.cityId == L"101010100" && saved.status.hasApiKey && saved.status.lastAttemptUnix == 0, "credentials-only changed city or refreshed");
         const auto bytes = Read(ini);
-        Require(bytes.find("; preserved comment\r\n") != std::string::npos && bytes.find("AppKey=fixture-key\r\nunknown=x") != std::string::npos && bytes.find("keep=unchanged") != std::string::npos, "INI preservation");
+        Require(bytes.find("; preserved comment\r\n") != std::string::npos && bytes.find("AppKey") == std::string::npos &&
+            bytes.find("unknown") != std::string::npos && bytes.find("keep") != std::string::npos &&
+            std::filesystem::exists(directory / L"secrets" / L"weather-appkey.bin"),
+            "INI preservation and protected credential import");
         WeatherService::ConfigPatch city; city.provider = 0; city.cityId = L"101190101"; city.cityName = L"南京"; city.cityRegion = L"南京-江苏";
         auto result = Wait(service.StartConfigure(city));
         Require(result.state == L"success" && result.status.temperature == L"22.6℃" && result.status.lastSuccessCityId == L"101190101" && result.status.cityRegion == L"南京-江苏", "configure/refresh snapshot");

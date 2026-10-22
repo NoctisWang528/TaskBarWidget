@@ -70,7 +70,7 @@ class PluginSettingsBridge
     static void Replace(const std::wstring& path, const std::string& expected, const std::string& bytes)
     {
         std::unique_lock<std::mutex> weatherLock(WeatherService::ConfigurationMutex(), std::defer_lock);
-        if (_wcsicmp(std::filesystem::path(path).filename().c_str(), L"WeatherPro.ini") == 0) weatherLock.lock();
+        if (_wcsicmp(std::filesystem::path(path).filename().c_str(), L"weather.ini") == 0) weatherLock.lock();
         if (Read(path) != expected) throw std::runtime_error("Plugin options changed outside this page. Reload settings and try again.");
         static unsigned sequence{};
         const std::wstring temporary = path + L".TaskBarWidgets-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(++sequence) + L".tmp";
@@ -162,13 +162,13 @@ public:
             }
             entry.SetNamedValue(L"items", items);
             JsonArray optionFields;
-            const wchar_t* iniName = id == L"battery.dll" ? L"Battery.dll.ini" : id == L"powermonplugin.dll" ? L"PowerMonPlugin.dll.ini" : id == L"weatherpro.dll" ? L"WeatherPro.ini" : nullptr;
+            const wchar_t* iniName = id == L"battery.dll" ? L"battery.ini" : id == L"powermonplugin.dll" ? L"power.ini" : id == L"weatherpro.dll" ? L"weather.ini" : nullptr;
             std::wstring note = L"内置监测功能，保存后重启应用生效。";
             if (iniName)
             {
                 try
                 {
-                    auto path = std::filesystem::path(theApp.m_config_dir) / L"plugins" / iniName;
+                    auto path = std::filesystem::path(theApp.m_data_dir) / L"config" / iniName;
                     auto bytes = Read(path.wstring());
                     size_t file = files.size(); files.push_back({path.wstring(), bytes, bytes, false});
                     entry.SetNamedValue(L"configPath", Text(path.wstring()));

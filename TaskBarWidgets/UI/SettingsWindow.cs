@@ -641,6 +641,7 @@ public sealed partial class SettingsWindow : Window
         return flyout;
     }
     private void ShowError(string message) { _notice.Message = message; _notice.Severity = InfoBarSeverity.Error; _notice.IsOpen = true; }
+    private void ShowNotice(string message, InfoBarSeverity severity) { _notice.Message = message; _notice.Severity = severity; _notice.IsOpen = true; }
     private void UpdateSaveStatus()
     {
         var count = _native.Pending.Count + _media.Pending.Count;

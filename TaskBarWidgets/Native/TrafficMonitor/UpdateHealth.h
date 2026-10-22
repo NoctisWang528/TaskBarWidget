@@ -96,7 +96,7 @@ namespace UpdateHealth
         if (full.filename() != L"job.json" || _wcsicmp(Normal(work.parent_path()).c_str(), Normal(jobs).c_str()) != 0)
             throw std::runtime_error("Unexpected update job location.");
         auto job = Read(full);
-        if (job.GetNamedNumber(L"protocolVersion", 0) != 1 || job.GetNamedString(L"nonce", L"") != nonce ||
+        if (job.GetNamedNumber(L"protocolVersion", 0) != 2 || job.GetNamedString(L"nonce", L"") != nonce ||
             _wcsicmp(Normal(job.GetNamedString(L"installRoot").c_str()).c_str(), Normal(root).c_str()) != 0 ||
             _wcsicmp(Normal(job.GetNamedString(L"workRoot").c_str()).c_str(), work.c_str()) != 0)
             throw std::runtime_error("Update job does not match this installation.");
@@ -138,7 +138,7 @@ namespace UpdateHealth
             try {
                 const auto job = Read(directory.path() / L"job.json");
                 const auto nonce = job.GetNamedString(L"nonce");
-                if (job.GetNamedNumber(L"protocolVersion", 0) != 1 ||
+                if (job.GetNamedNumber(L"protocolVersion", 0) != 2 ||
                     nonce.size() != 64 || std::wstring(nonce).find_first_not_of(L"0123456789abcdef") != std::wstring::npos ||
                     _wcsicmp(Normal(job.GetNamedString(L"installRoot").c_str()).c_str(), Normal(root).c_str()) != 0 ||
                     _wcsicmp(Normal(job.GetNamedString(L"workRoot").c_str()).c_str(), Normal(directory.path()).c_str()) != 0)

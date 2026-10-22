@@ -14,7 +14,7 @@ public sealed class LyricPipelineCache : ILyricPipelineCache
     // An explicit static constructor prevents early beforefieldinit initialization before host configuration.
     static LyricPipelineCache() { }
 
-    private static readonly string DefaultCacheDirectory = AppDataPaths.DatabaseDirectory;
+    private static readonly string DefaultCacheDirectory = AppDataPaths.LyricCacheDirectory;
     private static readonly JsonLyricCacheStore<RawLyricCacheEnvelope> DefaultRawStore = new(
         Path.Combine(DefaultCacheDirectory, "lyric-pipeline-raw-v1.json"));
     private static readonly JsonLyricCacheStore<ParsedLyricCacheEnvelope> DefaultParsedStore = new(

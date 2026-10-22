@@ -198,7 +198,7 @@ struct NativeMediaHost::Impl
     void Log(const std::wstring& message, HRESULT result = S_OK)
     {
         std::lock_guard lock(logMutex);
-        const std::wstring path = theApp.m_appdata_dir + L"native-media.log";
+        const std::wstring path = theApp.m_data_dir + L"\\logs\\native-media.log";
         WIN32_FILE_ATTRIBUTE_DATA attributes{};
         if (GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &attributes) &&
             (attributes.nFileSizeHigh || attributes.nFileSizeLow > 512 * 1024))
@@ -359,8 +359,8 @@ struct NativeMediaHost::Impl
         std::wstring executable = (appDirectory / L"Media" / L"TaskBarWidgets.Media.exe").wstring();
         std::wstring command = L"\"" + executable + L"\" --host-pid " +
             std::to_wstring(GetCurrentProcessId()) + L" --pipe-name TaskBarWidgets." +
-            std::to_wstring(GetCurrentProcessId()) + L" --portable-data " +
-            (theApp.m_general_data.portable_mode ? L"1" : L"0");
+            std::to_wstring(GetCurrentProcessId()) + L" --data-root \"" +
+            std::filesystem::path(theApp.m_data_dir).wstring() + L"\"";
         STARTUPINFOW startup{ sizeof(startup) };
         startup.dwFlags = STARTF_USESHOWWINDOW;
         startup.wShowWindow = SW_HIDE;
@@ -596,9 +596,7 @@ struct NativeMediaHost::Impl
             if (action == L"getUpdateContext")
             {
                 payload.SetNamedValue(L"installRoot", JsonValue::CreateStringValue(theApp.m_module_dir));
-                payload.SetNamedValue(L"nativeDataRoot", JsonValue::CreateStringValue(theApp.m_config_dir));
-                payload.SetNamedValue(L"portableMode",
-                    JsonValue::CreateBooleanValue(theApp.m_general_data.portable_mode));
+                payload.SetNamedValue(L"dataRoot", JsonValue::CreateStringValue(theApp.m_data_dir));
             }
             else if (action == L"updateUiReady") UpdateHealth::Report(VERSION);
             else if (action == L"exitForUpdate")
@@ -1495,7 +1493,7 @@ void NativeMediaHost::WriteFootprintMetrics()
         L" adjustRectChanged=" + std::to_wstring(taskbar_rect_changes.load()) +
         L" pid=" + std::to_wstring(GetCurrentProcessId()) + L"\r\n";
 
-    const std::wstring path = theApp.m_appdata_dir + L"native-metrics.log";
+    const std::wstring path = theApp.m_data_dir + L"\\logs\\native-metrics.log";
     WIN32_FILE_ATTRIBUTE_DATA attributes{};
     if (GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &attributes) &&
         (attributes.nFileSizeHigh || attributes.nFileSizeLow > 512 * 1024))

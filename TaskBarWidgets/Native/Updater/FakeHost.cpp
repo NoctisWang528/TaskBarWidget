@@ -67,15 +67,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     }
     auto root = yyjson_doc_get_root(doc);
     auto work = fs::path(W(yyjson_get_str(yyjson_obj_get(root, "workRoot"))));
-    auto data = fs::path(W(yyjson_get_str(yyjson_obj_get(root, "mediaDataRoot"))));
+    auto data = fs::path(W(yyjson_get_str(yyjson_obj_get(root, "dataRoot"))));
     std::string nonce = yyjson_get_str(yyjson_obj_get(root, "nonce"));
     std::string version = yyjson_get_str(yyjson_obj_get(root, "version"));
     auto mode = Read(work / L"test-mode.txt");
     if (mode == "fail-data")
     {
-        Write(data / L"media-settings.json", "new settings");
-        Write(data / L"database/user_data.db", "new db");
-        Write(data / L"database/user_data.db-wal", "new wal");
+        Write(data / L"config/media.json", "new settings");
+        Write(data / L"lyrics/user_data.db", "new db");
+        Write(data / L"lyrics/user_data.db-wal", "new wal");
         yyjson_doc_free(doc);
         LocalFree(args);
         return 9;

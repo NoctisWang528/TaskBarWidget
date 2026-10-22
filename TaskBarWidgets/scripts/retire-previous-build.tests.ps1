@@ -24,18 +24,14 @@ try {
         [ordered]@{ component='All'; configuration='Release'; buildStartedAt="$year-01-01T00:00:00+08:00"; buildCompletedAt="$year-01-01T00:01:00+08:00" } |
             ConvertTo-Json | Set-Content -LiteralPath (Join-Path $directory 'build-info.json') -Encoding UTF8
     }
-    New-Item -ItemType Directory -Path (Join-Path $old 'plugins') | Out-Null
-    foreach ($relative in @('config.ini','global_cfg.ini','history_traffic.dat','history_traffic.dat.bak','plugins\Battery.dll.ini','plugins\PowerMonPlugin.dll.ini','plugins\WeatherPro.ini')) {
+    foreach ($relative in @('builtin-startup-check.log')) {
         [IO.File]::WriteAllText((Join-Path $old $relative), "Synthetic user data for $relative`r`ncredential=synthetic-test-only`r`n")
     }
     $plan = (& $script -PreviousBuild $old -NewBuild $new | Out-String | ConvertFrom-Json)
-    if ($plan.Mode -ne 'Plan' -or -not (Test-Path -LiteralPath $old) -or (Test-Path -LiteralPath (Join-Path $new 'config.ini'))) { throw 'Plan modified fixture data.' }
+    if ($plan.Mode -ne 'Plan' -or -not (Test-Path -LiteralPath $old) -or (Test-Path -LiteralPath (Join-Path $new 'builtin-startup-check.log'))) { throw 'Plan modified fixture data.' }
     Assert-Refused { & $script -PreviousBuild $productRoot -NewBuild $new -Execute }
     Assert-Refused { & $script -PreviousBuild $new -NewBuild $new -Execute }
-    [IO.File]::WriteAllText((Join-Path $new 'config.ini'), 'Conflicting newer settings.')
-    Assert-Refused { & $script -PreviousBuild $old -NewBuild $new -Execute }
-    Remove-Item -LiteralPath (Join-Path $new 'config.ini')
-    $locked = [IO.File]::Open((Join-Path $old 'history_traffic.dat'), [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    $locked = [IO.File]::Open((Join-Path $old 'builtin-startup-check.log'), [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
     try { Assert-Refused { & $script -PreviousBuild $old -NewBuild $new -Execute } }
     finally { $locked.Dispose() }
     & $script -PreviousBuild $old -NewBuild $new -Execute

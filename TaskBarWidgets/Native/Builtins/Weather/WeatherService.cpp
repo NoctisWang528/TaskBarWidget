@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "WeatherService.h"
 #include "DataManager.h"
+#include "WeatherCredentialStore.h"
 #include "Common.h"
 #include "../../TrafficMonitor/PluginIniOptions.h"
 #include <filesystem>
@@ -154,8 +155,21 @@ void WeatherService::Configure(const ConfigPatch& patch)
         if (patch.cityRegion) set("config", "city_region", *patch.cityRegion);
     }
     if (patch.apiHost && !patch.apiHost->empty()) set("hfw", "ApiHost", *NormalizeApiHost(*patch.apiHost));
-    if (patch.apiKey && !patch.apiKey->empty()) set("hfw", "AppKey", *patch.apiKey);
-    if (patch.clearApiKey) set("hfw", "AppKey", L"");
+    const bool credentialOperation = patch.clearApiKey || (patch.apiKey && !patch.apiKey->empty());
+    if (patch.clearApiKey)
+    {
+        if (!WeatherCredentials::Clear(data.CredentialPath())) throw Failure{L"天气密钥清除失败，原配置未更改。"};
+    }
+    else if (patch.apiKey && !patch.apiKey->empty())
+    {
+        if (!WeatherCredentials::Write(data.CredentialPath(), *patch.apiKey))
+            throw Failure{L"天气密钥保存失败，原配置未更改。"};
+    }
+    // The INI never carries credentials. Keep a blank AppKey in legacy copies
+    // so an interrupted transition cannot leave a readable secret behind.
+    if (before.find("AppKey") != std::string::npos &&
+        (credentialOperation || std::filesystem::exists(data.CredentialPath())))
+        set("hfw", "AppKey", L"");
     if (after != before) SaveIni(path, before, after);
     }
     data.ReloadConfigs(); UpdateStatus();

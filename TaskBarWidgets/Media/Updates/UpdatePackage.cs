@@ -80,7 +80,7 @@ internal static class UpdatePackage
                 throw new InvalidDataException("Unmanaged language file.");
         }
         else if (new[] { ".ini", ".db", ".db3", ".sqlite", ".sqlite3", ".log", ".dat", ".bak", ".tmp", ".config" }.Contains(extension, StringComparer.OrdinalIgnoreCase) ||
-             name.Equals("settings.json", StringComparison.OrdinalIgnoreCase) || name.Equals("appsettings.json", StringComparison.OrdinalIgnoreCase) ||
+            name.Equals("settings.json", StringComparison.OrdinalIgnoreCase) || name.Equals("appsettings.json", StringComparison.OrdinalIgnoreCase) ||
              name.Equals("media-settings.json", StringComparison.OrdinalIgnoreCase) || name.Contains(".db-", StringComparison.OrdinalIgnoreCase) || name.Contains(".sqlite-", StringComparison.OrdinalIgnoreCase) ||
              name.Equals("config.json", StringComparison.OrdinalIgnoreCase) || name.Contains("history", StringComparison.OrdinalIgnoreCase) ||
              name.Contains("credentials", StringComparison.OrdinalIgnoreCase))

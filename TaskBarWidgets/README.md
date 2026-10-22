@@ -53,7 +53,7 @@ Windows 11 任务栏工具，使用 WinUI 3 设置与快捷卡片，整合硬件
 
 默认使用独立的 TaskBarWidgets 配置与缓存。先退出现有占用同一区域的任务栏工具，再启动新程序。保留旧安装作为回退；不要让两套应用同时写入相同配置。
 
-从源码工作区导入现有布局时，先退出新程序，再从本目录运行以下命令并输入旧安装目录。脚本只读取旧安装，将配置副本写入最近完整构建目录。导入目标必须位于本工作区的 `artifacts/` 下；需要导入发布 ZIP 时，先解压到该目录，再用 `-DestinationDirectory` 指定目标。已有新配置会先备份。内置功能沿用 `plugins/` 下三个 INI 文件作为配置兼容目录；该目录中的 DLL 不再加载。
+从源码工作区导入现有布局时，先退出新程序，再从本目录运行以下命令并输入旧安装目录。脚本只读取旧安装，将配置副本写入目标目录的 `Data/config/`。导入目标必须位于本工作区的 `artifacts/` 下；需要导入发布 ZIP 时，先解压到该目录，再用 `-DestinationDirectory` 指定目标。已有新配置会先备份。
 
 ```powershell
 $oldInstallation = Read-Host '旧 TrafficMonitor 安装目录'
@@ -72,9 +72,9 @@ $oldInstallation = Read-Host '旧 TrafficMonitor 安装目录'
 
 快捷面板与“同时设为默认通信设备”固定启用，只在主动选择设备时更改默认设备；不再提供音频偏好页或全局快捷键。设置按钮位于媒体卡片右上角。
 
-`261018-1213` 起，便携模式的媒体数据随程序放在 `Data/`。从较早版本手动升级时，先退出旧版并备份，再将旧目录的 `config.ini`、`global_cfg.ini`、`history_traffic.dat` 及 `plugins/` 中三个内置模块 INI 复制到新目录；将 `%APPDATA%/TaskBarWidgets/media-settings.json` 和 `database/` 分别复制到新目录的 `Data/media-settings.json` 与 `Data/database/`。如果旧目录已存在 `Data/`，优先完整复制该目录，不用旧共享数据覆盖它。非便携模式仍使用原 AppData 位置。
+所有运行数据固定在安装目录的 `Data/`，不再使用 AppData 或 `global_cfg.ini` 模式开关。首次启动会自动导入旧便携目录、`Data/database/` 和旧共享 AppData 数据，冲突文件归档到 `Data/migration/archive/`。配置分为 `Data/config/app.ini`、`battery.ini`、`power.ini`、`weather.ini`、`media.json`；歌词不可重建数据在 `Data/lyrics/`，可重建缓存在 `Data/cache/lyrics/`，天气密钥密文在 `Data/secrets/`。设置“常规 → 数据与备份”可查看状态、生成备份、重新导入旧数据或清理缓存。
 
-GitHub 的干净 ZIP 不带任何个人配置或历史。全新安装首次运行时会内置一份通用出厂配置（任务栏布局、监测项、卡片与歌词外观），其中网卡、CPU 温度传感器、字体等与机器相关的项一律留空，由程序自动选择；天气默认城市为通用的北京，用户自行设置后以用户城市为准。只要配置文件已存在，更新和启动都不会改动它。删除 `config.ini`（便携模式还有 `plugins/` 与 `Data/media-settings.json`）即可重新得到出厂默认。本地个人 build 已完成数据快照迁移，不能作为公开附件上传；双份包制作详见[便携与分发包](docs/便携与分发包.md)。
+GitHub 的干净 ZIP 不带任何个人配置或历史。全新安装首次运行时会内置一份通用出厂配置（任务栏布局、监测项、卡片与歌词外观），其中网卡、CPU 温度传感器、字体等与机器相关的项一律留空，由程序自动选择；天气默认城市为通用的北京，用户自行设置后以用户城市为准。只要配置文件已存在，更新和启动都不会改动它。DPAPI 天气密钥不能跨 Windows 用户或机器解密，迁移和备份会明确提示。本地个人 build 不能作为公开附件上传；双份包制作详见[便携与分发包](docs/便携与分发包.md)。
 
 登录自启统一使用当前用户的交互式最高权限计划任务。首次使用新目录，在“设置 → 常规”查看登记状态，按需“修复并启用登录启动”；程序不会在打包或仅打开设置时自动修改启动项。
 
@@ -107,7 +107,7 @@ GitHub 的干净 ZIP 不带任何个人配置或历史。全新安装首次运�
 
 进入“设置 → 硬件与网络 → 天气”，选择来源后输入城市或区县名称并点击“搜索”（或按 Enter），从结果中选择城市，再点击“保存城市并刷新”。城市代码由搜索结果提供，不能仅通过改显示名称来切换城市。以中国天气网的南京为例，城市代码为 `101190101`；该来源不需要 API Key。
 
-和风天气需要先填写控制台分配的专属 **API Host** 和 **API Key**，点击“保存连接配置”后再搜索城市。Host 支持纯域名或 `https://` 前缀，仅允许和风专属 `*.qweatherapi.com` 域名；不再使用停用中的公共地址。密钥不会读回界面，留空保留原值，“清除已保存密钥”才会删除。本机配置沿用 `WeatherPro.ini`，不要把此文件或密钥放入截图、仓库或共享压缩包。参见[和风 API Host](https://dev.qweather.com/docs/configuration/api-host/)和[认证说明](https://dev.qweather.com/docs/configuration/authentication/)。
+和风天气需要先填写控制台分配的专属 **API Host** 和 **API Key**，点击“保存连接配置”后再搜索城市。Host 支持纯域名或 `https://` 前缀，仅允许和风专属 `*.qweatherapi.com` 域名；不再使用停用中的公共地址。密钥不会读回界面，留空保留原值，“清除已保存密钥”才会删除。本机配置位于 `Data/config/weather.ini`，AppKey 只以当前 Windows 用户的 DPAPI 密文保存在 `Data/secrets/weather-appkey.bin`，不要把密钥或迁移归档放入截图、仓库或共享压缩包。参见[和风 API Host](https://dev.qweather.com/docs/configuration/api-host/)和[认证说明](https://dev.qweather.com/docs/configuration/authentication/)。
 
 保存城市立即生效，无需重启。“立即刷新已保存城市”不提交尚未选择／保存的搜索文字。页面显示最近尝试与成功时间、错误原因；网络失败会保留成功数据并说明其所属城市。天气更新频率点击上方“应用更改”后自动重新加载和刷新。
 

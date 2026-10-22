@@ -175,7 +175,7 @@ public sealed class JsonResolvedLyricCache : IContextualResolvedLyricCache, IDis
 
     private static string GetDefaultFilePath()
     {
-        var directory = AppDataPaths.DatabaseDirectory;
+        var directory = AppDataPaths.LyricsDirectory;
         return Path.Combine(directory, DefaultFileName);
     }
 

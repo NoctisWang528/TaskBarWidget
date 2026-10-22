@@ -357,8 +357,9 @@ function ConvertTo-MetricTable {
 }
 
 if (-not $SkipInternalMetrics) {
-    # Media helper: per-build log directory, METRICS lines carry a wall clock.
-    $mediaLogs = @(Get-ChildItem -LiteralPath (Join-Path $BuildDirectory 'Media\Logs') -Filter 'app_debug*.log' -ErrorAction SilentlyContinue)
+    # Media helper: product data log directory, METRICS lines carry a wall clock.
+    $dataLogDirectory = Join-Path $BuildDirectory 'Data\logs'
+    $mediaLogs = @(Get-ChildItem -LiteralPath $dataLogDirectory -Filter 'app-debug*.log' -ErrorAction SilentlyContinue)
     $mediaLines = New-Object System.Collections.ArrayList
     foreach ($file in $mediaLogs) {
         $content = @(Get-Content -LiteralPath $file.FullName -ErrorAction SilentlyContinue)
@@ -375,15 +376,14 @@ if (-not $SkipInternalMetrics) {
         }
     }
     if ($mediaLines.Count -gt 0) {
-        $internal['Media'] = ConvertTo-MetricTable -Lines $mediaLines -Source 'Media/Logs/app_debug.log'
+        $internal['Media'] = ConvertTo-MetricTable -Lines $mediaLines -Source 'Data/logs/app-debug.log'
         foreach ($line in $mediaLines) { [void]$rawMetricLines.Add("MEDIA $line") }
     }
 
-    # Native host: shared appdata directory, so the window filter is mandatory. Host
-    # lines may carry a pid= token; keep only the sampled TaskBarWidgets instance so a
-    # second installation cannot mix its counters into the window. Lines without pid=
-    # predate that key and stay eligible.
-    $nativePath = Join-Path $env:APPDATA 'TaskBarWidgets\native-metrics.log'
+    # Native host: the per-build data directory keeps installations isolated. Host
+    # lines may carry a pid= token; keep only the sampled TaskBarWidgets instance so
+    # logs from an earlier run cannot mix counters into the window.
+    $nativePath = Join-Path $dataLogDirectory 'native-metrics.log'
     if (Test-Path -LiteralPath $nativePath -PathType Leaf) {
         $nativeTarget = $targets | Where-Object { $_.Name -eq 'TaskBarWidgets' } | Select-Object -First 1
         $nativeLines = New-Object System.Collections.ArrayList

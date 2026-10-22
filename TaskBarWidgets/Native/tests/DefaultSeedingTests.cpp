@@ -108,10 +108,10 @@ int main(int argc, char** argv)
 
     const std::wstring extracted = work + L"\\extracted";
     ::CreateDirectoryW(extracted.c_str(), nullptr);
-    Check(DumpResource(IDR_DEFAULT_CONFIG, extracted + L"\\config.default.ini", module),
+    Check(DumpResource(IDR_DEFAULT_CONFIG, extracted + L"\\app.default.ini", module),
         "the factory config resource could not be dumped for comparison");
 
-    const std::wstring target = work + L"\\config.ini";
+    const std::wstring target = work + L"\\Data\\config\\app.ini";
     ::DeleteFileW(target.c_str());
     Check(DefaultConfigSeeder::SeedOne(IDR_DEFAULT_CONFIG, target, module) == DefaultConfigSeeder::Result::Created,
         "a missing config was not created");
@@ -134,12 +134,12 @@ int main(int argc, char** argv)
         Check(DefaultConfigSeeder::ReadResourceBytes(id, bytes, module) && !bytes.empty(),
             "a built-in module default resource is missing");
     }
-    Check(DumpResource(IDR_DEFAULT_BATTERY_INI, extracted + L"\\Battery.dll.default.ini", module) &&
-        DumpResource(IDR_DEFAULT_POWERMON_INI, extracted + L"\\PowerMonPlugin.dll.default.ini", module) &&
-        DumpResource(IDR_DEFAULT_WEATHER_INI, extracted + L"\\WeatherPro.default.ini", module),
+    Check(DumpResource(IDR_DEFAULT_BATTERY_INI, extracted + L"\\battery.default.ini", module) &&
+        DumpResource(IDR_DEFAULT_POWERMON_INI, extracted + L"\\power.default.ini", module) &&
+        DumpResource(IDR_DEFAULT_WEATHER_INI, extracted + L"\\weather.default.ini", module),
         "the built-in module defaults could not be dumped for comparison");
 
-    const std::wstring plugin = work + L"\\nested-plugins\\Battery.dll.ini";
+    const std::wstring plugin = work + L"\\Data\\config\\battery.ini";
     ::DeleteFileW(plugin.c_str());
     Check(DefaultConfigSeeder::SeedOne(IDR_DEFAULT_BATTERY_INI, plugin, module) == DefaultConfigSeeder::Result::Created,
         "a built-in module default was not created in a missing directory");

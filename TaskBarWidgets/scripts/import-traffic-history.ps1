@@ -9,7 +9,7 @@ $destination = & (Join-Path $PSScriptRoot 'resolve-app-directory.ps1') -Director
 $prefix = (Join-Path $productRoot 'artifacts').TrimEnd('\') + '\'
 if (-not $destination.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'History destination must be inside product artifacts.' }
 $source = [IO.Path]::GetFullPath($SourceFile)
-$target = Join-Path $destination 'history_traffic.dat'
+$target = Join-Path $destination 'Data\history\traffic.dat'
 if ($source -eq $target) { throw 'Source and destination history must differ.' }
 $executable = Join-Path $destination 'TaskBarWidgets.exe'
 if (Test-Path -LiteralPath $executable) {
@@ -56,7 +56,7 @@ foreach ($record in $sourceRecords.Values) { Add-DailyRecord $merged $record }
 foreach ($record in $targetRecords.Values) { Add-DailyRecord $merged $record }
 
 $backup = Join-Path $productRoot ('artifacts\backups\history-import-' + [Guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $backup, $destination -Force | Out-Null
+New-Item -ItemType Directory -Path $backup, $destination, (Split-Path -Parent $target) -Force | Out-Null
 Copy-Item -LiteralPath $source -Destination (Join-Path $backup 'source-history.dat')
 $output = [Collections.Generic.List[string]]::new()
 $output.Add(('lines: "{0}"' -f $merged.Count))

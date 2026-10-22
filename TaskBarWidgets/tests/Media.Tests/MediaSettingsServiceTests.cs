@@ -338,11 +338,11 @@ public sealed class MediaSettingsServiceTests
         var root = Path.Combine(
             Path.GetTempPath(),
             "tbw-settings-offsets-" + Guid.NewGuid().ToString("N"));
-        var originalRoot = AppDataPaths.RootDirectory;
         Directory.CreateDirectory(root);
         try
         {
-            AppDataPaths.ConfigureForApplicationRoot(root, hostPortableMode: true);
+            AppDataPaths.ResetForTests();
+            AppDataPaths.ConfigureForApplicationRoot(root);
             using var offsets = new TrackLyricOffsetStore();
             var context = new CurrentTrackLyricsContext(
                 new TrackInfo(
@@ -403,7 +403,7 @@ public sealed class MediaSettingsServiceTests
         }
         finally
         {
-            AppDataPaths.ConfigureForApplicationRoot(originalRoot, hostPortableMode: false);
+            AppDataPaths.ResetForTests();
             Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
             if (Directory.Exists(root))
             {

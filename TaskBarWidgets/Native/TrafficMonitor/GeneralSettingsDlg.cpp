@@ -211,7 +211,8 @@ BOOL CGeneralSettingsDlg::OnInitDialog()
     // TODO:  在此添加额外的初始化
 
     m_data.check_update_when_start=false;
-    for (UINT id : { IDC_CHECK_UPDATE_CHECK, IDC_CHECK_NOW_BUTTON, IDC_UPDATE_SORUCE_STATIC, IDC_GITHUB_RADIO, IDC_GITEE_RADIO })
+    for (UINT id : { IDC_CHECK_UPDATE_CHECK, IDC_CHECK_NOW_BUTTON, IDC_UPDATE_SORUCE_STATIC, IDC_GITHUB_RADIO, IDC_GITEE_RADIO,
+                     IDC_SAVE_TO_APPDATA_RADIO, IDC_SAVE_TO_PROGRAM_DIR_RADIO })
     {
         if (CWnd* control=GetDlgItem(id))
         {
@@ -266,9 +267,6 @@ BOOL CGeneralSettingsDlg::OnInitDialog()
         CheckDlgButton(IDC_AUTO_RUN_METHOD_REGESTRY_RADIO, TRUE);
 
 
-    ((CButton*)GetDlgItem(IDC_SAVE_TO_APPDATA_RADIO))->SetCheck(!m_data.portable_mode);
-    ((CButton*)GetDlgItem(IDC_SAVE_TO_PROGRAM_DIR_RADIO))->SetCheck(m_data.portable_mode);
-    GetDlgItem(IDC_SAVE_TO_PROGRAM_DIR_RADIO)->EnableWindow(theApp.m_module_dir_writable);
 
     ((CButton*)GetDlgItem(IDC_AUTO_RUN_CHECK))->SetCheck(m_data.auto_run);
 
@@ -291,8 +289,6 @@ BOOL CGeneralSettingsDlg::OnInitDialog()
     m_toolTip.Create(this);
     m_toolTip.SetMaxTipWidth(theApp.DPI(300));
     m_toolTip.AddTool(GetDlgItem(IDC_SHOW_ALL_CONNECTION_CHECK), CCommon::LoadText(IDS_SHOW_ALL_INFO_TIP));
-    m_toolTip.AddTool(GetDlgItem(IDC_SAVE_TO_APPDATA_RADIO), theApp.m_appdata_dir.c_str());
-    m_toolTip.AddTool(GetDlgItem(IDC_SAVE_TO_PROGRAM_DIR_RADIO), theApp.m_module_dir.c_str());
     AddOrUpdateAutoRunTooltip(true);
 
     if (m_data.cpu_usage_acquire_method == GeneralSettingData::CA_CPU_TIME)
@@ -409,13 +405,6 @@ void CGeneralSettingsDlg::OnOK()
     }
     m_show_all_interface_modified = (m_data.show_all_interface != theApp.m_general_data.show_all_interface);
 
-    //获取数据文件保存位置的设置
-    m_data.portable_mode = (((CButton*)GetDlgItem(IDC_SAVE_TO_PROGRAM_DIR_RADIO))->GetCheck() != 0);
-    if (m_data.portable_mode != theApp.m_general_data.portable_mode)
-    {
-        MessageBox(CCommon::LoadText(IDS_CFG_DIR_CHANGED_INFO), NULL, MB_ICONINFORMATION | MB_OK);
-    }
-
     //m_taskbar_item_modified = (theApp.m_taskbar_data.display_item != taskbar_displat_item_ori);
 
     CTabDlg::OnOK();
@@ -427,7 +416,7 @@ void CGeneralSettingsDlg::OnOK()
 void CGeneralSettingsDlg::OnBnClickedOpenConfigPathButton()
 {
     // TODO: 在此添加控件通知处理程序代码
-    ShellExecute(NULL, _T("explore"), theApp.m_config_dir.c_str(), NULL, NULL, SW_SHOWNORMAL);
+    ShellExecute(NULL, _T("explore"), theApp.m_data_dir.c_str(), NULL, NULL, SW_SHOWNORMAL);
 }
 
 

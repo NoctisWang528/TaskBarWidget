@@ -11,7 +11,7 @@ public class SongSearchMapDbContext : DbContext
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
-        var dbDirectory = AppDataPaths.DatabaseDirectory;
+        var dbDirectory = AppDataPaths.LyricsDirectory;
 
         try
         {

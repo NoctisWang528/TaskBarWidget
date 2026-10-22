@@ -105,7 +105,7 @@ void CWeatherPro::OnExtenedInfo(ExtendedInfoIndex index, const wchar_t* data)
     {
     case ITMPlugin::EI_CONFIG_DIR:
         WeatherCDataManager::InstanceRef().LoadConfigs(data);
-        if (GetFileAttributesW((std::wstring(data) + L"WeatherPro.ini").c_str()) == INVALID_FILE_ATTRIBUTES) WeatherCDataManager::InstanceRef().SaveConfigs();
+        if (GetFileAttributesW((std::wstring(data) + L"weather.ini").c_str()) == INVALID_FILE_ATTRIBUTES) WeatherCDataManager::InstanceRef().SaveConfigs();
         break;
 
     default:

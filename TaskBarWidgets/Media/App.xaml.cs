@@ -19,7 +19,7 @@ public partial class App : System.Windows.Application
     public App() => throw new InvalidOperationException("The media helper requires its native host launch arguments.");
     private readonly Process _host;
     private readonly string _pipeName;
-    private readonly bool? _portableData;
+    private readonly string? _dataRoot;
     private SettingsStore? _store;
     private MediaCoordinator? _media;
     private MediaPipeServer? _pipe;
@@ -28,6 +28,7 @@ public partial class App : System.Windows.Application
     private UpdateCoordinator? _updates;
     private UpdateInstallBridge? _updateInstaller;
     private UpdateSnapshot _updateUnavailable = new() { Phase = "error", Error = "更新服务尚未准备好。" };
+    private StorageCommandService? _storage;
     private readonly AudioDeviceService _audio = new();
     private MediaSettingsService? _settingsService;
     private readonly CancellationTokenSource _stop = new();
@@ -36,9 +37,9 @@ public partial class App : System.Windows.Application
     private readonly ArtworkDeltaState _artwork = new();
     internal AppSettings Settings { get; private set; } = new();
 
-    internal App(Process host, string pipeName, bool? portableData = null)
+    internal App(Process host, string pipeName, string? dataRoot = null)
     {
-        _host = host; _pipeName = pipeName; _portableData = portableData;
+        _host = host; _pipeName = pipeName; _dataRoot = dataRoot;
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
     }
 
@@ -48,8 +49,12 @@ public partial class App : System.Windows.Application
         try
         {
             var applicationRoot = Directory.GetParent(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar))!.FullName;
-            AppDataPaths.ConfigureForApplicationRoot(applicationRoot, _portableData);
-            var settingsPath = Path.Combine(AppDataPaths.RootDirectory, "media-settings.json");
+            DataStartup.Prepare(_dataRoot ?? AppDataPaths.ResolveForApplicationRoot(applicationRoot), applicationRoot);
+            _storage = new StorageCommandService(applicationRoot, AppDataPaths.RootDirectory);
+            // The startup probe above owns legacy migration; here only refresh
+            // the in-memory status after migration/restore completed.
+            _ = _storage.Status();
+            var settingsPath = AppDataPaths.MediaSettingsPath;
             FactoryDefaults.EnsureSeeded(settingsPath);
             _store = new SettingsStore(settingsPath);
             Settings = _store.Load(IsApplicationUsingLightTheme());
@@ -76,7 +81,8 @@ public partial class App : System.Windows.Application
             {
                 _updates = new UpdateCoordinator(applicationRoot, currentVersion, Settings.ProductAutomaticUpdatesEnabled,
                     snapshot => _ui?.PublishUpdateState(snapshot));
-                _updateInstaller = new UpdateInstallBridge(_updates, _nativeSettings, _ui, _host, applicationRoot, AppDataPaths.RootDirectory);
+                _updateInstaller = new UpdateInstallBridge(_updates, _nativeSettings, _ui, _host,
+                    applicationRoot, AppDataPaths.RootDirectory);
             }
             catch (Exception error)
             {
@@ -172,6 +178,21 @@ public partial class App : System.Windows.Application
         switch (action)
         {
             case "getUpdateState": return _updates?.Snapshot ?? _updateUnavailable;
+            case "getDataStatus": return _storage?.Status() ?? throw new InvalidOperationException("数据服务尚未准备好。");
+            case "storageCommand":
+            {
+                var storageAction = payload.GetProperty("action").GetString() ?? "";
+                return storageAction switch
+                {
+                    "backup" => await _storage!.BackupAsync(
+                        payload.TryGetProperty("path", out var backupPath) ? backupPath.GetString() : null, token),
+                    "scheduleRestore" => _storage!.ScheduleRestore(payload.GetProperty("path").GetString()!),
+                    "importLegacy" => _storage!.ScheduleLegacyImport(),
+                    "clearCache" => _storage!.ClearCache(),
+                    "openDataFolder" => OpenDataFolder(),
+                    _ => throw new ArgumentException("不支持的数据操作。")
+                };
+            }
             case "checkForUpdates": return _updates?.Check() ?? _updateUnavailable;
             case "downloadUpdate": return _updates?.Download() ?? _updateUnavailable;
             case "cancelUpdateDownload": return _updates?.CancelDownload() ?? _updateUnavailable;
@@ -303,6 +324,16 @@ public partial class App : System.Windows.Application
         number = 0;
         return value.TryGetProperty(name, out var property) && property.ValueKind == JsonValueKind.Number &&
             property.TryGetDouble(out number) && double.IsFinite(number);
+    }
+
+    private static object OpenDataFolder()
+    {
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = AppDataPaths.RootDirectory,
+            UseShellExecute = true
+        });
+        return new { success = true };
     }
 
     private MediaSettingsService SettingsService()

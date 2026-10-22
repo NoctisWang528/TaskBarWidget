@@ -54,7 +54,7 @@ int wmain(int count, wchar_t** arguments)
         fs::copy_file(own, helperPath);
         Helper helper(helperPath);
         const std::wstring nonce(64, L'a');
-        Json job; job.SetNamedValue(L"protocolVersion", Value::CreateNumberValue(1));
+        Json job; job.SetNamedValue(L"protocolVersion", Value::CreateNumberValue(2));
         job.SetNamedValue(L"installRoot", Value::CreateStringValue(root.wstring()));
         job.SetNamedValue(L"workRoot", Value::CreateStringValue(work.wstring()));
         job.SetNamedValue(L"version", Value::CreateStringValue(L"261018-1700"));

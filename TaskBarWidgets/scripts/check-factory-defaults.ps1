@@ -64,6 +64,7 @@ $weather = Read-Text (Join-Path $defaults 'WeatherPro.default.ini')
 foreach ($key in @('AppKey', 'ApiHost', 'app_key', 'api_host')) {
     if ($weather -match "(?m)^[ \t]*$key[ \t]*=[ \t]*\S") { Fail "WeatherPro.default.ini must leave '$key' empty" }
 }
+if ($weather -match '(?m)^[ \t]*AppKey[ \t]*=') { Fail 'WeatherPro.default.ini must not declare an INI credential slot' }
 if ($weather -notmatch '(?m)^\s*api_type\s*=') { Fail 'WeatherPro.default.ini must pin api_type explicitly' }
 if ($weather -notmatch '(?m)^\s*city_name\s*=\s*北京\s*$') { Fail 'WeatherPro.default.ini must pin the generic Beijing city name' }
 if ($weather -notmatch '(?m)^\s*city_no\s*=\s*101010100\s*$') { Fail 'WeatherPro.default.ini must pin the generic Beijing city id' }

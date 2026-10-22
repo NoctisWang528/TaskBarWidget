@@ -2,6 +2,20 @@
 
 更新：2026-10-22。最近成功完整构建的路径由本机 `artifacts/latest-build.txt` 提供；构建产物、布局检查图、日志和用户配置不提交到仓库。
 
+## 单目录数据布局与迁移阶段（2026-10-22）
+
+本轮将产品运行数据统一到 `<安装目录>\Data`，删除了 `global_cfg.ini` 模式读取和 AppData 回退。原生启动顺序现在是：验证 `Data` 路径与可写性 → 同步调用 `Media\TaskBarWidgets.Media.exe --migrate-data <安装目录>\Data` → 播种缺失的出厂文件 → 加载主配置和内置模块 → 启动媒体常驻进程。迁移失败不会加载旧配置或启动媒体。
+
+配置仍按写入者分文件：`Data/config/app.ini`、`battery.ini`、`power.ini`、`weather.ini`、`media.json`；不可重建歌词数据在 `Data/lyrics/`，可重建缓存在 `Data/cache/lyrics/`。天气 AppKey 以当前用户 DPAPI 密文保存到 `Data/secrets/weather-appkey.bin`，活动 `weather.ini` 不保留 AppKey。原生与媒体端的密钥信封、UTF-16 明文和 Base64 编码已做双向兼容；旧 UTF-8 密文也会尝试读取。
+
+迁移使用 staging、来源优先级和原子提交：目标现有文件优先，绝不覆盖；所有 JSON、INI、流量结构和 SQLite `integrity_check` 通过后才移动 staging 到目标，冲突及旧来源归档到 `Data/migration/archive/<UTC时间>/`，只保留最近一次归档。锁定文件不能删除时保留源文件并记录警告，不把已成功的新数据错误回滚。备份包含配置、历史、歌词不可重建数据、`layout.json` 和 DPAPI 密文，排除缓存、日志、归档和 SQLite 侧车；恢复会再次校验清单/哈希，生成 `pre-restore-latest.zip`，并在冷启动失败时回滚本次覆盖。
+
+验证证据：完整硬件 Release 构建 `artifacts/builds/20261022-192150`（版本 `261022-1921`）通过，`Lyrics.Core`、`Media`、`UI` 和两个测试项目均为 0 warning／0 error。`run-native-tests.ps1`、`run-builtin-startup-test.ps1`、`run-weather-service-tests.ps1`、`run-update-health-tests.ps1`、出厂默认、默认播种、历史导入、数据快照和旧构建退休回归均通过。独立数据布局探针覆盖当前便携 `Data/database` 迁移、AppData 优先级、锁定源文件归档、活动天气 INI 清洗、SQLite 校验、二次恢复、恢复前快照和 SQLite WAL/SHM 清理；原生与 C# 的 DPAPI 文件此前已完成双向读取。`test-ui-templates.ps1` 对 `20261022-192150` 通过，设置页与四张卡片正常加载且未激活窗口；离屏 HWND 未把投递的鼠标消息提升为 `PointerPressed`，因此真实拖动仍未验证。独立更新器 `test-updater.ps1 -SkipBuild` 在当前机器无子进程输出并挂起，已中止；实际发布 ZIP 的完整解压、持久化阶段和更新器预检通过。
+
+本地发布包验证（未发布）：完整解压、持久化阶段和更新器预检通过；ZIP 为 160 个条目、159 个程序文件，`Data`、`secrets`、`logs`、`migration`、`backups` 均为 0。具体本地路径与 SHA256见本轮任务结果。`dotnet test` 在当前机器启动 Testhost 时因 `OpenProcess` 返回 `Win32Exception (5) 拒绝访问` 中止，属于本机进程权限环境阻断，未观察到测试断言失败。
+
+未验证：真实用户 AppData 的完整归档耗时、日用安装升级后的首次迁移、跨用户/跨机器 DPAPI 失败、桌面备份/恢复按钮、卸载/启动登记、多显示器混合 DPI 和真实播放器；这些仍按桌面验收处理，不把离屏或夹具通过当成完成。未启动正常产品、未替换日用安装、未提交或发布 Release。
+
 ## 资源占用优化阶段 5：UI 管道对端校验（2026-10-22）
 
 OPT-009 单独提交落地，构建 `artifacts/builds/20261022-134854`。
@@ -79,7 +93,7 @@ Optimization 分支的阶段 0 只加观察能力，不改产品行为：新增�
 - 新增 [scripts/measure-footprint.ps1](scripts/measure-footprint.ps1)：按固定 1 s × 60 s 窗口对 `TaskBarWidgets`、`TaskBarWidgets.Media`、`TaskBarWidgets.UI` 采集 Working Set、Private Working Set、Commit、线程数、句柄数与 CPU 时间增量，输出首末值、Δ、均值与最小二乘斜率，并解析三进程的内建计数行；产物写入忽略目录 `artifacts/measurements/`。默认拒绝采样路径不在目标构建目录内的进程，避免把日常安装当成基线。
 - Private Working Set 改走 PDH `\Process(*)\Working Set - Private`（按 `ID Process` 关联 PID）。`QueryWorkingSetEx` 在本机对 explorer 与自身进程都返回成功但缓冲区全 0，已弃用；实测 explorer 339.3 MB / 97.3 MB、当前 shell 163 MB / 70.7 MB 与任务管理器一致。
 - Media 内建计数（`Media/Diagnostics/FootprintMetrics.cs`，5 s 一行 `[METRICS]`）：每秒分配字节、gen0/1/2、FFT 次数、发布帧数、管道写入次数与字节、`getState` 次数／总耗时／最大耗时／文本字节／封面字节／图标字节。
-- Native 内建计数（`NativeMediaHost::WriteFootprintMetrics()`，5 s 一行，写 `%APPDATA%\TaskBarWidgets\native-metrics.log`）：活动图层数、交换链数、文字排版／格式／画刷条数、封面缓存条数与字节、`MAIN_TIMER`／`MONITOR_TIMER`／`TASKBAR_TIMER` 触发次数。该文件不含曲目、路径或媒体内容。
+- Native 内建计数（`NativeMediaHost::WriteFootprintMetrics()`，5 s 一行，写 `<安装目录>\Data\logs\native-metrics.log`）：活动图层数、交换链数、文字排版／格式／画刷条数、封面缓存条数与字节、`MAIN_TIMER`／`MONITOR_TIMER`／`TASKBAR_TIMER` 触发次数。该文件不含曲目、路径或媒体内容。
 - UI 内建计数（`UI/FootprintMetrics.cs` 与 `CardMetricsLog`）：首开次数、首开与首帧的累计／均值／最大、首帧超时次数、图片缓存条目数、封面与来源图标是否在位。每 10 s 一行，打开与关闭时各补一行。
 - 计划文档新增 [§3.5 阶段 0 实施结果](docs/2026-10-22-资源占用优化方案.md)，记录字段、采集点与统计口径，并列出与方案原文不一致处（Native `Diagnostic()` 不承载计数、UI 未加 HWND 计数）。
 

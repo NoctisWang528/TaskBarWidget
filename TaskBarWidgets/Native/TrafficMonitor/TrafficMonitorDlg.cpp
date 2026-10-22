@@ -357,7 +357,7 @@ void CTrafficMonitorDlg::IniConnection()
             log_str += (const char*)m_pIfTable->table[i].bDescr;
             log_str += _T("\n");
         }
-        CCommon::WriteLog(log_str, (theApp.m_config_dir + L".\\connections.log").c_str());
+        CCommon::WriteLog(log_str, (theApp.m_data_dir + L"\\logs\\connections.log").c_str());
     }
 
     //if (m_connection_selected < 0 || m_connection_selected >= m_connections.size() || m_auto_select)
@@ -872,7 +872,6 @@ bool CTrafficMonitorDlg::ApplyUnifiedSettings(const TaskBarSettingData& taskbar,
     const bool result = theApp.SaveConfig();
     theApp.m_cannot_save_config_warning = previous_warning;
     if (!result && error) *error = L"设置已应用，但最终配置保存失败；请检查配置目录权限。";
-    theApp.SaveGlobalConfig();
     return result && startup_succeeded;
 }
 
@@ -1264,7 +1263,7 @@ void CTrafficMonitorDlg::DoMonitorAcquisition()
                 log_str += descr.c_str();
                 log_str += _T("\r\nm_connection_name: ");
                 log_str += theApp.m_cfg_data.m_connection_name.c_str();
-                CCommon::WriteLog(log_str, (theApp.m_config_dir + L".\\connections.log").c_str());
+                CCommon::WriteLog(log_str, (theApp.m_data_dir + L"\\logs\\connections.log").c_str());
             }
 
             IniConnection();
@@ -1710,7 +1709,7 @@ void CTrafficMonitorDlg::OnTimer(UINT_PTR nIDEvent)
                         log_str += _T(", ");
                     }
                     log_str += _T("\n");
-                    CCommon::WriteLog(log_str, (theApp.m_config_dir + L".\\debug.log").c_str());
+                    CCommon::WriteLog(log_str, (theApp.m_data_dir + L"\\logs\\debug.log").c_str());
                 }
             }
 
@@ -2011,9 +2010,7 @@ void CTrafficMonitorDlg::OnClose()
 {
     // TODO: 在此添加消息处理程序代码和/或调用默认值
     theApp.m_cannot_save_config_warning = true;
-    theApp.m_cannot_save_global_config_warning = true;
     theApp.SaveConfig();    //退出前保存设置到ini文件
-    theApp.SaveGlobalConfig();
     SaveHistoryTrafficFull();  // 退出时使用完整保存，确保所有数据都保存
     BackupHistoryTrafficFile();
 
@@ -2556,13 +2553,12 @@ BOOL CTrafficMonitorDlg::OnQueryEndSession()
 
     // TODO:  在此添加专用的查询结束会话代码
     theApp.SaveConfig();
-    theApp.SaveGlobalConfig();
     SaveHistoryTrafficFull();  // 系统关机时使用完整保存，确保所有数据都保存
     BackupHistoryTrafficFile();
 
     if (theApp.m_debug_log)
     {
-        CCommon::WriteLog(_T("TrafficMonitor进程已被终止，设置已保存。"), (theApp.m_config_dir + L".\\debug.log").c_str());
+        CCommon::WriteLog(_T("TrafficMonitor进程已被终止，设置已保存。"), (theApp.m_data_dir + L"\\logs\\debug.log").c_str());
     }
 
     return TRUE;

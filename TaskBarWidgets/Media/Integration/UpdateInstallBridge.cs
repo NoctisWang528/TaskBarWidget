@@ -16,12 +16,12 @@ internal sealed class UpdateInstallBridge
     private readonly NativeSettingsClient _native;
     private readonly UiHostBridge _ui;
     private readonly Process _host;
-    private readonly string _root, _mediaDataRoot;
+    private readonly string _root, _dataRoot;
     private int _installing;
 
     internal UpdateInstallBridge(UpdateCoordinator updates, NativeSettingsClient native, UiHostBridge ui,
-        Process host, string root, string mediaDataRoot)
-    { _updates = updates; _native = native; _ui = ui; _host = host; _root = root; _mediaDataRoot = mediaDataRoot; }
+        Process host, string root, string dataRoot)
+    { _updates = updates; _native = native; _ui = ui; _host = host; _root = root; _dataRoot = dataRoot; }
 
     internal UpdateSnapshot Begin(CancellationToken lifetime)
     {
@@ -53,8 +53,8 @@ internal sealed class UpdateInstallBridge
                 throw new IOException("独立更新器复制校验失败。");
             var nonce = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
             var job = new {
-                protocolVersion = 1, installRoot, stageRoot = prepared.StageRoot, workRoot = work,
-                nativeDataRoot = context.GetProperty("nativeDataRoot").GetString(), mediaDataRoot = _mediaDataRoot,
+                protocolVersion = 2, installRoot, stageRoot = prepared.StageRoot, workRoot = work,
+                dataRoot = context.GetProperty("dataRoot").GetString(),
                 version = prepared.Version, fileManifestSha256 = prepared.FileManifestSha256, requirements = prepared.Requirements,
                 nonce, nativePid = _host.Id, mediaPid = Environment.ProcessId, uiPid = _ui.ProcessId
             };

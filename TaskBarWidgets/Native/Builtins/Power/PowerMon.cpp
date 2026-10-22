@@ -248,7 +248,7 @@ void PowerMon::OnExtenedInfo(ExtendedInfoIndex index, const wchar_t* data)
 	case ITMPlugin::EI_CONFIG_DIR:
 		//从配置文件读取配置
 		g_data.LoadConfig(std::wstring(data));
-        if (GetFileAttributesW((std::wstring(data) + L"PowerMonPlugin.dll.ini").c_str()) == INVALID_FILE_ATTRIBUTES) g_data.SaveConfig();
+        if (GetFileAttributesW((std::wstring(data) + L"power.ini").c_str()) == INVALID_FILE_ATTRIBUTES) g_data.SaveConfig();
 
 		SyncSettingsData();
 		break;
