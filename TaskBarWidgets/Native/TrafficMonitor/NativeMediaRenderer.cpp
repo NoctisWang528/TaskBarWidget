@@ -1187,6 +1187,24 @@ namespace NativeMedia
         return true;
     }
 
+    FootprintSnapshot NativeMediaRenderer::Footprint() const
+    {
+        const Layer* const all[] = { &m_background, &m_lyrics, &m_spectrum,
+            &m_browser, &m_coverFront, &m_coverBack };
+        FootprintSnapshot snapshot;
+        for (const Layer* layer : all)
+        {
+            if (layer->visual) ++snapshot.layers;
+            if (layer->swapChain) ++snapshot.swapChains;
+        }
+        snapshot.textLayouts = m_painter.TextLayoutCount();
+        snapshot.textFormats = m_painter.TextFormatCount();
+        snapshot.brushes = m_painter.BrushCount();
+        snapshot.covers = m_painter.CoverCount();
+        snapshot.coverBytes = m_painter.CoverCacheBytes();
+        return snapshot;
+    }
+
     bool NativeMediaRenderer::Present(std::uint64_t now)
     {
         if (!m_hasState) return false;

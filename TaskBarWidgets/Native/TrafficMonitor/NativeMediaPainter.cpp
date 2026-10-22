@@ -891,6 +891,18 @@ namespace NativeMedia
         }
     }
 
+    std::uint64_t NativeMediaPainter::CoverCacheBytes() const
+    {
+        std::uint64_t bytes{};
+        for (const auto& entry : m_covers)
+        {
+            if (!entry.second.bitmap) continue;
+            const D2D1_SIZE_U size = entry.second.bitmap->GetPixelSize();
+            bytes += static_cast<std::uint64_t>(size.width) * size.height * 4;
+        }
+        return bytes;
+    }
+
     void NativeMediaPainter::TrimLayouts()
     {
         while (m_layouts.size() > 160)

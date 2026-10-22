@@ -96,6 +96,7 @@ public sealed partial class CardGroup : IDisposable
     private long _audioRequestSequence, _audioAppliedSequence;
     private int _audioGeneration;
     private int _generation, _ticks, _flyoutsOpen;
+    private int _metricsTicks;
     private long _lyricsSession;
     private string? _outputId, _inputId, _lastCover, _selectedSourceId;
     private bool _outputMuted, _inputMuted;
@@ -144,6 +145,13 @@ public sealed partial class CardGroup : IDisposable
         _previous.IsEnabled = _play.IsEnabled = _next.IsEnabled = _seek.IsEnabled = _source.IsEnabled = false;
         _timer.Tick += async (_, _) =>
         {
+            // Cumulative footprint snapshot every ~10 s on the existing 400 ms
+            // timer, plus one line per open and per hide (see WriteMetrics).
+            if (++_metricsTicks >= 25)
+            {
+                _metricsTicks = 0;
+                WriteMetrics();
+            }
             if (_visible) await RefreshAsync(++_ticks % 8 == 0, _ticks % 25 == 0);
         };
         _volumeTimer.Tick += async (_, _) => await FlushVolumesAsync();
@@ -304,6 +312,7 @@ public sealed partial class CardGroup : IDisposable
             _lyrics.Activate();
         }
         var openElapsed = timing.Elapsed;
+        FootprintMetrics.RecordOpen(openElapsed.TotalMilliseconds);
         var queuedWait = _openQueued;
         _openTiming = null;
         _openQueued = TimeSpan.Zero;
@@ -322,6 +331,8 @@ public sealed partial class CardGroup : IDisposable
         });
         CardLifecycleLog.Write($"shown generation={_generation} entry=0x{entryWindow:X}");
         _timer.Start();
+        _metricsTicks = 0;
+        WriteMetrics();
         _idleReleaseTimer.Stop();
         _ = RefreshAsync(_quickCardEnabled.GetValueOrDefault("device"), _quickCardEnabled.GetValueOrDefault("traffic"));
         if (_quickCardEnabled.GetValueOrDefault("media")) _ = SubscribeLyricsAsync(_lyricsSession, true);
@@ -337,9 +348,13 @@ public sealed partial class CardGroup : IDisposable
             await card.VisibleFrame.WaitAsync(TimeSpan.FromMilliseconds(600));
             CardTimingLog.Write($"first-frame openMs={openElapsed.TotalMilliseconds:0.0} " +
                 $"firstFrameMs={timing.Elapsed.TotalMilliseconds:0.0} totalMs={(queuedWait + timing.Elapsed).TotalMilliseconds:0.0}");
+            FootprintMetrics.RecordFirstFrame(timing.Elapsed.TotalMilliseconds);
         }
         catch (TimeoutException)
-        { CardTimingLog.Write($"first-frame-timeout openMs={openElapsed.TotalMilliseconds:0.0} totalMs={(queuedWait + timing.Elapsed).TotalMilliseconds:0.0}"); }
+        {
+            CardTimingLog.Write($"first-frame-timeout openMs={openElapsed.TotalMilliseconds:0.0} totalMs={(queuedWait + timing.Elapsed).TotalMilliseconds:0.0}");
+            FootprintMetrics.RecordFirstFrameTimeout();
+        }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         { CardLifecycleLog.Write($"timing-observe-failed hr=0x{exception.HResult:X8}"); }
     }
@@ -353,6 +368,11 @@ public sealed partial class CardGroup : IDisposable
         if (queued.TotalMilliseconds >= 30)
             CardTimingLog.Write($"queued gesture={gestureId} waitMs={queued.TotalMilliseconds:0.0}");
     }
+
+    // One line per lifecycle boundary keeps a 60 s desktop window analysable even
+    // when the poll timer stops while the card is hidden.
+    private void WriteMetrics()
+        => CardMetricsLog.Write(FootprintMetrics.Snapshot(_cover.Source is null ? 0 : 1, _cover.Source is not null, _sourceImageCache.Count));
 
     public void Hide() => Hide("explicit");
 
@@ -374,6 +394,7 @@ public sealed partial class CardGroup : IDisposable
         _lastHiddenAt = DateTimeOffset.UtcNow;
         _idleReleaseTimer.Start();
         ReleaseResidentResourcesIfNeeded();
+        WriteMetrics();
         foreach (var flyout in _flyouts) flyout.Hide();
         foreach (var card in AllCards) HideCard(card);
     }

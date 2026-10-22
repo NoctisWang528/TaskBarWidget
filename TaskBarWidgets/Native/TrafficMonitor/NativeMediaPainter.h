@@ -113,6 +113,14 @@ namespace NativeMedia
         static D2D1_COLOR_F ParseColor(const std::wstring& value, D2D1_COLOR_F fallback);
         static std::uint64_t HashText(const std::wstring& value);
 
+        // Built-in footprint counters sampled by the native metrics line.
+        std::size_t TextLayoutCount() const { return m_layouts.size(); }
+        std::size_t TextFormatCount() const { return m_formats.size(); }
+        std::size_t BrushCount() const { return m_brushes.size(); }
+        std::size_t CoverCount() const { return m_covers.size(); }
+        // Cached cover bitmaps are 32bpp PBGRA, so each pixel costs 4 bytes.
+        std::uint64_t CoverCacheBytes() const;
+
     private:
         struct TextFormatKey
         {

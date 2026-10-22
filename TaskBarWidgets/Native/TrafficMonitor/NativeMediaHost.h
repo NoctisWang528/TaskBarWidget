@@ -19,6 +19,9 @@ public:
     bool IsVisible() const;
     static void Shutdown();
     static void OpenSettings(const wchar_t* page = nullptr);
+    // kind: 0 = MAIN_TIMER, 1 = MONITOR_TIMER, 2 = TASKBAR_TIMER.
+    static void NoteTimer(unsigned kind);
+    static void WriteFootprintMetrics();
 private:
     struct Impl;
     static std::shared_ptr<Impl>& Shared();

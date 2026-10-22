@@ -2,6 +2,7 @@ using System.IO;
 using System.IO.Pipes;
 using System.Text.Json;
 using System.Threading.Channels;
+using TaskBarWidgets.Media.Diagnostics;
 
 namespace TaskBarWidgets.Media.Integration;
 
@@ -113,6 +114,7 @@ internal sealed class MediaPipeServer : IAsyncDisposable
             if (_outgoing.TryTake(out var frame) && frame is not null)
             {
                 await WriteAsync(pipe, filter.Filter(frame), cancellationToken).ConfigureAwait(false);
+                FootprintMetrics.NoteFrame();
                 continue;
             }
             await _wake.Reader.ReadAsync(cancellationToken).ConfigureAwait(false);
@@ -123,6 +125,7 @@ internal sealed class MediaPipeServer : IAsyncDisposable
     {
         var bytes = JsonSerializer.SerializeToUtf8Bytes(value);
         if (bytes.Length > MaximumMessageBytes) throw new InvalidDataException("Media frame exceeds protocol limit.");
+        FootprintMetrics.NotePipeWrite(bytes.Length);
         await pipe.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
         await pipe.WriteAsync(new byte[] { 10 }, cancellationToken).ConfigureAwait(false);
         await pipe.FlushAsync(cancellationToken).ConfigureAwait(false);

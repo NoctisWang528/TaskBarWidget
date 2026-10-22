@@ -1,9 +1,11 @@
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using System.Text.Json;
 using System.Runtime.InteropServices;
 using System.Windows;
 using Microsoft.Win32;
+using TaskBarWidgets.Media.Diagnostics;
 using TaskBarWidgets.Media.Integration;
 using TaskbarLyrics.Core.Database;
 using TaskbarLyrics.Core.Utilities;
@@ -88,6 +90,7 @@ public partial class App : System.Windows.Application
             if (_updateInstaller is not null) TaskObserver.Observe(_updateInstaller.ReportPreviousFailureAsync(_stop.Token), "previous update outcome");
             TaskObserver.Observe(WatchHostAsync(), "parent lifecycle");
             SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
+            FootprintMetrics.Start();
         }
         catch (Exception exception)
         {
@@ -193,11 +196,23 @@ public partial class App : System.Windows.Application
                 return new { snapshot = cardVisible ? _media.CardSnapshot : null };
             case "getState":
                 var state = _media.ControlState;
+                var coverDataUrl = _media.CoverDataUrl;
+                // Read the cover and each source icon once, then measure the text
+                // payload directly instead of serializing the whole reply.
+                var sourceItems = (state.Sources ?? []).Select(source => new { source.Id,
+                    label = source.Name switch { "QQMusic" => "QQ 音乐", "Netease" => "网易云音乐", "Kugou" => "酷狗音乐", "Douyin" => "抖音", "Browser" => BrowserSourceName(source.Id), _ => source.Name },
+                    iconDataUrl = _media.SourceIcon(source) }).ToArray();
+                long textBytes = Encoding.UTF8.GetByteCount(state.Title) + Encoding.UTF8.GetByteCount(state.Artist) + Encoding.UTF8.GetByteCount(state.Source);
+                long iconBytes = 0;
+                foreach (var item in sourceItems)
+                {
+                    textBytes += Encoding.UTF8.GetByteCount(item.label);
+                    iconBytes += Encoding.UTF8.GetByteCount(item.iconDataUrl);
+                }
+                FootprintMetrics.NoteStatePayload(textBytes, Encoding.UTF8.GetByteCount(coverDataUrl), iconBytes);
                 return new { state.Title, state.Artist, state.Source, state.PositionSeconds, state.DurationSeconds,
                     state.IsPlaying, state.CanPrevious, state.CanNext, state.CanPlayPause, state.CanSeek,
-                    coverDataUrl = _media.CoverDataUrl, sources = (state.Sources ?? []).Select(source => new { source.Id,
-                        label = source.Name switch { "QQMusic" => "QQ 音乐", "Netease" => "网易云音乐", "Kugou" => "酷狗音乐", "Douyin" => "抖音", "Browser" => BrowserSourceName(source.Id), _ => source.Name },
-                        iconDataUrl = _media.SourceIcon(source) }),
+                    coverDataUrl, sources = sourceItems,
                     state.SelectedSourceId, toolWindowTheme = (int)Settings.ToolWindowTheme };
             case "openPanel": OpenAudioPanel(); return new { success = true };
             case "getNativeSettings": return await GetNativeSettingsAsync();
@@ -352,6 +367,7 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs args)
     {
+        FootprintMetrics.Stop();
         _nativeSettings?.Dispose();
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
         _stop.Cancel();

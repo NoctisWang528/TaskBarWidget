@@ -1,7 +1,21 @@
 # 验收状态
 
-更新：2026-10-21。最近成功完整构建的路径由本机 `artifacts/latest-build.txt` 提供；构建产物、布局检查图、日志和用户配置不提交到仓库。
+更新：2026-10-22。最近成功完整构建的路径由本机 `artifacts/latest-build.txt` 提供；构建产物、布局检查图、日志和用户配置不提交到仓库。
 
+## 资源占用优化阶段 0：测量仪表与基线（2026-10-22）
+
+Optimization 分支的阶段 0 只加观察能力，不改产品行为：新增外部采样脚本与三进程内建计数，用于后续 OPT 编号工作项的 Δ 与斜率判据。
+
+- 新增 [scripts/measure-footprint.ps1](scripts/measure-footprint.ps1)：按固定 1 s × 60 s 窗口对 `TaskBarWidgets`、`TaskBarWidgets.Media`、`TaskBarWidgets.UI` 采集 Working Set、Private Working Set、Commit、线程数、句柄数与 CPU 时间增量，输出首末值、Δ、均值与最小二乘斜率，并解析三进程的内建计数行；产物写入忽略目录 `artifacts/measurements/`。默认拒绝采样路径不在目标构建目录内的进程，避免把日常安装当成基线。
+- Private Working Set 改走 PDH `\Process(*)\Working Set - Private`（按 `ID Process` 关联 PID）。`QueryWorkingSetEx` 在本机对 explorer 与自身进程都返回成功但缓冲区全 0，已弃用；实测 explorer 339.3 MB / 97.3 MB、当前 shell 163 MB / 70.7 MB 与任务管理器一致。
+- Media 内建计数（`Media/Diagnostics/FootprintMetrics.cs`，5 s 一行 `[METRICS]`）：每秒分配字节、gen0/1/2、FFT 次数、发布帧数、管道写入次数与字节、`getState` 次数／总耗时／最大耗时／文本字节／封面字节／图标字节。
+- Native 内建计数（`NativeMediaHost::WriteFootprintMetrics()`，5 s 一行，写 `%APPDATA%\TaskBarWidgets\native-metrics.log`）：活动图层数、交换链数、文字排版／格式／画刷条数、封面缓存条数与字节、`MAIN_TIMER`／`MONITOR_TIMER`／`TASKBAR_TIMER` 触发次数。该文件不含曲目、路径或媒体内容。
+- UI 内建计数（`UI/FootprintMetrics.cs` 与 `CardMetricsLog`）：首开次数、首开与首帧的累计／均值／最大、首帧超时次数、图片缓存条目数、封面与来源图标是否在位。每 10 s 一行，打开与关闭时各补一行。
+- 计划文档新增 [§3.5 阶段 0 实施结果](docs/2026-10-22-资源占用优化方案.md)，记录字段、采集点与统计口径，并列出与方案原文不一致处（Native `Diagnostic()` 不承载计数、UI 未加 HWND 计数）。
+
+验证：完整硬件 Release 构建 `artifacts/builds/20261022-120729` 通过；`tests/Media.Tests` 287 项通过（须先执行 `Native/tests/run-native-tests.ps1` 生成 `NativePipeIntegrationClient.exe`，否则该集成用例报缺失）；`Native/tests/run-native-tests.ps1` 全部通过；`scripts/validate-winui.ps1` 实际模板加载通过。
+
+未验证：11 状态基线表尚未采集，因为桌面测量需要启动本 worktree 的构建产物，当前授权边界为不启动正常产品；播放歌词、播放频谱、换曲、停止播放还需要真实播放器与音频源。跨显示器混合 DPI、Explorer 重建、真实音频设备切换、输入延迟均未验证。脚本的外部指标已用 explorer 与当前 shell 冒烟，三进程内建计数的实际落行尚未在运行中的产品上确认。
 ## 当前结论：Mica 观感已获用户认可（2026-10-21）
 
 用户明确反馈“现在的 mica 我比较满意了”，当前环境下的 Mica 视觉效果据此记为已认可，本轮视觉调校收尾。保留 Mica 以及现有个人参数和出厂默认值；未提供的实际个人参数不作推断，实验候选不自动成为默认。

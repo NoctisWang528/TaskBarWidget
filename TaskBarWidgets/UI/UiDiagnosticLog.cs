@@ -26,3 +26,10 @@ internal static class UiDiagnosticLog
     internal static void Write(string file, string message) => Pending.Writer.TryWrite((file,
         $"{DateTimeOffset.Now:o} pid={Environment.ProcessId} {message[..Math.Min(message.Length, 512)]}\n"));
 }
+
+// Footprint counters share the bounded writer above: no extra thread, and a
+// slow disk still cannot stall the UI thread.
+internal static class CardMetricsLog
+{
+    internal static void Write(string message) => UiDiagnosticLog.Write("ui-metrics.log", message);
+}

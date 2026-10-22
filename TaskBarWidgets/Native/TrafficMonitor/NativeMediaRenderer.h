@@ -11,6 +11,7 @@
 #include <dxgi1_3.h>
 #include <wrl/client.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -40,6 +41,18 @@ namespace NativeMedia
         double transitionProgress{ 1.0 };
         std::optional<double> displayedScan;
         bool scanActive{};
+    };
+
+    // Read-only footprint sample of the renderer caches.
+    struct FootprintSnapshot
+    {
+        unsigned layers{};
+        unsigned swapChains{};
+        std::size_t textLayouts{};
+        std::size_t textFormats{};
+        std::size_t brushes{};
+        std::size_t covers{};
+        std::uint64_t coverBytes{};
     };
 
     class NativeMediaRenderer
@@ -77,6 +90,8 @@ namespace NativeMedia
         // same Present/transition scheduler without creating GPU resources.
         void BeginHeadlessTest();
         RendererProbe AdvanceHeadlessTest(std::uint64_t now);
+        // Renderer state only changes on the UI thread, so no lock is needed.
+        FootprintSnapshot Footprint() const;
 
     private:
         friend struct NativeMediaRendererTestAccess;

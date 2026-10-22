@@ -95,6 +95,12 @@ namespace
     }
 }
 
+// Built-in footprint counters. Only the UI thread touches them.
+static std::atomic<unsigned long long> main_timer_ticks{};
+static std::atomic<unsigned long long> monitor_timer_ticks{};
+static std::atomic<unsigned long long> taskbar_timer_ticks{};
+static ULONGLONG last_metrics_write{};
+
 struct NativeMediaHost::Impl
 {
     HWND owner{};
@@ -1341,6 +1347,73 @@ void NativeMediaHost::OpenSettings(const wchar_t* page)
         if (page) command.SetNamedValue(L"page", JsonValue::CreateStringValue(page));
         instance->Send(command);
     }
+}
+
+void NativeMediaHost::NoteTimer(unsigned kind)
+{
+    if (kind == 0) ++main_timer_ticks;
+    else if (kind == 1) ++monitor_timer_ticks;
+    else if (kind == 2) ++taskbar_timer_ticks;
+}
+
+// Appends one METRICS line to native-metrics.log at most every 5000 ms.
+// Only cache footprint counters are recorded; no media content, track
+// information or file path ever reaches this file.
+void NativeMediaHost::WriteFootprintMetrics()
+{
+    const ULONGLONG now = GetTickCount64();
+    if (last_metrics_write && now - last_metrics_write < 5000) return;
+    last_metrics_write = now;
+
+    unsigned layers{};
+    unsigned swapChains{};
+    unsigned long long textLayouts{};
+    unsigned long long textFormats{};
+    unsigned long long brushes{};
+    unsigned long long covers{};
+    unsigned long long coverBytes{};
+    const auto& instance = Shared();
+    if (instance)
+    {
+        const auto footprint = instance->renderer.Footprint();
+        layers = footprint.layers;
+        swapChains = footprint.swapChains;
+        textLayouts = footprint.textLayouts;
+        textFormats = footprint.textFormats;
+        brushes = footprint.brushes;
+        covers = footprint.covers;
+        coverBytes = footprint.coverBytes;
+    }
+
+    SYSTEMTIME time{}; GetLocalTime(&time);
+    wchar_t prefix[32];
+    swprintf_s(prefix, L"%04u-%02u-%02u %02u:%02u:%02u",
+        time.wYear, time.wMonth, time.wDay, time.wHour, time.wMinute, time.wSecond);
+    const std::wstring line = std::wstring(prefix) + L" METRICS" +
+        L" layers=" + std::to_wstring(layers) +
+        L" swapChains=" + std::to_wstring(swapChains) +
+        L" textLayouts=" + std::to_wstring(textLayouts) +
+        L" textFormats=" + std::to_wstring(textFormats) +
+        L" brushes=" + std::to_wstring(brushes) +
+        L" covers=" + std::to_wstring(covers) +
+        L" coverBytes=" + std::to_wstring(coverBytes) +
+        L" mainTicks=" + std::to_wstring(main_timer_ticks.load()) +
+        L" monitorTicks=" + std::to_wstring(monitor_timer_ticks.load()) +
+        L" taskbarTicks=" + std::to_wstring(taskbar_timer_ticks.load()) + L"\r\n";
+
+    const std::wstring path = theApp.m_appdata_dir + L"native-metrics.log";
+    WIN32_FILE_ATTRIBUTE_DATA attributes{};
+    if (GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &attributes) &&
+        (attributes.nFileSizeHigh || attributes.nFileSizeLow > 512 * 1024))
+        MoveFileExW(path.c_str(), (path + L".1").c_str(), MOVEFILE_REPLACE_EXISTING);
+    HANDLE file = CreateFileW(path.c_str(), FILE_APPEND_DATA,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return;
+    const auto text = Utf8(line);
+    DWORD written{};
+    WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &written, nullptr);
+    CloseHandle(file);
 }
 
 void NativeMediaHost::Tick() { if (m_impl) m_impl->Tick(); }

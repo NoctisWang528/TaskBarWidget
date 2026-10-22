@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Threading;
+using TaskBarWidgets.Media.Diagnostics;
 
 namespace TaskbarLyrics.App;
 
@@ -556,6 +557,7 @@ public sealed class SystemAudioSpectrumService : IDisposable
 
     private static float[] CalculateFftMagnitudes(float[][] channels)
     {
+        FootprintMetrics.NoteFft();
         var length = channels[0].Length;
         var powers = new double[(length / 2) + 1];
         foreach (var samples in channels)
