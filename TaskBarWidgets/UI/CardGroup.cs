@@ -111,7 +111,11 @@ public sealed partial class CardGroup : IDisposable
     private readonly DateTimeOffset _createdAt = DateTimeOffset.UtcNow;
     private DateTimeOffset _lastHiddenAt = DateTimeOffset.UtcNow;
     private bool _residentResourcesReleased;
-    private readonly DispatcherTimer _idleReleaseTimer = new() { Interval = TimeSpan.FromSeconds(30) };
+    // Both resource modes release only rebuildable media/lyrics resources, and only
+    // after the cards have been hidden this long. The timer arms once for the
+    // remaining wait, so a hidden group never polls while nothing can change.
+    private const int IdleReleaseMinutes = 10;
+    private readonly DispatcherTimer _idleReleaseTimer = new() { Interval = TimeSpan.FromMinutes(IdleReleaseMinutes) };
     private sealed class CardSlot(string id, string title, FrameworkElement content, double height, bool autoHeight, double width)
     {
         internal string Id { get; } = id;
@@ -160,8 +164,10 @@ public sealed partial class CardGroup : IDisposable
         _volumeTimer.Tick += async (_, _) => await FlushVolumesAsync();
         _idleReleaseTimer.Tick += (_, _) =>
         {
-            if (_visible) _idleReleaseTimer.Stop();
-            else ReleaseResidentResourcesIfNeeded();
+            // One shot per hidden period: the release pass re-arms only when it has to
+            // wait again, so a hidden group never polls an idle timer.
+            _idleReleaseTimer.Stop();
+            if (!_visible) ReleaseResidentResourcesIfNeeded();
         };
         _seekTimer.Tick += async (_, _) =>
         {
@@ -396,7 +402,8 @@ public sealed partial class CardGroup : IDisposable
         _visibleLifetime?.Dispose();
         _visibleLifetime = null;
         _lastHiddenAt = DateTimeOffset.UtcNow;
-        _idleReleaseTimer.Start();
+        // Arms the one-shot idle release for the remaining hidden time; both resource
+        // modes take this path so Resident no longer keeps lyric layout forever.
         ReleaseResidentResourcesIfNeeded();
         WriteMetrics();
         foreach (var flyout in _flyouts) flyout.Hide();
@@ -1218,25 +1225,48 @@ public sealed partial class CardGroup : IDisposable
     }
     private void ReleaseResidentResourcesIfNeeded()
     {
-        if (!_onDemand || _visible || _residentResourcesReleased) return;
-        if (DateTimeOffset.UtcNow - _lastHiddenAt < TimeSpan.FromMinutes(10)) return;
+        if (_disposed || _visible || _residentResourcesReleased) return;
+        var idle = TimeSpan.FromMinutes(IdleReleaseMinutes);
+        var hiddenFor = DateTimeOffset.UtcNow - _lastHiddenAt;
+        if (hiddenFor < idle)
+        {
+            // Woken early by timer granularity: keep the single shot armed instead of
+            // leaving the release unreachable until the cards are hidden again.
+            ArmIdleRelease(idle - hiddenFor);
+            return;
+        }
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
         _residentResourcesReleased = true;
         // Release only media-card imagery and lyric layout, not unrelated card
-        // visuals. The next open recreates both from the latest snapshot.
+        // visuals, and never the current track's cover bitmap: that bitmap is the last
+        // visible media state, and dropping it made the next open re-decode and flash an
+        // empty frame. _forceArtworkSync still asks the next getState for the complete
+        // payload so the cleared source icon is rebuilt from the latest snapshot.
         _lyrics.ReleaseResources();
-        _cover.Source = null;
         _sourceImage.Source = null;
         _sourceImageCache.Clear();
-        _lastCover = null;
         _lastSourceIcon = "";
         _forceArtworkSync = true;
-        CardLifecycleLog.Write("resident-resources-released reason=on-demand-idle");
+        CardLifecycleLog.Write($"resident-resources-released reason=idle-hidden " +
+            $"mode={(_onDemand ? "on-demand" : "resident")} hiddenS={hiddenFor.TotalSeconds:0} " +
+            $"elapsedMs={System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}");
+    }
+    private void ArmIdleRelease(TimeSpan delay)
+    {
+        if (_disposed) return;
+        if (delay < TimeSpan.FromSeconds(1)) delay = TimeSpan.FromSeconds(1);
+        _idleReleaseTimer.Stop();
+        _idleReleaseTimer.Interval = delay;
+        _idleReleaseTimer.Start();
     }
     private void RestoreResidentResources()
     {
         if (!_residentResourcesReleased) return;
         _residentResourcesReleased = false;
-        CardLifecycleLog.Write("resident-resources-restored");
+        // Nothing is rebuilt here: the open path recreates lyric layout through
+        // Activate() and refetches icons through _forceArtworkSync, so the synchronous
+        // part of the first open stays unchanged.
+        CardLifecycleLog.Write($"resident-resources-restored hiddenS={(DateTimeOffset.UtcNow - _lastHiddenAt).TotalSeconds:0}");
     }
     private sealed record AudioChoice(string Id, string Name, bool IsDefault, bool IsCommunications, double Volume, bool IsMuted, bool CanControl);
     private sealed record SourceChoice(string Id, string Label, string IconDataUrl);

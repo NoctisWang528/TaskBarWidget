@@ -231,6 +231,8 @@ public partial class App : Application
     {
         if (_connection is null) return;
         _cards?.Hide();
+        // The window is reused across opens; only the first creation pays for the shell.
+        var reused = _settings is not null;
         if (_settings is null)
         {
             _settings = new SettingsWindow(_connection);
@@ -246,6 +248,7 @@ public partial class App : Application
         }
         _settings.ShowPage(page);
         _settings.Activate();
+        CardLifecycleLog.Write($"settings-shown page={page ?? "default"} reused={reused}");
     }
 
     private void OnBackendConnectionChanged(bool connected)
