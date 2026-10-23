@@ -22,6 +22,8 @@ public sealed partial class SettingsWindow
     private OffsetPageRequest? _offsetPendingRequest;
     private string _offsetSearch = "";
     private int _offsetPage = 1;
+    private StackPanel? _offsetCurrentContent;
+    private StackPanel? _offsetHistoryContent;
     private bool _storageBusy;
     private sealed record OffsetPageRequest(
         int RequestId,
@@ -506,12 +508,7 @@ public sealed partial class SettingsWindow
     private void RenderOffsets()
     {
         var current = Section("当前歌曲", "偏移按歌曲与歌词源分别保存，修改后立即作用于当前歌词。");
-        if (_serviceEvents.GetValueOrDefault("currentTrackOffset") is JsonObject track) {
-            current.Children.Add(new TextBlock { Text = Text(track["title"]) + " — " + Text(track["artist"]), TextWrapping = TextWrapping.Wrap });
-            current.Children.Add(Copy("歌词源：" + Text(track["lyricSource"]) + "；播放器偏移：" + Text(track["playerOffsetMilliseconds"]) + " ms"));
-            var offset = new NumberBox { Header = "单曲偏移（毫秒）", Value = Number(track["trackOffsetMilliseconds"]), Minimum = -5000, Maximum = 5000, SmallChange = 100, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact };
-            current.Children.Add(offset); current.Children.Add(ActionButton("应用到当前歌曲", () => ServiceCommandAsync("setCurrentTrackOffset", JsonValue.Create(offset.Value))));
-        } else current.Children.Add(Copy("尚无确定歌词源的歌曲。"));
+        _offsetCurrentContent = current;
         var history = Section("已保存偏移");
         var search = new TextBox { PlaceholderText = "搜索歌曲或歌手", Text = _offsetSearch }; history.Children.Add(search);
         history.Children.Add(ActionButton("搜索 / 刷新", async () =>
@@ -520,6 +517,27 @@ public sealed partial class SettingsWindow
             _offsetPage = 1;
             await QueueOffsetQuery(_pageGeneration, activate: false);
         }));
+        _offsetHistoryContent = new StackPanel { Spacing = 10 };
+        history.Children.Add(_offsetHistoryContent);
+        RefreshOffsetsContent();
+    }
+
+    private void RefreshOffsetsContent(bool updateCurrent = true)
+    {
+        if (_offsetCurrentContent is not { } current || _offsetHistoryContent is not { } history) return;
+        // Keep the page sections and search controls attached so data readback
+        // cannot replay their entrance transitions or discard in-progress input.
+        if (updateCurrent)
+        {
+            current.Children.Clear();
+            if (_serviceEvents.GetValueOrDefault("currentTrackOffset") is JsonObject track) {
+                current.Children.Add(new TextBlock { Text = Text(track["title"]) + " — " + Text(track["artist"]), TextWrapping = TextWrapping.Wrap });
+                current.Children.Add(Copy("歌词源：" + Text(track["lyricSource"]) + "；播放器偏移：" + Text(track["playerOffsetMilliseconds"]) + " ms"));
+                var offset = new NumberBox { Header = "单曲偏移（毫秒）", Value = Number(track["trackOffsetMilliseconds"]), Minimum = -5000, Maximum = 5000, SmallChange = 100, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact };
+                current.Children.Add(offset); current.Children.Add(ActionButton("应用到当前歌曲", () => ServiceCommandAsync("setCurrentTrackOffset", JsonValue.Create(offset.Value))));
+            } else current.Children.Add(Copy("尚无确定歌词源的歌曲。"));
+        }
+        history.Children.Clear();
         if (_serviceEvents.GetValueOrDefault("trackOffsetEntries") is JsonObject page && page["entries"] is JsonArray entries) {
             foreach (var entry in entries.OfType<JsonObject>()) {
                 var content = new StackPanel { Spacing = 6 };
@@ -554,6 +572,8 @@ public sealed partial class SettingsWindow
     {
         _offsetLatestRequestId = ++_offsetRequestSequence;
         CancelPendingOffsetQuery();
+        _offsetCurrentContent = null;
+        _offsetHistoryContent = null;
     }
 
     private void CancelPendingOffsetQuery()
@@ -655,7 +675,7 @@ public sealed partial class SettingsWindow
                 }
                 foreach (var response in responses)
                     ApplyServiceResponse(response, snapshot);
-                RenderPage();
+                RefreshOffsetsContent(updateCurrent: request.Activate);
                 UpdateSaveStatus();
                 request.Completion.TrySetResult(true);
             }
@@ -766,7 +786,10 @@ public sealed partial class SettingsWindow
         var snapshot = _media.Capture();
         foreach (var (action, value) in commands)
             ApplyServiceResponse(await RequestAsync("settingsCommand", new { action, value }), snapshot);
-        ApplyTheme(); RenderPage(); UpdateSaveStatus();
+        ApplyTheme();
+        if (_currentPage == "trackOffsets") RefreshOffsetsContent();
+        else RenderPage();
+        UpdateSaveStatus();
     }
 
     private void ApplyServiceResponse(JsonObject response, SettingsDraft.SaveSnapshot snapshot)
