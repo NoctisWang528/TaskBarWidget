@@ -709,17 +709,34 @@ namespace NativeMedia
         else context->PopAxisAlignedClip();
     }
 
+    float NativeMediaPainter::MeasureBrowserLine(ID2D1DeviceContext* context,
+        const EffectiveStyle& style, const std::wstring& text, float width, float fontSize,
+        int weight)
+    {
+        auto textStyle = style;
+        textStyle.fontWeight = weight;
+        const auto* entry = GetLayout(context, textStyle, text, fontSize, width, true, 0);
+        if (!entry) return fontSize;
+        if (entry->constrained)
+        {
+            DWRITE_TEXT_METRICS metrics{};
+            if (SUCCEEDED(entry->constrained->GetMetrics(&metrics)) && metrics.height > 0)
+                return (std::max)(fontSize, metrics.height);
+        }
+        return (std::max)(fontSize, entry->naturalHeight);
+    }
+
     void NativeMediaPainter::DrawBrowserText(ID2D1DeviceContext* context,
         const EffectiveStyle& style, const std::wstring& text, float left, float top,
-        float width, float height, float fontSize, int weight, D2D1_COLOR_F color,
+        float width, float lineHeight, float fontSize, int weight, D2D1_COLOR_F color,
         float opacity)
     {
-        if (!context || width <= 0 || height <= 0) return;
+        if (!context || width <= 0 || lineHeight <= 0) return;
         auto textStyle = style;
         textStyle.fontWeight = weight;
         const auto* entry = GetLayout(context, textStyle, text, fontSize, width, true, 0);
         if (!entry || !entry->constrained) return;
-        context->PushAxisAlignedClip(D2D1::RectF(left, top, left + width, top + height),
+        context->PushAxisAlignedClip(D2D1::RectF(left, top, left + width, top + lineHeight),
             D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
         context->DrawTextLayout(D2D1::Point2F(left, top), entry->constrained.Get(),
             GetBrush(context, WithOpacity(color, opacity)),
@@ -743,17 +760,23 @@ namespace NativeMedia
         const float metadataWidth = layout.browser.metadata.Width();
         const float titleSize = static_cast<float>(style.fontSizePx);
         const float sourceSize = (std::max)(9.0f, 10.0f * paint.dpiScale);
-        const float groupHeight = titleSize + sourceSize;
-        const float titleTop = layout.browser.metadata.top +
-            (layout.browser.metadata.Height() - groupHeight) / 2.0f;
-        DrawBrowserText(context, style,
-            browser.title.empty() ? std::wstring(BrowserFallback) : browser.title,
-            layout.browser.metadata.left, titleTop, metadataWidth, titleSize,
-            titleSize, 600, primary, 1.0f);
+        const auto titleText = browser.title.empty()
+            ? std::wstring(BrowserFallback)
+            : browser.title;
         const auto sourceText = browser.artist.empty() ? browser.source : browser.artist;
-        DrawBrowserText(context, style, sourceText,
-            layout.browser.metadata.left, titleTop + titleSize, metadataWidth, sourceSize,
-            sourceSize, 400, secondary, 1.0f);
+        // A DirectWrite line box is taller than its font size. Stacking and clipping the
+        // two lines at the font size cut the bottom off every glyph, so measure them.
+        const float titleHeight = MeasureBrowserLine(context, style, titleText,
+            metadataWidth, titleSize, 600);
+        const float sourceHeight = MeasureBrowserLine(context, style, sourceText,
+            metadataWidth, sourceSize, 400);
+        const float titleTop = layout.browser.metadata.top +
+            (layout.browser.metadata.Height() - titleHeight - sourceHeight) / 2.0f;
+        DrawBrowserText(context, style, titleText, layout.browser.metadata.left, titleTop,
+            metadataWidth, titleHeight, titleSize, 600, primary, 1.0f);
+        DrawBrowserText(context, style, sourceText, layout.browser.metadata.left,
+            titleTop + titleHeight, metadataWidth, sourceHeight, sourceSize, 400, secondary,
+            1.0f);
 
         const auto fillTriangle = [&](D2D1_POINT_2F first, D2D1_POINT_2F second,
             D2D1_POINT_2F third, D2D1_COLOR_F color)

@@ -235,8 +235,10 @@ namespace NativeMedia
             const std::wstring& text, float fontSize, float dpiScale, float left, float top, float width,
             float height, int alignment, D2D1_COLOR_F color, float opacity,
             std::optional<double> scanProgress, bool translationPlaceholder);
+        float MeasureBrowserLine(ID2D1DeviceContext* context, const EffectiveStyle& style,
+            const std::wstring& text, float width, float fontSize, int weight);
         void DrawBrowserText(ID2D1DeviceContext* context, const EffectiveStyle& style,
-            const std::wstring& text, float left, float top, float width, float height,
+            const std::wstring& text, float left, float top, float width, float lineHeight,
             float fontSize, int weight, D2D1_COLOR_F color, float opacity);
         void TrimLayouts();
         void TrimBrushes();

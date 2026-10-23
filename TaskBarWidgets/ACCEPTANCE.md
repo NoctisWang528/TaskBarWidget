@@ -2,6 +2,20 @@
 
 更新：2026-10-23。最近成功完整构建的路径由本机 `artifacts/latest-build.txt` 提供；构建产物、布局检查图、日志和用户配置不提交到仓库。
 
+## 任务栏浏览器媒体两行文字底部截断修复（2026-10-23）
+
+用户截图里任务栏浏览器媒体的标题与歌手／来源行字底被削平。原因是 `PaintBrowser` 把字号当成了裁剪高度：DirectWrite 的行框比字号高约三分之一，`DrawBrowserText` 的裁剪底边落在字号处，正好切掉每行文字的下沿；第二行又按标题字号而不是真实行高堆叠，两行在竖直方向上互相压住。
+
+- [NativeMediaPainter.h:238-242](Native/TrafficMonitor/NativeMediaPainter.h) 把原本的 `height` 参数改名为 `lineHeight`，并新增 `MeasureBrowserLine`：取受限文本布局的 `DWRITE_TEXT_METRICS.height`，取不到时退回自然行高，且不小于字号。这与封面占位字母按行高居中的既有做法（[NativeMediaPainter.cpp:680-684](Native/TrafficMonitor/NativeMediaPainter.cpp)）一致。
+- [NativeMediaPainter.cpp:760-779](Native/TrafficMonitor/NativeMediaPainter.cpp) 先量出标题行与第二行的行框高度，再按两者之和在按钮区左侧的 metadata 矩形里垂直居中；第二行从 `titleTop + titleHeight` 起画，不再按字号堆叠。字号、字重、颜色、省略号截断和按钮命中区域都没有变化。
+- [NativeMediaPainter.cpp:729-745](Native/TrafficMonitor/NativeMediaPainter.cpp) 的裁剪矩形改为行框高度，绘制仍在这一处轴对齐裁剪内完成。
+
+回归：[NativeMediaOffscreenTests.cpp:151-171](Native/tests/NativeMediaOffscreenTests.cpp) 新增按亮度找最低墨迹行的助手（背景层不透明，靠 alpha 判断没有意义）；[NativeMediaOffscreenTests.cpp:476-494](Native/tests/NativeMediaOffscreenTests.cpp) 用 `Fixture artist` 与带下伸字母的 `Fixture artist gyp` 各渲染一次，要求后者的墨迹底行更低。把裁剪高度改回字号做反向验证时该断言失败（`Browser metadata descenders are not clipped.`），修复后通过。
+
+验证：完整硬件 Release 构建 `artifacts/builds/20261023-152142`（版本 `261023-1521`）通过；`Native/tests/run-native-tests.ps1` 全部通过，含本次新增的离屏断言（离屏图 `Native\Bin\Tests\Offscreen\browser-controls.png` 与 `browser-metadata.png`）；`tests/Media.Tests` 311/311 通过。
+
+未验证：真机任务栏上的浏览器媒体、混合 DPI、不同字号与系统字体回退时的两行排版和按钮对齐——按项目规则没有启动日常安装或正常产品。`scripts/verify.ps1` 在本机 `tests/Lyrics.Core.Tests` 有 9 个与本改动无关的既有失败（`LyricPipelineCacheTests` 在数据根未配置时触发静态构造异常，`DataLayoutTests.MigrationRejectsInvalidJsonWithoutCommitting` 期望 `JsonException` 精确类型而实际抛出派生类型 `JsonReaderException`）；原生与 Media 测试均通过。
+
 ## 天气卡空状态刷新入口（2026-10-23）
 
 天气来源没有返回完整数据时，卡片正文会整体换成空状态；此前空状态只有一段错误说明，用户没有任何重试动作。现在空状态在说明文字下始终提供与左栏相同的“刷新天气”按钮；没有城市时继续保留原有的“打开天气设置”，因为它仍是那时唯一有用的入口。

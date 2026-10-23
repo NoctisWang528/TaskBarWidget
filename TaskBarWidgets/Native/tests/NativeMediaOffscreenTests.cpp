@@ -146,6 +146,28 @@ namespace
         return false;
     }
 
+    // Lowest row in [firstRow, 48) holding text ink between x = 0 and 300. The
+    // background surface is opaque, so ink has to be found by luminance, not alpha.
+    int LowestInkRow(IWICBitmap* bitmap, int firstRow)
+    {
+        WICRect area{ 0, firstRow, 300, 48 - firstRow };
+        ComPtr<IWICBitmapLock> lock;
+        if (FAILED(bitmap->Lock(&area, WICBitmapLockRead, &lock))) return -1;
+        UINT stride{}, size{};
+        BYTE* pixels{};
+        if (FAILED(lock->GetStride(&stride)) || FAILED(lock->GetDataPointer(&size, &pixels)))
+            return -1;
+        for (int y = area.Height - 1; y >= 0; --y)
+        {
+            for (int x = 0; x < area.Width; ++x)
+            {
+                const BYTE* pixel = pixels + y * stride + x * 4;
+                if ((pixel[0] + pixel[1] + pixel[2]) / 3 > 90) return firstRow + y;
+            }
+        }
+        return -1;
+    }
+
     ComPtr<IWICBitmap> CopyTextureToWic(IWICImagingFactory* wic,
         ID3D11Device* device, ID3D11DeviceContext* context, ID3D11Texture2D* texture)
     {
@@ -450,6 +472,26 @@ int main(int argc, char** argv)
             renderTexture.Get());
         SavePng(wic.Get(), targetBitmap.Get(), output / L"browser-controls.png");
         Require(HasVisiblePixels(targetBitmap.Get()), "Browser offscreen pixels are visible.");
+
+        // A DirectWrite line box is taller than its font size, so clipping the metadata
+        // lines at the font size cut the bottom off every glyph, descenders included.
+        const int plainBottom = LowestInkRow(targetBitmap.Get(), 24);
+        state.frame.browser.artist = L"Fixture artist gyp";
+        painter.BeginPaintFrame();
+        context->SetTarget(target.Get());
+        context->BeginDraw();
+        context->Clear(D2D1::ColorF(0, 0, 0, 0));
+        painter.PaintBackground(context.Get(), state, 400, 48, 1);
+        painter.PaintBrowser(context.Get(), browserPaint);
+        Require(SUCCEEDED(context->EndDraw()), "Draw offscreen browser descender frame.");
+        context->SetTarget(nullptr);
+        painter.EndPaintFrame();
+        targetBitmap = CopyTextureToWic(wic.Get(), d3d.Get(), d3dContext.Get(),
+            renderTexture.Get());
+        SavePng(wic.Get(), targetBitmap.Get(), output / L"browser-metadata.png");
+        const int descenderBottom = LowestInkRow(targetBitmap.Get(), 24);
+        Require(plainBottom > 0 && descenderBottom > plainBottom,
+            "Browser metadata descenders are not clipped.");
 
         std::cout << "Native media offscreen rendering assertions passed: "
             << output.string() << "\n";
