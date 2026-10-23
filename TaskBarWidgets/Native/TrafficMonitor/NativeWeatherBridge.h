@@ -76,6 +76,8 @@ namespace NativeWeatherBridge
         result.SetNamedValue(L"forecast", forecast);
         result.SetNamedValue(L"airQuality", air);
         result.SetNamedValue(L"alerts", alerts);
+        result.SetNamedValue(L"alertsError", text(details.AlertsError));
+        result.SetNamedValue(L"alertsAttribution", text(details.AlertsAttribution));
         JsonObject capabilities;
         capabilities.SetNamedValue(L"forecast", JsonValue::CreateBooleanValue(!details.Forecast.empty()));
         capabilities.SetNamedValue(L"humidity", JsonValue::CreateBooleanValue(!details.Current.Humidity.empty()));

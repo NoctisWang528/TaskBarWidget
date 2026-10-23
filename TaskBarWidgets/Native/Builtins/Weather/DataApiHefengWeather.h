@@ -93,6 +93,7 @@ protected:
     ForcastWeather _forcastWeatherTD, _forcastWeatherTM, _forcastWeatherDATM;
     RealtimeAirQuality _realtimeAirQuality;
     WeatherAlertList _weatherAlerts;
+    std::wstring _alertsError, _alertsCity, _alertsAttribution;
 
     bool _airQualityDataOutdated{ true };
     bool _alertsDataOutdated{ true };
