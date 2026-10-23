@@ -1,6 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation.Peers;
+using Microsoft.UI.Xaml.Automation.Provider;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 
@@ -191,6 +193,51 @@ public sealed partial class CardGroup
         if (ForecastFill(cards, 0).Background is not null)
             throw new InvalidOperationException("A forecast row missing its minimum temperature retained a colored fill.");
 
+        // An incomplete provider snapshot is the empty state users actually see; it must
+        // offer a retry and report the outcome there instead of only printing a sentence.
+        var incomplete = JsonSerializer.SerializeToElement(new
+        {
+            provider = 1,
+            revision = 48,
+            stale = false,
+            updating = false,
+            state = "error",
+            message = "中国天气网未返回完整的天气数据。",
+            temperature = "--",
+            city = new { id = "101190101", name = "南京", region = "" },
+            details = new { current = new { }, forecast = System.Array.Empty<object>(), alerts = System.Array.Empty<object>() }
+        });
+        cards.RenderWeather(incomplete);
+        await Task.Delay(40);
+        card.MeasureHeight();
+        card.Root.UpdateLayout();
+        if (cards._weatherEmptyState.Visibility != Visibility.Visible || cards._weatherContent.Visibility != Visibility.Collapsed ||
+            cards._weatherEmpty.Text != "中国天气网未返回完整的天气数据。")
+            throw new InvalidOperationException("An incomplete weather snapshot did not show the provider message in the empty state.");
+        if (cards._weatherEmptyRefresh.Visibility != Visibility.Visible || !cards._weatherEmptyRefresh.IsEnabled ||
+            cards._weatherSettings.Visibility != Visibility.Collapsed)
+            throw new InvalidOperationException("The weather empty state did not expose an enabled refresh action.");
+        var emptyOrigin = cards._weatherEmptyRefresh.TransformToVisual(card.Root).TransformPoint(new Windows.Foundation.Point());
+        if (cards._weatherEmptyRefresh.ActualWidth <= 0 || cards._weatherEmptyRefresh.ActualHeight <= 0 ||
+            emptyOrigin.X < -0.5 || emptyOrigin.Y < -0.5 ||
+            emptyOrigin.X + cards._weatherEmptyRefresh.ActualWidth > card.Root.ActualWidth + 0.5 ||
+            emptyOrigin.Y + cards._weatherEmptyRefresh.ActualHeight > card.Root.ActualHeight + 0.5)
+            throw new InvalidOperationException("The weather empty-state refresh action was laid out outside the card bounds.");
+        var emptyImagePath = Path.Combine(outputDirectory, "weather-card-empty.png");
+        await UiLayoutProbe.CaptureAsync(card.Root, emptyImagePath);
+        images.Add(new { theme = "Empty", imagePath = emptyImagePath });
+        var emptyLabel = cards._weatherEmpty.Text;
+        var emptyPeer = FrameworkElementAutomationPeer.CreatePeerForElement(cards._weatherEmptyRefresh) ?? new ButtonAutomationPeer(cards._weatherEmptyRefresh);
+        ((IInvokeProvider)emptyPeer.GetPattern(PatternInterface.Invoke)).Invoke();
+        // The probe has no media backend, so this retry must fail visibly in the empty
+        // state rather than silently doing nothing.
+        for (var attempt = 0; attempt < 300 &&
+            (cards._weatherRefreshing || cards._weatherEmpty.Text == emptyLabel); attempt++) await Task.Delay(10);
+        if (!cards._weatherEmpty.Text.StartsWith("天气刷新失败：", StringComparison.Ordinal))
+            throw new InvalidOperationException("A failed weather retry did not report into the empty state.");
+        if (!cards._weatherEmptyRefresh.IsEnabled)
+            throw new InvalidOperationException("The weather retry action stayed disabled after failing.");
+
         cards.SetQuickCardEnabled("weather", false);
         if (cards._cardsById.ContainsKey("weather")) throw new InvalidOperationException("Disabled weather card retained its HWND.");
         cards.SetQuickCardEnabled("weather", true);
@@ -208,6 +255,7 @@ public sealed partial class CardGroup
             micaSurface = true,
             staleRetained = true,
             temperatureGradient = true,
+            emptyStateRefresh = true,
             disabledCardWindowReleased = true,
             reenabledCardWindowRecreated = true,
             realNetworkTouched = false

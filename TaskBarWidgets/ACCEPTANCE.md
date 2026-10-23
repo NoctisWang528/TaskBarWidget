@@ -1,6 +1,19 @@
 # 验收状态
 
-更新：2026-10-22。最近成功完整构建的路径由本机 `artifacts/latest-build.txt` 提供；构建产物、布局检查图、日志和用户配置不提交到仓库。
+更新：2026-10-23。最近成功完整构建的路径由本机 `artifacts/latest-build.txt` 提供；构建产物、布局检查图、日志和用户配置不提交到仓库。
+
+## 天气卡空状态刷新入口（2026-10-23）
+
+天气来源没有返回完整数据时，卡片正文会整体换成空状态；此前空状态只有一段错误说明，用户没有任何重试动作。现在空状态在说明文字下始终提供与左栏相同的“刷新天气”按钮；没有城市时继续保留原有的“打开天气设置”，因为它仍是那时唯一有用的入口。
+
+- [UI/Cards/WeatherCard.cs:522-536](UI/Cards/WeatherCard.cs) 新增两个助手：`SetWeatherRefreshEnabled(bool enabled)` 同时驱动左栏与空状态两个刷新按钮，`SetWeatherStatus(string text)` 在空状态可见时把进度与失败同步写进空状态文案，避免在空状态点刷新后看不见任何反馈；空状态是否显示设置入口沿用原有 `hasCity` 判断（`:353`）。
+- 同一文件 `:241-242` 把两个入口放进左对齐的水平 `StackPanel`（间距 8），`:247-281` 的刷新流程与 `:286-310` 的读取流程改走上述助手；刷新失败只更新文案，不清空已经渲染的数据。
+- 探针回归 [UI/Cards/WeatherCardProbe.cs:196-230](UI/Cards/WeatherCardProbe.cs) 用 `revision = 48` 的不完整快照（`state = "error"`、文案“中国天气网未返回完整的天气数据。”、城市南京、`details.current` 为空）断言空状态可见、文案来自提供方、刷新按钮可见且启用、设置入口折叠，并用 `TransformToVisual` 断言按钮实际尺寸大于零且不越出卡片边界（离屏图片 `ui-weather-check/weather-card-empty.png` 另行人工核对）；随后通过 `ButtonAutomationPeer` + `IInvokeProvider` 真实点击，断言空状态出现“天气刷新失败：”且按钮重新启用。探针没有媒体后端，因此这条路径必然以失败收尾，正是需要验证的分支。
+- [scripts/test-ui-templates.ps1:93-99](scripts/test-ui-templates.ps1) 把 `emptyStateRefresh` 加进 `weatherCardControls` 的必过条件；[docs/界面统一方案.md:53](docs/界面统一方案.md) 补充空状态行为描述。
+
+验证：完整硬件 Release 构建 `artifacts/builds/20261023-140023`（版本 `261023-1400`）通过，边界检查 289 个字面输入，原生、Media、UI 三处构建均为 0 warning／0 error，共享 .NET／Windows App Runtime 布局检查通过。对最终发布目录运行 `scripts/validate-winui.ps1`：五个界面表面离屏加载成功且未激活窗口，`weatherCardControls.emptyStateRefresh` 为 `true`，空状态、深色与浅色三张离屏图片均生成且非空，探针未访问真实网络。
+
+未验证：正常产品里对真实中国天气网刷新失败的可见反馈、任务栏卡片上真实鼠标点击空状态按钮、混合 DPI 与多显示器下的空状态排版。按项目规则没有启动日常安装或正常产品，上述仍按桌面验收处理。
 
 ## 单目录数据布局与迁移阶段（2026-10-22）
 

@@ -140,6 +140,15 @@ public sealed partial class CardGroup
         TextWrapping = TextWrapping.Wrap,
         MaxLines = 3
     };
+    // The empty state replaces the card body, so it carries its own refresh action;
+    // without it an incomplete source left the card with no way to retry.
+    private readonly Button _weatherEmptyRefresh = CreateWeatherRefreshButton();
+    private readonly StackPanel _weatherEmptyActions = new()
+    {
+        Spacing = 8,
+        Orientation = Orientation.Horizontal,
+        HorizontalAlignment = HorizontalAlignment.Left
+    };
     private readonly Button _weatherSettings = new() { Content = "打开天气设置", MinHeight = 32, HorizontalAlignment = HorizontalAlignment.Left };
 
     private static FontFamily WeatherFontFamily => new("Microsoft YaHei UI");
@@ -152,6 +161,7 @@ public sealed partial class CardGroup
         root.Children.Add(BuildWeatherEmptyState());
 
         _weatherRefresh.Click += async (_, _) => await RefreshWeatherButtonAsync();
+        _weatherEmptyRefresh.Click += async (_, _) => await RefreshWeatherButtonAsync();
         _weatherSettings.Click += (_, _) => OpenWeatherSettings();
         _weatherAlertTimer.Tick += (_, _) =>
         {
@@ -228,7 +238,9 @@ public sealed partial class CardGroup
     {
         Secondary(_weatherEmpty);
         _weatherEmptyState.Children.Add(_weatherEmpty);
-        _weatherEmptyState.Children.Add(_weatherSettings);
+        _weatherEmptyActions.Children.Add(_weatherEmptyRefresh);
+        _weatherEmptyActions.Children.Add(_weatherSettings);
+        _weatherEmptyState.Children.Add(_weatherEmptyActions);
         return _weatherEmptyState;
     }
 
@@ -236,9 +248,8 @@ public sealed partial class CardGroup
     {
         if (_disposed || _weatherRefreshing) return;
         _weatherRefreshing = true;
-        _weatherRefresh.IsEnabled = false;
-        _weatherStatus.Text = "正在刷新天气…";
-        _weatherStatus.Visibility = Visibility.Visible;
+        SetWeatherRefreshEnabled(false);
+        SetWeatherStatus("正在刷新天气…");
         try
         {
             var token = _visibleLifetime?.Token ?? CancellationToken.None;
@@ -255,22 +266,18 @@ public sealed partial class CardGroup
             if (reply.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.Object)
                 RenderWeather(status);
             else
-            {
-                _weatherStatus.Text = String(reply, "message", "天气刷新未返回状态。");
-                _weatherStatus.Visibility = Visibility.Visible;
-            }
+                SetWeatherStatus(String(reply, "message", "天气刷新未返回状态。"));
         }
         catch (OperationCanceledException) { }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
             if (_disposed) return;
-            _weatherStatus.Text = "天气刷新失败：" + error.Message;
-            _weatherStatus.Visibility = Visibility.Visible;
+            SetWeatherStatus("天气刷新失败：" + error.Message);
         }
         finally
         {
             _weatherRefreshing = false;
-            if (!_disposed) _weatherRefresh.IsEnabled = true;
+            if (!_disposed) SetWeatherRefreshEnabled(true);
         }
     }
 
@@ -279,7 +286,7 @@ public sealed partial class CardGroup
     internal async Task LoadWeatherAsync()
     {
         if (_disposed || !_quickCardEnabled.GetValueOrDefault("weather")) return;
-        if (_weatherRefresh.IsEnabled) _weatherRefresh.IsEnabled = false;
+        if (_weatherRefresh.IsEnabled) SetWeatherRefreshEnabled(false);
         try
         {
             var token = _visibleLifetime?.Token ?? CancellationToken.None;
@@ -289,15 +296,11 @@ public sealed partial class CardGroup
         catch (OperationCanceledException) { }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
-            if (!_disposed)
-            {
-                _weatherStatus.Text = "读取天气失败：" + error.Message;
-                _weatherStatus.Visibility = Visibility.Visible;
-            }
+            if (!_disposed) SetWeatherStatus("读取天气失败：" + error.Message);
         }
         finally
         {
-            if (!_disposed) _weatherRefresh.IsEnabled = !_weatherRefreshing;
+            if (!_disposed) SetWeatherRefreshEnabled(!_weatherRefreshing);
         }
     }
 
@@ -348,13 +351,13 @@ public sealed partial class CardGroup
                 ? FirstNonEmpty(String(status, "message"), "当前天气来源还没有完整数据。可以稍后刷新，或在天气设置中切换来源。")
                 : "还没有设置天气城市。设置城市后，这里会显示当前天气和预报。";
             _weatherSettings.Visibility = hasCity ? Visibility.Collapsed : Visibility.Visible;
-            _weatherRefresh.IsEnabled = !_weatherRefreshing;
+            SetWeatherRefreshEnabled(!_weatherRefreshing);
             return;
         }
 
         RenderWeatherModules();
         _weatherSettings.Visibility = Visibility.Collapsed;
-        _weatherRefresh.IsEnabled = !_weatherRefreshing && !Bool(status, "updating");
+        SetWeatherRefreshEnabled(!_weatherRefreshing && !Bool(status, "updating"));
     }
 
     internal void RenderWeatherModules()
@@ -514,6 +517,21 @@ public sealed partial class CardGroup
     {
         _weatherEmptyState.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
         _weatherContent.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void SetWeatherRefreshEnabled(bool enabled)
+    {
+        _weatherRefresh.IsEnabled = enabled;
+        _weatherEmptyRefresh.IsEnabled = enabled;
+    }
+
+    // The empty state replaces the card body, so progress and failures must also reach its
+    // label; otherwise a retry started there would look like nothing happened.
+    private void SetWeatherStatus(string text)
+    {
+        _weatherStatus.Text = text;
+        _weatherStatus.Visibility = HasValue(text) ? Visibility.Visible : Visibility.Collapsed;
+        if (_weatherEmptyState.Visibility == Visibility.Visible) _weatherEmpty.Text = text;
     }
 
     private void OpenWeatherSettings()
