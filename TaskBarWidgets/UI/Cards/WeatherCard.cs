@@ -35,7 +35,7 @@ public sealed partial class CardGroup
     internal Grid _weatherContent = new()
     {
         Width = WeatherCardDesignWidth,
-        Height = WeatherCardDesignHeight,
+        MinHeight = WeatherCardDesignHeight,
         HorizontalAlignment = HorizontalAlignment.Center,
         VerticalAlignment = VerticalAlignment.Center
     };
@@ -61,7 +61,12 @@ public sealed partial class CardGroup
     {
         FontFamily = WeatherFontFamily,
         FontSize = 11,
-        MaxLines = 1,
+        TextWrapping = TextWrapping.Wrap
+    };
+    private readonly TextBlock _weatherAttribution = new()
+    {
+        FontFamily = WeatherFontFamily,
+        FontSize = 10,
         TextWrapping = TextWrapping.Wrap
     };
 
@@ -92,6 +97,7 @@ public sealed partial class CardGroup
     };
     private readonly Grid _weatherMain = new()
     {
+        MinHeight = WeatherCardDesignHeight,
         HorizontalAlignment = HorizontalAlignment.Stretch,
         VerticalAlignment = VerticalAlignment.Stretch
     };
@@ -137,8 +143,7 @@ public sealed partial class CardGroup
     {
         FontFamily = WeatherFontFamily,
         FontSize = 12,
-        TextWrapping = TextWrapping.Wrap,
-        MaxLines = 3
+        TextWrapping = TextWrapping.Wrap
     };
     // The empty state replaces the card body, so it carries its own refresh action;
     // without it an incomplete source left the card with no way to retry.
@@ -155,7 +160,7 @@ public sealed partial class CardGroup
 
     private FrameworkElement BuildWeather()
     {
-        var root = new Grid { Width = WeatherCardDesignWidth, Height = WeatherCardDesignHeight };
+        var root = new Grid { Width = WeatherCardDesignWidth, MinHeight = WeatherCardDesignHeight };
         BuildWeatherContent();
         root.Children.Add(_weatherContent);
         root.Children.Add(BuildWeatherEmptyState());
@@ -193,7 +198,13 @@ public sealed partial class CardGroup
 
     private void BuildWeatherContent()
     {
+        _weatherContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        _weatherContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        _weatherContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         _weatherContent.Children.Add(_weatherMain);
+        Grid.SetRow(_weatherStatus, 1); _weatherContent.Children.Add(_weatherStatus);
+        Grid.SetRow(_weatherAttribution, 2); _weatherContent.Children.Add(_weatherAttribution);
+        Secondary(_weatherStatus); Secondary(_weatherAttribution);
 
         _weatherMain.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(45, GridUnitType.Star) });
         _weatherMain.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(55, GridUnitType.Star) });
@@ -223,7 +234,6 @@ public sealed partial class CardGroup
         _weatherLeft.Children.Add(_weatherCurrentRow);
 
         _weatherSummary.Children.Add(_weatherCondition);
-        _weatherSummary.Children.Add(_weatherStatus);
         Grid.SetRow(_weatherSummary, 2);
         _weatherLeft.Children.Add(_weatherSummary);
 
@@ -339,6 +349,8 @@ public sealed partial class CardGroup
         SetWeatherIcon(String(current, "conditionKind", "unknown"), isNight);
         _weatherStatus.Text = WeatherStatus(status);
         _weatherStatus.Visibility = HasValue(_weatherStatus.Text) ? Visibility.Visible : Visibility.Collapsed;
+        _weatherAttribution.Text = String(details, "alertsAttribution");
+        _weatherAttribution.Visibility = HasValue(_weatherAttribution.Text) ? Visibility.Visible : Visibility.Collapsed;
 
         var forecast = Array(details, "forecast").ToArray();
         var alerts = Array(details, "alerts").ToArray();
@@ -350,14 +362,19 @@ public sealed partial class CardGroup
             _weatherEmpty.Text = hasCity
                 ? FirstNonEmpty(String(status, "message"), "当前天气来源还没有完整数据。可以稍后刷新，或在天气设置中切换来源。")
                 : "还没有设置天气城市。设置城市后，这里会显示当前天气和预报。";
+            if (HasValue(_weatherStatus.Text) && _weatherEmpty.Text != _weatherStatus.Text)
+                _weatherEmpty.Text += " · " + _weatherStatus.Text;
+            if (HasValue(_weatherAttribution.Text)) _weatherEmpty.Text += "\n" + _weatherAttribution.Text;
             _weatherSettings.Visibility = hasCity ? Visibility.Collapsed : Visibility.Visible;
             SetWeatherRefreshEnabled(!_weatherRefreshing);
+            RefreshWeatherLayout();
             return;
         }
 
         RenderWeatherModules();
         _weatherSettings.Visibility = Visibility.Collapsed;
         SetWeatherRefreshEnabled(!_weatherRefreshing && !Bool(status, "updating"));
+        RefreshWeatherLayout();
     }
 
     internal void RenderWeatherModules()
@@ -555,8 +572,10 @@ public sealed partial class CardGroup
         var parts = new List<string>();
         if (Bool(status, "updating")) parts.Add("正在更新");
         if (Bool(status, "stale"))
-            parts.Add(HasValue(lastCity) ? "上次成功城市：" + lastCity : "当前显示上次成功数据");
+            parts.Add(HasValue(lastCity) ? "当前显示上次成功数据（" + lastCity + "）" : "当前显示上次成功数据");
         if (state == "error" && HasValue(message)) parts.Add(message);
+        var alertsError = String(Object(status, "details"), "alertsError");
+        if (HasValue(alertsError)) parts.Add(alertsError);
         return string.Join(" · ", parts.Distinct(StringComparer.Ordinal));
     }
 

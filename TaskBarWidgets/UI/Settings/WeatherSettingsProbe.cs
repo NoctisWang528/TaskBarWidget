@@ -26,12 +26,14 @@ public sealed partial class SettingsWindow
         var savedCity = new JsonObject { ["id"] = "101010100", ["name"] = "北京", ["region"] = "北京" };
         var provider = 0; var hasKey = false; var apiHost = ""; var refreshed = false;
         var searchStarted = false; var configureCount = 0; var cleared = false; var failRefresh = true; var statusReads = 0;
+        var refreshCount = 0; var alertsError = ""; var failCredentials = false;
         var jobs = new Dictionary<long, JsonObject>();
         long nextJobId = 0;
         JsonObject Status() => new() {
             ["provider"] = provider, ["city"] = savedCity.DeepClone(), ["apiHost"] = apiHost, ["hasApiKey"] = hasKey,
             ["updating"] = false, ["message"] = refreshed ? "晴" : "尚未刷新", ["temperature"] = refreshed ? "23°C" : "",
-            ["lastAttempt"] = "2026-10-16T10:00:00", ["lastSuccess"] = refreshed ? "2026-10-16T10:00:00" : "" };
+            ["lastAttempt"] = "2026-10-16T10:00:00", ["lastSuccess"] = refreshed ? "2026-10-16T10:00:00" : "",
+            ["details"] = new JsonObject { ["alertsError"] = alertsError } };
 
         async Task BackendAsync()
         {
@@ -65,12 +67,20 @@ public sealed partial class SettingsWindow
                         if (payload["credentialsOnly"]?.ToString() == "true")
                         {
                             if (payload.ContainsKey("provider") || payload.ContainsKey("city")) throw new InvalidOperationException("Credential save changed the city/provider.");
-                            apiHost = Text(payload["apiHost"]);
-                            if (payload["clearApiKey"]?.ToString() == "true") { hasKey = false; cleared = true; }
-                            else if (payload.ContainsKey("apiKey"))
+                            if (failCredentials && payload["clearApiKey"]?.ToString() != "true")
                             {
-                                if (Text(payload["apiKey"]) != "synthetic-probe-key") throw new InvalidOperationException("Explicit key write was not preserved.");
-                                hasKey = true;
+                                completed["success"] = false; completed["error"] = "模拟连接验证失败";
+                            }
+                            else
+                            {
+                                if (!string.IsNullOrWhiteSpace(Text(payload["apiHost"]))) apiHost = Text(payload["apiHost"]);
+                                if (payload["clearApiKey"]?.ToString() == "true") { hasKey = false; cleared = true; }
+                                else if (payload.ContainsKey("apiKey"))
+                                {
+                                    if (Text(payload["apiKey"]) != "synthetic-probe-key") throw new InvalidOperationException("Explicit key write was not preserved.");
+                                    hasKey = true;
+                                }
+                                completed["message"] = "和风天气连接已验证并保存；当前生效来源和城市未改变。";
                             }
                         }
                         else
@@ -82,6 +92,7 @@ public sealed partial class SettingsWindow
                     }
                     else if (operation == "refresh")
                     {
+                        refreshCount++;
                         if (failRefresh) { failRefresh = false; completed["success"] = false; completed["error"] = "模拟天气连接错误"; }
                         else refreshed = true;
                         completed["status"] = Status();
@@ -131,23 +142,80 @@ public sealed partial class SettingsWindow
             page.Provider.SelectedIndex = 1;
             await staleSearch.WaitAsync(timeout.Token);
             if (page.Results.Items.Count != 0 || Text(page.SavedCity?["id"]) != "101010100") throw new InvalidOperationException("Changing provider accepted stale search results or changed saved city.");
+            if (page.Refresh.IsEnabled || !page.SwitchProvider.IsEnabled || !page.Active.Text.Contains("中国天气网") || !page.Draft.Text.Contains("尚未保存"))
+                throw new InvalidOperationException("Provider draft was confused with the active provider.");
+            await window.RefreshWeatherAsync(page);
+            if (refreshCount != 0) throw new InvalidOperationException("Draft provider refreshed the old provider.");
+            var switchSave = window.SwitchWeatherProviderAsync(page);
+            if (window._apply.IsEnabled || page.ApiHost.IsEnabled || page.SwitchProvider.IsEnabled)
+                throw new InvalidOperationException("Pending provider switch did not exclude other writes.");
+            await switchSave.WaitAsync(timeout.Token);
+            if (provider != 1 || Text(savedCity["id"]) != "101010100" || !page.Message.Message.Contains("和风天气") || !page.Message.Message.Contains("北京"))
+                throw new InvalidOperationException("Explicit switch did not configure the saved city and chosen provider.");
+            page.SavedCity!["id"] = "non-cn-city"; page.Provider.SelectedIndex = 0;
+            if (page.SwitchProvider.IsEnabled) throw new InvalidOperationException("An incompatible saved city allowed direct provider switching.");
+            await window.SwitchWeatherProviderAsync(page);
+            if (configureCount != 1) throw new InvalidOperationException("Incompatible city reached configure.");
+            page.SavedCity["id"] = "101010100"; page.Provider.SelectedIndex = 1;
             await window.SearchWeatherCityAsync(page).WaitAsync(timeout.Token);
-            if (page.Results.Items.Count != 1 || page.CityCode.Text != "101010100" || configureCount != 0) throw new InvalidOperationException("Search changed the saved city before selection/save.");
+            if (page.Results.Items.Count != 1 || page.CityCode.Text != "101010100" || configureCount != 1) throw new InvalidOperationException("Search changed the saved city before selection/save.");
             page.Results.SelectedIndex = 0;
             if (page.CityCode.Text != "101190101" || !page.SaveCity.IsEnabled) throw new InvalidOperationException("Selecting a city did not populate its read-only code.");
+            if (page.Refresh.IsEnabled) throw new InvalidOperationException("Unsaved selected city allowed old-city refresh.");
+            await window.RefreshWeatherAsync(page);
+            if (refreshCount != 0) throw new InvalidOperationException("Unsaved city reached refresh.");
+            alertsError = "预警获取失败：模拟错误";
             var citySave = window.SaveWeatherCityAsync(page);
             if (window._apply.IsEnabled) throw new InvalidOperationException("Weather commit did not disable global Apply.");
             await citySave.WaitAsync(timeout.Token);
             if (Text(savedCity["id"]) != "101190101" || provider != 1 || !page.LastSuccess.Text.Contains("2026-10-16")) throw new InvalidOperationException("City save did not apply the chosen provider/city and weather status.");
-            page.ApiHost.Text = "probe.qweatherapi.com"; page.ApiKey.Password = "synthetic-probe-key";
+            if (page.Message.Severity != InfoBarSeverity.Warning || !page.Message.Message.Contains(alertsError) || !page.Message.Message.Contains("南京"))
+                throw new InvalidOperationException("City save hid alert failure or actual city.");
+            page.ApiKey.Password = "synthetic-probe-key";
+            await Task.Delay(20, timeout.Token);
+            if (page.Refresh.IsEnabled) throw new InvalidOperationException("Key editing did not immediately disable refresh.");
+            page.ApiKey.Password = "";
+            await Task.Delay(20, timeout.Token);
+            if (!page.Refresh.IsEnabled) throw new InvalidOperationException("Discarding the key draft did not restore refresh.");
+            page.ApiHost.Text = "probe.qweatherapi.com";
+            await Task.Delay(20, timeout.Token);
+            if (page.Refresh.IsEnabled) throw new InvalidOperationException("Host editing did not immediately disable refresh.");
+            page.ApiKey.Password = "synthetic-probe-key";
+            if (page.Refresh.IsEnabled || page.SwitchProvider.IsEnabled) throw new InvalidOperationException("Unsaved credentials allowed refresh/switch.");
+            page.Provider.SelectedIndex = 0;
+            if (!page.SwitchProvider.IsEnabled || !page.Draft.Text.Contains("已保存城市"))
+                throw new InvalidOperationException("Hidden QWeather drafts blocked switching back to China Weather.");
+            var chinaStatus = Status(); chinaStatus["provider"] = 0;
+            window.ApplyWeatherStatus(page, chinaStatus);
+            if (!page.Refresh.IsEnabled) throw new InvalidOperationException("Hidden QWeather drafts blocked active China Weather refresh.");
+            window.ApplyWeatherStatus(page, Status());
+            page.Provider.SelectedIndex = 1;
+            failCredentials = true;
             await window.SaveWeatherCredentialsAsync(page, false).WaitAsync(timeout.Token);
+            if (hasKey || apiHost.Length != 0 || page.Message.Severity != InfoBarSeverity.Error || page.ApiKey.Password.Length == 0 || page.Refresh.IsEnabled)
+                throw new InvalidOperationException("Failed credential validation lost its draft or changed saved credentials.");
+            failCredentials = false;
+            var connectionSave = window.SaveWeatherCredentialsAsync(page, false);
+            if (window._apply.IsEnabled || page.ApiKey.IsEnabled) throw new InvalidOperationException("Credential validation did not exclude other writes.");
+            await connectionSave.WaitAsync(timeout.Token);
             if (!hasKey || page.ApiKey.Password.Length != 0 || !page.KeyStatus.Text.Contains("已保存")) throw new InvalidOperationException("Key was not write-only or persisted status is missing.");
+            if (!page.Message.Message.Contains("已验证") || !page.Message.Message.Contains("未改变") || page.Message.Message.Contains("尚未切换") || provider != 1 || Text(savedCity["id"]) != "101190101")
+                throw new InvalidOperationException("Credential success implied a weather refresh or source switch.");
+            page.ApiHost.Text = "";
             await window.SaveWeatherCredentialsAsync(page, false).WaitAsync(timeout.Token);
-            if (!hasKey) throw new InvalidOperationException("Blank password replaced the stored key.");
+            if (!hasKey || apiHost != "probe.qweatherapi.com") throw new InvalidOperationException("Blank credentials replaced stored values.");
+            failCredentials = true;
+            page.ApiHost.Text = "unsaved.qweatherapi.com";
             await window.SaveWeatherCredentialsAsync(page, true).WaitAsync(timeout.Token);
-            if (!cleared || hasKey) throw new InvalidOperationException("Explicit key clear did not work.");
+            if (!cleared || hasKey || apiHost != "probe.qweatherapi.com" || page.ApiHost.Text != "unsaved.qweatherapi.com")
+                throw new InvalidOperationException("Explicit key clear failed or committed/discarded the host draft.");
+            page.ApiHost.Text = apiHost;
             await window.RefreshWeatherAsync(page).WaitAsync(timeout.Token);
             if (page.Message.Severity != InfoBarSeverity.Error || !page.Message.Message.Contains("模拟天气连接错误")) throw new InvalidOperationException("Refresh failure was silently hidden.");
+            await window.RefreshWeatherAsync(page).WaitAsync(timeout.Token);
+            if (page.Message.Severity != InfoBarSeverity.Warning || !page.Message.Message.Contains(alertsError) || !page.Message.Message.Contains("和风天气") || !page.Message.Message.Contains("南京"))
+                throw new InvalidOperationException("Refresh reported full success despite alert failure.");
+            alertsError = "";
             await window.RefreshWeatherAsync(page).WaitAsync(timeout.Token);
             if (page.Message.Severity != InfoBarSeverity.Success) throw new InvalidOperationException("Refresh could not recover after failure.");
             var pending = window.SearchWeatherCityAsync(page);

@@ -139,6 +139,16 @@ void WeatherService::UpdateStatus()
 void WeatherService::Configure(const ConfigPatch& patch)
 {
     auto& data = WeatherCDataManager::InstanceRef(); const auto path = data.ConfigPath();
+    if (patch.credentialsOnly && !patch.clearApiKey) {
+        data.ReloadConfigs();
+        DataApiHefengWeather candidate;
+        candidate.config = data.m_api_hfw->config;
+        if (patch.apiHost && !patch.apiHost->empty()) candidate.config.ApiHost = *NormalizeApiHost(*patch.apiHost);
+        if (patch.apiKey && !patch.apiKey->empty()) candidate.config.AppKey = *patch.apiKey;
+        CityInfoList cities;
+        if (!candidate.QueryCity(L"101010100", cities) || cities.empty())
+            throw Failure{L"连接验证失败，未保存连接配置：" + NetworkMessage(&candidate)};
+    }
     {
     std::lock_guard<std::mutex> configuration_lock(ConfigurationMutex());
     const auto before = ReadIni(path); auto after = before;
@@ -223,7 +233,7 @@ void WeatherService::Work()
                     catch (const Failure& failure) { throw Failure{L"城市设置已保存，但刷新失败：" + failure.message}; }
                     catch (...) { throw Failure{L"城市设置已保存，但刷新失败，请稍后重试。"}; }
                 }
-                else result.message = L"服务配置已保存；密钥不会返回界面。";
+                else result.message = job.patch.clearApiKey ? L"已清除保存的密钥。" : L"和风天气连接已验证并保存；当前生效来源和城市未改变。";
             }
             else Refresh();
         }

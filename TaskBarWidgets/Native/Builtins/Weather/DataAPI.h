@@ -76,6 +76,8 @@ struct WeatherDetails
     std::vector<WeatherForecastDay> Forecast;
     WeatherAirQuality AirQuality;
     std::vector<WeatherAlert> Alerts;
+    std::wstring AlertsError;
+    std::wstring AlertsAttribution;
 };
 
 namespace WeatherCondition

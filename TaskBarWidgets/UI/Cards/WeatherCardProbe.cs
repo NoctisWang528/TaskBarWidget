@@ -35,6 +35,7 @@ public sealed partial class CardGroup
                     new { min = "16", max = "22", weatherDay = "阴", weatherNight = "阴", conditionDayKind = "overcast", conditionNightKind = "overcast" }
                 },
                 airQuality = new { aqi = "42", category = "优", pm25 = "18", pm10 = "30", publishedAt = "17:00" },
+                alertsAttribution = "合成归因：和风天气 https://www.qweather.com/",
                 alerts = new[]
                 {
                     new { typeName = "大风", level = "蓝色", title = "大风蓝色预警", text = "注意户外活动。", publishedAt = "16:00" },
@@ -61,6 +62,10 @@ public sealed partial class CardGroup
         }
         if (cards._weatherTemperature.Text != "18.3°" || cards._weatherCity.Text != "南京")
             throw new InvalidOperationException("Weather card did not render the normalized current snapshot.");
+        if (cards._weatherAttribution.Visibility != Visibility.Visible ||
+            cards._weatherAttribution.Text != "合成归因：和风天气 https://www.qweather.com/" ||
+            cards._weatherAttribution.TextWrapping != TextWrapping.Wrap || cards._weatherStatus.Text.Contains("和风天气"))
+            throw new InvalidOperationException("Alert attribution was missing, unwrapped, or treated as an error.");
         if (cards._weatherForecast.Children.Count != 5 || cards._weatherForecast.RowDefinitions.Count != 5)
             throw new InvalidOperationException("Weather card did not reserve the five-row Apple-style forecast.");
         if (cards._weatherIcon is not Viewbox { Width: 42, Height: 42 })
@@ -93,6 +98,8 @@ public sealed partial class CardGroup
 
         if (cards._weatherTemperature.FontFamily.Source != "Microsoft YaHei UI")
             throw new InvalidOperationException("Weather text did not use the configured card font.");
+        if (cards._weatherAttribution.FontFamily.Source != cards._weatherTemperature.FontFamily.Source)
+            throw new InvalidOperationException("Alert attribution did not follow the card font.");
         if (cards._weatherAlertsHost.MaxHeight != 54)
             throw new InvalidOperationException("Weather alert scroll limit changed.");
         if (cards._weatherAlerts.Children.Count != 2)
@@ -133,6 +140,8 @@ public sealed partial class CardGroup
                 current = new { temperature = "22", weather = "多云", conditionKind = "partly-cloudy", observedAt = "2026-10-19 16:00" },
                 forecast = new object[0],
                 airQuality = new { pm25 = "20" },
+                alertsError = "预警获取失败：合成错误",
+                alertsAttribution = "合成归因：和风天气 https://www.qweather.com/",
                 alerts = new object[0],
                 capabilities = new { forecast = false, humidity = false, wind = false, airQuality = true, precipitation = false, alerts = false, updatedAt = true }
             }
@@ -141,6 +150,10 @@ public sealed partial class CardGroup
         await Task.Delay(40);
         card.MeasureHeight();
         card.Root.UpdateLayout();
+        if (!cards._weatherStatus.Text.Contains("预警获取失败：合成错误") ||
+            !cards._weatherStatus.Text.Contains("上次成功数据（南京）") ||
+            cards._weatherStatus.Visibility != Visibility.Visible || cards._weatherAttribution.Visibility != Visibility.Visible)
+            throw new InvalidOperationException("Zero alerts hid the alert failure, retained-data explanation, or attribution.");
         if (cards._weatherForecast.Children.Count != 0 || cards._weatherAlerts.Children.Count != 0 ||
             cards._weatherAlertPanel.Visibility != Visibility.Collapsed)
             throw new InvalidOperationException("Missing forecast data was not hidden and zero alerts did not leave the lower-left area blank.");
@@ -164,6 +177,8 @@ public sealed partial class CardGroup
             }
         });
         cards.RenderWeather(gradientStatus);
+        if (cards._weatherStatus.Visibility != Visibility.Collapsed || cards._weatherAttribution.Visibility != Visibility.Collapsed)
+            throw new InvalidOperationException("Recovered weather retained an old alert error or attribution.");
         await Task.Delay(40);
         card.Root.UpdateLayout();
 

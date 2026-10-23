@@ -385,6 +385,7 @@ namespace wccs  // WeatherComCnSpider
             {
                 auto *jroot = yyjson_doc_get_root(jdoc);
                 auto *jalert_arr = yyjson_obj_get(jroot, "w");
+                if (!yyjson_is_arr(jalert_arr)) succeed = false;
 
                 auto num_alerts = yyjson_arr_size(jalert_arr);
                 if (num_alerts > 0)
@@ -694,6 +695,7 @@ std::wstring DataApiWeatherComCnSpider::GetWeatherCode(EWeatherInfoType type)
 std::optional<WeatherDetails> DataApiWeatherComCnSpider::GetWeatherDetails() const
 {
     WeatherDetails details;
+    details.AlertsError = _alertsError;
     details.Current.Temperature = _realtimeWeather.Temperature;
     details.Current.WeatherText = _realtimeWeather.Weather;
     details.Current.WeatherCode = _realtimeWeather.WeatherCode;
@@ -729,7 +731,17 @@ bool DataApiWeatherComCnSpider::UpdateWeather()
     if (_dataCity != city.CityNO) { _realtimeWeather = {}; _weatherTD = {}; _weatherTM = {}; _weatherDATM = {}; _weatherAlerts.clear(); _dataCity = city.CityNO; }
     const bool realtime = QueryRealtimeWeather(city.CityNO);
     const bool forecast = QueryForecastWeather(city.CityNO);
-    if (WeatherCDataManager::Instance().GetConfig().m_show_weather_alerts) QueryWeatherAlerts(city.CityNO);
+    if (WeatherCDataManager::Instance().GetConfig().m_show_weather_alerts) {
+        if (QueryWeatherAlerts(city.CityNO)) _alertsError.clear();
+        else {
+            const auto status = WeatherCCommon::LastHttpStatus();
+            const auto reason = status && status != 200 ? L"HTTP " + std::to_wstring(status) :
+                WeatherCCommon::LastTransportError() ? std::wstring(L"连接失败或超时") : std::wstring(L"响应格式无效或数据不完整");
+            _alertsError = L"中国天气网预警获取失败：" + reason + L"。";
+            if (!_weatherAlerts.empty()) _alertsError += L"当前预警为上次获取的信息，请以官方发布为准。";
+        }
+    }
+    else { _weatherAlerts.clear(); _alertsError.clear(); }
     const bool success = type == EWeatherInfoType::WEATHER_REALTIME ? realtime : forecast;
     _lastError = success ? L"" : L"中国天气网未返回完整的天气数据。";
     return success;
