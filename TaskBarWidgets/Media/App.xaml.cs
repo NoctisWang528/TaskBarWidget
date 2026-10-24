@@ -202,9 +202,12 @@ public partial class App : System.Windows.Application
             case "downloadUpdate": return _updates?.Download() ?? _updateUnavailable;
             case "cancelUpdateDownload": return _updates?.CancelDownload() ?? _updateUnavailable;
             case "installUpdate":
-                if (!payload.TryGetProperty("confirmed", out var confirmed) || confirmed.ValueKind != JsonValueKind.True)
-                    throw new InvalidOperationException("安装前必须确认重启。");
-                return _updateInstaller?.Begin(_stop.Token) ?? _updateUnavailable;
+                // Installation keeps its single confirmation path: the card starts
+                // the settings process on demand and the user confirms there. The
+                // card never installs on its own.
+                if (_ui is not null)
+                    TaskObserver.Observe(_ui.SendAsync("openSettings", page: "about"), "update confirmation");
+                return new { success = true, opened = "settings" };
             case "openSettings":
                 // Starts the WinUI settings process on demand; it exits when the
                 // last settings window closes.
