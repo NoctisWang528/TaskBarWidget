@@ -62,105 +62,109 @@ namespace Cards::Paint
             else
             {
                 main = lyrics.current;
-                secondary = lyrics.currentTranslation.empty() ? lyrics.next : lyrics.currentTranslation;
+                secondary = lyrics.translationMode
+                    ? (lyrics.currentTranslation.empty() ? L"\u2026" : lyrics.currentTranslation) : lyrics.next;
             }
-            const float mainSize = std::clamp(static_cast<float>(lyrics.fontSize) > 5.0f ? static_cast<float>(lyrics.fontSize) : 14.0f,
-                11.2f, LyricHeight * 0.92f);
-            const float secondarySize = std::max(9.0f, mainSize * 0.92f);
+            const float layoutScale = std::clamp(static_cast<float>(lyrics.layoutScalePercent) / 100.0f,
+                0.25f, 4.0f);
+            const float requestedSize = std::clamp(static_cast<float>(lyrics.fontSize), 5.0f, 72.0f);
+            const bool twoRows = LyricHeight >= requestedSize * 2.4f;
+            const float rowHeight = LyricHeight / (twoRows ? 2.0f : 1.0f);
+            const float mainSize = std::min(requestedSize, std::max(11.2f * layoutScale, rowHeight * 0.92f));
+            const float secondarySize = std::max(9.0f * layoutScale, mainSize * 0.92f);
             const std::wstring family = lyrics.fontFamily.empty() ? environment.fontFamily : lyrics.fontFamily;
-            const bool twoRows = !secondary.empty() && LyricHeight >= mainSize * 2.4f;
-
+            const Color primary = environment.highContrast ? palette.primary
+                : ParseColor(lyrics.primaryColor, palette.primary);
+            Color secondaryColor = environment.highContrast ? palette.primary
+                : ParseColor(lyrics.translationMode ? lyrics.translationColor : lyrics.secondaryColor,
+                    palette.secondary);
+            if (!environment.highContrast && lyrics.translationMode && lyrics.currentTranslation.empty())
+                secondaryColor.a *= 0.55f;
             Color shadowColor = WithAlpha(Color{ 0, 0, 0, 1 }, 0.36f);
-            if (lyrics.textShadow == L"none" || environment.highContrast) shadowColor = WithAlpha(Color{}, 0.0f);
+            if (lyrics.textShadow.empty() || lyrics.textShadow == L"none" || environment.highContrast)
+                shadowColor.a = 0.0f;
 
             const auto row = [&](const std::wstring& text, float size, Color color, float rowTop,
-                float scan, float marquee)
+                float scan)
             {
-                if (text.empty()) return;
-                const D2D1_RECT_F rect = Draw::Rect(left, rowTop, left + width, rowTop + size * 1.35f);
-                // An overlong line scrolls instead of clipping; the measured overflow
-                // drives both the clip and the offset.
-                float overflow = 0.0f;
+                if (text.empty() || width <= 0.0f || !graphics.DWrite()) return;
                 const auto format = graphics.TextFormat(family, size, lyrics.fontWeight,
                     DWRITE_TEXT_ALIGNMENT_LEADING, false);
-                if (format && graphics.DWrite())
+                if (!format) return;
+                winrt::com_ptr<IDWriteTextLayout> layout;
+                if (FAILED(graphics.DWrite()->CreateTextLayout(text.c_str(),
+                    static_cast<UINT32>(text.size()), format, width, rowHeight, layout.put()))) return;
+                // Apply before measuring: italic glyph widths must drive both
+                // alignment/scrolling and the scan clip, without changing cached formats.
+                const DWRITE_TEXT_RANGE range{ 0, static_cast<UINT32>(text.size()) };
+                layout->SetFontStyle(lyrics.fontItalic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL, range);
+                layout->SetUnderline(lyrics.fontUnderline, range);
+                layout->SetStrikethrough(lyrics.fontStrikeOut, range);
+                DWRITE_TEXT_METRICS metrics{};
+                if (FAILED(layout->GetMetrics(&metrics))) return;
+                const float textWidth = metrics.widthIncludingTrailingWhitespace;
+                const bool scanning = std::isfinite(scan) && scan >= 0.0f;
+                const float progress = scanning ? std::clamp(scan, 0.0f, 1.0f) : 0.0f;
+                const float overflow = std::max(0.0f, textWidth - width);
+                const float shift = scanning ? -std::clamp(progress * textWidth - width * 0.65f,
+                    0.0f, overflow) : 0.0f;
+                const float alignedLeft = lyrics.textAlignment == L"Right" ? std::max(0.0f, width - textWidth)
+                    : lyrics.textAlignment == L"Center" ? std::max(0.0f, (width - textWidth) / 2.0f) : 0.0f;
+                const float textLeft = left + (overflow > 0.5f ? shift : alignedLeft);
+                // Keep one measured layout for the base, shadow and scan. Scan width
+                // belongs to the full line, not to the viewport or an ellipsized copy.
+                if (!scanning)
                 {
-                    winrt::com_ptr<IDWriteTextLayout> layout;
-                    if (SUCCEEDED(graphics.DWrite()->CreateTextLayout(text.c_str(),
-                        static_cast<UINT32>(text.size()), format, width * 4.0f, size * 2.0f,
-                        layout.put())))
+                    winrt::com_ptr<IDWriteInlineObject> ellipsis;
+                    if (SUCCEEDED(graphics.DWrite()->CreateEllipsisTrimmingSign(format, ellipsis.put())))
                     {
-                        DWRITE_TEXT_METRICS metrics{};
-                        if (SUCCEEDED(layout->GetMetrics(&metrics)))
-                            overflow = (std::max)(0.0f, metrics.widthIncludingTrailingWhitespace - width);
+                        const DWRITE_TRIMMING trimming{ DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0 };
+                        layout->SetTrimming(&trimming, ellipsis.get());
                     }
                 }
-                const bool scrolls = overflow > 1.0f;
-                const std::wstring shown = scrolls ? text
-                    : Draw::Ellipsize(context, graphics, text, family, size, lyrics.fontWeight, width);
-                const float shift = scrolls ? -overflow * std::clamp(marquee, 0.0f, 1.0f) : 0.0f;
-                const auto alignment = scrolls ? DWRITE_TEXT_ALIGNMENT_LEADING
-                    : DWRITE_TEXT_ALIGNMENT_CENTER;
-                const D2D1_RECT_F target = scrolls
-                    ? D2D1::RectF(rect.left + shift, rect.top, rect.left + shift + width * 4.0f, rect.bottom)
-                    : rect;
-                if (scrolls)
+                const auto draw = [&](Color ink, float y)
                 {
-                    context->PushAxisAlignedClip(rect, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-                    const D2D1_RECT_F wide = D2D1::RectF(rect.left + shift, rect.top,
-                        rect.left + shift + width * 4.0f, rect.bottom);
-                    if (shadowColor.a > 0.0f)
-                        Draw::Text(context, graphics, shown, family, size, lyrics.fontWeight,
-                            shadowColor, D2D1::RectF(wide.left, wide.top + 1.0f, wide.right, wide.bottom + 1.0f),
-                            alignment);
-                    Draw::Text(context, graphics, shown, family, size, lyrics.fontWeight, color, wide,
-                        alignment);
+                    const auto brush = graphics.Brush(context, ink);
+                    if (brush) context->DrawTextLayout(D2D1::Point2F(textLeft, y), layout.get(), brush.Get());
+                };
+                const auto rect = Draw::Rect(left, rowTop, left + width, rowTop + rowHeight);
+                context->PushAxisAlignedClip(rect, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+                if (shadowColor.a > 0.0f) draw(shadowColor, rowTop + 1.0f);
+                draw(scanning && !environment.highContrast
+                    ? ParseColor(lyrics.secondaryColor, palette.secondary) : color, rowTop);
+                if (scanning && progress > 0.0f)
+                {
+                    const float scanRight = std::clamp(textLeft + textWidth * progress, left, left + width);
+                    context->PushAxisAlignedClip(Draw::Rect(left, rowTop, scanRight, rect.bottom),
+                        D2D1_ANTIALIAS_MODE_ALIASED);
+                    draw(environment.highContrast ? palette.primary : ParseColor(lyrics.scanColor, palette.accent), rowTop);
                     context->PopAxisAlignedClip();
                 }
-                else
-                {
-                    if (shadowColor.a > 0.0f)
-                        Draw::Text(context, graphics, shown, family, size, lyrics.fontWeight,
-                            shadowColor, D2D1::RectF(target.left, target.top + 1.0f, target.right,
-                                target.bottom + 1.0f), alignment);
-                    Draw::Text(context, graphics, shown, family, size, lyrics.fontWeight, color, target,
-                        alignment);
-                }
-                if (scan > 0.01f && scan < 0.999f)
-                {
-                    // Scan highlight: a clipped overlay rather than per-glyph work, so
-                    // the base text exists once and the highlight is only a clip.
-                    const D2D1_RECT_F scanRect = D2D1::RectF(rect.left, rect.top,
-                        rect.left + (rect.right - rect.left) * scan, rect.bottom);
-                    context->PushAxisAlignedClip(scanRect, D2D1_ANTIALIAS_MODE_ALIASED);
-                    const auto scanColor = ParseColor(lyrics.scanColor.empty()
-                        ? DefaultScanColor(environment.dark) : lyrics.scanColor, palette.accent);
-                    Draw::Text(context, graphics, shown, family, size, lyrics.fontWeight, scanColor,
-                        target, alignment);
-                    context->PopAxisAlignedClip();
-                }
+                context->PopAxisAlignedClip();
             };
 
-            // Wrap transition: the previous line leaves upward while the new one
-            // enters from below. Both exist only while the transition runs.
-            const float wrap = std::clamp(transition.progress, 0.0f, 1.0f);
+            // Clip the rolling rows so they cannot paint over metadata or transport.
+            const float wrap = environment.reducedMotion || !lyrics.animateTransition ? 1.0f
+                : std::clamp(transition.progress, 0.0f, 1.0f);
+            context->PushAxisAlignedClip(Draw::Rect(left, top, left + width, top + LyricHeight),
+                D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
             if (wrap < 0.999f && !transition.previous.empty())
             {
-                const float shift = (1.0f - wrap) * mainSize * 1.25f;
-                const float alpha = wrap;
-                row(transition.previous, mainSize, WithAlpha(palette.primary, 0.98f * alpha),
-                    top - shift, 0.0f, 0.0f);
+                const float shift = wrap * rowHeight;
+                const float alpha = 1.0f - wrap;
+                row(transition.previous, mainSize, WithAlpha(primary, primary.a * alpha),
+                    top - shift, -1.0f);
                 if (twoRows && !transition.previousSecondary.empty())
                     row(transition.previousSecondary, secondarySize,
-                        WithAlpha(palette.primary, 0.62f * alpha), top + mainSize * 1.3f - shift, 0.0f,
-                        0.0f);
+                        WithAlpha(secondaryColor, secondaryColor.a * alpha), top + rowHeight - shift, -1.0f);
             }
-            const float enter = (1.0f - wrap) * mainSize * 0.55f;
-            row(main, mainSize, WithAlpha(palette.primary, 0.98f * (0.35f + 0.65f * wrap)), top + enter,
-                lyrics.progress, transition.marquee);
-            if (twoRows) row(secondary, secondarySize,
-                WithAlpha(palette.primary, 0.62f * (0.35f + 0.65f * wrap)),
-                top + mainSize * 1.3f + enter, 0.0f, 0.0f);
+            const float enter = (1.0f - wrap) * rowHeight;
+            row(main, mainSize, WithAlpha(primary, primary.a * (0.35f + 0.65f * wrap)), top + enter,
+                displayable ? static_cast<float>(lyrics.wordScan) : -1.0f);
+            if (twoRows && !secondary.empty()) row(secondary, secondarySize,
+                WithAlpha(secondaryColor, secondaryColor.a * (0.35f + 0.65f * wrap)),
+                top + rowHeight + enter, -1.0f);
+            context->PopAxisAlignedClip();
         }
     }
 

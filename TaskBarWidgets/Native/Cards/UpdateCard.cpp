@@ -37,17 +37,19 @@ namespace Cards::Paint
                 palette.secondary, Draw::Rect(left, progressTop + 8.0f, left + width,
                     progressTop + 26.0f));
 
-        const std::wstring action = update.phase == L"ready" ? L"installUpdate"
-            : update.phase == L"downloading" ? L"cancelUpdateDownload" : L"downloadUpdate";
+        const bool ready = update.phase == L"ready" && update.canInstall;
+        const bool downloadable = update.phase == L"available" && update.canDownload;
+        const std::wstring action = update.phase == L"ready" ? L"installUpdate" : L"downloadUpdate";
         const std::wstring label = update.phase == L"ready" ? L"安装并重启"
-            : update.phase == L"downloading" ? L"取消下载" : L"下载更新";
+            : update.phase == L"downloading" ? L"正在下载…"
+            : update.phase == L"verifying" ? L"正在校验…" : L"下载更新";
         const float buttonTop = heightDip - Layout::Padding - 32.0f;
         const D2D1_RECT_F button = Draw::Rect(left, buttonTop, left + width, buttonTop + 32.0f);
-        Draw::FillRound(context, button, 8.0f, WithAlpha(palette.accent, 0.18f));
-        Draw::Text(context, graphics, label, environment.fontFamily, 12.0f, 600, palette.primary,
+        Draw::FillRound(context, button, 8.0f, WithAlpha(palette.accent, ready || downloadable ? 0.18f : 0.06f));
+        Draw::Text(context, graphics, label, environment.fontFamily, 12.0f, 600,
+            ready || downloadable ? palette.primary : palette.secondary,
             Draw::Rect(button.left, button.top + 7.0f, button.right, button.bottom - 5.0f),
             DWRITE_TEXT_ALIGNMENT_CENTER);
-        Draw::AddButton(regions, 500, button, action, label,
-            update.phase == L"ready" ? update.canInstall : update.canDownload);
+        Draw::AddButton(regions, 500, button, action, label, ready || downloadable);
     }
 }

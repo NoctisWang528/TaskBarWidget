@@ -178,7 +178,10 @@ public sealed partial class SettingsWindow : Window
         InitializeModuleGestures();
         _root.ActualThemeChanged += (_, _) => { UpdateTitleBarTheme(); UpdateMicaStatus(); };
         _root.Loaded += (_, _) => { TrySubscribeSettingsHighContrast(); UpdateTitleBarTheme(); };
-        Activated += (_, _) => { if (!_closed) UpdateTitleBarTheme(); };
+        Activated += (_, _) => {
+            if (_closed) return;
+            UpdateTitleBarTheme();
+        };
         _navigation.Loaded += async (_, _) => {
             SelectNavigationItem(NavigationPages().FirstOrDefault(item => (string)item.Tag == _currentPage));
             if (!_loaded && _connection.IsConnected) await GuardAsync(() => ReloadAsync());
@@ -297,27 +300,27 @@ public sealed partial class SettingsWindow : Window
     }
     private async Task CloseWithPendingChangesAsync()
     {
-        var weatherBusy = _weatherPage is { Committing: true };
-        var pending = _native.Pending.Count + _media.Pending.Count > 0 || weatherBusy || HasWeatherDraft();
-        if (!pending || _root.XamlRoot is null)
+        if (_closeDialogOpen) return;
+        if (_busy || _weatherPage is { Committing: true })
         {
-            CancelWeatherPage();
-            DeactivateCardMicaPreview();
-            AppWindow.Hide();
-            Dismissed?.Invoke();
+            ShowNotice("正在保存或刷新，请完成后再关闭；当前草稿会保留。", InfoBarSeverity.Informational);
             return;
         }
-        if (_closeDialogOpen) return;
+        var pending = _native.Pending.Count + _media.Pending.Count > 0 || HasWeatherDraft();
+        if (!pending)
+        {
+            CloseConfirmed();
+            return;
+        }
+        if (_root.XamlRoot is null) return;
         _closeDialogOpen = true;
         var dialog = new ContentDialog
         {
             XamlRoot = _root.XamlRoot,
             RequestedTheme = _root.RequestedTheme,
             Title = "有尚未应用的设置",
-            Content = weatherBusy
-                ? "天气操作仍在进行。可以继续编辑，之后应用或丢弃更改。"
-                : "设置中还有未应用的更改。要应用后关闭、丢弃更改，还是继续编辑？",
-            PrimaryButtonText = weatherBusy ? "继续编辑" : "应用并关闭",
+            Content = "设置中还有未应用的更改。要应用后关闭、丢弃更改，还是继续编辑？",
+            PrimaryButtonText = "应用并关闭",
             SecondaryButtonText = "丢弃更改",
             CloseButtonText = "继续编辑",
             DefaultButton = ContentDialogButton.Close
@@ -325,23 +328,32 @@ public sealed partial class SettingsWindow : Window
         ContentDialogResult result;
         try { result = await dialog.ShowAsync(); }
         finally { _closeDialogOpen = false; }
-        if (result == ContentDialogResult.Primary && !weatherBusy)
+        if (result == ContentDialogResult.Primary)
         {
             await GuardAsync(SaveAsync);
-            if (_native.Pending.Count + _media.Pending.Count > 0 || HasWeatherDraft()) return;
+            if (HasPendingChanges || _notice is { IsOpen: true, Severity: InfoBarSeverity.Error } ||
+                _weatherPage?.Message is { IsOpen: true, Severity: InfoBarSeverity.Error }) return;
         }
-        else if (result == ContentDialogResult.Primary || result == ContentDialogResult.None)
+        else if (result == ContentDialogResult.None)
         {
             Activate();
             return;
         }
+        // A save could have started while the confirmation was open. Never
+        // cancel an active write merely because the user chose to discard drafts.
+        if (_busy || _weatherPage is { Committing: true }) return;
         _native.Pending.Clear();
         _media.Pending.Clear();
+        CloseConfirmed();
+    }
+    private void CloseConfirmed()
+    {
         CancelWeatherPage();
         CancelModulePointerDrag();
         DeactivateCardMicaPreview();
-        AppWindow.Hide();
+        _shutdown = true; // Bypass only the already-completed close confirmation.
         Dismissed?.Invoke();
+        Close();
     }
     internal void LoadValidationData(JsonObject native, JsonObject media)
     {
@@ -414,7 +426,9 @@ public sealed partial class SettingsWindow : Window
     }
     private async Task SaveAsync()
     {
-        if (_busy || !_loaded || _weatherPage?.Committing == true) return;
+        if (_busy || !_loaded || _weatherPage is { Committing: true } or { Searching: true } or { LoadingStatus: true }) return;
+        if (_weatherPage is { } weather && HasWeatherDraft() && !await SaveWeatherDraftAsync(weather)) return;
+        if (_native.Pending.Count + _media.Pending.Count == 0) { UpdateSaveStatus(); return; }
         CancelModulePointerDrag();
         _busy = true; UpdateSaveStatus();
         var native = _native.Capture(); var media = _media.Capture();
@@ -434,7 +448,14 @@ public sealed partial class SettingsWindow : Window
                 RefreshCardMicaAfterReadback();
             _notice.Severity = InfoBarSeverity.Success; _notice.Message = "已保存并读回主程序配置。"; _notice.IsOpen = true;
         }
-        finally { _busy = false; if (!themeOnly) RenderPage(); UpdateSaveStatus(); }
+        finally {
+            _busy = false;
+            if (!themeOnly) {
+                if (_weatherPage is { } page) { page.HasStatus = false; await ReadWeatherStatusAsync(page); }
+                else RenderPage();
+            }
+            UpdateSaveStatus();
+        }
     }
     private void ApplyTheme()
     {
@@ -598,12 +619,13 @@ public sealed partial class SettingsWindow : Window
         return flyout;
     }
     private void ShowError(string message) { _notice.Message = message; _notice.Severity = InfoBarSeverity.Error; _notice.IsOpen = true; }
+    private void ShowNotice(string message, InfoBarSeverity severity) { _notice.Message = message; _notice.Severity = severity; _notice.IsOpen = true; }
     private void UpdateSaveStatus()
     {
-        var count = _native.Pending.Count + _media.Pending.Count;
+        var count = _native.Pending.Count + _media.Pending.Count + (HasWeatherDraft() ? 1 : 0);
         var empty = _loaded && _layout is not null && !_layout.Modules.Any(module => _layout.Enabled(module.Id));
         var weatherSaving = _weatherPage?.Committing == true;
-        _apply.IsEnabled = !_busy && !weatherSaving && count > 0;
+        _apply.IsEnabled = !_busy && !weatherSaving && _weatherPage is not { Searching: true } and not { LoadingStatus: true } && count > 0;
         _saveStatus.Text = _busy ? "正在保存或读取；新的编辑会保留在草稿中…" : weatherSaving ? "正在保存或刷新天气…" : empty ? "请至少添加一个显示模块再应用。" : count > 0 ? $"{count} 项更改待应用" : "配置已同步";
         if (_weatherPage is not null) UpdateWeatherButtons(_weatherPage);
     }

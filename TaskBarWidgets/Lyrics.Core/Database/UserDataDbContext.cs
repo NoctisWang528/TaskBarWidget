@@ -20,7 +20,7 @@ public sealed class UserDataDbContext : DbContext
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
-        var databasePath = _databasePath ?? Path.Combine(AppDataPaths.DatabaseDirectory, "user_data.db");
+        var databasePath = _databasePath ?? Path.Combine(AppDataPaths.LyricsDirectory, "user_data.db");
         var dbDirectory = Path.GetDirectoryName(databasePath)!;
         Directory.CreateDirectory(dbDirectory);
         optionsBuilder.UseSqlite($"Data Source={databasePath}");

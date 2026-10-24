@@ -22,7 +22,7 @@ function Copy-StableDataFile([string]$Source, [string]$Destination) {
         try { [Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xfeff) | ConvertFrom-Json -Depth 100 | Out-Null }
         catch { throw "Invalid JSON snapshot: $Source" }
     }
-    if ([IO.Path]::GetFileName($Source) -match '^history_traffic\.dat') {
+    if ([IO.Path]::GetFileName($Source) -match '^(history_traffic|traffic)\.dat(?:\.bak)?$') {
         $lines = [Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xfeff) -split '\r?\n'
         if ($lines[0] -notmatch '^lines:\s*"(?<count>\d+)"\s*$') { throw 'Invalid traffic snapshot header.' }
         $expected = [int]$Matches.count
@@ -48,18 +48,4 @@ function Assert-UnlinkedPath([string]$Path) {
         if ($walk.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Package paths must not contain links or junctions.' }
         $walk = if ($walk -is [IO.FileInfo]) { $walk.Directory } else { $walk.Parent }
     }
-}
-
-function Test-PortableDataMode([string]$GlobalConfig) {
-    $inConfig = $false
-    $portable = $false
-    foreach ($raw in [IO.File]::ReadAllLines($GlobalConfig)) {
-        $line = $raw.Trim()
-        if ($line.StartsWith('[')) { $inConfig = $line -ieq '[config]'; continue }
-        if ($inConfig -and $line -match '^portable_mode\s*=\s*(?<value>.+?)\s*$') {
-            $number = 0
-            $portable = $Matches.value -ieq 'true' -or ([int]::TryParse($Matches.value, [ref]$number) -and $number -ne 0)
-        }
-    }
-    $portable
 }

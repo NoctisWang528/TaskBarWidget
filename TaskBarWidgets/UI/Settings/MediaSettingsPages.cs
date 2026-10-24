@@ -8,6 +8,7 @@ using Microsoft.UI.Xaml.Input;
 using Windows.Foundation;
 using TaskBarWidgets.UI.Settings;
 using Windows.System;
+using Windows.Storage.Pickers;
 
 namespace TaskBarWidgets.UI;
 
@@ -21,6 +22,9 @@ public sealed partial class SettingsWindow
     private OffsetPageRequest? _offsetPendingRequest;
     private string _offsetSearch = "";
     private int _offsetPage = 1;
+    private StackPanel? _offsetCurrentContent;
+    private StackPanel? _offsetHistoryContent;
+    private bool _storageBusy;
     private sealed record OffsetPageRequest(
         int RequestId,
         int Generation,
@@ -94,6 +98,147 @@ public sealed partial class SettingsWindow
         var section = Section("应用界面");
         section.Children.Add(MediaEditor("toolWindowTheme", "界面主题", "select", choices: ["System", "Light", "Dark"], labels: ["跟随系统", "浅色", "深色"]));
         section.Children.Add(Copy("主题立即在设置窗口和快捷卡片中同步预览，点击“应用更改”后保存；重新读取可撤销未保存的修改。开机启动由上方主程序设置管理。"));
+        RenderDataStorage();
+    }
+
+    private void RenderDataStorage()
+    {
+        var section = Section("数据与备份", "所有运行数据固定在安装目录的 Data 文件夹中；备份不包含缓存、日志和迁移归档。");
+        var status = _serviceEvents.GetValueOrDefault("dataStatus") as JsonObject;
+        if (status is null)
+        {
+            section.Children.Add(Copy("正在读取数据状态…"));
+            _ = LoadDataStatusAsync();
+        }
+        else
+        {
+            RenderDataStatus(section, status);
+        }
+        var primary = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var open = ActionButton("打开数据目录", () => StorageActionAsync("openDataFolder"));
+        var backup = ActionButton("立即备份", () => StorageActionAsync("backup"));
+        var restore = ActionButton("恢复备份", PickAndRestoreAsync);
+        primary.Children.Add(open);
+        primary.Children.Add(backup);
+        primary.Children.Add(restore);
+        section.Children.Add(primary);
+
+        var maintenance = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var import = ActionButton("重新导入旧数据", async () =>
+        {
+            if (await ConfirmAsync("重新导入旧数据？", "重新扫描旧安装目录和共享 AppData。已有新数据不会覆盖，旧文件会归档；下一次启动时执行。"))
+                await StorageActionAsync("importLegacy");
+        });
+        var clearCache = ActionButton("清理可重建缓存", async () =>
+        {
+            if (await ConfirmAsync("清理可重建缓存？", "只删除 Data\\cache 中的内容。歌词数据库、单曲偏移、配置、历史、迁移归档和备份不会被删除。"))
+                await StorageActionAsync("clearCache");
+        });
+        maintenance.Children.Add(import);
+        maintenance.Children.Add(clearCache);
+        section.Children.Add(maintenance);
+        foreach (var button in new[] { open, backup, restore, import, clearCache })
+            button.IsEnabled = !_storageBusy;
+    }
+
+    private void RenderDataStatus(StackPanel section, JsonObject status)
+    {
+        section.Children.Add(Copy("数据目录：" + Text(status["dataRoot"])));
+        section.Children.Add(Copy("布局版本 " + Text(status["layoutVersion"]) + " · 迁移状态 " + Text(status["layoutState"])));
+        section.Children.Add(Copy($"个人数据 {FormatBytes(Number(status["personalBytes"]))} · 缓存 {FormatBytes(Number(status["cacheBytes"]))} · 归档 {FormatBytes(Number(status["archiveBytes"]))}"));
+        if (status["credentialPresent"]?.GetValue<bool>() == true)
+        {
+            section.Children.Add(Copy(status["credentialDecryptable"]?.GetValue<bool>() == true
+                ? "天气密钥已加密保存（仅当前 Windows 用户可解密）。"
+                : "天气密钥无法解密，请重新输入。备份中的密文不能跨用户或跨机器使用。"));
+        }
+        if (status["containsLegacyPlaintextCredential"]?.GetValue<bool>() == true)
+            section.Children.Add(Copy("警告：旧版天气 INI 曾含明文 AppKey，迁移归档中可能仍有该明文。不要分享 Data\\migration\\archive；常规备份不会包含归档。"));
+        if (status["migrationWarnings"] is JsonArray warnings)
+            foreach (var warning in warnings.Take(4))
+                section.Children.Add(Copy("迁移提示：" + Text(warning)));
+        if (status["pendingRestore"]?.GetValue<bool>() == true)
+            section.Children.Add(Copy("已排队恢复备份；请关闭并重新启动应用以执行。"));
+        else if (Text(status["layoutState"]) == "migration-requested")
+            section.Children.Add(Copy("已排队重新导入旧数据；请关闭并重新启动应用以执行。"));
+        if (!string.IsNullOrWhiteSpace(Text(status["migrationId"])))
+            section.Children.Add(Copy("最近迁移 " + Text(status["migrationCompletedAtUtc"], "时间未知")));
+        if (!string.IsNullOrWhiteSpace(Text(status["lastBackup"])))
+            section.Children.Add(Copy("最近备份：" + Text(status["lastBackup"])));
+    }
+
+    private async Task LoadDataStatusAsync()
+    {
+        try
+        {
+            _serviceEvents["dataStatus"] = await RequestAsync("getDataStatus");
+            RenderPage();
+        }
+        catch (Exception error)
+        {
+            ShowError("读取数据状态失败：" + error.Message);
+        }
+    }
+
+    private async Task StorageActionAsync(string action, string? path = null)
+    {
+        if (_storageBusy) return;
+        _storageBusy = true;
+        RenderPage();
+        try
+        {
+            var response = await RequestAsync("storageCommand", new { action, path });
+            _serviceEvents["dataStatus"] = response["status"]?.DeepClone() ?? response;
+            if (action == "backup" && response["path"] is JsonNode backupPath)
+                ShowNotice("备份已保存：" + Text(backupPath), InfoBarSeverity.Success);
+            RenderPage();
+        }
+        catch (Exception error)
+        {
+            ShowError("数据操作失败：" + error.Message);
+        }
+        finally
+        {
+            _storageBusy = false;
+            RenderPage();
+        }
+    }
+
+    private async Task PickAndRestoreAsync()
+    {
+        if (_storageBusy) return;
+        var picker = new FileOpenPicker();
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+        picker.FileTypeFilter.Add(".zip");
+        var file = await picker.PickSingleFileAsync();
+        if (file is null) return;
+        if (!await ConfirmAsync("恢复备份？",
+                "备份会先校验清单、版本、路径和 SHA256，并排队到下一次冷启动。执行前会自动生成 pre-restore-latest.zip；失败时回滚当前数据。"))
+            return;
+        await StorageActionAsync("scheduleRestore", file.Path);
+    }
+
+    private static string FormatBytes(double bytes) => bytes switch
+    {
+        >= 1024 * 1024 * 1024 => $"{bytes / 1024 / 1024 / 1024:0.0} GB",
+        >= 1024 * 1024 => $"{bytes / 1024 / 1024:0.0} MB",
+        >= 1024 => $"{bytes / 1024:0.0} KB",
+        _ => $"{bytes:0} B"
+    };
+
+    private async Task<bool> ConfirmAsync(string title, string message)
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = _root.XamlRoot,
+            RequestedTheme = _root.RequestedTheme,
+            Title = title,
+            Content = message,
+            PrimaryButtonText = "继续",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Close
+        };
+        return await dialog.ShowAsync() == ContentDialogResult.Primary;
     }
     private void RenderLyrics()
     {
@@ -363,12 +508,7 @@ public sealed partial class SettingsWindow
     private void RenderOffsets()
     {
         var current = Section("当前歌曲", "偏移按歌曲与歌词源分别保存，修改后立即作用于当前歌词。");
-        if (_serviceEvents.GetValueOrDefault("currentTrackOffset") is JsonObject track) {
-            current.Children.Add(new TextBlock { Text = Text(track["title"]) + " — " + Text(track["artist"]), TextWrapping = TextWrapping.Wrap });
-            current.Children.Add(Copy("歌词源：" + Text(track["lyricSource"]) + "；播放器偏移：" + Text(track["playerOffsetMilliseconds"]) + " ms"));
-            var offset = new NumberBox { Header = "单曲偏移（毫秒）", Value = Number(track["trackOffsetMilliseconds"]), Minimum = -5000, Maximum = 5000, SmallChange = 100, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact };
-            current.Children.Add(offset); current.Children.Add(ActionButton("应用到当前歌曲", () => ServiceCommandAsync("setCurrentTrackOffset", JsonValue.Create(offset.Value))));
-        } else current.Children.Add(Copy("尚无确定歌词源的歌曲。"));
+        _offsetCurrentContent = current;
         var history = Section("已保存偏移");
         var search = new TextBox { PlaceholderText = "搜索歌曲或歌手", Text = _offsetSearch }; history.Children.Add(search);
         history.Children.Add(ActionButton("搜索 / 刷新", async () =>
@@ -377,6 +517,27 @@ public sealed partial class SettingsWindow
             _offsetPage = 1;
             await QueueOffsetQuery(_pageGeneration, activate: false);
         }));
+        _offsetHistoryContent = new StackPanel { Spacing = 10 };
+        history.Children.Add(_offsetHistoryContent);
+        RefreshOffsetsContent();
+    }
+
+    private void RefreshOffsetsContent(bool updateCurrent = true)
+    {
+        if (_offsetCurrentContent is not { } current || _offsetHistoryContent is not { } history) return;
+        // Keep the page sections and search controls attached so data readback
+        // cannot replay their entrance transitions or discard in-progress input.
+        if (updateCurrent)
+        {
+            current.Children.Clear();
+            if (_serviceEvents.GetValueOrDefault("currentTrackOffset") is JsonObject track) {
+                current.Children.Add(new TextBlock { Text = Text(track["title"]) + " — " + Text(track["artist"]), TextWrapping = TextWrapping.Wrap });
+                current.Children.Add(Copy("歌词源：" + Text(track["lyricSource"]) + "；播放器偏移：" + Text(track["playerOffsetMilliseconds"]) + " ms"));
+                var offset = new NumberBox { Header = "单曲偏移（毫秒）", Value = Number(track["trackOffsetMilliseconds"]), Minimum = -5000, Maximum = 5000, SmallChange = 100, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact };
+                current.Children.Add(offset); current.Children.Add(ActionButton("应用到当前歌曲", () => ServiceCommandAsync("setCurrentTrackOffset", JsonValue.Create(offset.Value))));
+            } else current.Children.Add(Copy("尚无确定歌词源的歌曲。"));
+        }
+        history.Children.Clear();
         if (_serviceEvents.GetValueOrDefault("trackOffsetEntries") is JsonObject page && page["entries"] is JsonArray entries) {
             foreach (var entry in entries.OfType<JsonObject>()) {
                 var content = new StackPanel { Spacing = 6 };
@@ -411,6 +572,8 @@ public sealed partial class SettingsWindow
     {
         _offsetLatestRequestId = ++_offsetRequestSequence;
         CancelPendingOffsetQuery();
+        _offsetCurrentContent = null;
+        _offsetHistoryContent = null;
     }
 
     private void CancelPendingOffsetQuery()
@@ -512,7 +675,7 @@ public sealed partial class SettingsWindow
                 }
                 foreach (var response in responses)
                     ApplyServiceResponse(response, snapshot);
-                RenderPage();
+                RefreshOffsetsContent(updateCurrent: request.Activate);
                 UpdateSaveStatus();
                 request.Completion.TrySetResult(true);
             }
@@ -623,7 +786,10 @@ public sealed partial class SettingsWindow
         var snapshot = _media.Capture();
         foreach (var (action, value) in commands)
             ApplyServiceResponse(await RequestAsync("settingsCommand", new { action, value }), snapshot);
-        ApplyTheme(); RenderPage(); UpdateSaveStatus();
+        ApplyTheme();
+        if (_currentPage == "trackOffsets") RefreshOffsetsContent();
+        else RenderPage();
+        UpdateSaveStatus();
     }
 
     private void ApplyServiceResponse(JsonObject response, SettingsDraft.SaveSnapshot snapshot)

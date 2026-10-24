@@ -79,6 +79,7 @@ namespace Cards
 
     void Graphics::Release()
     {
+        ReleaseMask();
         bitmaps.clear();
         formats.clear();
         geometries.clear();
@@ -178,7 +179,7 @@ namespace Cards
         }
         const auto interop = Abi<ABI::Windows::UI::Composition::ICompositorInterop>(compositor);
         winrt::com_ptr<ABI::Windows::UI::Composition::ICompositionGraphicsDevice> device;
-        if (FAILED(interop->CreateGraphicsDevice(dxgiDevice.Get(), device.put())))
+        if (FAILED(interop->CreateGraphicsDevice(d2dDevice.Get(), device.put())))
         {
             error = L"CreateGraphicsDevice failed";
             return nullptr;
@@ -239,8 +240,9 @@ namespace Cards
             const auto resource = Abi<ABI::Windows::UI::Composition::ICompositionDrawingSurfaceInterop>(surface);
             ComPtr<ID2D1DeviceContext> device;
             POINT updateOffset{};
-            if (FAILED(resource->BeginDraw(nullptr, __uuidof(ID2D1DeviceContext),
-                reinterpret_cast<void**>(device.GetAddressOf()), &updateOffset)))
+            lastResult = resource->BeginDraw(nullptr, __uuidof(ID2D1DeviceContext),
+                reinterpret_cast<void**>(device.GetAddressOf()), &updateOffset);
+            if (FAILED(lastResult))
                 return nullptr;
             context = device;
             drawing = true;
@@ -258,7 +260,8 @@ namespace Cards
         try
         {
             const auto resource = Abi<ABI::Windows::UI::Composition::ICompositionDrawingSurfaceInterop>(surface);
-            if (FAILED(resource->EndDraw())) Release();
+            lastResult = resource->EndDraw();
+            if (FAILED(lastResult)) Release();
         }
         catch (...) { Release(); }
     }
@@ -278,7 +281,8 @@ namespace Cards
         int decodeHeightPixels)
     {
         if (source.empty() || !wic || !context) return nullptr;
-        const auto cached = bitmaps.find(source);
+        const std::wstring key = source + L"|" + std::to_wstring(decodeWidthPixels) + L"x" + std::to_wstring(decodeHeightPixels);
+        const auto cached = bitmaps.find(key);
         if (cached != bitmaps.end()) return cached->second.Get();
 
         std::vector<BYTE> bytes;
@@ -308,11 +312,13 @@ namespace Cards
             return nullptr;
 
         UINT sourceWidth{}, sourceHeight{};
-        converter->GetSize(&sourceWidth, &sourceHeight);
+        if (FAILED(converter->GetSize(&sourceWidth, &sourceHeight)) || sourceWidth == 0 || sourceHeight == 0 ||
+            sourceWidth > 16384 || sourceHeight > 16384 || static_cast<uint64_t>(sourceWidth) * sourceHeight > 64ull * 1024 * 1024)
+            return nullptr;
         ComPtr<IWICBitmapSource> final = converter;
         ComPtr<IWICBitmapScaler> scaler;
-        const int limitWidth = (std::max)(1, decodeWidthPixels * 2);
-        const int limitHeight = (std::max)(1, decodeHeightPixels * 2);
+        const int limitWidth = std::clamp(decodeWidthPixels, 1, 2048);
+        const int limitHeight = std::clamp(decodeHeightPixels, 1, 2048);
         if (sourceWidth > 0 && sourceHeight > 0 &&
             (sourceWidth > static_cast<UINT>(limitWidth) || sourceHeight > static_cast<UINT>(limitHeight)) &&
             SUCCEEDED(wic->CreateBitmapScaler(scaler.GetAddressOf())))
@@ -338,8 +344,33 @@ namespace Cards
         ComPtr<ID2D1Bitmap1> bitmap;
         bitmap.Attach(BitmapFromConverter(finalConverter.Get()));
         if (!bitmap) return nullptr;
-        auto entry = bitmaps.emplace(source, bitmap);
+        // Keep ownership bounded across track changes. Callers retain any bitmap
+        // needed for the current drawing operation with their own COM reference.
+        const auto cost = [](const auto& entry)
+        {
+            const auto size = entry.second->GetPixelSize();
+            return static_cast<uint64_t>(entry.first.size()) * sizeof(wchar_t) +
+                static_cast<uint64_t>(size.width) * size.height * 4;
+        };
+        uint64_t bytesHeld = 0;
+        for (const auto& entry : bitmaps) bytesHeld += cost(entry);
+        const auto size = bitmap->GetPixelSize();
+        const uint64_t incoming = static_cast<uint64_t>(key.size()) * sizeof(wchar_t) +
+            static_cast<uint64_t>(size.width) * size.height * 4;
+        if (incoming > 8ull * 1024 * 1024) return nullptr;
+        while (!bitmaps.empty() && (bitmaps.size() >= 32 || bytesHeld + incoming > 8ull * 1024 * 1024))
+        { bytesHeld -= cost(*bitmaps.begin()); bitmaps.erase(bitmaps.begin()); }
+        auto entry = bitmaps.emplace(key, bitmap);
         return entry.first->second.Get();
+    }
+
+    void Graphics::ForgetImage(const std::wstring& source)
+    {
+        if (source.empty()) return;
+        const auto prefix = source + L"|";
+        for (auto iter = bitmaps.begin(); iter != bitmaps.end();)
+            if (iter->first.starts_with(prefix)) iter = bitmaps.erase(iter);
+            else ++iter;
     }
 
     ID2D1PathGeometry* Graphics::RoundedRect(float rectWidth, float rectHeight, float radius)
@@ -393,6 +424,7 @@ namespace Cards
         format->SetTextAlignment(alignment);
         format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
         format->SetWordWrapping(wrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
+        if (formats.size() >= 64) formats.clear();
         const auto entry = formats.emplace(key, format);
         return entry.first->second.Get();
     }
@@ -403,12 +435,15 @@ namespace Cards
     bool Graphics::BeginMask(ID2D1DeviceContext* target)
     {
         if (!target || !context) return false;
-        D2D1_SIZE_F size = target->GetSize();
+        const auto size = target->GetPixelSize();
         float dpiX = 96.0f, dpiY = 96.0f;
         target->GetDpi(&dpiX, &dpiY);
-        const UINT width = (std::max)(1u, static_cast<UINT>(std::lround(size.width)));
-        const UINT height = (std::max)(1u, static_cast<UINT>(std::lround(size.height)));
-        if (!mask || mask->GetPixelSize().width != width || mask->GetPixelSize().height != height)
+        const UINT width = (std::max)(1u, size.width);
+        const UINT height = (std::max)(1u, size.height);
+        float maskDpiX{}, maskDpiY{};
+        if (mask) mask->GetDpi(&maskDpiX, &maskDpiY);
+        if (!mask || mask->GetPixelSize().width != width || mask->GetPixelSize().height != height ||
+            maskDpiX != dpiX || maskDpiY != dpiY)
         {
             mask.Reset();
             const D2D1_BITMAP_PROPERTIES1 properties = D2D1::BitmapProperties1(
@@ -418,9 +453,10 @@ namespace Cards
             if (FAILED(target->CreateBitmap(D2D1::SizeU(width, height), nullptr, 0, properties,
                 mask.GetAddressOf()))) return false;
         }
-        maskTarget = target;
+        target->GetTarget(maskTarget.ReleaseAndGetAddressOf());
+        target->GetTransform(&maskTransform);
         target->SetTarget(mask.Get());
-        target->SetTransform(D2D1::Matrix3x2F::Identity());
+        // Use the same coordinates as the card's drawing surface.
         target->Clear(D2D1::ColorF(0, 0.0f));
         return true;
     }
@@ -428,7 +464,8 @@ namespace Cards
     void Graphics::EndMask(ID2D1DeviceContext* target, float blurDip)
     {
         if (!target || !mask) return;
-        target->SetTarget(nullptr);
+        target->SetTarget(maskTarget.Get());
+        maskTarget.Reset();
         float dpiX = 96.0f, dpiY = 96.0f;
         target->GetDpi(&dpiX, &dpiY);
         if (!maskBlur && FAILED(target->CreateEffect(GaussianBlurEffect, maskBlur.GetAddressOf())))
@@ -436,18 +473,18 @@ namespace Cards
             maskBlur.Reset();
             return;
         }
-        const float scale = dpiX / 96.0f;
         maskBlur->SetInput(0, mask.Get());
-        maskBlur->SetValue(D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION, (std::max)(0.1f, blurDip * scale * 0.6f));
+        maskBlur->SetValue(D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION, (std::max)(0.1f, blurDip * 0.6f));
         maskBlur->SetValue(D2D1_GAUSSIANBLUR_PROP_BORDER_MODE, D2D1_BORDER_MODE_SOFT);
         target->SetTransform(D2D1::Matrix3x2F::Identity());
         target->DrawImage(maskBlur.Get(), D2D1_INTERPOLATION_MODE_LINEAR);
+        target->SetTransform(maskTransform);
     }
 
     void Graphics::ReleaseMask()
     {
         mask.Reset();
-        maskTarget = nullptr;
+        maskTarget.Reset();
         maskBlur.Reset();
     }
 

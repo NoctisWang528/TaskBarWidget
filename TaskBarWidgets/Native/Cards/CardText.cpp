@@ -113,10 +113,8 @@ namespace Cards
     {
         wchar_t buffer[64]{};
         if (totalKiB > 0 && totalKiB < 10.24) return L"<0.01 MB";
-        if (totalKiB >= 1024.0 * 1024.0)
-            swprintf_s(buffer, L"%.2f GB", totalKiB / (1024.0 * 1024.0));
-        else
-            swprintf_s(buffer, L"%.2f MB", totalKiB / 1024.0);
+        const bool gib = totalKiB >= 1024.0 * 1024.0;
+        swprintf_s(buffer, L"%.2f", totalKiB / (gib ? 1024.0 * 1024.0 : 1024.0));
         std::wstring text = buffer;
         // Drop the trailing zeros the WinUI "0.##" format would not print.
         const auto dot = text.find(L'.');
@@ -125,7 +123,7 @@ namespace Cards
             while (!text.empty() && text.back() == L'0') text.pop_back();
             if (!text.empty() && text.back() == L'.') text.pop_back();
         }
-        return text;
+        return text + (gib ? L" GB" : L" MB");
     }
 
     std::wstring FormatDateLabel(const std::wstring& date)
@@ -151,8 +149,10 @@ namespace Cards
 
     std::wstring FormatTemperature(const std::wstring& value)
     {
-        if (value.empty()) return L"--";
-        return value;
+        if (value.empty() || value == L"--") return L"--";
+        if (value.find(L'\u2103') != std::wstring::npos || value.back() == L'\u00b0' ||
+            (value.size() >= 2 && value.substr(value.size() - 2) == L"\u00b0C")) return value;
+        return value + L"\u00b0";
     }
 
     const wchar_t* DefaultPrimaryColor(bool dark) { return dark ? L"#F2FFFFFF" : L"#F2141414"; }

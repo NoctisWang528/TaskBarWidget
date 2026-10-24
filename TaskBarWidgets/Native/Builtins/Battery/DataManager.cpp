@@ -41,7 +41,7 @@ static void WritePrivateProfileInt(const wchar_t* app_name, const wchar_t* key_n
 
 void BatteryCDataManager::LoadConfig(const std::wstring& config_dir)
 {
-    m_config_path = config_dir + L"Battery.dll.ini";
+    m_config_path = config_dir + L"battery.ini";
     m_setting_data.battery_type = static_cast<BatteryType>(GetPrivateProfileInt(L"config", L"battery_type", static_cast<int>(BatteryType::NUMBER_BESIDE_ICON), m_config_path.c_str()));
     m_setting_data.show_battery_in_tooltip = (GetPrivateProfileInt(L"config", L"show_battery_in_tooltip", 1, m_config_path.c_str()) != 0);
     m_setting_data.show_percent = (GetPrivateProfileInt(L"config", L"show_percent", 1, m_config_path.c_str()) != 0);

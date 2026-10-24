@@ -873,7 +873,7 @@ public sealed class MediaSettingsService : IDisposable
         {
             "notGranted" => "尚未允许读取系统播放声音。",
             "disabled" => "频谱已关闭，不会读取系统播放声音。",
-            "blocked" => "系统音频采集被系统或安全软件阻止。",
+            "blocked" => DescribeSpectrumCaptureError(diagnostics.LastError),
             "capturing" => "正在读取系统播放声音并生成频谱。",
             _ => "已允许；仅在频谱需要显示时读取系统播放声音。"
         };
@@ -886,6 +886,48 @@ public sealed class MediaSettingsService : IDisposable
 
         _lastSpectrumCaptureStateJson = json;
         Publish("spectrumCaptureState", payload);
+    }
+
+    private static string DescribeSpectrumCaptureError(string? lastError)
+    {
+        if (string.IsNullOrWhiteSpace(lastError))
+        {
+            return "暂时无法读取系统播放声音，将自动重试。";
+        }
+
+        // The capture services record LastError as "<ExceptionType>: <message>";
+        // interop-casting errors mean a product bug, never a security software block.
+        var separator = lastError.IndexOf(": ", StringComparison.Ordinal);
+        var exceptionType = separator > 0 ? lastError[..separator] : string.Empty;
+        if (exceptionType is "InvalidCastException"
+            or "TypeInitializationException"
+            or "TypeLoadException"
+            or "MarshalDirectiveException"
+            or "MissingMethodException"
+            or "EntryPointNotFoundException")
+        {
+            return "频谱组件初始化出现内部错误，并非被安全软件阻止。";
+        }
+
+        if (exceptionType == "COMException")
+        {
+            if (lastError.Contains("0x80070490", StringComparison.OrdinalIgnoreCase))
+            {
+                return "未找到可用的播放设备，连接播放设备后会自动重试。";
+            }
+
+            if (lastError.Contains("0x88890004", StringComparison.OrdinalIgnoreCase))
+            {
+                return "音频设备已失效或被移除，重新选择设备后会自动重试。";
+            }
+
+            if (lastError.Contains("0x80070005", StringComparison.OrdinalIgnoreCase))
+            {
+                return "系统音频采集被系统或安全软件阻止。";
+            }
+        }
+
+        return "暂时无法读取系统播放声音，将自动重试。";
     }
 
     private void PublishSpectrumRetryingState()

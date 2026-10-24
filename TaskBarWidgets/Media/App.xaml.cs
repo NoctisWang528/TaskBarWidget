@@ -1,9 +1,11 @@
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using System.Text.Json;
 using System.Runtime.InteropServices;
 using System.Windows;
 using Microsoft.Win32;
+using TaskBarWidgets.Media.Diagnostics;
 using TaskBarWidgets.Media.Integration;
 using TaskbarLyrics.Core.Database;
 using TaskbarLyrics.Core.Utilities;
@@ -17,7 +19,7 @@ public partial class App : System.Windows.Application
     public App() => throw new InvalidOperationException("The media helper requires its native host launch arguments.");
     private readonly Process _host;
     private readonly string _pipeName;
-    private readonly bool? _portableData;
+    private readonly string? _dataRoot;
     private SettingsStore? _store;
     private MediaCoordinator? _media;
     private MediaPipeServer? _pipe;
@@ -26,20 +28,25 @@ public partial class App : System.Windows.Application
     private NativeCardBridge? _cards;
     private CardSnapshotBuilder? _cardSnapshot;
     private AudioSnapshot? _lastAudio;
-    private UpdateSnapshot? _lastUpdate;
-    private bool _healthUiStarted;
+    private readonly SemaphoreSlim _audioRequests = new(1, 1);
+    private bool _cardRefreshRunning, _cardDetailsRunning, _cardWasVisible;
+    private DateTimeOffset _nextCardAudio, _nextCardWeather, _nextCardTraffic;
+    private System.Windows.Threading.DispatcherTimer? _cardTimer;
     private UpdateCoordinator? _updates;
     private UpdateInstallBridge? _updateInstaller;
     private UpdateSnapshot _updateUnavailable = new() { Phase = "error", Error = "更新服务尚未准备好。" };
+    private StorageCommandService? _storage;
     private readonly AudioDeviceService _audio = new();
     private MediaSettingsService? _settingsService;
     private readonly CancellationTokenSource _stop = new();
     private bool _shutdownRequested;
+    // Per-connection artwork version memory for getState: see the artworkDelta branch.
+    private readonly ArtworkDeltaState _artwork = new();
     internal AppSettings Settings { get; private set; } = new();
 
-    internal App(Process host, string pipeName, bool? portableData = null)
+    internal App(Process host, string pipeName, string? dataRoot = null)
     {
-        _host = host; _pipeName = pipeName; _portableData = portableData;
+        _host = host; _pipeName = pipeName; _dataRoot = dataRoot;
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
     }
 
@@ -49,8 +56,12 @@ public partial class App : System.Windows.Application
         try
         {
             var applicationRoot = Directory.GetParent(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar))!.FullName;
-            AppDataPaths.ConfigureForApplicationRoot(applicationRoot, _portableData);
-            var settingsPath = Path.Combine(AppDataPaths.RootDirectory, "media-settings.json");
+            DataStartup.Prepare(_dataRoot ?? AppDataPaths.ResolveForApplicationRoot(applicationRoot), applicationRoot);
+            _storage = new StorageCommandService(applicationRoot, AppDataPaths.RootDirectory);
+            // The startup probe above owns legacy migration; here only refresh
+            // the in-memory status after migration/restore completed.
+            _ = _storage.Status();
+            var settingsPath = AppDataPaths.MediaSettingsPath;
             FactoryDefaults.EnsureSeeded(settingsPath);
             _store = new SettingsStore(settingsPath);
             Settings = _store.Load(IsApplicationUsingLightTheme());
@@ -74,21 +85,30 @@ public partial class App : System.Windows.Application
             // front-ends can never disagree about device state.
             _cardSnapshot = new CardSnapshotBuilder();
             _cards = new NativeCardBridge($"TaskBarWidgets.Cards.{_host.Id}",
-                BuildCardSnapshot,
+                token => Dispatcher.InvokeAsync(BuildCardSnapshot, System.Windows.Threading.DispatcherPriority.Background, token).Task,
                 (request, generation, token) => Dispatcher.InvokeAsync(() =>
                     HandleCardRequestAsync(request, generation, token)).Task.Unwrap());
+            _cards.VisibilityChanged += () => _ = Dispatcher.InvokeAsync(ApplyCardLyricsVisibility);
             _cards.Start();
+            _cardTimer = new System.Windows.Threading.DispatcherTimer(TimeSpan.FromMilliseconds(400),
+                System.Windows.Threading.DispatcherPriority.Background,
+                (_, _) => TaskObserver.Observe(RefreshVisibleCardsAsync(), "card state refresh"), Dispatcher);
             // The signal only says "re-read the bridge". Applying the authoritative
             // state on the dispatcher keeps a late release from overriding a newer
             // subscription that was accepted after the disconnect.
             _ui.CardLyricsReleased += () => _ = Dispatcher.InvokeAsync(ApplyCardLyricsVisibility);
+            _ui.ConnectionClosed += generation => _ = Dispatcher.InvokeAsync(() =>
+            {
+                if (_ui.ConnectionGeneration != generation + 1) return;
+                TaskObserver.Observe(ForwardToCards("cardMicaPreview", JsonSerializer.SerializeToElement(new { enabled = false })), "reset card material");
+                TaskObserver.Observe(ForwardToCards("cardThemePreview", JsonSerializer.SerializeToElement(new { enabled = false })), "reset card theme");
+            });
             try
             {
                 _updates = new UpdateCoordinator(applicationRoot, currentVersion,
                     Settings.ProductAutomaticUpdatesEnabled,
                     snapshot =>
                     {
-                        _lastUpdate = snapshot;
                         _cards?.PublishSnapshot();
                         _ui?.PublishUpdateState(snapshot);
                     });
@@ -109,6 +129,7 @@ public partial class App : System.Windows.Application
             if (_updateInstaller is not null) TaskObserver.Observe(_updateInstaller.ReportPreviousFailureAsync(_stop.Token), "previous update outcome");
             TaskObserver.Observe(WatchHostAsync(), "parent lifecycle");
             SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
+            FootprintMetrics.Start();
         }
         catch (Exception exception)
         {
@@ -149,7 +170,6 @@ public partial class App : System.Windows.Application
             case "startUiHealth":
                 // Health mode is the only path that starts settings without a user
                 // action; the window itself stays hidden until the user opens it.
-                _healthUiStarted = _healthUiStarted || (_ui is not null);
                 _ui?.StartOnDemand();
                 break;
             case "hideCards":
@@ -182,21 +202,23 @@ public partial class App : System.Windows.Application
     // ---- native card channel -------------------------------------------------
 
     internal object BuildCardSnapshot() => _cardSnapshot?.Build(Settings, _media!, _lastAudio,
-        _lastUpdate, _cards?.Connected == true, (int)Settings.ToolWindowTheme)
+        _updates?.Snapshot ?? _updateUnavailable, _cards?.Connected == true, (int)Settings.ToolWindowTheme)
         ?? new { connected = false };
 
     // The native card front-end only gets the actions its widgets need: audio,
     // media transport, weather status/refresh, history, lyrics, update and the
     // settings/update-confirm entry points. Everything else stays UI-only.
-    private async Task<object?> HandleCardRequestAsync(JsonElement payload, long generation, CancellationToken token)
+    private async Task<object?> HandleCardRequestAsync(JsonElement request, long generation, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
         if (_cards is null || !_cards.IsConnectionCurrent(generation))
             throw new OperationCanceledException("卡片连接已失效。");
         if (_media is null) throw new InvalidOperationException("媒体服务尚未准备好。");
-        var action = payload.ValueKind == JsonValueKind.Object &&
-            payload.TryGetProperty("action", out var actionValue) && actionValue.ValueKind == JsonValueKind.String
-            ? actionValue.GetString() ?? "" : "";
+        var action = request.GetProperty("action").GetString() ?? "";
+        // v1 clients used flat arguments; media commands need a separate inner
+        // action, so the canonical request is { action, payload: { ... } }.
+        var payload = request.TryGetProperty("payload", out var arguments) && arguments.ValueKind == JsonValueKind.Object
+            ? arguments : request;
         switch (action)
         {
             case "cardSnapshot":
@@ -207,63 +229,26 @@ public partial class App : System.Windows.Application
             case "getUpdateState":
                 return _cardSnapshot?.DescribeUpdate(_updates?.Snapshot ?? _updateUnavailable)
                     ?? _updateUnavailable;
-            case "downloadUpdate": return _updates?.Download() ?? _updateUnavailable;
-            case "cancelUpdateDownload": return _updates?.CancelDownload() ?? _updateUnavailable;
+            case "downloadUpdate": return _cardSnapshot!.DescribeUpdate(_updates?.Download() ?? _updateUnavailable);
+            case "cancelUpdateDownload": return _cardSnapshot!.DescribeUpdate(_updates?.CancelDownload() ?? _updateUnavailable);
             case "installUpdate":
                 // Installation keeps its single confirmation path: the card starts
                 // the settings process on demand and the user confirms there. The
                 // card never installs on its own.
-                if (_ui is not null)
-                    TaskObserver.Observe(_ui.SendAsync("openSettings", page: "about"), "update confirmation");
-                return new { success = true, opened = "settings" };
+                if (_ui is not null) await _ui.SendAsync("confirmInstallUpdate");
+                return _cardSnapshot!.DescribeUpdate(_updates?.Snapshot ?? _updateUnavailable);
             case "openSettings":
                 // Starts the WinUI settings process on demand; it exits when the
                 // last settings window closes.
-                if (_ui is not null) TaskObserver.Observe(_ui.SendAsync("openSettings"), "card settings");
+                var settingsPage = payload.TryGetProperty("page", out var cardPage) && cardPage.ValueKind == JsonValueKind.String
+                    ? cardPage.GetString() : null;
+                if (_ui is not null) await _ui.SendAsync("openSettings", page: settingsPage);
                 return new { success = true };
             case "getAudio":
-            {
-                var snapshot = await _audio.GetSnapshotAsync(token);
-                _lastAudio = snapshot;
-                _cardSnapshot?.BumpAudio();
-                return _cardSnapshot!.DescribeAudio(snapshot);
-            }
             case "selectDevice":
             case "setVolume":
             case "setMute":
-            {
-                var flow = payload.GetProperty("flow").GetString();
-                if (flow is not ("input" or "output")) throw new ArgumentException("设备类型无效。");
-                var deviceId = payload.TryGetProperty("deviceId", out var id) ? id.GetString() : null;
-                bool operationSucceeded = true;
-                string? message = null;
-                if (action == "selectDevice")
-                {
-                    if (string.IsNullOrWhiteSpace(deviceId)) throw new ArgumentException("请选择音频设备。");
-                    var result = await _audio.SetDefaultAsync(deviceId, flow == "input", true, token);
-                    operationSucceeded = result.Succeeded;
-                    message = result.Message;
-                }
-                else if (action == "setVolume")
-                {
-                    if (!TryNumber(payload, "volume", out var volume) || volume < 0 || volume > 1)
-                        throw new ArgumentException("音量范围无效。");
-                    await _audio.SetVolumeAsync(deviceId, volume * 100, input: flow == "input",
-                        cancellationToken: token);
-                }
-                else
-                {
-                    // Mute never writes volume: it is its own endpoint property.
-                    await _audio.SetMuteAsync(deviceId, payload.GetProperty("muted").GetBoolean(),
-                        input: flow == "input", cancellationToken: token);
-                }
-                // Audio mutations always answer with the full post-mutation
-                // readback, never an optimistic echo.
-                var readback = await _audio.GetSnapshotAsync(token);
-                _lastAudio = readback;
-                _cardSnapshot?.BumpAudio();
-                return _cardSnapshot!.DescribeAudio(readback, operationSucceeded, message);
-            }
+                return await HandleAudioRequestAsync(action, payload, token, () => _cards.IsConnectionCurrent(generation));
             case "mediaCommand":
             {
                 var command = payload.GetProperty("action").GetString() ?? "";
@@ -280,20 +265,34 @@ public partial class App : System.Windows.Application
             case "getTrafficHistory":
             {
                 var history = await GetTrafficHistoryAsync(token);
-                _cardSnapshot!.SetTraffic(history);
-                return _cardSnapshot.DescribeTraffic(history);
+                var traffic = _cardSnapshot!.SetTraffic(history);
+                _cards.PublishSnapshot();
+                return traffic;
             }
             case "weatherCommand":
             {
                 if (_nativeSettings is null) throw new InvalidOperationException("天气服务尚未连接主程序。");
+                var operation = payload.GetProperty("operation").GetString();
+                if (operation is not ("status" or "refresh")) throw new ArgumentException("不支持的卡片天气操作。");
                 var result = await _nativeSettings.RequestAsync("weatherCommand", payload.Clone(), token);
-                _cardSnapshot!.SetWeather(result);
-                return _cardSnapshot.DescribeWeather(result);
+                while (result.TryGetProperty("pending", out var pending) && pending.ValueKind == JsonValueKind.True)
+                {
+                    var jobId = result.GetProperty("jobId").GetInt64();
+                    await Task.Delay(350, token);
+                    result = await _nativeSettings.RequestAsync("weatherCommand", JsonSerializer.SerializeToElement(new { operation = "result", jobId }), token);
+                }
+                var weather = _cardSnapshot!.SetWeather(result);
+                _cards.PublishSnapshot();
+                if (result.TryGetProperty("success", out var success) && success.ValueKind == JsonValueKind.False)
+                    throw new InvalidOperationException(result.GetProperty("error").GetString() ?? "天气刷新失败。");
+                return weather;
             }
             case "subscribeCardLyrics":
             {
                 var visible = payload.GetProperty("visible").GetBoolean();
-                _media.SetCardVisible(visible);
+                var session = payload.TryGetProperty("session", out var sessionValue) ? sessionValue.GetInt64() : 0;
+                if (!_cards.TrySubscribeCardLyrics(visible, session, generation)) throw new OperationCanceledException("卡片订阅已失效。");
+                ApplyCardLyricsVisibility();
                 _cards.PublishSnapshot();
                 return new { success = true };
             }
@@ -315,7 +314,116 @@ public partial class App : System.Windows.Application
 
     // Runs on the dispatcher. Reading the bridge's visible flag here, instead of
     // pushing a captured boolean from the pipe thread, makes the last state win.
-    private void ApplyCardLyricsVisibility() => _media?.SetCardVisible(_ui?.CardLyricsVisible == true);
+    private void ApplyCardLyricsVisibility()
+    {
+        _media?.SetCardVisible(_cards?.CardLyricsVisible == true || _ui?.CardLyricsVisible == true);
+        var visible = _cards?.CardLyricsVisible == true;
+        if (visible && !_cardWasVisible)
+        {
+            _nextCardAudio = _nextCardWeather = _nextCardTraffic = DateTimeOffset.MinValue;
+            TaskObserver.Observe(RefreshVisibleCardsAsync(), "card initial refresh");
+        }
+        _cardWasVisible = visible;
+    }
+
+    // One asynchronous refresh at a time, only while the group is visible. Audio
+    // shares the mutation/readback gate with both front-ends; weather/history do
+    // not hold it. Snapshot coalescing happens on the writer, not on this timer.
+    private async Task RefreshVisibleCardsAsync()
+    {
+        if (_shutdownRequested || _cards?.CardLyricsVisible != true || _cardRefreshRunning) return;
+        _cardRefreshRunning = true;
+        try
+        {
+            _cards.PublishSnapshot(); // Controls/position and completed source icons, even during a slow audio read.
+            if (!_cardDetailsRunning) TaskObserver.Observe(RefreshCardDetailsAsync(), "card details refresh");
+            if (DateTimeOffset.UtcNow >= _nextCardAudio)
+            {
+                _nextCardAudio = DateTimeOffset.UtcNow.AddSeconds(1);
+                await HandleAudioRequestAsync("getAudio", default, _stop.Token);
+            }
+        }
+        catch (Exception error) when (error is IOException or InvalidOperationException or TimeoutException or OperationCanceledException or System.Runtime.InteropServices.COMException)
+        {
+            if (!_shutdownRequested) Log.Warn("Card audio refresh failed: " + error.GetType().Name);
+        }
+        finally { _cardRefreshRunning = false; }
+    }
+
+    private async Task RefreshCardDetailsAsync()
+    {
+        if (_shutdownRequested || _cards?.CardLyricsVisible != true || _cardDetailsRunning) return;
+        _cardDetailsRunning = true;
+        try
+        {
+            var generation = _cards.ConnectionGeneration;
+            if (_nativeSettings is null) return;
+            if (DateTimeOffset.UtcNow >= _nextCardWeather)
+            {
+                _nextCardWeather = DateTimeOffset.UtcNow.AddSeconds(5);
+                var weather = await _nativeSettings.RequestAsync("weatherCommand", JsonSerializer.SerializeToElement(new { operation = "status" }), _stop.Token);
+                if (!_cards.IsConnectionCurrent(generation) || !_cards.CardLyricsVisible) return;
+                _cardSnapshot!.SetWeather(weather);
+                _cards.PublishSnapshot();
+            }
+            if (DateTimeOffset.UtcNow >= _nextCardTraffic)
+            {
+                _nextCardTraffic = DateTimeOffset.UtcNow.AddMinutes(1);
+                var traffic = await GetTrafficHistoryAsync(_stop.Token);
+                if (!_cards.IsConnectionCurrent(generation) || !_cards.CardLyricsVisible) return;
+                _cardSnapshot!.SetTraffic(traffic);
+                _cards.PublishSnapshot();
+            }
+        }
+        catch (Exception error) when (error is IOException or InvalidOperationException or TimeoutException or OperationCanceledException or System.Runtime.InteropServices.COMException)
+        {
+            if (!_shutdownRequested) Log.Warn("Card refresh failed: " + error.GetType().Name);
+        }
+        finally { _cardDetailsRunning = false; }
+    }
+
+    // The gate covers the entire operation plus readback, rather than individual
+    // COM calls. UI and native cards cannot interleave another mutation between
+    // a write and the state returned for that write.
+    private async Task<object> HandleAudioRequestAsync(string action, JsonElement payload, CancellationToken token, Func<bool>? isCurrent = null)
+    {
+        await _audioRequests.WaitAsync(token);
+        try
+        {
+            token.ThrowIfCancellationRequested();
+            if (isCurrent?.Invoke() == false) throw new OperationCanceledException("界面连接已失效。");
+            bool succeeded = true;
+            string? message = null;
+            if (action != "getAudio")
+            {
+                var flow = payload.GetProperty("flow").GetString();
+                if (flow is not ("input" or "output")) throw new ArgumentException("设备类型无效。");
+                var deviceId = payload.TryGetProperty("deviceId", out var id) ? id.GetString() : null;
+                if (action == "selectDevice")
+                {
+                    if (string.IsNullOrWhiteSpace(deviceId)) throw new ArgumentException("请选择音频设备。");
+                    var result = await _audio.SetDefaultAsync(deviceId, flow == "input", true, token);
+                    succeeded = result.Succeeded; message = result.Message;
+                }
+                else if (action == "setVolume")
+                {
+                    if (!TryNumber(payload, "volume", out var volume) || volume < 0 || volume > 1) throw new ArgumentException("音量范围无效。");
+                    await _audio.SetVolumeAsync(deviceId, volume * 100, input: flow == "input", cancellationToken: token);
+                }
+                else await _audio.SetMuteAsync(deviceId, payload.GetProperty("muted").GetBoolean(), input: flow == "input", cancellationToken: token);
+            }
+            var snapshot = await _audio.GetSnapshotAsync(token);
+            if (action != "getAudio" || _lastAudio is null || !snapshot.Outputs.SequenceEqual(_lastAudio.Outputs) ||
+                !snapshot.Inputs.SequenceEqual(_lastAudio.Inputs))
+            {
+                _lastAudio = snapshot;
+                _cardSnapshot!.BumpAudio();
+                _cards?.PublishSnapshot();
+            }
+            return _cardSnapshot!.DescribeAudio(snapshot, succeeded, message);
+        }
+        finally { _audioRequests.Release(); }
+    }
 
     private async Task<object?> HandleUiRequestAsync(JsonElement request, long generation, CancellationToken token)
     {
@@ -330,6 +438,21 @@ public partial class App : System.Windows.Application
         switch (action)
         {
             case "getUpdateState": return _updates?.Snapshot ?? _updateUnavailable;
+            case "getDataStatus": return _storage?.Status() ?? throw new InvalidOperationException("数据服务尚未准备好。");
+            case "storageCommand":
+            {
+                var storageAction = payload.GetProperty("action").GetString() ?? "";
+                return storageAction switch
+                {
+                    "backup" => await _storage!.BackupAsync(
+                        payload.TryGetProperty("path", out var backupPath) ? backupPath.GetString() : null, token),
+                    "scheduleRestore" => _storage!.ScheduleRestore(payload.GetProperty("path").GetString()!),
+                    "importLegacy" => _storage!.ScheduleLegacyImport(),
+                    "clearCache" => _storage!.ClearCache(),
+                    "openDataFolder" => OpenDataFolder(),
+                    _ => throw new ArgumentException("不支持的数据操作。")
+                };
+            }
             case "checkForUpdates": return _updates?.Check() ?? _updateUnavailable;
             case "downloadUpdate": return _updates?.Download() ?? _updateUnavailable;
             case "cancelUpdateDownload": return _updates?.CancelDownload() ?? _updateUnavailable;
@@ -344,14 +467,6 @@ public partial class App : System.Windows.Application
                 return _updateInstaller?.Begin(_stop.Token) ?? _updateUnavailable;
             case "reportUiReady":
                 await _nativeSettings!.RequestAsync("updateUiReady", cancellationToken: token);
-                // A health-only UI exits immediately after reporting; an ordinary
-                // settings process keeps living with its window.
-                if (_healthUiStarted)
-                {
-                    _healthUiStarted = false;
-                    if (_ui is not null)
-                        TaskObserver.Observe(_ui.SendAsync("shutdown"), "health ui shutdown");
-                }
                 return new { success = true };
             case "subscribeCardLyrics":
                 var cardVisible = payload.GetProperty("visible").GetBoolean();
@@ -363,13 +478,57 @@ public partial class App : System.Windows.Application
                 ApplyCardLyricsVisibility();
                 return new { snapshot = cardVisible ? _media.CardSnapshot : null };
             case "getState":
+            {
                 var state = _media.ControlState;
-                return new { state.Title, state.Artist, state.Source, state.PositionSeconds, state.DurationSeconds,
-                    state.IsPlaying, state.CanPrevious, state.CanNext, state.CanPlayPause, state.CanSeek,
-                    coverDataUrl = _media.CoverDataUrl, sources = (state.Sources ?? []).Select(source => new { source.Id,
-                        label = source.Name switch { "QQMusic" => "QQ 音乐", "Netease" => "网易云音乐", "Kugou" => "酷狗音乐", "Douyin" => "抖音", "Browser" => BrowserSourceName(source.Id), _ => source.Name },
-                        iconDataUrl = _media.SourceIcon(source) }),
-                    state.SelectedSourceId, toolWindowTheme = (int)Settings.ToolWindowTheme };
+                var coverDataUrl = _media.CoverDataUrl;
+                // The card polls every 400 ms and the source icons dominate the reply, so the
+                // client may opt into artwork delta: unchanged cover/icon strings are omitted.
+                // Version memory belongs to one connection; a reconnect always gets a complete
+                // reply so a re-created client can never keep stale artwork. Clients that do not
+                // send the flag (older builds, other callers) still receive the full payload.
+                var delta = _artwork.Begin(generation, payload.ValueKind == JsonValueKind.Object
+                    && payload.TryGetProperty("artworkDelta", out var artworkDelta)
+                    && artworkDelta.ValueKind == JsonValueKind.True);
+                var coverChanged = _artwork.CoverChanged(coverDataUrl, delta);
+                long textBytes = Encoding.UTF8.GetByteCount(state.Title) + Encoding.UTF8.GetByteCount(state.Artist) + Encoding.UTF8.GetByteCount(state.Source);
+                long iconBytes = 0;
+                // Read the cover and each source icon once, then measure the text payload
+                // directly instead of serializing the whole reply.
+                _artwork.RetainIcons((state.Sources ?? []).Select(source => source.Id));
+                var sourceItems = (state.Sources ?? []).Select(source =>
+                {
+                    var label = source.Name switch { "QQMusic" => "QQ 音乐", "Netease" => "网易云音乐", "Kugou" => "酷狗音乐", "Douyin" => "抖音", "Browser" => BrowserSourceName(source.Id), _ => source.Name };
+                    var icon = _media.SourceIcon(source) ?? string.Empty;
+                    var item = new Dictionary<string, object?> { ["id"] = source.Id, ["label"] = label };
+                    textBytes += Encoding.UTF8.GetByteCount(label);
+                    if (_artwork.IconChanged(source.Id, icon, delta))
+                    {
+                        item["iconDataUrl"] = icon;
+                        iconBytes += Encoding.UTF8.GetByteCount(icon);
+                    }
+                    return item;
+                }).ToList();
+                FootprintMetrics.NoteStatePayload(textBytes, coverChanged ? Encoding.UTF8.GetByteCount(coverDataUrl) : 0, iconBytes);
+                if (coverChanged) _artwork.CommitCover(coverDataUrl);
+                var reply = new Dictionary<string, object?>
+                {
+                    ["title"] = state.Title,
+                    ["artist"] = state.Artist,
+                    ["source"] = state.Source,
+                    ["positionSeconds"] = state.PositionSeconds,
+                    ["durationSeconds"] = state.DurationSeconds,
+                    ["isPlaying"] = state.IsPlaying,
+                    ["canPrevious"] = state.CanPrevious,
+                    ["canNext"] = state.CanNext,
+                    ["canPlayPause"] = state.CanPlayPause,
+                    ["canSeek"] = state.CanSeek
+                };
+                if (coverChanged) reply["coverDataUrl"] = coverDataUrl;
+                reply["sources"] = sourceItems;
+                reply["selectedSourceId"] = state.SelectedSourceId;
+                reply["toolWindowTheme"] = (int)Settings.ToolWindowTheme;
+                return reply;
+            }
             case "openPanel": OpenAudioPanel(); return new { success = true };
             case "getNativeSettings": return await GetNativeSettingsAsync();
             case "applyNativeSettings": return await ApplyNativeSettingsAsync(payload);
@@ -389,43 +548,39 @@ public partial class App : System.Windows.Application
                 if (!(command.StartsWith("selectSource:", StringComparison.Ordinal) || command is "playPause" or "previous" or "next" or "seek")) throw new ArgumentException("不支持的媒体操作。");
                 await _media.CommandAsync(command, TryNumber(payload, "positionSeconds", out var position) ? position : null);
                 return new { success = true };
-            case "getAudio": return AudioPayload(await _audio.GetSnapshotAsync(token));
+            case "hideCards":
+                await ForwardToCards("hideCards", default);
+                return new { success = true };
+            case "previewCardMica":
+            case "previewCardTheme":
+                await ForwardToCards(action == "previewCardMica" ? "cardMicaPreview" : "cardThemePreview", payload);
+                return new { success = true };
+            case "getAudio":
             case "selectDevice":
             case "setVolume":
             case "setMute":
-                var flow = payload.GetProperty("flow").GetString();
-                if (flow is not ("input" or "output")) throw new ArgumentException("设备类型无效。");
-                var deviceId = payload.TryGetProperty("deviceId", out var id) ? id.GetString() : null;
-                if (action == "selectDevice")
-                {
-                    if (string.IsNullOrWhiteSpace(deviceId)) throw new ArgumentException("请选择音频设备。");
-                    var result = await _audio.SetDefaultAsync(deviceId, flow == "input", true, token);
-                    return AudioPayload(await _audio.GetSnapshotAsync(token), result.Succeeded, result.Message);
-                }
-                else if (action == "setVolume")
-                {
-                    if (!TryNumber(payload, "volume", out var volume) || volume < 0 || volume > 1) throw new ArgumentException("音量范围无效。");
-                    await _audio.SetVolumeAsync(deviceId, volume * 100, input: flow == "input", cancellationToken: token);
-                }
-                else await _audio.SetMuteAsync(deviceId, payload.GetProperty("muted").GetBoolean(), input: flow == "input", cancellationToken: token);
-                return AudioPayload(await _audio.GetSnapshotAsync(token));
+                return await HandleAudioRequestAsync(action!, payload, token, () => _ui.IsConnectionCurrent(generation));
             default: throw new ArgumentException("不支持的界面操作。");
         }
     }
     private static string BrowserSourceName(string id) => id.Contains("msedge", StringComparison.OrdinalIgnoreCase) ? "Microsoft Edge" :
         id.Contains("chrome", StringComparison.OrdinalIgnoreCase) ? "Google Chrome" : id.Contains("firefox", StringComparison.OrdinalIgnoreCase) ? "Firefox" : "浏览器";
 
-    private static object AudioPayload(AudioSnapshot snapshot, bool operationSucceeded = true, string? message = null)
-    {
-        static object Endpoint(AudioEndpoint item) => new { item.Id, item.Name, item.IsDefault, item.IsCommunications, volume = item.Volume / 100.0, item.IsMuted, item.CanControl };
-        return new { outputs = snapshot.Outputs.Select(Endpoint), inputs = snapshot.Inputs.Select(Endpoint), operationSucceeded, message };
-    }
-
     private static bool TryNumber(JsonElement value, string name, out double number)
     {
         number = 0;
         return value.TryGetProperty(name, out var property) && property.ValueKind == JsonValueKind.Number &&
             property.TryGetDouble(out number) && double.IsFinite(number);
+    }
+
+    private static object OpenDataFolder()
+    {
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = AppDataPaths.RootDirectory,
+            UseShellExecute = true
+        });
+        return new { success = true };
     }
 
     private MediaSettingsService SettingsService()
@@ -492,6 +647,7 @@ public partial class App : System.Windows.Application
         if (_pipe is null) return;
         var quickCards = new
         {
+            revision = _cardSnapshot?.ConfigurationRevision ?? 1,
             order = Settings.QuickCardOrder,
             columns = Settings.QuickCardColumns,
             enabled = Settings.QuickCardEnabled,
@@ -515,7 +671,8 @@ public partial class App : System.Windows.Application
     private Task ForwardToCards(string action, JsonElement payload)
     {
         if (_pipe is null) return Task.CompletedTask;
-        return _pipe.SendCommandAsync(new { version = 1, type = "command", action, payload });
+        return _pipe.SendCommandAsync(new { version = 1, type = "command", action,
+            payload = payload.ValueKind == JsonValueKind.Undefined ? (JsonElement?)null : payload });
     }
 
     internal void PreviewSettings(AppSettings settings) => _media?.ApplySettings(settings);
@@ -535,6 +692,9 @@ public partial class App : System.Windows.Application
         NativeWindowTheme.SetMode(Settings.ToolWindowTheme);
         _media?.ApplySettings(Settings);
         _media?.ApplyTuning(Settings.SpectrumTuning);
+        _cardSnapshot?.BumpConfiguration();
+        PublishCardConfiguration();
+        _cards?.PublishSnapshot();
         return true;
     }
 
@@ -556,8 +716,10 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs args)
     {
+        FootprintMetrics.Stop();
         _nativeSettings?.Dispose();
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+        _cardTimer?.Stop();
         _stop.Cancel();
         if (_updates is not null) TaskObserver.Observe(_updates.DisposeAsync().AsTask(), "update service shutdown");
         _settingsService?.Dispose();
@@ -575,11 +737,13 @@ public partial class App : System.Windows.Application
         if (_shutdownRequested) return;
         _shutdownRequested = true;
         _nativeSettings?.Dispose();
+        _cardTimer?.Stop();
         _stop.Cancel();
         if (_updates is not null) await _updates.DisposeAsync();
         // Stop input producers before releasing the media services they call into.
         _settingsService?.Dispose();
         if (_ui is not null) await _ui.DisposeAsync();
+        if (_cards is not null) await _cards.DisposeAsync();
         await _audio.DisposeAsync();
         _media?.Dispose();
         if (_pipe is not null) await _pipe.DisposeAsync();

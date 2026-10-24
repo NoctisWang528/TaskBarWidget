@@ -35,15 +35,7 @@ public:
         std::wstring Humidity;
     };
 
-    struct RealtimeAirQuality
-    {
-        std::wstring PublishTime;
-        std::wstring AQI;
-        std::wstring Level;
-        std::wstring Category;
-        std::wstring PM2p5;
-        std::wstring PM10;
-    };
+    using RealtimeAirQuality = WeatherAirQuality;
 
     struct ForcastWeather
     {
@@ -89,10 +81,15 @@ public:
 
     Config config;
 protected:
+    bool ValidateConfiguration();
+    bool ResolveCoordinates(const std::wstring& query, std::wstring& coordinates);
+    bool _updating{ false }, _coordinatesResolved{ false }, _sharedFailure{ false };
+    std::wstring _coordinates, _coordinateError, _airCity;
     RealtimeWeather _realtimeWeather;
     ForcastWeather _forcastWeatherTD, _forcastWeatherTM, _forcastWeatherDATM;
     RealtimeAirQuality _realtimeAirQuality;
     WeatherAlertList _weatherAlerts;
+    std::wstring _alertsError, _alertsCity, _alertsAttribution;
 
     bool _airQualityDataOutdated{ true };
     bool _alertsDataOutdated{ true };

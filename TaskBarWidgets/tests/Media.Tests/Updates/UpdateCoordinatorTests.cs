@@ -19,7 +19,7 @@ public sealed class UpdateCoordinatorTests
     {
         foreach (var resource in new[] { "UI/Settings/SettingsThemeResources.xbf", "UI/Resources/SettingsNavigationResources.xbf", "vccorlib140.dll", "release-manifest.json" })
             Assert.Equal(resource, UpdatePackage.ValidateRelativePath(resource));
-        foreach (var personal in new[] { "UI/Settings/user.json", "UI/Settings/SettingsNavigationResources.xbf", "Media/media-settings.json", "UI/Data/record.db", "licenses/private.db" })
+        foreach (var personal in new[] { "UI/Settings/user.json", "UI/Settings/SettingsNavigationResources.xbf", "Media/config/media.json", "UI/Data/record.db", "licenses/private.db" })
             Assert.Throws<InvalidDataException>(() => UpdatePackage.ValidateRelativePath(personal));
     }
 

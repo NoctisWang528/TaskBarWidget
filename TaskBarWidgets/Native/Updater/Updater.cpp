@@ -357,7 +357,7 @@ struct File
 };
 struct Job
 {
-    fs::path file, install, stage, work, nativeData, mediaData;
+    fs::path file, install, stage, work, data;
     std::string version, nonce, manifestHash;
     DWORD pids[3]{};
     uint64_t windowsBuild{};
@@ -367,14 +367,13 @@ Job LoadJob(const fs::path &p)
 {
     auto d = Parse(p);
     auto v = yyjson_doc_get_root(d.get());
-    Require(Number(v, "protocolVersion") == 1, "Unsupported job protocol");
+    Require(Number(v, "protocolVersion") == 2, "Unsupported job protocol");
     Job j;
     j.file = p;
     j.install = Absolute(String(v, "installRoot"));
     j.stage = Absolute(String(v, "stageRoot"));
     j.work = Absolute(String(v, "workRoot"));
-    j.nativeData = Absolute(String(v, "nativeDataRoot"));
-    j.mediaData = Absolute(String(v, "mediaDataRoot"));
+    j.data = Absolute(String(v, "dataRoot"));
     Require(Equal(p.parent_path(), j.work), "Job directory must equal workRoot");
     Require(fs::is_directory(j.install) && fs::is_directory(j.stage) && fs::is_directory(j.work),
             "Missing transaction directory");
@@ -382,17 +381,10 @@ Job LoadJob(const fs::path &p)
                 !Equal(j.install, j.work) && !Under(j.work, j.install) && !Under(j.install, j.work) &&
                 !Equal(j.stage, j.work) && !Under(j.work, j.stage) && !Under(j.stage, j.work),
             "Program, stage and job roots must be disjoint");
-    Require(!Under(j.work, j.nativeData) && !Under(j.work, j.mediaData) && !Under(j.nativeData, j.work) &&
-                !Under(j.mediaData, j.work) && !Equal(j.work, j.nativeData) && !Equal(j.work, j.mediaData),
+    Require(!Under(j.work, j.data) && !Under(j.data, j.work) && !Equal(j.work, j.data),
             "Data overlaps transaction directory");
 #ifndef TBW_UPDATER_TEST
-    PWSTR roaming = nullptr;
-    Require(SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, KF_FLAG_DEFAULT, nullptr, &roaming)),
-            "Cannot locate application data");
-    fs::path appData = fs::path(roaming) / L"TaskBarWidgets";
-    CoTaskMemFree(roaming);
-    Require((Equal(j.nativeData, j.install) && Equal(j.mediaData, j.install / L"Data")) ||
-                (Equal(j.nativeData, appData) && Equal(j.mediaData, appData)),
+    Require(Equal(j.data, j.install / L"Data"),
             "Unrecognized personal data roots");
 #endif
     j.version = String(v, "version");
@@ -673,14 +665,23 @@ bool NativePersonal(const std::string &rel)
 {
     auto p = fs::path(Wide(rel));
     auto n = Lower(p.filename().wstring());
-    return (p.parent_path().empty() && (Lower(p.extension().wstring()) == L".ini" || n == L"history_traffic.dat" ||
-                                        n.rfind(L"history_traffic.dat.", 0) == 0)) ||
-           (Lower(p.parent_path().wstring()) == L"plugins" && Lower(p.extension().wstring()) == L".ini");
+    return n == L"layout.json" ||
+           Lower(p.parent_path().wstring()) == L"config" && Lower(p.extension().wstring()) == L".ini" ||
+           Lower(p.parent_path().wstring()) == L"history" &&
+               (n == L"traffic.dat" || n.rfind(L"traffic.dat.", 0) == 0);
 }
 bool MediaPersonal(const std::string &rel)
 {
     auto s = Lower(Wide(rel));
-    return s == L"media-settings.json" || s == L"settings.json" || s.rfind(L"database/", 0) == 0;
+    auto p = fs::path(Wide(rel));
+    auto extension = Lower(p.extension().wstring());
+    // SQLite sidecars are part of the frozen database state too. Use the same
+    // narrow allowlist for backup, journal validation and rollback enumeration.
+    return s == L"config/media.json" ||
+           Lower(p.parent_path().wstring()) == L"lyrics" &&
+               (extension == L".db" || extension == L".json" || extension == L".db-wal" ||
+                extension == L".db-shm" || extension == L".db-journal") ||
+           s == L"secrets/weather-appkey.bin";
 }
 std::vector<std::string> DataFiles(const fs::path &root, bool media)
 {
@@ -716,10 +717,8 @@ fs::path Base(const Job &j, const std::string &g)
 {
     if (g == "program" || g == "marker")
         return j.install;
-    if (g == "native")
-        return j.nativeData;
-    if (g == "media")
-        return j.mediaData;
+    if (g == "native" || g == "media")
+        return j.data;
     throw Failure("Invalid journal group");
 }
 void ValidSaved(const Saved &s)
@@ -731,7 +730,7 @@ void ValidSaved(const Saved &s)
             Relative(s.path, true);
     }
     else if (s.group == "marker")
-        Require(s.path == "global_cfg.ini", "Unsafe configuration marker");
+        Require(false, "Unsafe configuration marker");
     else if (s.group == "native")
         Require(NativePersonal(s.path), "Unsafe native data in journal");
     else if (s.group == "media")
@@ -831,11 +830,9 @@ Journal Backup(const Job &j, const std::vector<File> &next)
     SaveJournal(j, t);
     for (auto &p : paths)
         Snapshot(j, t, "program", p.second);
-    for (auto &p : DataFiles(j.nativeData, false))
+    for (auto &p : DataFiles(j.data, false))
         Snapshot(j, t, "native", p);
-    if (!Equal(j.install, j.nativeData))
-        Snapshot(j, t, "marker", "global_cfg.ini");
-    for (auto &p : DataFiles(j.mediaData, true))
+    for (auto &p : DataFiles(j.data, true))
         Snapshot(j, t, "media", p);
     t.phase = "prepared";
     SaveJournal(j, t);
@@ -858,7 +855,7 @@ void SpaceAndPermissions(const Job &j, const std::vector<File> &files)
             need += bytes;
         }
     }
-    for (auto pair : {std::make_pair(j.nativeData, false), std::make_pair(j.mediaData, true)})
+    for (auto pair : {std::make_pair(j.data, false), std::make_pair(j.data, true)})
         for (auto &p : DataFiles(pair.first, pair.second))
             need += fs::file_size(Child(pair.first, p));
     ULARGE_INTEGER avail{};
@@ -868,8 +865,7 @@ void SpaceAndPermissions(const Job &j, const std::vector<File> &files)
             "Insufficient installation space");
     ProbeWrite(j.work);
     ProbeWrite(j.install);
-    ProbeWrite(j.nativeData);
-    ProbeWrite(j.mediaData);
+    ProbeWrite(j.data);
 }
 void UnlockedTargets(const Job &j, const Journal &t)
 {
@@ -1063,7 +1059,7 @@ void RotateOlderBackups(const Job &j)
             Safe(entry.path());
             auto document = Parse(entry.path() / L"job.json");
             auto value = yyjson_doc_get_root(document.get());
-            if (Number(value, "protocolVersion") != 1 || !Equal(Absolute(String(value, "installRoot")), j.install) ||
+            if (Number(value, "protocolVersion") != 2 || !Equal(Absolute(String(value, "installRoot")), j.install) ||
                 !Equal(Absolute(String(value, "workRoot")), entry.path()))
                 continue;
             Job prior = j;

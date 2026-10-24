@@ -15,7 +15,7 @@ namespace Cards
     {
         // Runtime ids combine a constant with the region id, exactly the identifiers
         // the interaction table already uses.
-        constexpr int RootRuntimeId = 1;
+        constexpr int RootRuntimeId = -1;
 
         long ControlTypeOf(Layout::RegionType type)
         {
@@ -37,15 +37,19 @@ namespace Cards
         }
     }
 
+    // UseComThreading honors the COM apartment only when the provider opts out
+    // of C++/WinRT's default free-threaded marshaler. All callbacks stay on STA.
     struct CardAccessibility::Root : winrt::implements<Root, IRawElementProviderSimple,
-        IRawElementProviderFragment, IRawElementProviderFragmentRoot>
+        IRawElementProviderFragment, IRawElementProviderFragmentRoot, winrt::non_agile>
     {
         HWND window{};
+        int focusedId{};
         std::wstring name;
         TableSource table;
         ScaleSource scale;
         SliderSource slider;
         ActionSink action;
+        ExpandedSource expanded;
         std::vector<winrt::com_ptr<IRawElementProviderFragment>> children;
         // Children hold this token weakly: a screen reader may keep an element
         // alive after the card window is gone, and every call must then no-op
@@ -86,7 +90,7 @@ namespace Cards
         {
             if (!value) return E_INVALIDARG;
             *value = static_cast<ProviderOptions>(ProviderOptions_ServerSideProvider |
-                ProviderOptions_UseComThreading);
+                ProviderOptions_ProviderOwnsSetFocus | ProviderOptions_UseComThreading);
             return S_OK;
         }
 
@@ -136,7 +140,7 @@ namespace Cards
         {
             if (!value) return E_INVALIDARG;
             *value = nullptr;
-            return S_OK;
+            return window ? UiaHostProviderFromHwnd(window, value) : UIA_E_ELEMENTNOTAVAILABLE;
         }
 
         HRESULT __stdcall ElementProviderFromPoint(double x, double y,
@@ -164,6 +168,8 @@ namespace Cards
         {
             if (!value) return E_INVALIDARG;
             *value = nullptr;
+            if (!window) return UIA_E_ELEMENTNOTAVAILABLE;
+            if (focusedId) CreateChild(focusedId).copy_to(value);
             return S_OK;
         }
 
@@ -211,7 +217,10 @@ namespace Cards
             return S_OK;
         }
 
-        HRESULT __stdcall SetFocus() override { return S_OK; }
+        HRESULT __stdcall SetFocus() override
+        {
+            return window ? S_OK : UIA_E_ELEMENTNOTAVAILABLE;
+        }
 
         HRESULT __stdcall get_FragmentRoot(IRawElementProviderFragmentRoot** value) override
         {
@@ -228,7 +237,7 @@ namespace Cards
     // interaction table, so the automation tree cannot drift from the painted one.
     struct RegionProvider : winrt::implements<RegionProvider, IRawElementProviderSimple,
         IRawElementProviderFragment, IInvokeProvider, IRangeValueProvider,
-        IExpandCollapseProvider, ISelectionItemProvider>
+        IExpandCollapseProvider, ISelectionItemProvider, winrt::non_agile>
     {
         CardAccessibility::Root* root{};
         std::weak_ptr<int> lifetime;
@@ -240,6 +249,8 @@ namespace Cards
         {
             Layout::Region region;
             region.id = id;
+            region.enabled = false;
+            region.focusable = false;
             if (Alive() && root->table)
             {
                 for (const auto& candidate : root->table().All())
@@ -253,14 +264,18 @@ namespace Cards
         void Fire(const std::wstring& payload)
         {
             if (!Alive() || !root->action) return;
-            root->action(Current(), payload);
+            const auto region = Current();
+            if (!region.enabled) return;
+            // Copy before calling out: the action may close this card.
+            const auto action = root->action;
+            action(region, payload.empty() && region.action == L"selectDay" ? region.name : payload);
         }
 
         HRESULT __stdcall get_ProviderOptions(ProviderOptions* value) override
         {
             if (!value) return E_INVALIDARG;
             *value = static_cast<ProviderOptions>(ProviderOptions_ServerSideProvider |
-                ProviderOptions_UseComThreading);
+                ProviderOptions_ProviderOwnsSetFocus | ProviderOptions_UseComThreading);
             return S_OK;
         }
 
@@ -274,9 +289,11 @@ namespace Cards
                 match = static_cast<IRangeValueProvider*>(this);
             else if (region.type == Layout::RegionType::Cell && patternId == UIA_SelectionItemPatternId)
                 match = static_cast<ISelectionItemProvider*>(this);
-            else if (IsExpander(region) && patternId == UIA_ExpandCollapsePatternId)
+            else if (IsExpander(region) && Alive() && root->expanded &&
+                patternId == UIA_ExpandCollapsePatternId)
                 match = static_cast<IExpandCollapseProvider*>(this);
-            else if (region.type == Layout::RegionType::Button && patternId == UIA_InvokePatternId)
+            else if ((region.type == Layout::RegionType::Button ||
+                region.type == Layout::RegionType::MenuItem) && patternId == UIA_InvokePatternId)
                 match = static_cast<IInvokeProvider*>(this);
             if (match)
             {
@@ -311,7 +328,8 @@ namespace Cards
             case UIA_IsEnabledPropertyId:
             case UIA_IsKeyboardFocusablePropertyId:
                 value->vt = VT_BOOL;
-                value->boolVal = region.enabled ? VARIANT_TRUE : VARIANT_FALSE;
+                value->boolVal = region.enabled && (propertyId != UIA_IsKeyboardFocusablePropertyId ||
+                    region.focusable) ? VARIANT_TRUE : VARIANT_FALSE;
                 return S_OK;
             case UIA_IsControlElementPropertyId:
             case UIA_IsContentElementPropertyId:
@@ -320,7 +338,11 @@ namespace Cards
                 return S_OK;
             case UIA_IsOffscreenPropertyId:
                 value->vt = VT_BOOL;
-                value->boolVal = VARIANT_FALSE;
+                value->boolVal = Alive() && IsWindowVisible(root->window) ? VARIANT_FALSE : VARIANT_TRUE;
+                return S_OK;
+            case UIA_HasKeyboardFocusPropertyId:
+                value->vt = VT_BOOL;
+                value->boolVal = Alive() && root->focusedId == id ? VARIANT_TRUE : VARIANT_FALSE;
                 return S_OK;
             case UIA_SelectionItemIsSelectedPropertyId:
                 value->vt = VT_BOOL;
@@ -357,22 +379,23 @@ namespace Cards
                 *value = parent;
                 return S_OK;
             }
-            root->Rebuild();
-            int index = -1;
-            for (size_t candidate = 0; candidate < root->children.size(); ++candidate)
+            if (!root->table) return UIA_E_ELEMENTNOTAVAILABLE;
+            const auto& all = root->table().All();
+            const auto current = std::find_if(all.begin(), all.end(),
+                [this](const Layout::Region& region) { return region.id == id; });
+            if (current == all.end()) return UIA_E_ELEMENTNOTAVAILABLE;
+            if (direction == NavigateDirection_NextSibling)
             {
-                if (root->children[candidate].get() ==
-                    static_cast<IRawElementProviderFragment*>(this))
-                {
-                    index = static_cast<int>(candidate);
-                    break;
-                }
+                for (auto next = current + 1; next != all.end(); ++next)
+                    if (next->type != Layout::RegionType::Text)
+                    { root->CreateChild(next->id).copy_to(value); break; }
             }
-            if (index < 0) return S_OK;
-            const int target = direction == NavigateDirection_NextSibling ? index + 1
-                : direction == NavigateDirection_PreviousSibling ? index - 1 : -1;
-            if (target >= 0 && target < static_cast<int>(root->children.size()))
-                root->children[static_cast<size_t>(target)].copy_to(value);
+            else if (direction == NavigateDirection_PreviousSibling)
+            {
+                for (auto previous = current; previous != all.begin(); )
+                    if ((--previous)->type != Layout::RegionType::Text)
+                    { root->CreateChild(previous->id).copy_to(value); break; }
+            }
             return S_OK;
         }
 
@@ -409,7 +432,14 @@ namespace Cards
 
         // The card never takes foreground activation, so automation focus is
         // reported without SetForegroundWindow.
-        HRESULT __stdcall SetFocus() override { return S_OK; }
+        HRESULT __stdcall SetFocus() override
+        {
+            if (!Alive()) return UIA_E_ELEMENTNOTAVAILABLE;
+            if (!Enabled()) return UIA_E_ELEMENTNOTENABLED;
+            root->focusedId = id;
+            return UiaRaiseAutomationEvent(static_cast<IRawElementProviderSimple*>(this),
+                UIA_AutomationFocusChangedEventId);
+        }
 
         HRESULT __stdcall get_FragmentRoot(IRawElementProviderFragmentRoot** value) override
         {
@@ -435,7 +465,8 @@ namespace Cards
         {
             if (!Enabled()) return UIA_E_ELEMENTNOTENABLED;
             // The same 0..1 ratio the pointer sends, so both paths share one action.
-            Fire(std::to_wstring(std::clamp(value, 0.0, 1.0)));
+            if (!std::isfinite(value) || value < 0.0 || value > 1.0) return E_INVALIDARG;
+            Fire(std::to_wstring(value));
             return S_OK;
         }
 
@@ -481,21 +512,36 @@ namespace Cards
         // ---- expand collapse ---------------------------------------------
         HRESULT __stdcall Expand() override
         {
-            Fire(L"");
+            if (!Alive()) return UIA_E_ELEMENTNOTAVAILABLE;
+            if (!Enabled()) return UIA_E_ELEMENTNOTENABLED;
+            if (!root->expanded) return UIA_E_NOTSUPPORTED;
+            if (!root->expanded(Current())) Fire(L"");
             return S_OK;
         }
 
-        HRESULT __stdcall Collapse() override { return S_OK; }
+        HRESULT __stdcall Collapse() override
+        {
+            if (!Alive()) return UIA_E_ELEMENTNOTAVAILABLE;
+            if (!Enabled()) return UIA_E_ELEMENTNOTENABLED;
+            if (!root->expanded) return UIA_E_NOTSUPPORTED;
+            if (root->expanded(Current())) Fire(L"collapse");
+            return S_OK;
+        }
 
         HRESULT __stdcall get_ExpandCollapseState(ExpandCollapseState* value) override
         {
-            if (value) *value = ExpandCollapseState_Collapsed;
+            if (!value) return E_INVALIDARG;
+            if (!Alive()) return UIA_E_ELEMENTNOTAVAILABLE;
+            if (!root->expanded) return UIA_E_NOTSUPPORTED;
+            *value = root->expanded(Current()) ? ExpandCollapseState_Expanded : ExpandCollapseState_Collapsed;
             return S_OK;
         }
 
         // ---- selection item ----------------------------------------------
         HRESULT __stdcall Select() override
         {
+            if (!Alive()) return UIA_E_ELEMENTNOTAVAILABLE;
+            if (!Enabled()) return UIA_E_ELEMENTNOTENABLED;
             Fire(L"");
             return S_OK;
         }
@@ -529,7 +575,7 @@ namespace Cards
     CardAccessibility::~CardAccessibility() { Detach(); }
 
     void CardAccessibility::Attach(HWND window, std::wstring name, TableSource table,
-        ScaleSource scale, SliderSource slider, ActionSink action)
+        ScaleSource scale, SliderSource slider, ActionSink action, ExpandedSource expanded)
     {
         Detach();
         root = winrt::make_self<Root>();
@@ -539,16 +585,40 @@ namespace Cards
         root->scale = std::move(scale);
         root->slider = std::move(slider);
         root->action = std::move(action);
+        root->expanded = std::move(expanded);
     }
 
     void CardAccessibility::Detach()
     {
         if (!root) return;
+        root->lifetime.reset();
+        root->window = nullptr;
         root->children.clear();
         root->table = nullptr;
+        root->scale = nullptr;
         root->slider = nullptr;
         root->action = nullptr;
+        root->expanded = nullptr;
         root = nullptr;
+    }
+
+    void CardAccessibility::NotifyFocus(const Layout::Region* region)
+    {
+        if (!root) return;
+        root->focusedId = region ? region->id : 0;
+        if (region)
+        {
+            const auto child = root->CreateChild(region->id);
+            const auto simple = child.as<IRawElementProviderSimple>();
+            UiaRaiseAutomationEvent(simple.get(), UIA_AutomationFocusChangedEventId);
+        }
+    }
+
+    void CardAccessibility::NotifyStructureChanged()
+    {
+        if (!root) return;
+        const auto simple = root.as<IRawElementProviderSimple>();
+        UiaRaiseStructureChangedEvent(simple.get(), StructureChangeType_ChildrenInvalidated, nullptr, 0);
     }
 
     LRESULT CardAccessibility::OnGetObject(WPARAM keys, LPARAM position)

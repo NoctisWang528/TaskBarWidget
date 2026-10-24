@@ -21,10 +21,10 @@ public sealed class UiHostBridgeConnectionTests
         using var timeout = new CancellationTokenSource(Timeout);
         await using var oldClient = await TestClient.ConnectAsync(harness.PipeName, timeout.Token);
 
-        await oldClient.SendAsync(Request("block-1", "block"), timeout.Token);
+        await oldClient.SendAsync(Request("block-1", "mediaCommand"), timeout.Token);
         await harness.Started.WaitAsync(timeout.Token);
         // The old connection's visible=true subscription is queued behind the
-        // blocked request, then the connection is closed before it can run.
+        // blocked control-lane request, then the connection is closed before it can run.
         await oldClient.SendAsync(Request("old-subscribe", "subscribeCardLyrics", new { visible = true, session = 12 }), timeout.Token);
         await oldClient.DisposeAsync();
 
@@ -36,7 +36,7 @@ public sealed class UiHostBridgeConnectionTests
         harness.Release();
         await harness.Finished.WaitAsync(timeout.Token);
         // A new request on the same ordered lane proves the stale item was handled.
-        await newClient.SendAsync(Request("new-state", "getState"), timeout.Token);
+        await newClient.SendAsync(Request("new-state", "getUpdateState"), timeout.Token);
         var stateReply = await newClient.ReadUiResultAsync("new-state", timeout.Token);
         Assert.True(stateReply.GetProperty("success").GetBoolean());
         Assert.False(harness.Bridge.CardLyricsVisible);
@@ -58,7 +58,7 @@ public sealed class UiHostBridgeConnectionTests
         using var timeout = new CancellationTokenSource(Timeout);
         await using var oldClient = await TestClient.ConnectAsync(harness.PipeName, timeout.Token);
 
-        await oldClient.SendAsync(Request("slow-1", "block"), timeout.Token);
+        await oldClient.SendAsync(Request("slow-1", "mediaCommand"), timeout.Token);
         await harness.Started.WaitAsync(timeout.Token);
         await oldClient.DisposeAsync();
 
@@ -67,7 +67,7 @@ public sealed class UiHostBridgeConnectionTests
         harness.Release();
         await harness.Finished.WaitAsync(timeout.Token);
 
-        await newClient.SendAsync(Request("new-1", "getState"), timeout.Token);
+        await newClient.SendAsync(Request("new-1", "getUpdateState"), timeout.Token);
         var reply = await newClient.ReadUiResultAsync("new-1", timeout.Token);
         Assert.True(reply.GetProperty("success").GetBoolean());
         Assert.DoesNotContain("slow-1", newClient.ObservedResults);
@@ -103,7 +103,7 @@ public sealed class UiHostBridgeConnectionTests
         Assert.True(harness.Bridge.CardLyricsVisible);
         Assert.Equal(signals, harness.ReleaseSignals);
 
-        await newClient.SendAsync(Request("after", "getState"), timeout.Token);
+        await newClient.SendAsync(Request("after", "getUpdateState"), timeout.Token);
         Assert.True((await newClient.ReadUiResultAsync("after", timeout.Token)).GetProperty("success").GetBoolean());
         Assert.True(harness.Bridge.CardLyricsVisible);
     }
@@ -176,10 +176,10 @@ public sealed class UiHostBridgeConnectionTests
         await using var harness = new BridgeHarness();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await using var client = await TestClient.ConnectAsync(harness.PipeName, timeout.Token);
-        await client.SendAsync(Request("block-1", "block"), timeout.Token);
+        await client.SendAsync(Request("block-1", "mediaCommand"), timeout.Token);
         await harness.Started.WaitAsync(timeout.Token);
         for (var index = 0; index < 24; ++index)
-            await client.SendAsync(Request($"queued-{index}", "getState"), timeout.Token);
+            await client.SendAsync(Request($"queued-{index}", "getUpdateState"), timeout.Token);
 
         await harness.Bridge.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
         harness.Release();
@@ -240,7 +240,7 @@ public sealed class UiHostBridgeConnectionTests
                 Executions.Enqueue(action);
                 switch (action)
                 {
-                    case "block":
+                    case "mediaCommand":
                         _started.TrySetResult();
                         try { await _release.Task.WaitAsync(token); }
                         finally { _finished.TrySetResult(); }

@@ -38,6 +38,10 @@ namespace Cards::Protocol
 
     Message Parse(const std::string& utf8);
 
+    // Called for the client's local connectionStarted event, before the new
+    // connection's full snapshot. Backend revision counters may have restarted.
+    void ResetRevisions(Snapshot& target);
+
     // Applies the parts present in `snapshot.payload` onto `target` and reports
     // which parts changed. Older revisions are ignored per part.
     struct Changes
@@ -50,9 +54,10 @@ namespace Cards::Protocol
         bool weather{ false };
         bool update{ false };
         bool status{ false };
+        bool theme{ false };
         bool Any() const
         {
-            return config || media || audio || lyrics || traffic || weather || update || status;
+            return config || media || audio || lyrics || traffic || weather || update || status || theme;
         }
     };
 

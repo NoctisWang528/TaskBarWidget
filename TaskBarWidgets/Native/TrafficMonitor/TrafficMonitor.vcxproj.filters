@@ -436,6 +436,9 @@
     <ClInclude Include="CommonData.h">
       <Filter>源文件和头文件\公共的类\CommonData</Filter>
     </ClInclude>
+    <ClInclude Include="DataStartup.h">
+      <Filter>源文件和头文件\公共的类</Filter>
+    </ClInclude>
     <ClInclude Include="AppAlreadyRuningDlg.h">
       <Filter>源文件和头文件\对话框类\AppAlreadyRuningDlg</Filter>
     </ClInclude>

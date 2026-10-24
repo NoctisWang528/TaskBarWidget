@@ -24,29 +24,29 @@
     <Link>
       <!-- WindowsApp.lib carries the WinRT activation for the composition and
            system-backdrop factories; the rest are the card graphics stack. -->
-      <AdditionalDependencies>windowsapp.lib;d2d1.lib;d3d11.lib;dwrite.lib;dxgi.lib;windowscodecs.lib;uiautomationcore.lib;dcomp.lib;crypt32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>windowsapp.lib;CoreMessaging.lib;d2d1.lib;d3d11.lib;dwrite.lib;dxgi.lib;windowscodecs.lib;uiautomationcore.lib;dcomp.lib;crypt32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
 
   <ItemGroup>
-    <ClCompile Include="$(MSBuildThisFileDirectory)CardTypes.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)CardText.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)CardLayout.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)CardDraw.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)CardGraphics.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)CardIcons.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)CardProtocol.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)CardClient.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)CardWindow.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)CardPopup.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)CardAccessibility.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)CardHost.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)CardMeasure.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)MediaCard.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)DeviceCard.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)TrafficCard.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)WeatherCard.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)UpdateCard.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)CardTypes.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)CardText.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)CardLayout.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)CardDraw.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)CardGraphics.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)CardIcons.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)CardProtocol.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)CardClient.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)CardWindow.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)CardPopup.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)CardAccessibility.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)CardHost.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)CardMeasure.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)MediaCard.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)DeviceCard.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)TrafficCard.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)WeatherCard.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)UpdateCard.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions></ClCompile>
     <ClInclude Include="$(MSBuildThisFileDirectory)CardPch.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)CardTypes.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)CardText.h" />

@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "WeatherService.h"
 #include "DataManager.h"
+#include "WeatherCredentialStore.h"
 #include "Common.h"
 #include "../../TrafficMonitor/PluginIniOptions.h"
 #include <filesystem>
@@ -44,7 +45,7 @@ namespace
         if (api) { const auto message = api->GetLastError(); if (!message.empty()) return message; }
         const auto http = WeatherCCommon::LastHttpStatus();
         if (http && http != 200) return L"天气服务返回 HTTP " + std::to_wstring(http) + L"，请检查来源和服务配置。";
-        if (WeatherCCommon::LastTransportError()) return L"天气服务连接失败或超时，请稍后重试。";
+        if (WeatherCCommon::LastTransportError()) return WeatherCCommon::LastTransportErrorMessage();
         return L"天气服务未返回可用数据，已保留上次成功天气。";
     }
 }
@@ -80,12 +81,21 @@ std::optional<std::wstring> WeatherService::NormalizeApiHost(const std::wstring&
     }
     return host;
 }
+std::wstring WeatherService::ApiHostError(const std::wstring& value)
+{
+    const auto host = NormalizeApiHost(value);
+    if (!host) return L"请输入控制台分配的专属 qweatherapi.com 域名；仅支持 HTTPS，不接受路径、端口或账户信息。";
+    return L"";
+}
 void WeatherService::Validate(const ConfigPatch& patch)
 {
     if (patch.provider < -1 || patch.provider > 1) throw Failure{L"请选择有效的天气来源。"};
     if (patch.cityId && (!SafeText(*patch.cityId, 64) || patch.cityId->empty() || patch.cityId->find_first_not_of(L"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,-_") != std::wstring::npos)) throw Failure{L"城市代码无效，请从搜索结果中选择城市。"};
     if ((patch.cityName && (!SafeText(*patch.cityName, 128) || patch.cityName->empty())) || (patch.cityRegion && !SafeText(*patch.cityRegion, 256))) throw Failure{L"城市名称或区域无效。"};
-    if (patch.apiHost && !patch.apiHost->empty() && !NormalizeApiHost(*patch.apiHost)) throw Failure{L"请输入专属 qweatherapi.com 域名；仅支持 HTTPS，不接受路径、端口或账户信息。"};
+    if (patch.apiHost && !patch.apiHost->empty()) {
+        const auto error = ApiHostError(*patch.apiHost);
+        if (!error.empty()) throw Failure{error};
+    }
     if (patch.apiKey && (!SafeText(*patch.apiKey, 512) || patch.apiKey->find_first_of(L" \t") != std::wstring::npos)) throw Failure{L"API Key 格式无效。"};
     if (patch.clearApiKey && patch.apiKey && !patch.apiKey->empty()) throw Failure{L"清除密钥与设置新密钥不能同时进行。"};
 }
@@ -138,6 +148,16 @@ void WeatherService::UpdateStatus()
 void WeatherService::Configure(const ConfigPatch& patch)
 {
     auto& data = WeatherCDataManager::InstanceRef(); const auto path = data.ConfigPath();
+    if (patch.credentialsOnly && !patch.clearApiKey) {
+        data.ReloadConfigs();
+        DataApiHefengWeather candidate;
+        candidate.config = data.m_api_hfw->config;
+        if (patch.apiHost && !patch.apiHost->empty()) candidate.config.ApiHost = *NormalizeApiHost(*patch.apiHost);
+        if (patch.apiKey && !patch.apiKey->empty()) candidate.config.AppKey = *patch.apiKey;
+        CityInfoList cities;
+        if (!candidate.QueryCity(L"101010100", cities) || cities.empty())
+            throw Failure{L"连接验证失败，未保存连接配置：" + NetworkMessage(&candidate)};
+    }
     {
     std::lock_guard<std::mutex> configuration_lock(ConfigurationMutex());
     const auto before = ReadIni(path); auto after = before;
@@ -154,8 +174,21 @@ void WeatherService::Configure(const ConfigPatch& patch)
         if (patch.cityRegion) set("config", "city_region", *patch.cityRegion);
     }
     if (patch.apiHost && !patch.apiHost->empty()) set("hfw", "ApiHost", *NormalizeApiHost(*patch.apiHost));
-    if (patch.apiKey && !patch.apiKey->empty()) set("hfw", "AppKey", *patch.apiKey);
-    if (patch.clearApiKey) set("hfw", "AppKey", L"");
+    const bool credentialOperation = patch.clearApiKey || (patch.apiKey && !patch.apiKey->empty());
+    if (patch.clearApiKey)
+    {
+        if (!WeatherCredentials::Clear(data.CredentialPath())) throw Failure{L"天气密钥清除失败，原配置未更改。"};
+    }
+    else if (patch.apiKey && !patch.apiKey->empty())
+    {
+        if (!WeatherCredentials::Write(data.CredentialPath(), *patch.apiKey))
+            throw Failure{L"天气密钥保存失败，原配置未更改。"};
+    }
+    // The INI never carries credentials. Keep a blank AppKey in legacy copies
+    // so an interrupted transition cannot leave a readable secret behind.
+    if (before.find("AppKey") != std::string::npos &&
+        (credentialOperation || std::filesystem::exists(data.CredentialPath())))
+        set("hfw", "AppKey", L"");
     if (after != before) SaveIni(path, before, after);
     }
     data.ReloadConfigs(); UpdateStatus();
@@ -163,9 +196,10 @@ void WeatherService::Configure(const ConfigPatch& patch)
 void WeatherService::Refresh()
 {
     auto& data = WeatherCDataManager::InstanceRef(); data.ReloadConfigs(); UpdateStatus();
-    { std::lock_guard<std::mutex> lock(m_mutex); m_status.lastAttemptUnix = std::time(nullptr); }
+    { std::lock_guard<std::mutex> lock(m_mutex); m_status.lastAttemptUnix = std::time(nullptr); m_status.stale = true; }
     if (data.GetConfig().m_api_type == DataApiType::API_HefengWeather) {
-        if (!NormalizeApiHost(data.m_api_hfw->config.ApiHost)) throw Failure{L"请先保存和风天气专属 API Host。"};
+        const auto error = ApiHostError(data.m_api_hfw->config.ApiHost);
+        if (!error.empty()) throw Failure{error};
         if (data.m_api_hfw->config.AppKey.empty()) throw Failure{L"请先保存和风天气 API Key。"};
     }
     if (!data.RefreshWeather()) {
@@ -195,7 +229,8 @@ void WeatherService::Work()
                 if (job.provider == 0) { DataApiWeatherComCnSpider api; if (!api.QueryCity(job.query, cities)) throw Failure{NetworkMessage(&api)}; }
                 else {
                     DataApiHefengWeather api; api.config = data.m_api_hfw->config;
-                    if (!NormalizeApiHost(api.config.ApiHost)) throw Failure{L"请先保存和风天气专属 API Host。"};
+                    const auto error = ApiHostError(api.config.ApiHost);
+                    if (!error.empty()) throw Failure{error};
                     if (api.config.AppKey.empty()) throw Failure{L"请先保存和风天气 API Key。"};
                     if (!api.QueryCity(job.query, cities)) throw Failure{NetworkMessage(&api)};
                 }
@@ -209,7 +244,7 @@ void WeatherService::Work()
                     catch (const Failure& failure) { throw Failure{L"城市设置已保存，但刷新失败：" + failure.message}; }
                     catch (...) { throw Failure{L"城市设置已保存，但刷新失败，请稍后重试。"}; }
                 }
-                else result.message = L"服务配置已保存；密钥不会返回界面。";
+                else result.message = job.patch.clearApiKey ? L"已清除保存的密钥。" : L"和风天气连接已验证并保存；当前生效来源和城市未改变。";
             }
             else Refresh();
         }

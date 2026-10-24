@@ -39,6 +39,8 @@ namespace Cards
         virtual void OnOpenSettings() = 0;
         virtual void OnMenuOpened(bool open) = 0;
         virtual void OnLayoutInvalidated() = 0;
+        virtual void OnGraphicsFailure(HRESULT) {}
+        virtual bool IsMenuExpanded(const std::wstring&) const { return false; }
     };
 
     struct CardEnvironment
@@ -96,6 +98,8 @@ namespace Cards
         // release.
         void UpdateSlider(const Layout::Region& region, float ratio);
         void FinishSlider();
+        void CancelPointer();
+        void AcknowledgeSlider(const std::wstring& action);
 
         // Window-procedure hook for the native UI Automation provider.
         LRESULT OnGetObject(WPARAM keys, LPARAM position);
@@ -109,6 +113,7 @@ namespace Cards
         const Snapshot& CurrentSnapshot() const { return snapshot; }
         const CardEnvironment& Environment() const { return environment; }
         HWND Handle() const { return window; }
+        bool HasRenderedContent() const;
 
     private:
         friend class CardHost;
@@ -116,6 +121,7 @@ namespace Cards
 
         void BuildVisualTree(HINSTANCE instance);
         void ApplyMotion();
+        void UpdateTimer();
         void PaintContent(bool rebuildRegions);
         void PaintPopup();
         void ClosePopup();

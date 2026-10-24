@@ -357,7 +357,7 @@ void CTrafficMonitorDlg::IniConnection()
             log_str += (const char*)m_pIfTable->table[i].bDescr;
             log_str += _T("\n");
         }
-        CCommon::WriteLog(log_str, (theApp.m_config_dir + L".\\connections.log").c_str());
+        CCommon::WriteLog(log_str, (theApp.m_data_dir + L"\\logs\\connections.log").c_str());
     }
 
     //if (m_connection_selected < 0 || m_connection_selected >= m_connections.size() || m_auto_select)
@@ -718,13 +718,23 @@ bool CTrafficMonitorDlg::ApplyUnifiedSettings(const TaskBarSettingData& taskbar,
     if (error) error->clear();
     const auto previous_taskbar = theApp.m_taskbar_data;
     const auto previous_general = theApp.m_general_data;
+    // Enabling Direct2D implies a transparent background with manual colors. Resolve that
+    // mutation here so the configuration written to disk is the state that actually runs,
+    // and so a transparency toggle can never be persisted as an opaque background.
+    const bool d2d_turned_on = (previous_taskbar.disable_d2d && !taskbar.disable_d2d);
+    TaskBarSettingData applied_taskbar = taskbar;
+    applied_taskbar.show_tool_tip = false;
+    if (d2d_turned_on)
+    {
+        applied_taskbar.SetTaskabrTransparent(true);
+        applied_taskbar.auto_set_background_color = false;
+    }
     const bool auto_run_changed = general.auto_run != previous_general.auto_run
         || general.auto_run_by_task_scheduler != previous_general.auto_run_by_task_scheduler;
     const bool interface_changed = general.show_all_interface != previous_general.show_all_interface;
     const bool interval_changed = general.monitor_time_span != previous_general.monitor_time_span;
     // Check persistence before applying renderer/timer/hardware changes.
-    theApp.m_taskbar_data = taskbar;
-    theApp.m_taskbar_data.show_tool_tip = false;
+    theApp.m_taskbar_data = applied_taskbar;
     theApp.m_general_data = general;
     const bool previous_warning = theApp.m_cannot_save_config_warning;
     theApp.m_cannot_save_config_warning = false;
@@ -733,30 +743,28 @@ bool CTrafficMonitorDlg::ApplyUnifiedSettings(const TaskBarSettingData& taskbar,
     theApp.m_taskbar_data = previous_taskbar;
     theApp.m_general_data = previous_general;
     if (!saved) { if (error) *error = L"无法保存监测配置；未应用修改。"; return false; }
-    const bool colors_changed = previous_taskbar.text_colors != taskbar.text_colors || previous_taskbar.back_color != taskbar.back_color
-        || previous_taskbar.transparent_color != taskbar.transparent_color || previous_taskbar.status_bar_color != taskbar.status_bar_color
-        || previous_taskbar.specify_each_item_color != taskbar.specify_each_item_color;
-    if (colors_changed && taskbar.auto_adapt_light_theme && taskbar.auto_save_taskbar_color_settings_to_preset)
+    const bool colors_changed = previous_taskbar.text_colors != applied_taskbar.text_colors || previous_taskbar.back_color != applied_taskbar.back_color
+        || previous_taskbar.transparent_color != applied_taskbar.transparent_color || previous_taskbar.status_bar_color != applied_taskbar.status_bar_color
+        || previous_taskbar.specify_each_item_color != applied_taskbar.specify_each_item_color;
+    if (colors_changed && applied_taskbar.auto_adapt_light_theme && applied_taskbar.auto_save_taskbar_color_settings_to_preset)
     {
-        auto preset_data = taskbar;
-        int preset = CWindowsSettingHelper::IsWindows10LightTheme() ? taskbar.light_default_style : taskbar.dark_default_style;
+        auto preset_data = applied_taskbar;
+        int preset = CWindowsSettingHelper::IsWindows10LightTheme() ? applied_taskbar.light_default_style : applied_taskbar.dark_default_style;
         theApp.m_taskbar_default_style.ModifyDefaultStyle(preset, preset_data);
         theApp.m_taskbar_default_style.SaveConfig();
     }
     bool is_hardware_monitor_item_changed = (general.hardware_monitor_item != theApp.m_general_data.hardware_monitor_item);
     bool is_show_notify_icon_changed = (general.show_notify_icon != theApp.m_general_data.show_notify_icon);
     bool is_connections_hide_changed = (general.connections_hide.ToVector() != theApp.m_general_data.connections_hide.ToVector());
-    bool d2d_turned_on = (theApp.m_taskbar_data.disable_d2d && !taskbar.disable_d2d);
     //需要重新关闭再打开任务栏窗口的情况
-    bool taskbar_changed = (theApp.m_taskbar_data.show_taskbar_wnd_in_secondary_display != taskbar.show_taskbar_wnd_in_secondary_display
-        || theApp.m_taskbar_data.secondary_display_index != taskbar.secondary_display_index
-        || theApp.m_taskbar_data.disable_d2d != taskbar.disable_d2d
-        || theApp.m_taskbar_data.IsTaskbarTransparent() != taskbar.IsTaskbarTransparent()
-        || theApp.m_taskbar_data.auto_set_background_color != taskbar.auto_set_background_color
+    bool taskbar_changed = (previous_taskbar.show_taskbar_wnd_in_secondary_display != applied_taskbar.show_taskbar_wnd_in_secondary_display
+        || previous_taskbar.secondary_display_index != applied_taskbar.secondary_display_index
+        || previous_taskbar.disable_d2d != applied_taskbar.disable_d2d
+        || previous_taskbar.IsTaskbarTransparent() != applied_taskbar.IsTaskbarTransparent()
+        || previous_taskbar.auto_set_background_color != applied_taskbar.auto_set_background_color
         );
 
-    theApp.m_taskbar_data = taskbar;
-    theApp.m_taskbar_data.show_tool_tip = false;
+    theApp.m_taskbar_data = applied_taskbar;
     theApp.m_general_data = general;
     if (applied) *applied = true;
     theApp.SendSettingsToPlugin();
@@ -765,13 +773,6 @@ bool CTrafficMonitorDlg::ApplyUnifiedSettings(const TaskBarSettingData& taskbar,
 
     SetTextFont();
 
-    //打开了D2D渲染后自动开启“背景透明”并关闭“根据任务栏颜色自动设置背景色”
-    if (d2d_turned_on)
-    {
-        theApp.m_taskbar_data.SetTaskabrTransparent(true);
-        theApp.m_taskbar_data.auto_set_background_color = false;
-    }
-
     //CTaskBarDlg::SaveConfig();
     if (IsTaskbarWndValid())
     {
@@ -779,8 +780,9 @@ bool CTrafficMonitorDlg::ApplyUnifiedSettings(const TaskBarSettingData& taskbar,
         //如果更改了任务栏窗口字体或显示的文本，则任务栏窗口可能要变化，于是关闭再打开任务栏窗口
         if (taskbar_changed)
         {
-            CloseTaskBarWnd();
-            OpenTaskBarWnd();
+            //设置应用同步执行在任务栏窗口自身的 WindowProc 栈上（唤醒 → Tick → ProcessIncoming），
+            //内联重建会 delete 栈上仍在执行的 CTaskBarDlg 并销毁其 HWND；投递到消息循环后再重建。
+            PostMessage(WM_REOPEN_TASKBAR_WND, 0, 0);
         }
         else
         {
@@ -870,7 +872,6 @@ bool CTrafficMonitorDlg::ApplyUnifiedSettings(const TaskBarSettingData& taskbar,
     const bool result = theApp.SaveConfig();
     theApp.m_cannot_save_config_warning = previous_warning;
     if (!result && error) *error = L"设置已应用，但最终配置保存失败；请检查配置目录权限。";
-    theApp.SaveGlobalConfig();
     return result && startup_succeeded;
 }
 
@@ -1262,7 +1263,7 @@ void CTrafficMonitorDlg::DoMonitorAcquisition()
                 log_str += descr.c_str();
                 log_str += _T("\r\nm_connection_name: ");
                 log_str += theApp.m_cfg_data.m_connection_name.c_str();
-                CCommon::WriteLog(log_str, (theApp.m_config_dir + L".\\connections.log").c_str());
+                CCommon::WriteLog(log_str, (theApp.m_data_dir + L"\\logs\\connections.log").c_str());
             }
 
             IniConnection();
@@ -1501,12 +1502,15 @@ void CTrafficMonitorDlg::OnTimer(UINT_PTR nIDEvent)
     // TODO: 在此添加消息处理程序代码和/或调用默认值
     if (nIDEvent == MONITOR_TIMER)
     {
+        NativeMediaHost::NoteTimer(1);
         //通知线程获取监控数据
         m_monitor_data_required = true;
     }
 
     if (nIDEvent == MAIN_TIMER)
     {
+        NativeMediaHost::NoteTimer(0);
+        NativeMediaHost::WriteFootprintMetrics();
         m_timer_cnt++;
         if (m_first_start)      //这个if语句在程序启动后1秒执行
         {
@@ -1705,7 +1709,7 @@ void CTrafficMonitorDlg::OnTimer(UINT_PTR nIDEvent)
                         log_str += _T(", ");
                     }
                     log_str += _T("\n");
-                    CCommon::WriteLog(log_str, (theApp.m_config_dir + L".\\debug.log").c_str());
+                    CCommon::WriteLog(log_str, (theApp.m_data_dir + L"\\logs\\debug.log").c_str());
                 }
             }
 
@@ -1730,9 +1734,13 @@ void CTrafficMonitorDlg::OnTimer(UINT_PTR nIDEvent)
         }
 
         //根据任务栏颜色自动设置任务栏窗口背景色
+        // Sampling is only meaningful for an opaque window: writing a sampled desktop color while the
+        // taskbar background is transparent would silently replace the user's color and re-pair the
+        // transparency sentinel, which is what made the background reappear under a transparent taskbar.
         if (theApp.m_taskbar_data.auto_set_background_color && theApp.m_win_version.IsWindows8OrLater()
             && IsTaskbarWndValid() && theApp.m_taskbar_data.transparent_color != 0
-            && !m_is_foreground_fullscreen && theApp.m_taskbar_data.disable_d2d)
+            && !m_is_foreground_fullscreen && theApp.m_taskbar_data.disable_d2d
+            && !theApp.m_taskbar_data.IsTaskbarTransparent())
         {
             CRect rect;
             ::GetWindowRect(m_tBarDlg->GetSafeHwnd(), rect);
@@ -1786,6 +1794,7 @@ void CTrafficMonitorDlg::OnTimer(UINT_PTR nIDEvent)
 
     if (nIDEvent == TASKBAR_TIMER)
     {
+        NativeMediaHost::NoteTimer(2);
         ++m_taskbar_timer_cnt;
         if (m_taskbar_timer_cnt % 5 == 0 && theApp.m_cfg_data.m_show_task_bar_wnd && theApp.m_taskbar_data.show_taskbar_wnd_in_secondary_display)
         {
@@ -1822,8 +1831,20 @@ void CTrafficMonitorDlg::OnTimer(UINT_PTR nIDEvent)
                                                                 p_TaskBarDlg->CalculateWindowSize(); });
             }
 
+            //归因统计：只读取调整前后的窗口矩形，不改变 AdjustWindowPos 和 Invalidate 的调用时机
+            HWND taskbar_wnd = m_tBarDlg->GetSafeHwnd();
+            RECT taskbar_rect_before{}, taskbar_rect_after{};
+            ::GetWindowRect(taskbar_wnd, &taskbar_rect_before);
             m_tBarDlg->AdjustWindowPos();
+            ::GetWindowRect(taskbar_wnd, &taskbar_rect_after);
             m_tBarDlg->Invalidate(FALSE);
+            const bool taskbar_rect_changed =
+                taskbar_rect_before.left != taskbar_rect_after.left ||
+                taskbar_rect_before.top != taskbar_rect_after.top ||
+                taskbar_rect_before.right != taskbar_rect_after.right ||
+                taskbar_rect_before.bottom != taskbar_rect_after.bottom;
+            //每轮都记一次失效请求，并记录其中调整后几何真正变化了几次
+            NativeMediaHost::NoteTaskbarRefresh(1, taskbar_rect_changed ? 1 : 0);
         }
     }
 
@@ -1989,9 +2010,7 @@ void CTrafficMonitorDlg::OnClose()
 {
     // TODO: 在此添加消息处理程序代码和/或调用默认值
     theApp.m_cannot_save_config_warning = true;
-    theApp.m_cannot_save_global_config_warning = true;
     theApp.SaveConfig();    //退出前保存设置到ini文件
-    theApp.SaveGlobalConfig();
     SaveHistoryTrafficFull();  // 退出时使用完整保存，确保所有数据都保存
     BackupHistoryTrafficFile();
 
@@ -2534,13 +2553,12 @@ BOOL CTrafficMonitorDlg::OnQueryEndSession()
 
     // TODO:  在此添加专用的查询结束会话代码
     theApp.SaveConfig();
-    theApp.SaveGlobalConfig();
     SaveHistoryTrafficFull();  // 系统关机时使用完整保存，确保所有数据都保存
     BackupHistoryTrafficFile();
 
     if (theApp.m_debug_log)
     {
-        CCommon::WriteLog(_T("TrafficMonitor进程已被终止，设置已保存。"), (theApp.m_config_dir + L".\\debug.log").c_str());
+        CCommon::WriteLog(_T("TrafficMonitor进程已被终止，设置已保存。"), (theApp.m_data_dir + L"\\logs\\debug.log").c_str());
     }
 
     return TRUE;

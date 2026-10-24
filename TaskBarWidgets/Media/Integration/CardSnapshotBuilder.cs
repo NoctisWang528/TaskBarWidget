@@ -13,26 +13,39 @@ internal sealed class CardSnapshotBuilder
     private long _trafficRevision;
     private long _weatherRevision;
     private long _audioRevision;
+    private long _mediaRevision;
+    private long _configurationRevision = 1;
+    private long _weatherSourceRevision = -1;
     private object? _lastTraffic;
     private object? _lastWeather;
 
     internal long TrafficRevision => Interlocked.Read(ref _trafficRevision);
     internal long WeatherRevision => Interlocked.Read(ref _weatherRevision);
     internal long AudioRevision => Interlocked.Read(ref _audioRevision);
+    internal long ConfigurationRevision => Interlocked.Read(ref _configurationRevision);
 
-    internal void SetTraffic(JsonElement payload)
+    internal object SetTraffic(JsonElement payload)
     {
-        _lastTraffic = DescribeTraffic(payload);
         Interlocked.Increment(ref _trafficRevision);
+        return _lastTraffic = DescribeTraffic(payload);
     }
 
-    internal void SetWeather(JsonElement payload)
+    internal object SetWeather(JsonElement payload)
     {
-        _lastWeather = DescribeWeather(payload);
+        var status = payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("status", out var nested)
+            && nested.ValueKind == JsonValueKind.Object ? nested : payload;
+        if (status.ValueKind == JsonValueKind.Object && status.TryGetProperty("revision", out var revision) && revision.ValueKind == JsonValueKind.Number &&
+            revision.TryGetInt64(out var sourceRevision))
+        {
+            if (sourceRevision < _weatherSourceRevision && _lastWeather is not null) return _lastWeather;
+            _weatherSourceRevision = sourceRevision;
+        }
         Interlocked.Increment(ref _weatherRevision);
+        return _lastWeather = DescribeWeather(payload);
     }
 
     internal void BumpAudio() => Interlocked.Increment(ref _audioRevision);
+    internal void BumpConfiguration() => Interlocked.Increment(ref _configurationRevision);
 
     internal object Build(AppSettings settings, MediaCoordinator media, AudioSnapshot? audio,
         UpdateSnapshot? update, bool connected, int theme)
@@ -45,7 +58,7 @@ internal sealed class CardSnapshotBuilder
             enabled = settings.QuickCardEnabled,
             resourceMode = settings.QuickCardResourceMode.ToString(),
             font = settings.CardFontFamily,
-            revision = 1,
+            revision = ConfigurationRevision,
             mica = new
             {
                 vivid = settings.CardMicaVivid,
@@ -59,18 +72,18 @@ internal sealed class CardSnapshotBuilder
         var mediaState = DescribeMedia(media);
         var lyrics = DescribeLyrics(media.CardFrame);
         var audioState = DescribeAudio(audio);
-        return new
+        return new Dictionary<string, object?>
         {
-            statusText = connected ? "" : "媒体服务正在连接…",
-            connected,
-            toolWindowTheme = theme,
-            quickCards,
-            media = mediaState,
-            lyrics,
-            audio = audioState,
-            traffic = _lastTraffic,
-            weather = _lastWeather,
-            update = DescribeUpdate(update),
+            ["statusText"] = connected ? "" : "媒体服务正在连接…",
+            ["connected"] = connected,
+            ["toolWindowTheme"] = theme,
+            ["quickCards"] = quickCards,
+            ["media"] = mediaState,
+            ["lyrics"] = lyrics,
+            ["audio"] = audioState,
+            ["traffic"] = _lastTraffic,
+            ["weather"] = _lastWeather,
+            ["update"] = DescribeUpdate(update),
         };
     }
 
@@ -85,8 +98,8 @@ internal sealed class CardSnapshotBuilder
         return new
         {
             revision = Interlocked.Read(ref _audioRevision),
-            outputs = snapshot?.Outputs.Select(Endpoint) ?? [],
-            inputs = snapshot?.Inputs.Select(Endpoint) ?? [],
+            outputs = snapshot?.Outputs.Select(Endpoint).ToArray() ?? [],
+            inputs = snapshot?.Inputs.Select(Endpoint).ToArray() ?? [],
             operationSucceeded,
             message,
         };
@@ -95,27 +108,28 @@ internal sealed class CardSnapshotBuilder
     internal object DescribeMedia(MediaCoordinator media)
     {
         var state = media.ControlState;
-        return new
+        return new Dictionary<string, object?>
         {
-            revision = media.CardFrame?.revision ?? 0,
-            title = state.Title,
-            artist = state.Artist,
-            source = state.Source,
-            positionSeconds = state.PositionSeconds,
-            durationSeconds = state.DurationSeconds,
-            isPlaying = state.IsPlaying,
-            canPrevious = state.CanPrevious,
-            canNext = state.CanNext,
-            canPlayPause = state.CanPlayPause,
-            canSeek = state.CanSeek,
-            coverDataUrl = media.CoverDataUrl,
-            sources = (state.Sources ?? []).Select(source => new
+            // Controls, cover and source icons change independently of lyrics.
+            ["revision"] = ++_mediaRevision,
+            ["title"] = state.Title,
+            ["artist"] = state.Artist,
+            ["source"] = state.Source,
+            ["positionSeconds"] = state.PositionSeconds,
+            ["durationSeconds"] = state.DurationSeconds,
+            ["isPlaying"] = state.IsPlaying,
+            ["canPrevious"] = state.CanPrevious,
+            ["canNext"] = state.CanNext,
+            ["canPlayPause"] = state.CanPlayPause,
+            ["canSeek"] = state.CanSeek,
+            ["coverDataUrl"] = media.CoverDataUrl,
+            ["sources"] = (state.Sources ?? []).Select(source => new Dictionary<string, object?>
             {
-                source.Id,
-                label = Label(source),
-                iconDataUrl = media.SourceIcon(source),
-            }),
-            selectedSourceId = state.SelectedSourceId,
+                ["id"] = source.Id,
+                ["label"] = Label(source),
+                ["iconDataUrl"] = media.SourceIcon(source),
+            }).ToArray(),
+            ["selectedSourceId"] = state.SelectedSourceId,
         };
     }
 
@@ -156,12 +170,16 @@ internal sealed class CardSnapshotBuilder
             animateTransition = lyrics.animateTransition,
             wordScanProgress = lyrics.wordScanProgress,
             scene = lyrics.scene,
+            nativeAppearance = NativeAppearanceJson.Normalize(frame.nativeAppearance),
             style = new
             {
                 fontFamily = style.fontFamily,
                 layoutScalePercent = style.layoutScalePercent,
                 fontSize = style.fontSize,
                 fontWeight = style.fontWeight,
+                fontItalic = Boolean(frame.nativeAppearance, "fontItalic"),
+                fontUnderline = Boolean(frame.nativeAppearance, "fontUnderline"),
+                fontStrikeOut = Boolean(frame.nativeAppearance, "fontStrikeOut"),
                 primaryColor = style.primaryColor,
                 secondaryColor = style.secondaryColor,
                 translationColor = style.translationColor,
@@ -223,6 +241,8 @@ internal sealed class CardSnapshotBuilder
     // added here so the front-end never parses provider-specific fields.
     internal object DescribeWeather(JsonElement payload)
     {
+        if (payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("status", out var status) &&
+            status.ValueKind == JsonValueKind.Object) payload = status;
         var details = payload.ValueKind == JsonValueKind.Object &&
             payload.TryGetProperty("details", out var value) && value.ValueKind == JsonValueKind.Object
             ? value : default;
@@ -232,24 +252,39 @@ internal sealed class CardSnapshotBuilder
         var city = payload.ValueKind == JsonValueKind.Object &&
             payload.TryGetProperty("city", out var cityValue) && cityValue.ValueKind == JsonValueKind.Object
             ? cityValue : default;
+        var lastCity = payload.ValueKind == JsonValueKind.Object &&
+            payload.TryGetProperty("lastSuccessCity", out var lastCityValue) && lastCityValue.ValueKind == JsonValueKind.Object
+            ? lastCityValue : default;
+        var temperature = Text(current, "temperature");
+        if (temperature.Length == 0) temperature = Text(payload, "temperature");
         return new
         {
             revision = WeatherRevision,
-            provider = Text(payload, "provider"),
+            provider = payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("provider", out var provider) &&
+                provider.ValueKind == JsonValueKind.Number && provider.TryGetInt32(out var providerId)
+                ? providerId == 1 ? "和风天气" : "中国天气网" : Text(payload, "provider"),
             city = Text(city, "name"),
+            cityId = Text(city, "id"),
             region = Text(city, "region"),
+            lastSuccessCity = Text(lastCity, "name"),
+            lastSuccessCityId = Text(lastCity, "id"),
+            lastAttempt = Text(payload, "lastAttempt"),
+            lastSuccess = Text(payload, "lastSuccess"),
             state = Text(payload, "state"),
             message = Text(payload, "message"),
-            temperature = Text(current, "temperature"),
+            temperature,
             feelsLike = Text(current, "feelsLike"),
             weather = Text(current, "weather"),
             conditionKind = Text(current, "conditionKind"),
             humidity = Text(current, "humidity"),
+            windDirection = Text(current, "windDirection"),
+            windScale = Text(current, "windScale"),
+            windSpeed = Text(current, "windSpeed"),
             observedAt = Text(current, "observedAt"),
             stale = Boolean(payload, "stale"),
             updating = Boolean(payload, "updating"),
-            hasData = current.ValueKind == JsonValueKind.Object,
-            details,
+            hasData = temperature.Length > 0,
+            details = details.ValueKind == JsonValueKind.Object ? (JsonElement?)details.Clone() : null,
         };
     }
 

@@ -2,6 +2,7 @@
 #include "CardWindow.h"
 #include "CardDraw.h"
 #include "CardText.h"
+#include <dwmapi.h>
 
 using Microsoft::WRL::ComPtr;
 using namespace winrt::Windows::UI::Composition;
@@ -48,6 +49,13 @@ namespace Cards
             case WM_MOUSELEAVE:
                 card->OnMouseLeave();
                 return 0;
+            case WM_CAPTURECHANGED:
+            case WM_CANCELMODE:
+                card->CancelPointer();
+                return 0;
+            case WM_CLOSE:
+                if (card->Host()) card->Host()->OnHideCards(L"close");
+                return 0;
             case WM_GETOBJECT:
             {
                 const LRESULT result = card->OnGetObject(keys, position);
@@ -67,6 +75,7 @@ namespace Cards
                 if (keys == AnimationTimer) card->Tick();
                 return 0;
             case WM_DPICHANGED:
+                if (card->Host()) card->Host()->OnLayoutInvalidated();
                 card->Invalidate();
                 return 0;
             default:
@@ -118,11 +127,13 @@ namespace Cards
         Compositor compositor{ nullptr };
         winrt::Windows::UI::Composition::Desktop::DesktopWindowTarget target{ nullptr };
         ContainerVisual root{ nullptr };
+        CompositionRoundedRectangleGeometry corner{ nullptr };
         ContainerVisual motion{ nullptr };
         SpriteVisual wash{ nullptr };
         SpriteVisual content{ nullptr };
         DrawingSurface surface;
         muxc::MicaController mica{ nullptr };
+        muxc::SystemBackdropConfiguration micaConfiguration{ nullptr };
         bool micaReady{ false };
         bool micaFailed{ false };
         bool dirty{ true };
@@ -139,16 +150,23 @@ namespace Cards
         float sliderRatio{};
         bool sliderSeeking{};
         ULONGLONG lastSliderSent{};
+        ULONGLONG sliderPendingUntil{};
+        double mediaPosition{};
+        ULONGLONG mediaPositionTick{};
+        ULONGLONG lastWeatherAlert{};
         // Lyric scanning is interpolated on the card thread: a line frame carries
         // the position within that line, so the card learns the rate from two
         // consecutive frames and advances the highlight until the next one.
         long long lyricsRevision{ -1 };
         double lyricsProgress{};
         double lyricsRate{};
+        double scanProgress{ -1 };
+        double scanRate{};
         ULONGLONG lastLyricPaint{};
         // Cover cross-fade: the outgoing bitmap is released as soon as the fade ends.
         std::wstring coverKey;
         std::wstring previousCoverKey;
+        std::wstring previousCoverData;
         ULONGLONG coverFadeStart{};
         // Wrap transition state for the lyric rows.
         std::wstring lyricPrevious;
@@ -181,14 +199,15 @@ namespace Cards
         environment = cardEnvironment;
         EnsureClass(instance);
         const DWORD style = WS_POPUP;
-        const DWORD extended = WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE |
+        const DWORD extended = WS_EX_TOOLWINDOW | WS_EX_TOPMOST |
             WS_EX_NOREDIRECTIONBITMAP;
         window = CreateWindowExW(extended, ClassName, L"", style, 0, 0,
             static_cast<int>(Layout::CardWidth), static_cast<int>(Layout::HeightMedia),
             nullptr, nullptr, instance, nullptr);
         if (!window) return false;
         SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
-        SetTimer(window, AnimationTimer, 16, nullptr);
+        const DWM_WINDOW_CORNER_PREFERENCE preference = DWMWCP_ROUND;
+        DwmSetWindowAttribute(window, DWMWA_WINDOW_CORNER_PREFERENCE, &preference, sizeof(preference));
         BuildVisualTree(instance);
         ApplyEnvironment(cardEnvironment);
         if (!impl->compositor) return false;
@@ -196,18 +215,17 @@ namespace Cards
             [this] { return scale; },
             [this](int id)
             {
-                // Slider ratios mirror what the painter shows.
-                if (snapshot.audio.outputs.size() + snapshot.audio.inputs.size() == 0) return 0.0;
-                double value = 0.0;
-                for (const auto& endpoint : snapshot.audio.outputs) value = (std::max)(value, endpoint.volume);
-                for (const auto& endpoint : snapshot.audio.inputs) value = (std::max)(value, endpoint.volume);
-                UNREFERENCED_PARAMETER(id);
-                return value;
+                const auto* region = regions.Find(id);
+                if (!region) return 0.0;
+                if (region->action == L"seek") return snapshot.media.duration > 0 ? snapshot.media.position / snapshot.media.duration : 0.0;
+                const auto& endpoints = region->action == L"setVolume:input" ? snapshot.audio.inputs : snapshot.audio.outputs;
+                for (const auto& endpoint : endpoints) if (endpoint.isDefault) return endpoint.volume;
+                return endpoints.empty() ? 0.0 : endpoints.front().volume;
             },
             [this](const Layout::Region& region, const std::wstring& payload)
             {
                 if (auto* host = Host()) host->OnRequest(region.action, payload);
-            });
+            }, [this](const Layout::Region& region) { return host.IsMenuExpanded(region.action); });
         return true;
     }
 
@@ -231,6 +249,8 @@ namespace Cards
             impl->root = impl->compositor.CreateContainerVisual();
             impl->root.RelativeSizeAdjustment(winrt::Windows::Foundation::Numerics::float2{ 1.0f, 1.0f });
             impl->target.Root(impl->root);
+            impl->corner = impl->compositor.CreateRoundedRectangleGeometry();
+            impl->root.Clip(impl->compositor.CreateGeometricClip(impl->corner));
 
             // Motion container: the show/hide animation changes only its opacity
             // and offset. The HWND geometry never moves with the animation.
@@ -264,12 +284,14 @@ namespace Cards
             try { impl->mica.RemoveAllSystemBackdropTargets(); } catch (...) { }
             impl->mica = nullptr;
         }
+        impl->micaConfiguration = nullptr;
         impl->surface.Release();
         if (impl->content) impl->content.Brush(nullptr);
         impl->content = nullptr;
         impl->wash = nullptr;
         impl->motion = nullptr;
         impl->root = nullptr;
+        impl->corner = nullptr;
         impl->target = nullptr;
         impl->compositor = nullptr;
         if (window)
@@ -297,6 +319,7 @@ namespace Cards
                 {
                     auto controller = muxc::MicaController();
                     auto configuration = muxc::SystemBackdropConfiguration();
+                    impl->micaConfiguration = configuration;
                     configuration.IsInputActive(true);
                     configuration.Theme(environment.dark ? muxc::SystemBackdropTheme::Dark
                         : muxc::SystemBackdropTheme::Light);
@@ -327,6 +350,7 @@ namespace Cards
             try
             {
                 const auto& tuning = environment.mica;
+                impl->micaConfiguration.Theme(environment.dark ? muxc::SystemBackdropTheme::Dark : muxc::SystemBackdropTheme::Light);
                 const auto fallback = FallbackColor(environment.dark);
                 impl->mica.TintColor(fallback);
                 impl->mica.FallbackColor(fallback);
@@ -341,8 +365,7 @@ namespace Cards
                     // Custom Mica off: the system default look, which is what
                     // ResetProperties() restores for the WinUI path.
                     impl->mica.Kind(muxc::MicaKind::Base);
-                    impl->mica.TintOpacity(0.0f);
-                    impl->mica.LuminosityOpacity(1.0f);
+                    impl->mica.ResetProperties();
                 }
                 impl->micaReady = true;
             }
@@ -356,26 +379,44 @@ namespace Cards
         // is off, or high contrast is on.
         if (impl->wash && impl->compositor)
         {
-            const uint8_t alpha = environment.highContrast ? 255 : (impl->micaReady ? 18 : 235);
-            const auto color = environment.dark
-                ? winrt::Windows::UI::Color{ alpha, 32, 32, 32 }
-                : winrt::Windows::UI::Color{ alpha, 250, 250, 250 };
+            const COLORREF system = GetSysColor(COLOR_WINDOW);
+            const auto color = environment.highContrast
+                ? winrt::Windows::UI::Color{255, GetRValue(system), GetGValue(system), GetBValue(system)}
+                : impl->micaReady ? winrt::Windows::UI::Color{10, 255, 255, 255} : FallbackColor(environment.dark);
             impl->wash.Brush(impl->compositor.CreateColorBrush(color));
         }
-        if (themeChanged) { impl->dirty = true; impl->damage = RECT{}; }
+        impl->dirty = true; impl->damage = RECT{};
+        UpdateTimer();
+        if (visible) Paint();
     }
 
     void CardWindow::SetSnapshot(const Snapshot& value)
     {
         const auto now = GetTickCount64();
-        if (value.lyrics.revision != impl->lyricsRevision)
+        const bool sameLine = value.lyrics.trackId == snapshot.lyrics.trackId &&
+            value.lyrics.currentLineIndex == snapshot.lyrics.currentLineIndex && value.lyrics.current == snapshot.lyrics.current;
+        const bool newLyrics = value.lyrics.revision != impl->lyricsRevision || !sameLine;
+        if (kind == Kind::Media && !sameLine && value.lyrics.animateTransition && !environment.reducedMotion &&
+            !snapshot.lyrics.current.empty())
         {
-            if (impl->lyricsRevision >= 0 && impl->lyricsTick != 0 && value.lyrics.isPlaying)
+            impl->lyricPrevious = snapshot.lyrics.current;
+            impl->lyricPreviousSecondary = snapshot.lyrics.currentTranslation.empty() ? snapshot.lyrics.next : snapshot.lyrics.currentTranslation;
+            impl->lyricWrapStart = now;
+        }
+        if (newLyrics)
+        {
+            const double scanElapsed = impl->lyricsTick ? (now - impl->lyricsTick) / 1000.0 : 0.0;
+            const double scanAdvance = value.lyrics.wordScan - impl->scanProgress;
+            impl->scanRate = sameLine && value.lyrics.isPlaying && value.lyrics.wordScan >= 0 &&
+                impl->scanProgress >= 0 && scanElapsed > 0.05 && scanAdvance >= 0 && scanAdvance < 0.9
+                ? scanAdvance / scanElapsed : 0.0;
+            impl->scanProgress = value.lyrics.wordScan;
+            if (sameLine && impl->lyricsRevision >= 0 && impl->lyricsTick != 0 && value.lyrics.isPlaying)
             {
                 const double delta = static_cast<double>(now - impl->lyricsTick) / 1000.0;
                 const double advance = value.lyrics.progress - impl->lyricsProgress;
                 // Only a forward move inside one line teaches a usable rate.
-                if (delta > 0.05 && advance >= 0.0 && advance < 0.9) impl->lyricsRate = advance / delta;
+                impl->lyricsRate = delta > 0.05 && advance >= 0.0 && advance < 0.9 ? advance / delta : 0.0;
             }
             else if (value.lyrics.revision != impl->lyricsRevision)
             {
@@ -385,27 +426,22 @@ namespace Cards
             impl->lyricsProgress = value.lyrics.progress;
             impl->lyricsTick = now;
         }
-        if (kind == Kind::Media && value.lyrics.revision != impl->lyricsRevision &&
-            value.lyrics.currentLineIndex != impl->lyricLineIndex &&
-            value.lyrics.animateTransition && !snapshot.lyrics.current.empty())
-        {
-            // The outgoing line stays only for the transition; it is released as
-            // soon as the animation ends.
-            impl->lyricPrevious = snapshot.lyrics.current;
-            impl->lyricPreviousSecondary = snapshot.lyrics.currentTranslation.empty()
-                ? snapshot.lyrics.next : snapshot.lyrics.currentTranslation;
-            impl->lyricWrapStart = GetTickCount64();
-        }
-        if (value.lyrics.currentLineIndex != impl->lyricLineIndex)
+        if (!sameLine)
             impl->lyricLineStarted = GetTickCount64();
         impl->lyricLineIndex = value.lyrics.currentLineIndex;
         if (kind == Kind::Media && value.media.coverKey != impl->coverKey)
         {
+            if (environment.graphics && impl->previousCoverData != value.media.coverDataUrl)
+                environment.graphics->ForgetImage(impl->previousCoverData);
             impl->previousCoverKey = impl->coverKey;
+            impl->previousCoverData = snapshot.media.coverDataUrl;
             impl->coverKey = value.media.coverKey;
             impl->coverFadeStart = GetTickCount64();
         }
         snapshot = value;
+        impl->mediaPosition = value.media.position;
+        impl->mediaPositionTick = now;
+        UpdateTimer();
         impl->dirty = true;
         impl->damage = RECT{};
         if (visible) Paint();
@@ -419,7 +455,7 @@ namespace Cards
 
     POINT CardWindow::ToDip(POINT pixels) const
     {
-        return Layout::ToDip(pixels, scale);
+        return Layout::ToDip(POINT{pixels.x - bounds.left, pixels.y - bounds.top}, scale);
     }
 
     float CardWindow::ContentWidthDip() const { return Layout::WidthDip(kind); }
@@ -434,6 +470,11 @@ namespace Cards
         bounds = targetBounds;
         scale = targetScale > 0.0f ? targetScale : 1.0f;
         measuredHeightDip = static_cast<float>(targetBounds.bottom - targetBounds.top) / scale;
+        if (impl->corner)
+        {
+            impl->corner.Size({ static_cast<float>(targetBounds.right - targetBounds.left), static_cast<float>(targetBounds.bottom - targetBounds.top) });
+            impl->corner.CornerRadius({ Layout::CornerRadius * scale, Layout::CornerRadius * scale });
+        }
         if (window)
         {
             SetWindowPos(window, HWND_TOPMOST, bounds.left, bounds.top,
@@ -442,6 +483,8 @@ namespace Cards
         }
         impl->dirty = true;
         impl->damage = RECT{};
+        // Resident prewarm must produce actual pixels before the first show.
+        Paint();
     }
 
     void CardWindow::ApplyMotion()
@@ -479,12 +522,14 @@ namespace Cards
         impl->dirty = true;
         impl->damage = RECT{};
         Paint();
+        UpdateTimer();
     }
 
     void CardWindow::Hide(bool animate)
     {
         visible = false;
         if (!window) return;
+        CancelPointer();
         ClosePopup();
         if (animate && !environment.reducedMotion && impl->opacity > 0.01f)
         {
@@ -501,96 +546,73 @@ namespace Cards
             ApplyMotion();
             ShowWindow(window, SW_HIDE);
         }
+        UpdateTimer();
+    }
+
+    void CardWindow::UpdateTimer()
+    {
+        if (!window) return;
+        const bool dynamic = visible && (impl->coverFadeStart || impl->lyricWrapStart ||
+            impl->sliderPendingUntil || (kind == Kind::Media && snapshot.media.isPlaying) ||
+            (kind == Kind::Weather && snapshot.weather.alerts.size() > 1));
+        if (impl->animating || dynamic) SetTimer(window, AnimationTimer,
+            impl->animating ? 16 : kind == Kind::Weather ? 1000 : 33, nullptr);
+        else KillTimer(window, AnimationTimer);
     }
 
     bool CardWindow::Tick()
     {
-        if (!impl->animating && visible && kind == Kind::Media && impl->lyricLineStarted != 0 &&
-            snapshot.lyrics.isPlaying)
+        const auto now = GetTickCount64();
+        bool repaint = false;
+        if (impl->sliderPendingUntil && now >= impl->sliderPendingUntil)
         {
-            const double age = static_cast<double>(GetTickCount64() - impl->lyricLineStarted) / 1000.0;
-            if (age > 0.8 && age < 7.0)
+            impl->sliderPendingUntil = 0; impl->sliderId = 0; impl->sliderAction.clear(); repaint = true;
+        }
+        if (impl->animating)
+        {
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - impl->started).count();
+            const float progress = std::clamp(static_cast<float>(elapsed) / AnimationMilliseconds, 0.0f, 1.0f);
+            const float target = visible ? 1.0f : 0.0f;
+            impl->opacity = impl->fromOpacity + (target - impl->fromOpacity) * progress;
+            impl->offset = impl->fromOffset * (1.0f - progress);
+            ApplyMotion();
+            if (progress >= 1.0f)
             {
-                impl->dirty = true;
-                Paint();
-                return true;
+                impl->animating = false;
+                if (!visible) ShowWindow(window, SW_HIDE);
             }
         }
-        if (!impl->animating && visible && impl->lyricWrapStart != 0)
+        if (visible)
         {
-            if (GetTickCount64() - impl->lyricWrapStart < LyricWrapMilliseconds)
+            if (kind == Kind::Weather && snapshot.weather.alerts.size() > 1 && now / 4000 != impl->lastWeatherAlert)
+            { impl->lastWeatherAlert = now / 4000; repaint = true; }
+            if (impl->coverFadeStart)
             {
-                impl->dirty = true;
-                Paint();
-            }
-            else
-            {
-                impl->lyricPrevious.clear();
-                impl->lyricPreviousSecondary.clear();
-                impl->lyricWrapStart = 0;
-                Paint();
-            }
-            return true;
-        }
-        if (!impl->animating && visible && impl->coverFadeStart != 0)
-        {
-            if (GetTickCount64() - impl->coverFadeStart < CoverFadeMilliseconds)
-            {
-                impl->dirty = true;
-                Paint();
-            }
-            else
-            {
-                impl->previousCoverKey.clear();
-                impl->coverFadeStart = 0;
-                Paint();
-            }
-            return true;
-        }
-        // Lyrics advance between snapshots, so the media card keeps a timer while
-        // it is visible and playing even when no motion animation is running.
-        if (!impl->animating && visible && kind == Kind::Media && snapshot.lyrics.isPlaying &&
-            impl->lyricsRate > 0.0)
-        {
-            // The scan advances between frames; repaint at roughly 30 Hz instead of
-            // the 60 Hz timer so a playing card never redraws at full rate.
-            const ULONGLONG now = GetTickCount64();
-            if (now - impl->lastLyricPaint >= 33)
-            {
-                impl->lastLyricPaint = now;
-                const double position = impl->lyricsProgress + impl->lyricsRate *
-                    (static_cast<double>(now - impl->lyricsTick) / 1000.0);
-                if (position < 1.0)
+                repaint = true;
+                if (environment.reducedMotion || now - impl->coverFadeStart >= CoverFadeMilliseconds)
                 {
-                    impl->dirty = true;
-                    Paint();
+                    if (environment.graphics && impl->previousCoverData != snapshot.media.coverDataUrl)
+                        environment.graphics->ForgetImage(impl->previousCoverData);
+                    impl->previousCoverKey.clear(); impl->previousCoverData.clear(); impl->coverFadeStart = 0;
                 }
             }
-            return true;
+            if (impl->lyricWrapStart)
+            {
+                repaint = true;
+                if (environment.reducedMotion || now - impl->lyricWrapStart >= LyricWrapMilliseconds)
+                { impl->lyricPrevious.clear(); impl->lyricPreviousSecondary.clear(); impl->lyricWrapStart = 0; }
+            }
+            if (kind == Kind::Media && snapshot.media.isPlaying && now - impl->lastLyricPaint >= 33)
+            { impl->lastLyricPaint = now; repaint = true; }
+            if (repaint) { impl->dirty = true; Paint(); }
         }
-        if (!impl->animating) return false;
-        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - impl->started).count();
-        float progress = static_cast<float>(elapsed) / static_cast<float>(AnimationMilliseconds);
-        progress = std::clamp(progress, 0.0f, 1.0f);
-        const float target = visible ? 1.0f : 0.0f;
-        impl->opacity = impl->fromOpacity + (target - impl->fromOpacity) * progress;
-        impl->offset = impl->fromOffset * (1.0f - progress);
-        ApplyMotion();
-        if (progress >= 1.0f)
-        {
-            impl->animating = false;
-            impl->opacity = target;
-            impl->offset = 0.0f;
-            ApplyMotion();
-            if (!visible) ShowWindow(window, SW_HIDE);
-        }
+        UpdateTimer();
         return impl->animating;
     }
 
     void CardWindow::PaintContent(bool rebuildRegions)
     {
-        if (!visible && impl->opacity <= 0.01f) return;
         if (!impl->compositor || !environment.device || !environment.graphics) return;
         const int widthPixels = (std::max)(1, static_cast<int>(bounds.right - bounds.left));
         const int heightPixels = (std::max)(1, static_cast<int>(bounds.bottom - bounds.top));
@@ -600,10 +622,10 @@ namespace Cards
         if (rebuildRegions) regions.Clear();
         {
             DrawScope scope(impl->surface);
-            if (!scope) { impl->dirty = true; return; }
+            if (!scope) { impl->dirty = true; host.OnGraphicsFailure(impl->surface.LastResult()); return; }
             ID2D1DeviceContext* context = scope.Get();
             context->SetDpi(96.0f * scale, 96.0f * scale);
-            context->SetTransform(D2D1::Matrix3x2F::Identity());
+            context->SetTransform(D2D1::Matrix3x2F::Translation(scope.offset.x / scale, scope.offset.y / scale));
             context->Clear(D2D1::ColorF(0, 0.0f));
 
             const float widthDip = ContentWidthDip();
@@ -611,21 +633,31 @@ namespace Cards
             // The surface is painted at physical size; scaling by the fit factor
             // keeps the DIP layout above identical to the WinUI card.
             const float fit = (bounds.right - bounds.left) / std::max(1.0f, widthDip * scale);
-            context->SetTransform(D2D1::Matrix3x2F::Scale(scale * fit, scale * fit));
+            // DPI already scales DIP coordinates; apply only the atlas offset.
+            context->SetTransform(D2D1::Matrix3x2F::Translation(scope.offset.x / scale, scope.offset.y / scale));
 
             // A dragged slider is painted from the pointer until the gesture ends,
             // so an older snapshot can never drag the knob back mid-drag.
-            Snapshot painted = snapshot;
+            // This is the window's display copy. The host keeps authoritative
+            // snapshots; updating scalar presentation values avoids copying image
+            // strings and all four cards' models on every animation tick.
+            auto& painted = snapshot;
+            if (painted.media.isPlaying && impl->mediaPositionTick)
+                painted.media.position = std::clamp(impl->mediaPosition +
+                    (GetTickCount64() - impl->mediaPositionTick) / 1000.0, 0.0, std::max(0.0, painted.media.duration));
             if (painted.lyrics.isPlaying && impl->lyricsRate > 0.0 && impl->lyricsTick != 0)
             {
                 const double elapsed = static_cast<double>(GetTickCount64() - impl->lyricsTick) / 1000.0;
                 painted.lyrics.progress = std::clamp(
                     impl->lyricsProgress + impl->lyricsRate * elapsed, 0.0, 1.0);
             }
+            if (painted.lyrics.isPlaying && impl->scanProgress >= 0 && impl->scanRate > 0)
+                painted.lyrics.wordScan = std::clamp(impl->scanProgress + impl->scanRate *
+                    std::min(0.15, (GetTickCount64() - impl->lyricsTick) / 1000.0), 0.0, 1.0);
             if (impl->sliderId != 0 && !impl->sliderSeeking)
             {
-                for (auto* list : { &painted.audio.outputs, &painted.audio.inputs })
-                    for (auto& endpoint : *list) endpoint.volume = impl->sliderRatio;
+                auto& endpoints = impl->sliderAction == L"setVolume:input" ? painted.audio.inputs : painted.audio.outputs;
+                for (auto& endpoint : endpoints) if (endpoint.isDefault) endpoint.volume = impl->sliderRatio;
             }
             else if (impl->sliderId != 0 && impl->sliderSeeking)
             {
@@ -657,19 +689,24 @@ namespace Cards
                 }
             }
             Paint::CoverTransition cover;
+            ComPtr<ID2D1Bitmap1> previousCover;
             if (kind == Kind::Media && !impl->previousCoverKey.empty() && impl->coverFadeStart != 0)
             {
                 const ULONGLONG elapsed = GetTickCount64() - impl->coverFadeStart;
                 if (elapsed < CoverFadeMilliseconds)
                 {
-                    cover.previous = environment.graphics->DecodeImage(impl->previousCoverKey,
+                    previousCover = environment.graphics->DecodeImage(impl->previousCoverData,
                         static_cast<int>(64 * scale * fit), static_cast<int>(64 * scale * fit));
+                    cover.previous = previousCover.Get();
                     cover.previousOpacity = 1.0f - static_cast<float>(elapsed) /
                         static_cast<float>(CoverFadeMilliseconds);
                 }
                 else
                 {
                     // The old cover is dropped the moment the transition ends.
+                    if (impl->previousCoverData != snapshot.media.coverDataUrl)
+                        environment.graphics->ForgetImage(impl->previousCoverData);
+                    impl->previousCoverData.clear();
                     impl->previousCoverKey.clear();
                     impl->coverFadeStart = 0;
                 }
@@ -693,8 +730,23 @@ namespace Cards
                 Paint::Update(context, painted, environment, regions, widthDip, heightDip);
                 break;
             }
+            if (const auto* focused = regions.Find(impl->focusedRegion))
+            {
+                const auto& r = focused->bounds;
+                Draw::StrokeRound(context, Draw::Rect(static_cast<float>(r.left), static_cast<float>(r.top),
+                    static_cast<float>(r.right), static_cast<float>(r.bottom)), 4,
+                    Draw::Colors(environment).accent, 1.5f);
+            }
+            if (!snapshot.statusText.empty())
+            {
+                const auto area = Draw::Rect(8, heightDip - 25, widthDip - 8, heightDip - 3);
+                Draw::FillRound(context, area, 4, environment.dark ? Color{0.15f, 0.1f, 0.1f, 1} : Color{1, 0.94f, 0.92f, 1});
+                Draw::Text(context, *environment.graphics, snapshot.statusText, environment.fontFamily, 10, 400,
+                    Draw::Colors(environment).primary, area);
+            }
         }
-        if (!impl->content.Brush() && impl->surface.Handle())
+        if (!impl->surface.Ready()) { impl->dirty = true; host.OnGraphicsFailure(impl->surface.LastResult()); return; }
+        if (impl->surface.Handle())
         {
             auto brush = impl->compositor.CreateSurfaceBrush(impl->surface.Handle());
             brush.Stretch(CompositionStretch::Fill);
@@ -714,7 +766,12 @@ namespace Cards
     {
         if (!impl->compositor) return;
         const bool rebuild = impl->dirty || !impl->surface.Ready();
-        PaintContent(rebuild);
+        if (rebuild) PaintContent(true);
+    }
+
+    bool CardWindow::HasRenderedContent() const
+    {
+        return impl->surface.Ready() && impl->content && impl->content.Brush() && !impl->dirty;
     }
 
     void CardWindow::ClosePopup()
@@ -745,77 +802,72 @@ namespace Cards
 
     bool CardWindow::OnPointer(UINT message, POINT pixels, bool leftDown)
     {
+        UNREFERENCED_PARAMETER(leftDown);
         const POINT dip = ToDip(pixels);
         if (!impl->trackingLeave)
         {
-            TRACKMOUSEEVENT event{ sizeof(event) };
-            event.dwFlags = TME_LEAVE;
-            event.hwndTrack = window;
-            TrackMouseEvent(&event);
-            impl->trackingLeave = true;
+            TRACKMOUSEEVENT event{ sizeof(event), TME_LEAVE, window, 0 };
+            TrackMouseEvent(&event); impl->trackingLeave = true;
         }
-
-        const auto* region = HitRegion(dip, true);
-        const int id = region ? region->id : 0;
-        if (id != impl->hotRegion)
+        const auto* hit = HitRegion(dip, true);
+        const int id = hit ? hit->id : 0;
+        if (id != impl->hotRegion) { impl->hotRegion = id; impl->dirty = true; }
+        if (message == WM_LBUTTONDOWN || message == WM_LBUTTONDBLCLK)
         {
-            impl->hotRegion = id;
-            impl->dirty = true;
-        }
-
-        if (message == WM_MOUSEMOVE)
-        {
-            if (impl->dragging && region)
-            {
-                if (region->type == Layout::RegionType::Slider && region->enabled)
-                {
-                    const float width = static_cast<float>(region->bounds.right - region->bounds.left);
-                    const float ratio = std::clamp(
-                        static_cast<float>(dip.x - region->bounds.left) / std::max(1.0f, width), 0.0f, 1.0f);
-                    UpdateSlider(*region, ratio);
-                }
-            }
-            if (impl->dirty && visible) Paint();
-            return false;
-        }
-
-        if (message == WM_LBUTTONDOWN)
-        {
-            if (!region) return false;
-            if (!region->enabled) return true;
-            if (region->type == Layout::RegionType::Slider)
+            if (!hit || !hit->enabled) return false;
+            const auto region = *hit;
+            SetFocus(window); SetCapture(window);
+            impl->capturedRegion = region.id;
+            impl->focusedRegion = region.id;
+            accessibility.NotifyFocus(&region);
+            if (region.type == Layout::RegionType::Slider)
             {
                 impl->dragging = true;
-                impl->capturedRegion = region->id;
-                const float width = static_cast<float>(region->bounds.right - region->bounds.left);
-                const float ratio = std::clamp(
-                    static_cast<float>(dip.x - region->bounds.left) / std::max(1.0f, width), 0.0f, 1.0f);
-                UpdateSlider(*region, ratio);
-                return true;
+                const float ratio = std::clamp((dip.x - region.bounds.left) /
+                    std::max(1.0f, static_cast<float>(region.bounds.right - region.bounds.left)), 0.0f, 1.0f);
+                UpdateSlider(region, ratio);
             }
-            impl->capturedRegion = region->id;
             return true;
         }
-
+        if (message == WM_MOUSEMOVE && impl->dragging)
+        {
+            if (const auto* found = regions.Find(impl->capturedRegion))
+            {
+                const auto region = *found;
+                const float ratio = std::clamp((dip.x - region.bounds.left) /
+                    std::max(1.0f, static_cast<float>(region.bounds.right - region.bounds.left)), 0.0f, 1.0f);
+                UpdateSlider(region, ratio);
+            }
+            return true;
+        }
         if (message == WM_LBUTTONUP)
         {
-            const bool dragging = impl->dragging;
-            impl->dragging = false;
-            const int captured = impl->capturedRegion;
-            impl->capturedRegion = 0;
-            if (!region || !region->enabled) return dragging;
-            if (region->type == Layout::RegionType::Slider)
-            {
-                // The gesture always commits its final value, even if the drag was
-                // shorter than the coalescing interval.
-                FinishSlider();
-                return true;
-            }
-            if (captured != region->id) return true;
-            Activate(*region);
+            const auto* found = regions.Find(impl->capturedRegion);
+            const std::optional<Layout::Region> region = found ? std::optional<Layout::Region>(*found) : std::nullopt;
+            const bool dragged = impl->dragging;
+            impl->dragging = false; impl->capturedRegion = 0;
+            if (dragged) FinishSlider();
+            if (GetCapture() == window) ReleaseCapture();
+            if (!dragged && region && region->enabled && region->id == id) Activate(*region);
             return true;
         }
+        if (impl->dirty && visible) Paint();
         return false;
+    }
+
+    void CardWindow::CancelPointer()
+    {
+        const bool dragged = impl->dragging;
+        impl->dragging = false; impl->capturedRegion = 0;
+        if (dragged) FinishSlider();
+        if (GetCapture() == window) ReleaseCapture();
+    }
+
+    void CardWindow::AcknowledgeSlider(const std::wstring& action)
+    {
+        if (impl->dragging || action != impl->sliderAction) return;
+        impl->sliderPendingUntil = 0; impl->sliderId = 0; impl->sliderAction.clear();
+        UpdateTimer();
     }
 
     void CardWindow::UpdateSlider(const Layout::Region& region, float ratio)
@@ -830,7 +882,7 @@ namespace Cards
         const ULONGLONG now = GetTickCount64();
         if (impl->lastSliderSent != 0 && now - impl->lastSliderSent < 120) return;
         impl->lastSliderSent = now;
-        host.OnRequest(region.action, std::to_wstring(ratio));
+        host.OnRequest(impl->sliderAction, std::to_wstring(ratio));
     }
 
     void CardWindow::FinishSlider()
@@ -838,10 +890,10 @@ namespace Cards
         if (impl->sliderId == 0) return;
         const std::wstring action = impl->sliderAction;
         const float ratio = impl->sliderRatio;
-        impl->sliderId = 0;
-        impl->sliderAction.clear();
         impl->lastSliderSent = 0;
+        impl->sliderPendingUntil = GetTickCount64() + 3000;
         if (!action.empty()) host.OnRequest(action, std::to_wstring(ratio));
+        UpdateTimer();
     }
 
     void CardWindow::OnMouseLeave()
@@ -871,8 +923,7 @@ namespace Cards
         UNREFERENCED_PARAMETER(shift);
         if (virtualKey == VK_ESCAPE)
         {
-            if (OnEscape()) return true;
-            host.OnHideCards(L"escape");
+            host.OnRequest(L"escape", L"");
             return true;
         }
         if (virtualKey == VK_TAB)
@@ -880,6 +931,7 @@ namespace Cards
             const auto* current = regions.Find(impl->focusedRegion);
             const auto* next = regions.NextFocus(current, (GetKeyState(VK_SHIFT) & 0x8000) ? -1 : 1);
             impl->focusedRegion = next ? next->id : 0;
+            accessibility.NotifyFocus(next);
             impl->dirty = true;
             if (visible) Paint();
             return true;
@@ -898,8 +950,16 @@ namespace Cards
             {
                 if (region->type == Layout::RegionType::Slider && region->enabled)
                 {
-                    const float step = (virtualKey == VK_LEFT ? -1.0f : 1.0f) * 0.05f;
-                    host.OnRequest(region->action + L".step", std::to_wstring(step));
+                    const auto copy = *region;
+                    double value = 0;
+                    if (copy.action == L"seek") value = snapshot.media.duration > 0 ? snapshot.media.position / snapshot.media.duration : 0;
+                    else
+                    {
+                        const auto& endpoints = copy.action == L"setVolume:input" ? snapshot.audio.inputs : snapshot.audio.outputs;
+                        for (const auto& endpoint : endpoints) if (endpoint.isDefault) value = endpoint.volume;
+                    }
+                    UpdateSlider(copy, static_cast<float>(std::clamp(value + (virtualKey == VK_LEFT ? -0.05 : 0.05), 0.0, 1.0)));
+                    FinishSlider();
                     return true;
                 }
             }

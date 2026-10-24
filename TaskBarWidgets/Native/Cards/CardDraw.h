@@ -38,7 +38,8 @@ namespace Cards::Draw
     // \`ellipsis\` clips with a trailing ellipsis when the text is too wide.
     void Text(ID2D1DeviceContext* context, Graphics& graphics, const std::wstring& value,
         const std::wstring& family, float size, int weight, Color color, D2D1_RECT_F rect,
-        DWRITE_TEXT_ALIGNMENT alignment = DWRITE_TEXT_ALIGNMENT_LEADING);
+        DWRITE_TEXT_ALIGNMENT alignment = DWRITE_TEXT_ALIGNMENT_LEADING,
+        bool italic = false, bool underline = false, bool strikeout = false);
     std::wstring Ellipsize(ID2D1DeviceContext* context, Graphics& graphics, const std::wstring& value,
         const std::wstring& family, float size, int weight, float maxWidth);
 
@@ -59,4 +60,9 @@ namespace Cards::Draw
     int AddText(Layout::Table& regions, int id, D2D1_RECT_F rect, const std::wstring& name);
 
     D2D1_RECT_F Rect(float left, float top, float right, float bottom);
+}
+
+namespace Cards::Paint
+{
+    float WeatherHeight(const Snapshot& snapshot, const CardEnvironment& environment, float widthDip);
 }

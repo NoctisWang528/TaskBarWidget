@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using TaskbarLyrics.Core.Utilities;
 using TaskbarLyrics.App;
+using TaskBarWidgets.Media.Diagnostics;
 
 namespace TaskBarWidgets.Media.Integration;
 
@@ -28,6 +29,7 @@ internal sealed class UiHostBridge : IAsyncDisposable
     // drops the coordinator's card visibility with it so a dead session can
     // never keep lyric work alive.
     internal event Action? CardLyricsReleased;
+    internal event Action<long>? ConnectionClosed;
     private readonly object _updateGate = new();
     private JsonElement? _pendingUpdate;
     private bool _sendingUpdate;
@@ -165,12 +167,16 @@ internal sealed class UiHostBridge : IAsyncDisposable
     private void OnConnectionChanged(bool connected, long generation)
     {
         if (connected) BeginConnection(generation);
-        else EndConnection(generation);
+        else
+        {
+            EndConnection(generation);
+            ConnectionClosed?.Invoke(generation);
+        }
     }
     // Health mode asks for the process without a settings command.
-    internal void StartOnDemand() => EnsureProcess();
+    internal void StartOnDemand() => EnsureProcess(healthOnly: true);
 
-    private void EnsureProcess()
+    private void EnsureProcess(bool healthOnly = false)
     {
         if (_disposed || _process is { HasExited: false }) return;
         _process?.Dispose();
@@ -189,6 +195,7 @@ internal sealed class UiHostBridge : IAsyncDisposable
             start.Environment.Remove(key);
         start.ArgumentList.Add("--host-pid"); start.ArgumentList.Add(Environment.ProcessId.ToString());
         start.ArgumentList.Add("--pipe-name"); start.ArgumentList.Add(_name);
+        if (healthOnly) start.ArgumentList.Add("--health-probe");
         _process = Process.Start(start) ?? throw new IOException("WinUI 界面未能启动。");
         var launched = _process;
         launched.EnableRaisingEvents = true;
@@ -228,6 +235,8 @@ internal sealed class UiHostBridge : IAsyncDisposable
     }
     private void RecordTiming(UiRequestTiming timing)
     {
+        // Counted before the existing log throttling so every getState is measured.
+        if (timing.Action == "getState") FootprintMetrics.NoteStateTiming(timing.OperationMilliseconds);
         if ((timing.Action is "getAudio" or "getState") && timing.QueueMilliseconds + timing.OperationMilliseconds < 100 && Interlocked.Increment(ref _pollLogs) > 4) return;
         if (Volatile.Read(ref _timingLogs) >= 128 || Interlocked.Increment(ref _timingLogs) > 128) return;
         Log.Diagnostic("UIREQUEST", $"action={timing.Action} lane={timing.Lane} queueMs={timing.QueueMilliseconds:F1} operationMs={timing.OperationMilliseconds:F1} outcome={timing.Outcome}");

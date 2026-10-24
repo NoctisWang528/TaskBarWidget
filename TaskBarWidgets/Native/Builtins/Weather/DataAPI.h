@@ -57,6 +57,12 @@ struct WeatherAirQuality
     std::wstring PM2p5;
     std::wstring PM10;
     std::wstring PublishTime;
+    std::wstring IndexCode;
+    std::wstring IndexName;
+    std::wstring PM2p5Unit;
+    std::wstring PM10Unit;
+    std::wstring Error;
+    std::wstring Attribution;
 };
 
 struct WeatherAlert
@@ -76,6 +82,8 @@ struct WeatherDetails
     std::vector<WeatherForecastDay> Forecast;
     WeatherAirQuality AirQuality;
     std::vector<WeatherAlert> Alerts;
+    std::wstring AlertsError;
+    std::wstring AlertsAttribution;
 };
 
 namespace WeatherCondition

@@ -1,6 +1,6 @@
 # 验收状态
 
-更新：2026-10-21。最近成功完整构建的路径由本机 `artifacts/latest-build.txt` 提供；构建产物、布局检查图、日志和用户配置不提交到仓库。
+更新：2026-10-24。最近成功完整构建的路径由本机 `artifacts/latest-build.txt` 提供；构建产物、布局检查图、日志和用户配置不提交到仓库。
 
 ## 卡片迁入原生进程（分支 dsh/CardDrawingRebuild，2026-10-24）
 
@@ -12,6 +12,189 @@
 
 **待桌面验收。** 本轮没有启动产品：明暗 Mica 观感、四张卡与更新卡的实际排布、设备／来源菜单、歌词扫描与换行过渡、滑块拖动、外部点击收起、设置关闭退出进程，以及混合 DPI、真实音频与播放器、高对比度与减少动画，都仍需在真实桌面确认。UI Automation 已实现但未经屏幕阅读器验证；封面淡出与光晕模糊的像素观感同样待实屏确认。
 
+## 天气统一保存与来源显示（2026-10-24）
+
+用户更正账户 Host 后确认上一版天气功能正常。本轮将来源、城市及连接草稿纳入顶部“应用更改”：先验证并保存连接，再保存城市或来源，失败保留输入；普通设置保存不再重建天气编辑器而丢失天气状态。待保存判断使用实际差异，撤销编辑后不再因历史编辑标记一直显示未保存。卡片将和风返回的归因页裸 URL 显示为“和风天气 · 数据来源”两个可访问链接，其他来源文字保留。
+
+完整硬件 Release `261024-1906`（`artifacts/builds/20261024-190642`）编译通过，WinUI 发布资源及共享运行库布局检查通过。使用从产品源码提取的实际天气草稿方法，在当前 PowerShell 进程的托管模拟环境中检查连接验证失败保留输入、连接先于城市保存、不兼容城市阻止来源切换、隐藏连接输入不阻止切换中国天气网，以及城市已保存但刷新失败的错误处理，均通过。现有 WinUI 回归增加顶部按钮与来源命名链接场景并参与编译；遵守用户不启动软件的要求，没有运行产品、离屏探针或测试可执行程序，真实窗口交互仍待用户验收。没有修改用户 Host、Key、安装或网络配置。
+
+## 撤销 API Host 硬编码误拦截（2026-10-24）
+
+用户确认使用账户自己的 API Host 后，发现 `261024-1750` 会在真实请求发出前将一个固定域名判定为文档示例。这是本地硬编码判断错误，不能根据域名与文档内容相同推断账户归属。现已移除该判断，仅保留 HTTPS、域名格式及 qweatherapi.com 边界校验；连接与鉴权以真实服务响应为准。设置说明、协议和合成回归同步更正，不再把硬编码拒绝当作正确行为。
+
+用户已明确要求不要启动软件或测试探针。本次只进行静态检查、编译和包内容校验，不运行产品、原生测试程序或离屏探针，不更改个人配置。用户随后授权撤回 `261024-1750` 并重新发布修正版；旧 Release 转为草稿停止公开分发，保留原标签和提交历史。下文 `261024-1750` 的示例 Host 拦截描述为历史错误行为，已由本节修正，不能作为 Host 无效的证据。
+
+编译结果：完整 Release `261024-1816`（`artifacts/builds/20261024-181609`）通过；修改后的原生回归源码仅编译为对象文件，未链接或启动测试程序。回归已改为允许格式合法的不同自定义 Host 通过合成请求完成搜索、刷新与保存，但本次未运行回归或实际接口，不能宣称网络功能已验收。
+
+重新发行：修正提交 `b5c1bd1` 由合并提交 `7261ccf` 合入主分支，完整硬件 Release `261024-1820`（`artifacts/builds/20261024-182050`）编译成功。根据用户明确要求，本轮没有执行产品、测试程序或探针；分发前只检查清单、哈希、包内容以及受信任托管校验器的解包逻辑，上传草稿后下载附件复核，再发布新版。旧版 `261024-1750` 保留为草稿，标签和提交历史不删除；新版说明延续上一版用户可见变更，移除失效的示例地址拦截描述，不新增本次错误修复条目。
+
+## 和风修复合入与发行构建（2026-10-24）
+
+`codex/qweather-transport-aqi` 的连接诊断与空气质量改动已由提交 `18e1324` 合入主分支，合并提交为 `7aa705e`。主分支完整硬件 Release 为 `261024-1750`（`artifacts/builds/20261024-175033`）。天气服务回归、真实 WinHTTP 回环、原生状态／布局／管道回归、内置模块启动、最终包 WinUI 离屏与组件、共享运行库及缺失／错误版本诊断均通过；离屏窗口未激活。
+
+发行采用干净提交来源，打包和草稿附件下载后均使用已发布旧版 `261023-1616` 的完整包校验器检查更新兼容性，并使用隔离更新器夹具检查完整清单预检；相关报告保存在本机 `artifacts/package-checks/`、`artifacts/updater-tests/` 和发行附件下载目录中。未使用个人 API Key 请求真实服务，未启动或替换日常安装，实际账户权限与地理覆盖、桌面指针交互和混合 DPI 的限制沿用下节说明。
+
+## 和风连接诊断与空气质量 v1（2026-10-24）
+
+连接验证、搜索与刷新统一拒绝官方文档中的完整示例 Host，提示从账户控制台复制专属地址；不按后缀推测或修改用户配置。连接失败在实际 WinHTTP 调用处保留错误及阶段，非成功 HTTP 响应仅在固定长度内读取，并按已知和风错误类型映射安全提示。共享连接、鉴权与账户错误终止本轮后续请求；不把 HTTP 200 后的断流当作完整成功，也不显示上游任意标题、正文或凭据。
+
+空气质量迁移至 `/airquality/v1/current/{latitude}/{longitude}`，与预警每轮共享一次坐标解析；显式经纬度直接使用，GeoAPI 不跨轮缓存。优先中国标准 `cn-mee`，其次其他本地标准，最后 QAQI；展示 `aqiDisplay` 与实际标准，污染物浓度保留有效零值和单位，缺失不补零，不编造观测时间。空气质量失败只保留同地点上次数据并显示独立警告，切换地点或关闭时清空，归因与预警归因合并去重显示。
+
+验证：完整硬件 Release `261024-1745`（`artifacts/builds/20261024-174502`）、`Native/tests/run-weather-service-tests.ps1`、`Native/tests/run-weather-http-tests.ps1` 和最终包 `scripts/validate-winui.ps1` 均通过。天气服务回归包括示例地址不联网、错误正文不透出密钥、共享故障短路、实况成功后预报阶段共享故障仍报告失败、v1 空气质量映射及恢复。回环测试不替换传输函数，实际验证 Gzip、非成功 HTTP、跳转禁用、断流、超时与响应上限，不涉及真实账户或系统代理/证书变更。WinUI 合成探针验证标准、单位、零值、归因去重、失败警告和连接输入保留；深浅主题截图已检查。完整构建仍有未改动模块的既有警告。
+
+限制：回环证明能够识别超时和限制响应体读取总时长，不代表严格三秒端到端超时保证；Windows WinHTTP 的重试及时序存在变化。离屏窗口无法把投递的鼠标消息提升成真实指针事件，因此没有实际拖动验收。Claude Code 独立复核触及预设预算后停止，未形成最终结论，不作为通过证据；编译、回归和差异检查由主代理完成。
+
+实际接口验收仍需用户在设置里填写账户控制台分配的专属 Host，再验证连接、搜索江宁并刷新。合成及回环测试不证明真实账户权限、额度或预警地理覆盖。用户已授权将本次改动合入主分支、重新完整构建、提交、推送并发布干净 Release；不启动正常产品，不替换日常安装。正式发行先上传草稿附件，再用下载后的附件与旧版完整校验器检查通过后发布。
+
+## 天气与单曲偏移修复合并发布（2026-10-23）
+
+`codex/weather-alert-flow` 和 `codex/fix-offset-page-refresh` 已合入主分支。单曲偏移页面收到数据后仅更新当前歌曲与历史列表，保留分组、搜索控件和未提交输入，不再重建整页或重复播放入场动画。
+
+合并后的完整硬件 Release 为 `261023-1616`（`artifacts/builds/20261023-161623`）。天气原生回归、原生状态／布局／管道／离屏渲染回归、内置模块启动、最终包 WinUI 离屏模板与组件、共享运行库及缺失／错误版本诊断均通过。单曲偏移探针确认初次仅构建一次页面，回包不重建，搜索与当前歌曲草稿保留，过期响应被忽略；天气探针覆盖预警失败提示、归因与来源草稿。深浅主题天气卡离屏图片已检查。
+
+本机 .NET 通用测试宿主在监听父进程退出时抛出 `Win32Exception (5): Access denied`；歌词与媒体测试分别重试后仍在执行测试前中止，因此本轮不能宣称这两套 .NET 单元测试通过。相关日志保留在 `artifacts/logs/`。上述原生回归和 WinUI 组件探针正常执行并通过。
+
+本轮没有启动正常产品、替换日常安装或使用个人密钥请求真实接口。实际桌面观感、真实 API 权限与地理覆盖、Explorer 和混合 DPI 验收仍待确认。
+
+## 和风天气预警与来源切换流程（2026-10-23）
+
+和风预警改用 `/weatheralert/v1/current/{latitude}/{longitude}`：Location ID 通过 GeoAPI 获取坐标，经纬度位置直接沿用输入坐标，统一按接口要求保留两位小数。新响应校验 `metadata.zeroResult` 和 `alerts`，映射事件、颜色级别、正文与时间，排除撤销通知，并显示返回的归因信息。
+
+两种天气来源都通过独立的 `details.alertsError` 报告预警失败；天气主体仍可正常刷新，但设置提示使用警告状态，卡片显示失败原因。仅同一城市保留上次预警并标明可能过时，成功空结果清除旧预警和错误。中国天气网缺少预警数组的响应不再被当成成功空结果。
+
+和风连接保存前通过 GeoAPI 验证候选 Host/Key，失败不覆盖连接配置。设置区分当前生效来源和草稿，提供明确的“切换来源并刷新”；来源、城市或可见的连接草稿未提交时禁止刷新旧选择。刷新成功提示包含实际来源和城市，连接验证成功不表示来源已切换。清除密钥不验证连接，也不提交或丢弃未保存的 Host 草稿。
+
+验证：完整硬件 Release `261023-1609`（`artifacts/builds/20261023-160940`）、`Native/tests/run-weather-service-tests.ps1` 和最终包 `scripts/validate-winui.ps1` 均通过。原生合成响应覆盖新接口、取消通知、坐标顺序、错误保留/恢复、空结果与无效坐标；WinUI 合成探针覆盖来源草稿、切换、连接验证失败、未保存连接与独立预警错误提示。深浅主题天气卡和空状态的离屏图片已检查。完整构建仍包含未改动模块的既有编译警告。
+
+限制：没有使用个人 API Key 请求真实天气，没有启动正常产品或替换日常安装；真实接口权限、江宁/海区预警的地理覆盖、实际桌面交互和混合 DPI 验收仍待进行。用户于本日授权将天气与单曲偏移修复合入主分支，构建、提交、推送、发布干净 ZIP，并清理对应工作树。
+
+## 任务栏浏览器媒体两行文字底部截断修复（2026-10-23）
+
+用户截图里任务栏浏览器媒体的标题与歌手／来源行字底被削平。原因是 `PaintBrowser` 把字号当成了裁剪高度：DirectWrite 的行框比字号高约三分之一，`DrawBrowserText` 的裁剪底边落在字号处，正好切掉每行文字的下沿；第二行又按标题字号而不是真实行高堆叠，两行在竖直方向上互相压住。
+
+- [NativeMediaPainter.h:238-242](Native/TrafficMonitor/NativeMediaPainter.h) 把原本的 `height` 参数改名为 `lineHeight`，并新增 `MeasureBrowserLine`：取受限文本布局的 `DWRITE_TEXT_METRICS.height`，取不到时退回自然行高，且不小于字号。这与封面占位字母按行高居中的既有做法（[NativeMediaPainter.cpp:680-684](Native/TrafficMonitor/NativeMediaPainter.cpp)）一致。
+- [NativeMediaPainter.cpp:760-779](Native/TrafficMonitor/NativeMediaPainter.cpp) 先量出标题行与第二行的行框高度，再按两者之和在按钮区左侧的 metadata 矩形里垂直居中；第二行从 `titleTop + titleHeight` 起画，不再按字号堆叠。字号、字重、颜色、省略号截断和按钮命中区域都没有变化。
+- [NativeMediaPainter.cpp:729-745](Native/TrafficMonitor/NativeMediaPainter.cpp) 的裁剪矩形改为行框高度，绘制仍在这一处轴对齐裁剪内完成。
+
+回归：[NativeMediaOffscreenTests.cpp:151-171](Native/tests/NativeMediaOffscreenTests.cpp) 新增按亮度找最低墨迹行的助手（背景层不透明，靠 alpha 判断没有意义）；[NativeMediaOffscreenTests.cpp:476-494](Native/tests/NativeMediaOffscreenTests.cpp) 用 `Fixture artist` 与带下伸字母的 `Fixture artist gyp` 各渲染一次，要求后者的墨迹底行更低。把裁剪高度改回字号做反向验证时该断言失败（`Browser metadata descenders are not clipped.`），修复后通过。
+
+验证：完整硬件 Release 构建 `artifacts/builds/20261023-152142`（版本 `261023-1521`）通过；`Native/tests/run-native-tests.ps1` 全部通过，含本次新增的离屏断言（离屏图 `Native\Bin\Tests\Offscreen\browser-controls.png` 与 `browser-metadata.png`）；`tests/Media.Tests` 311/311 通过。
+
+未验证：真机任务栏上的浏览器媒体、混合 DPI、不同字号与系统字体回退时的两行排版和按钮对齐——按项目规则没有启动日常安装或正常产品。`scripts/verify.ps1` 在本机 `tests/Lyrics.Core.Tests` 有 9 个与本改动无关的既有失败（`LyricPipelineCacheTests` 在数据根未配置时触发静态构造异常，`DataLayoutTests.MigrationRejectsInvalidJsonWithoutCommitting` 期望 `JsonException` 精确类型而实际抛出派生类型 `JsonReaderException`）；原生与 Media 测试均通过。
+
+## 天气卡空状态刷新入口（2026-10-23）
+
+天气来源没有返回完整数据时，卡片正文会整体换成空状态；此前空状态只有一段错误说明，用户没有任何重试动作。现在空状态在说明文字下始终提供与左栏相同的“刷新天气”按钮；没有城市时继续保留原有的“打开天气设置”，因为它仍是那时唯一有用的入口。
+
+- [UI/Cards/WeatherCard.cs:522-536](UI/Cards/WeatherCard.cs) 新增两个助手：`SetWeatherRefreshEnabled(bool enabled)` 同时驱动左栏与空状态两个刷新按钮，`SetWeatherStatus(string text)` 在空状态可见时把进度与失败同步写进空状态文案，避免在空状态点刷新后看不见任何反馈；空状态是否显示设置入口沿用原有 `hasCity` 判断（`:353`）。
+- 同一文件 `:241-242` 把两个入口放进左对齐的水平 `StackPanel`（间距 8），`:247-281` 的刷新流程与 `:286-310` 的读取流程改走上述助手；刷新失败只更新文案，不清空已经渲染的数据。
+- 探针回归 [UI/Cards/WeatherCardProbe.cs:196-230](UI/Cards/WeatherCardProbe.cs) 用 `revision = 48` 的不完整快照（`state = "error"`、文案“中国天气网未返回完整的天气数据。”、城市南京、`details.current` 为空）断言空状态可见、文案来自提供方、刷新按钮可见且启用、设置入口折叠，并用 `TransformToVisual` 断言按钮实际尺寸大于零且不越出卡片边界（离屏图片 `ui-weather-check/weather-card-empty.png` 另行人工核对）；随后通过 `ButtonAutomationPeer` + `IInvokeProvider` 真实点击，断言空状态出现“天气刷新失败：”且按钮重新启用。探针没有媒体后端，因此这条路径必然以失败收尾，正是需要验证的分支。
+- [scripts/test-ui-templates.ps1:93-99](scripts/test-ui-templates.ps1) 把 `emptyStateRefresh` 加进 `weatherCardControls` 的必过条件；[docs/界面统一方案.md:53](docs/界面统一方案.md) 补充空状态行为描述。
+
+验证：完整硬件 Release 构建 `artifacts/builds/20261023-140023`（版本 `261023-1400`）通过，边界检查 289 个字面输入，原生、Media、UI 三处构建均为 0 warning／0 error，共享 .NET／Windows App Runtime 布局检查通过。对最终发布目录运行 `scripts/validate-winui.ps1`：五个界面表面离屏加载成功且未激活窗口，`weatherCardControls.emptyStateRefresh` 为 `true`，空状态、深色与浅色三张离屏图片均生成且非空，探针未访问真实网络。
+
+未验证：正常产品里对真实中国天气网刷新失败的可见反馈、任务栏卡片上真实鼠标点击空状态按钮、混合 DPI 与多显示器下的空状态排版。按项目规则没有启动日常安装或正常产品，上述仍按桌面验收处理。
+
+## 单目录数据布局与迁移阶段（2026-10-22）
+
+本轮将产品运行数据统一到 `<安装目录>\Data`，删除了 `global_cfg.ini` 模式读取和 AppData 回退。原生启动顺序现在是：验证 `Data` 路径与可写性 → 同步调用 `Media\TaskBarWidgets.Media.exe --migrate-data <安装目录>\Data` → 播种缺失的出厂文件 → 加载主配置和内置模块 → 启动媒体常驻进程。迁移失败不会加载旧配置或启动媒体。
+
+配置仍按写入者分文件：`Data/config/app.ini`、`battery.ini`、`power.ini`、`weather.ini`、`media.json`；不可重建歌词数据在 `Data/lyrics/`，可重建缓存在 `Data/cache/lyrics/`。天气 AppKey 以当前用户 DPAPI 密文保存到 `Data/secrets/weather-appkey.bin`，活动 `weather.ini` 不保留 AppKey。原生与媒体端的密钥信封、UTF-16 明文和 Base64 编码已做双向兼容；旧 UTF-8 密文也会尝试读取。
+
+迁移使用 staging、来源优先级和原子提交：目标现有文件优先，绝不覆盖；所有 JSON、INI、流量结构和 SQLite `integrity_check` 通过后才移动 staging 到目标，冲突及旧来源归档到 `Data/migration/archive/<UTC时间>/`，只保留最近一次归档。锁定文件不能删除时保留源文件并记录警告，不把已成功的新数据错误回滚。备份包含配置、历史、歌词不可重建数据、`layout.json` 和 DPAPI 密文，排除缓存、日志、归档和 SQLite 侧车；恢复会再次校验清单/哈希，生成 `pre-restore-latest.zip`，并在冷启动失败时回滚本次覆盖。
+
+验证证据：完整硬件 Release 构建 `artifacts/builds/20261022-194522`（版本 `261022-1945`）通过，`Lyrics.Core`、`Media`、`UI` 和两个测试项目均为 0 warning／0 error。`run-native-tests.ps1`、`run-builtin-startup-test.ps1`、`run-weather-service-tests.ps1`、`run-update-health-tests.ps1`、出厂默认、默认播种、历史导入、数据快照和旧构建退休回归均通过。独立数据布局探针覆盖当前便携 `Data/database` 迁移、AppData 优先级、锁定源文件归档、活动天气 INI 清洗、SQLite 校验、二次恢复、恢复前快照和 SQLite WAL/SHM 清理；原生与 C# 的 DPAPI 文件此前已完成双向读取。更新健康测试新增旧版协议 1 作业兼容，覆盖 `261022-1616` 客户端发起的跨版本升级、已回滚作业不阻塞启动和仍处于安装中的作业继续触发恢复保护。`test-ui-templates.ps1` 对 `20261022-194522` 通过，设置页与四张卡片正常加载且未激活窗口；离屏 HWND 未把投递的鼠标消息提升为 `PointerPressed`，因此真实拖动仍未验证。独立更新器 `test-updater.ps1 -SkipBuild` 在当前机器无子进程输出并挂起，已中止；实际发布 ZIP 的完整解压、持久化阶段和更新器预检通过。
+
+本地发布包验证（未发布）：完整解压、持久化阶段和更新器预检通过；ZIP 为 160 个条目、159 个程序文件，`Data`、`secrets`、`logs`、`migration`、`backups` 均为 0。具体本地路径与 SHA256见本轮任务结果。`dotnet test` 在当前机器启动 Testhost 时因 `OpenProcess` 返回 `Win32Exception (5) 拒绝访问` 中止，属于本机进程权限环境阻断，未观察到测试断言失败。
+
+未验证：真实用户 AppData 的完整归档耗时、日用安装升级后的首次迁移、跨用户/跨机器 DPAPI 失败、桌面备份/恢复按钮、卸载/启动登记、多显示器混合 DPI 和真实播放器；这些仍按桌面验收处理，不把离屏或夹具通过当成完成。兼容修复没有启动日常安装执行第二次真实更新；本地安装仍保留旧版，最终更新链路由用户下次确认更新时完成。
+
+## 资源占用优化阶段 5：UI 管道对端校验（2026-10-22）
+
+OPT-009 单独提交落地，构建 `artifacts/builds/20261022-134854`。
+
+- 校验只作用于 UI 桥管道 `TaskBarWidgets.UI.{mediaPid}`：[Media/Integration/MediaPipeServer.cs:40-49](Media/Integration/MediaPipeServer.cs) 推导期望对端为 `../UI/TaskBarWidgets.UI.exe`，`:76-81` 在握手与 generation 自增前调用 `AcceptClient`；`:124-157` 决定放行／拒绝。原生宿主管道 `TaskBarWidgets.{nativePid}` 的客户端是原生 exe，统一按 UI 校验会全部拒绝，故保持 `CurrentUserOnly` 并记一次 `skip/no-expected-peer`。
+- 对端路径经 `GetNamedPipeClientProcessId` + `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` + `QueryFullProcessImageName` 获取（`:161-197`），比较时大小写不敏感、归一尾分隔符并展开 8.3 短名（`:245-285`）；失败按 stage 打标，日志不含路径。
+- 拒绝发生在 generation 自增前，不握手、不发帧、不触发 `_connectionChanged`；客户端首读 EOF，UI 500 ms 重连接管，协议版本与重连语义未变。
+- 回退边界：同级 UI exe 缺失时 fail-open（记 `event=fallback`）；测试进程自连记 `skip/self-connection`。
+
+验证：完整硬件 Release 构建 `artifacts/builds/20261022-134854` 通过；`tests/Media.Tests` 310/310（新增 `PipePeerTests` 7 测试／13 用例）。
+
+未验证：真实第三方进程在断线窗口内连接 UI 桥管道 `TaskBarWidgets.UI.{mediaPid}` 被拒、被拒后 UI 重连时序、更新器替换 UI exe 期间的连接。残留缺口：原生宿主管道 `TaskBarWidgets.{nativePid}` 仅 `CurrentUserOnly`、无对端校验，断线窗口内同用户进程可占槽收发；对端路径比较不解析重解析点（目录 junction／8.3 短名可使 `QueryFullProcessImageName` 呈现期望路径字符串），同用户威胁模型内仅纵深价值；非标准发布布局会被拒；拒绝日志未限流。
+
+## 资源占用优化阶段 4：Native 失败归因与任务栏刷新计数（2026-10-22）
+
+OPT-005／OPT-006 单独提交落地，构建 `artifacts/builds/20261022-134854`。
+
+- OPT-006 只加证据不改行为：[NativeMediaRenderer.h:60-84](Native/TrafficMonitor/NativeMediaRenderer.h) 新增 `FailureOp` 枚举，[NativeMediaRenderer.cpp:278-307](Native/TrafficMonitor/NativeMediaRenderer.cpp) 的 `RecordFailure` 以"操作名＋HRESULT"5 s 去重并累计 `failedOps`／`suppressedOps`；`FailureContext()`（`:310-322`）只在写日志时构造，一次日志带操作名、HRESULT、交换链尺寸、buffer 数与 `targetBound`。`IsDeviceLostResult` 仍未收录 `DXGI_ERROR_INVALID_CALL`，`Fail` 仍不排重试。
+- 失败点补操作名（`CreateD3DDevice`／`ResizeBuffers`／`AcquireBuffer`／`CreateTargetBitmap`／`Draw`／`Present`／`SetContent`／`AddVisual` 等），`ApplyVisualTree` 的 `SetRoot`／`Commit` 失败计 `silentOps`，调用序列不变；`HandleDeviceLost`（`:1540-1558`）的判定与重试顺序不变。
+- OPT-005 归因：[NativeMediaHost.cpp:1440-1495](Native/TrafficMonitor/NativeMediaHost.cpp) 的 `native-metrics.log` 行追加 `deviceLost`／`invalidCall`／`failedOps`／`suppressedOps`／`silentOps`／`lastFailureHr`／`lastFailureOp`／`lastFailureWidth`／`Height`／`Buffers`／`TargetBound` 与任务栏 `invalidates`／`adjustRectChanged`；后者由 [TrafficMonitorDlg.cpp:1835-1848](Native/TrafficMonitor/TrafficMonitorDlg.cpp) 在 `AdjustWindowPos` 前后各取一次窗口矩形得出。
+- 本轮未调整任何节拍：三个定时器与 2 秒兜底发现机制原样保留。
+
+验证：完整硬件 Release 构建 `artifacts/builds/20261022-134854` 通过；`Native/tests/run-native-tests.ps1` 全部通过（含 `NativeMediaRendererLifecycleTests`、`CompositionResizeTests`、`NativePipeTransportTests` PASS A–E）；`scripts/measure-footprint.ps1` 已把新累计字段加入计数器键表。
+
+未验证：`0x887A0001` 的真实来源仍未定位（需真机出现时读 `native-metrics.log`）；100 ms 任务栏刷新与 1 s 主定时器能否降频尚未量化；`m_diagnostic` 只在真正写日志时更新，去重窗口内的重复失败不刷新诊断文本。
+
+## 资源占用优化阶段 3：UI 常驻资源边界（2026-10-22）
+
+OPT-003 单独提交落地，构建 `artifacts/builds/20261022-134854`。
+
+- 释放门槛改为"资源类型＋隐藏时长"：[UI/CardGroup.cs:1226-1252](UI/CardGroup.cs) 只判 `_disposed || _visible || _residentResourcesReleased`，Resident 模式隐藏满 10 分钟（`:117`）同样释放；不足 10 分钟则按剩余时间重新武装单发定时器（`:1254-1260`）。
+- `_idleReleaseTimer` 由 30 s 周期改为 10 分钟单发（`:165-171`），打开时 `Stop()`（`:346`）、隐藏时交由释放判定决定是否武装（`:407`），Resident 下定时器空转消失。
+- 释放集合按优先级重排：保留 `_cover.Source`（当前曲目封面位图），释放歌词排版、来源图标位图与缓存并置 `_forceArtworkSync`；删除原 `_cover.Source = null`／`_lastCover = null`，避免首开重新解码并闪空白帧。
+- 设置页关闭释放内容树：[UI/SettingsWindow.cs:306-359](UI/SettingsWindow.cs) 两个静默关闭分支统一 `CloseToHiddenWindow()`，`Hide()` 后 `ReleasePageContent()`（`:363-388`）清空页面子树并置空预览面，保留窗口壳；有未应用草稿时跳过。重建走 `Activated`／`ShowPage` → `RenderPage()`（`:183-189`、`:654-660`）。
+- 日志：`resident-resources-released reason=idle-hidden mode=… hiddenS=… elapsedMs=…`、`settings-content-released`、`settings-shown reused=`（[UI/App.xaml.cs:234-251](UI/App.xaml.cs)）。
+
+验证：完整硬件 Release 构建 `artifacts/builds/20261022-134854` 通过；`scripts/validate-winui.ps1` 通过（含"关闭后仍是隐藏窗口"的模板断言）；`dotnet build` UI 项目 0 warning 0 error。
+
+未验证（桌面验收）：隐藏 10 分钟后首次打开的 p50／p95 与内存回落幅度；关闭瞬间在途 `SaveAsync` 的 `finally → RenderPage()` 是否把树重建回隐藏窗口；清空焦点控件后的焦点回落；更新卡与真实换曲路径。
+
+## 资源占用优化阶段 2：频谱分配（2026-10-22）
+
+OPT-004 单独提交落地，构建 `artifacts/builds/20261022-134854`。
+
+- [Media/SystemAudioSpectrumService.cs:156-228](Media/SystemAudioSpectrumService.cs) 的 `GetSpectrum` 改为每帧从 `_idleScratch` 租借 scratch 缓冲（`Interlocked.Exchange` 取、`finally` 归还），`SpectrumScratch`（`:756-802`）仅在声道数或采样窗变化时重建；`powers`／`real`／`imaginary`／`magnitudes`／`bars` 全部复用到一次性分配的缓冲里。
+- 整帧只在第一段 `lock (_sync)` 内捕获一次 `_tuningSettings` 引用（`:172`），删掉每次 `GetSpectrum` 的 `Clone()`；`ApplyTuning` 仍是"先 Clone 再整体替换引用"，语义不变。
+- Hann 窗按长度缓存在静态 `ConcurrentDictionary<int, double[]>`（`:28`、`:582-592`），不再逐样本重算余弦。
+- 输出仍 `Clone()` 一次（`:222`），因为 `MediaCoordinator.cs:621` 会把数组跨帧保留。
+
+收益（分配器口径折算，**非**桌面复测；2 声道、2048 窗、32 bars，对象头 24 B、double 8 B/元素、float 4 B/元素）：每帧分配 `samples` 40 B＋每声道 `float[2048]` ×2 共 16,432 B＋`powers` `double[1025]` 8,224 B＋两声道 `real`／`imaginary` `double[2048]` ×4 共 65,632 B＋`magnitudes` `float[1025]` 4,124 B＋输出 `bars` `float[32]` 152 B＋调参 `Clone()` 196 B＝94,800 B → 152 B（62.5 fps 时约 5.65 MiB/s → 9.3 KiB/s）；形状变化才付一次约 61.8 KB（61,788 B）的 scratch 重建。
+
+验证：完整硬件 Release 构建 `artifacts/builds/20261022-134854` 通过；`tests/Media.Tests` 310/310（新增 `SpectrumSignalTests` 5 项：逐帧对照新实例、同输入两次一致、声道形状变化、窗口长度切换、返回数组归调用方）；`Native/tests/run-native-tests.ps1` 全部通过。
+
+未验证：真实设备切换、系统音频授权后首次起采、静音／停止播放的节拍与听感未做桌面复测；分配数字来自 `GC.GetTotalAllocatedBytes`，不含原生侧分配。
+
+## 资源占用优化阶段 1：封面与状态增量（2026-10-22）
+
+OPT-001／OPT-002／OPT-007／OPT-008 一次提交落地，构建 `artifacts/builds/20261022-131902`。
+
+- OPT-001 Native 封面按显示尺寸解码：`PrepareCover` 改收 `coverEdgePx`（[NativeMediaPainter.h:105](Native/TrafficMonitor/NativeMediaPainter.h)），解码边取 `m_effectiveStyle.coverSizePx`（物理像素），由 [NativeMediaRenderer.cpp:847-850](Native/TrafficMonitor/NativeMediaRenderer.cpp)／`:951-953` 传入；[NativeMediaPainter.cpp:948-1023](Native/TrafficMonitor/NativeMediaPainter.cpp) 的 `DecodeBitmap` 只在源图更大时用 `IWICBitmapScaler`（`HighQualityCubic`）等比缩小，2048 边／4 MPx 拒绝原样保留；缓存键混入解码边长（`:844-850`），淘汰由"最多 4 条"改为 4 MiB 字节预算（`:864-882`）。
+- OPT-002 `getState` 增量：新增 [Media/Integration/ArtworkDeltaState.cs](Media/Integration/ArtworkDeltaState.cs)，[Media/App.xaml.cs:199-230](Media/App.xaml.cs) 按连接 generation 省略未变的 `coverDataUrl` 与 `sources[].iconDataUrl`；新连接与不声明 `artworkDelta` 的客户端仍收全量，旧客户端不会因缺字段清空封面。[UI/CardGroup.cs:773](UI/CardGroup.cs) 声明 delta，`:836-839` 与 `:1252` 把缺失字段当"未变"，本地释放资源后 `:1232` 强制一次全量。
+- OPT-007 隐私：[NativeMediaHost.cpp:34-49](Native/TrafficMonitor/NativeMediaHost.cpp) 用 FNV-1a 64 `TrackHash64` 替代 `trackId` 全文，`:946-958` 只写长度与哈希标记；日志不再含标题或艺人。
+- OPT-008：删除 `MediaCoordinator.CreateCover()`、`_coverBitmap` 与 `MediaControlState.Cover`（无消费者的检索证据见[方案 §5](docs/2026-10-22-资源占用优化方案.md)）。
+
+收益（折算自阶段 0 实测口径，**非**本轮实测）：`getState` 稳态不再发送约 88 KB 图标 + 5.3 KB 封面（卡片可见时 2.34 次/s ≈ 0.28 MB/s 管道字节）；Native 单张封面 360,000 B → 34×34×4 = 4,624 B（100% DPI，200% 为 18,496 B）；封面缓存上限从 4 条 × 2048² × 4 B 的理论 64 MiB 收到 4 MiB 硬预算。
+
+验证：完整硬件 Release 构建 `artifacts/builds/20261022-131902` 通过；`tests/Media.Tests` 292/292（新增 `ArtworkDeltaTests` 5 项）；`Native/tests/run-native-tests.ps1` 全部通过（含新增缩放／缓存键断言 [NativeMediaOffscreenTests.cpp:321-343](Native/tests/NativeMediaOffscreenTests.cpp)）；`scripts/validate-winui.ps1` 通过。
+
+未验证：本轮未做桌面复测（用户选择先提交、复测留到桌面验收）。换曲 20 次后的 PWS/Commit 斜率、100% 以外 DPI 的重解码与交叉淡入、索引色 GIF/BMP 的缩放回退、任务栏很窄时 `min(coverSizePx, shellWidth)` 的多余解码、`appIcon` 透明边在 `HighQualityCubic` 下的暗边、重连后封面正确性（仅单元测试覆盖）均未在桌面确认。
+
+## 资源占用优化阶段 0：测量仪表与基线（2026-10-22）
+
+Optimization 分支的阶段 0 只加观察能力，不改产品行为：新增外部采样脚本与三进程内建计数，用于后续 OPT 编号工作项的 Δ 与斜率判据。
+
+- 新增 [scripts/measure-footprint.ps1](scripts/measure-footprint.ps1)：按固定 1 s × 60 s 窗口对 `TaskBarWidgets`、`TaskBarWidgets.Media`、`TaskBarWidgets.UI` 采集 Working Set、Private Working Set、Commit、线程数、句柄数与 CPU 时间增量，输出首末值、Δ、均值与最小二乘斜率，并解析三进程的内建计数行；产物写入忽略目录 `artifacts/measurements/`。默认拒绝采样路径不在目标构建目录内的进程，避免把日常安装当成基线。
+- Private Working Set 改走 PDH `\Process(*)\Working Set - Private`（按 `ID Process` 关联 PID）。`QueryWorkingSetEx` 在本机对 explorer 与自身进程都返回成功但缓冲区全 0，已弃用；实测 explorer 339.3 MB / 97.3 MB、当前 shell 163 MB / 70.7 MB 与任务管理器一致。
+- Media 内建计数（`Media/Diagnostics/FootprintMetrics.cs`，5 s 一行 `[METRICS]`）：每秒分配字节、gen0/1/2、FFT 次数、发布帧数、管道写入次数与字节、`getState` 次数／总耗时／最大耗时／文本字节／封面字节／图标字节。
+- Native 内建计数（`NativeMediaHost::WriteFootprintMetrics()`，5 s 一行，写 `<安装目录>\Data\logs\native-metrics.log`）：活动图层数、交换链数、文字排版／格式／画刷条数、封面缓存条数与字节、`MAIN_TIMER`／`MONITOR_TIMER`／`TASKBAR_TIMER` 触发次数。该文件不含曲目、路径或媒体内容。
+- UI 内建计数（`UI/FootprintMetrics.cs` 与 `CardMetricsLog`）：首开次数、首开与首帧的累计／均值／最大、首帧超时次数、图片缓存条目数、封面与来源图标是否在位。每 10 s 一行，打开与关闭时各补一行。
+- 计划文档新增 [§3.5 阶段 0 实施结果](docs/2026-10-22-资源占用优化方案.md)，记录字段、采集点与统计口径，并列出与方案原文不一致处（Native `Diagnostic()` 不承载计数、UI 未加 HWND 计数）。
+
+- 阶段 0 基线已实采（同一实例 12:35:48–12:42:30，403 点/进程）：待机三进程 PWS 合计 147 MB；播放歌词后 Native +25.1 MB 且停止播放后不回落；设置页首次打开一次抬升 UI +75.3 MB PWS／+85.1 MB Commit／+626 句柄，关闭后不回落；最高状态为"播放过并开过设置之后的待机"295 MB；频谱把 Media 分配从 0.40 抬到 4.75 MB/s。明细与未采集项见 [§3.5](docs/2026-10-22-资源占用优化方案.md)。
+
+验证：完整硬件 Release 构建 `artifacts/builds/20261022-120729` 通过；`tests/Media.Tests` 287 项通过（须先执行 `Native/tests/run-native-tests.ps1` 生成 `NativePipeIntegrationClient.exe`，否则该集成用例报缺失）；`Native/tests/run-native-tests.ps1` 全部通过；`scripts/validate-winui.ps1` 实际模板加载通过。
+
+未验证：11 个状态里"换曲"未采集（窗口内无换曲特征）与"隐藏十分钟"未采集（压缩为 60 s 并并入停止播放段）；启动态窗口比进程创建晚约 20 s，冷启动峰值未覆盖。真实切歌、Explorer 重建、音频设备切换、多显示器混合 DPI、输入延迟属桌面验收，本轮未做。用户报告的"获取系统音频信息失败"提示在仓库中检索不到原文，其触发路径未复现；仅确认重新授权后 FFT 起采（§3.5 附表）。
 ## 当前结论：Mica 观感已获用户认可（2026-10-21）
 
 用户明确反馈“现在的 mica 我比较满意了”，当前环境下的 Mica 视觉效果据此记为已认可，本轮视觉调校收尾。保留 Mica 以及现有个人参数和出厂默认值；未提供的实际个人参数不作推断，实验候选不自动成为默认。
@@ -289,3 +472,16 @@ context 下连续四次调整尺寸、修复前顺序复现失败、解除 targe
 **待桌面验收。** 真实 Explorer 重建、混合 DPI 多显示器、分辨率／刷新率变化、
 RDP／锁屏恢复，以及交换链重建时的实际合成器画面和长期日志稳定性，仍需在
 安装后的桌面环境确认；WARP 回归不能替代这些场景。
+
+
+## 2026-10-24 原生卡片审查与整合发布
+
+审查起点为 `dsh/CardDrawingRebuild` 的 `428adda`，先合入当前主分支 `f841fdf`，保留资源占用优化、天气连接/AQI/预警迁移、Data 目录及设置保存修复。用户授权本轮直接修复、合并主分支、推送和发布；实际桌面测试由用户进行。详细问题与对原实现的评价见 [原生卡片代码审查](docs/2026-10-24-原生卡片代码审查.md)。
+
+修复涵盖实际 D2D/Composition 设备接入与表面目标恢复、卡片 STA bootstrap/DispatcherQueue/退出、DPI 与输入坐标、拖动捕获与终值读回、请求封装和单写端、重连代际、图片增量与缓存、歌词动画和显示设置、天气空状态/归属、UIA apartment 与菜单状态、按需设置退出以及卡片闲置资源释放。另由发布检查发现并修复主分支既有 SQLite 侧文件回滚缺口，未把它归因于卡片分支。
+
+完整硬件 Release 构建：`artifacts/builds/20261024-203345`，版本 `261024-2033`。Media 测试 315 项通过；原生既有回归与跨语言测试客户端通过；实际生产卡片代码的独立 NativeCardsProbe 通过，覆盖五种隐藏窗口、Composition/D2D 提交、遮罩目标恢复、100%/150%/200% 命中转换、卡片线程启动与正常退出。发布目录设置模板、共享 .NET/Windows App Runtime、原生托管启动探针通过。更新器隔离检查通过，包含新建 SQLite 侧文件清理、原有侧文件恢复和未知相似名称文件保留。
+
+新增卡片探针不启动正常产品、Media 服务或真实音频，不读取个人配置，不显示或激活正常窗口。WinUI 离屏 PostMessage 不能证明真实 PointerPressed 拖动，本次没有把其记为通过。没有采集内存基线，也没有声称节省了某个实测内存数值。
+
+待用户桌面验收：Mica 与动画最终观感、实际鼠标/键盘与菜单、真实音频与播放器、屏幕阅读器、Explorer 重建和混合显示器 DPI。媒体卡当前仍是单内容表面重绘，不能宣称已经完成全部静态/动态图层分离优化。

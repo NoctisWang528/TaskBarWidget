@@ -1,5 +1,6 @@
 ﻿#include "pch.h"
 #include "DataManager.h"
+#include "WeatherCredentialStore.h"
 #include "resource.h"
 #include "SimpleIni.h"
 #include "Common.h"
@@ -745,6 +746,15 @@ std::wstring WeatherCDataManager::ConfigPath() const
     return m_config_file_path;
 }
 
+std::wstring WeatherCDataManager::CredentialPath() const
+{
+    const auto slash = m_config_file_path.find_last_of(L"\\/");
+    const auto directory = slash == std::wstring::npos ? std::wstring{} : m_config_file_path.substr(0, slash);
+    const auto dataSlash = directory.find_last_of(L"\\/");
+    const auto dataRoot = dataSlash == std::wstring::npos ? directory : directory.substr(0, dataSlash);
+    return dataRoot + L"\\secrets\\weather-appkey.bin";
+}
+
 void WeatherCDataManager::ReloadConfigs()
 {
     std::lock_guard<std::mutex> configuration_lock(WeatherService::ConfigurationMutex());
@@ -758,12 +768,10 @@ void WeatherCDataManager::_setLangID(const std::wstring &cfg_dir)
     static const WORD langid_zh_cn = MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED);
 
     // 插件配置文件所在文件夹的上一级为主程序配置文件路径
-    auto pos = cfg_dir.rfind(L"plugins");
-    if (pos == std::wstring::npos)
-        return;
-
-    auto tm_cfg_dir = cfg_dir.substr(0, pos);
-    auto tm_cfg_file = tm_cfg_dir + L"config.ini";
+    auto tm_cfg_file = cfg_dir;
+    const auto slash = tm_cfg_file.find_last_of(L"\\/");
+    if (slash != std::wstring::npos)
+        tm_cfg_file = tm_cfg_file.substr(0, slash + 1) + L"app.ini";
 
     CSimpleIni tm_ini;
     tm_ini.SetUnicode();
@@ -794,13 +802,16 @@ void WeatherCDataManager::LoadConfigs(const std::wstring &cfg_dir)
     SCityInfo city; SConfiguration config;
     const auto &ch = cfg_dir.back();
     if (ch == L'\\' || ch == L'/')
-        path = cfg_dir + L"WeatherPro.ini";
+        path = cfg_dir + L"weather.ini";
     else
-        path = cfg_dir + L"\\WeatherPro.ini";
+        path = cfg_dir + L"\\weather.ini";
 
     CSimpleIni ini;
     ini.SetUnicode();
     const bool existing = ini.LoadFile(path.c_str()) == SI_OK;
+    // CredentialPath() is derived from the active configuration path. Set it
+    // before the one-way legacy import reads or writes the protected store.
+    m_config_file_path = path;
 
     city.CityNO = ini.GetValue(L"config", L"city_no", L"101010100");
     city.CityName = ini.GetValue(L"config", L"city_name", L"北京");
@@ -820,7 +831,34 @@ void WeatherCDataManager::LoadConfigs(const std::wstring &cfg_dir)
 
     DataApiHefengWeather::Config hf_cfg;
     hf_cfg.ApiHost = WeatherService::NormalizeApiHost(ini.GetValue(L"hfw", L"ApiHost", L"")).value_or(L"");
-    hf_cfg.AppKey = ini.GetValue(L"hfw", L"AppKey", L"");
+    WeatherCredentials::Read(CredentialPath(), hf_cfg.AppKey);
+    if (hf_cfg.AppKey.empty())
+    {
+        // One-way legacy import. The INI key is scrubbed immediately after the
+        // protected copy is durable; an interrupted write leaves the value for
+        // the next startup rather than losing it.
+        const auto legacyKey = ini.GetValue(L"hfw", L"AppKey", L"");
+        if (legacyKey && *legacyKey)
+        {
+            if (WeatherCredentials::Write(CredentialPath(), legacyKey))
+            {
+                hf_cfg.AppKey = legacyKey;
+                ini.Delete(L"hfw", L"AppKey", true);
+                ini.SaveFile(path.c_str());
+            }
+        }
+    }
+    else
+    {
+        // A previous migration may have copied a plaintext key alongside the
+        // protected credential. Never leave that redundant copy in the INI.
+        const auto legacyKey = ini.GetValue(L"hfw", L"AppKey", L"");
+        if (legacyKey && *legacyKey)
+        {
+            ini.Delete(L"hfw", L"AppKey", true);
+            ini.SaveFile(path.c_str());
+        }
+    }
     hf_cfg.ShowRealtimeTemperatureFeelsLike = ini.GetBoolValue(L"hfw", L"show_rt_temp_feels_like", 0);
     hf_cfg.ShowRealtimeWind = ini.GetBoolValue(L"hfw", L"show_rt_wind", 1);
     hf_cfg.ShowRealtimeWindScale = ini.GetBoolValue(L"hfw", L"show_rt_wind_scale", 1);
@@ -834,7 +872,7 @@ void WeatherCDataManager::LoadConfigs(const std::wstring &cfg_dir)
     hf_cfg.ShowWeatherAlert = ini.GetBoolValue(L"hfw", L"show_weather_alert", 1);
     std::lock_guard<std::mutex> state_lock(m_state_mutex);
     m_currentCityInfo = std::move(city); m_config = config;
-    m_api_hfw->config = std::move(hf_cfg); m_config_file_path = std::move(path);
+    m_api_hfw->config = std::move(hf_cfg);
 }
 
 void WeatherCDataManager::SaveConfigs() const
@@ -860,7 +898,7 @@ void WeatherCDataManager::SaveConfigs() const
     ini.SetLongValue(L"config", L"double_click_action", m_config.m_double_click_action);
 
     auto &hf_cfg = m_api_hfw->config;
-    ini.SetValue(L"hfw", L"AppKey", hf_cfg.AppKey.c_str());
+    ini.Delete(L"hfw", L"AppKey", true);
     ini.SetValue(L"hfw", L"ApiHost", hf_cfg.ApiHost.c_str());
     ini.SetBoolValue(L"hfw", L"show_rt_temp_feels_like", hf_cfg.ShowRealtimeTemperatureFeelsLike);
     ini.SetBoolValue(L"hfw", L"show_rt_wind", hf_cfg.ShowRealtimeWind);

@@ -112,6 +112,7 @@ namespace Cards
         bool available{ false };
         bool isPlaying{ false };
         bool isPureMusic{ false };
+        bool translationMode{ false };
         bool animateTransition{ true };
         int currentLineIndex{ -1 };
         double progress{ 0 };
@@ -124,6 +125,9 @@ namespace Cards
         std::wstring fontFamily;
         double fontSize{ 13 };
         int fontWeight{ 600 };
+        bool fontItalic{ false };
+        bool fontUnderline{ false };
+        bool fontStrikeOut{ false };
         std::wstring primaryColor;
         std::wstring secondaryColor;
         std::wstring translationColor;
@@ -165,6 +169,8 @@ namespace Cards
 
     struct WeatherAlert
     {
+        std::wstring type;
+        std::wstring publishedAt;
         std::wstring typeName;
         std::wstring level;
         std::wstring title;
@@ -186,7 +192,12 @@ namespace Cards
     {
         std::wstring provider;
         std::wstring city;
+        std::wstring cityId;
         std::wstring region;
+        std::wstring lastSuccessCity;
+        std::wstring lastSuccessCityId;
+        std::wstring lastAttempt;
+        std::wstring lastSuccess;
         std::wstring state;
         std::wstring message;
         std::wstring temperature;
@@ -195,8 +206,23 @@ namespace Cards
         std::wstring conditionKind;
         std::wstring humidity;
         std::wstring wind;
+        std::wstring windScale;
+        std::wstring windSpeed;
         std::wstring observedAt;
         std::wstring airQuality;
+        std::wstring airLevel;
+        std::wstring airCategory;
+        std::wstring airIndexCode;
+        std::wstring airIndexName;
+        std::wstring airPublishedAt;
+        std::wstring airError;
+        std::wstring airAttribution;
+        std::wstring pm25;
+        std::wstring pm10;
+        std::wstring pm25Unit;
+        std::wstring pm10Unit;
+        std::wstring alertsError;
+        std::wstring alertsAttribution;
         bool stale{ false };
         bool updating{ false };
         bool hasData{ false };
@@ -233,6 +259,7 @@ namespace Cards
         WeatherState weather;
         UpdateState update;
         std::wstring statusText;
+        int toolWindowTheme{ 0 }; // AppSettings: System=0, Light=1, Dark=2.
         bool connected{ false };
     };
 

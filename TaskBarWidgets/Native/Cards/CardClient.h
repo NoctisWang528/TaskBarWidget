@@ -9,6 +9,7 @@
 #include <Windows.h>
 
 #include <atomic>
+#include <condition_variable>
 #include <deque>
 #include <memory>
 #include <mutex>
@@ -32,13 +33,14 @@ namespace Cards
         Client& operator=(const Client&) = delete;
 
         // Starts the worker. Posts WM_CARD_PIPE_WAKE to \`notify\` whenever new
-        // messages arrive. Safe to call once; a reconnect is automatic.
+        // messages arrive. Reconnection is automatic. Each connection first queues
+        // the local connectionStarted event before delivering server messages.
         void Start(HWND notify);
         void Stop();
 
-        // Queues one request. \`payload\` is raw JSON for the \`payload\` member and
-        // may be empty. Returns the request id used, or an empty string when the
-        // queue is full.
+        // Queues { action, payload: { ...arguments } }. `payload` is a complete
+        // JSON argument object (or empty), including the inner media `action`.
+        // Returns the request id, or empty on invalid payload / full queue / stop.
         // \`kind\` prefixes the request id so the host can route the reply
         // (audio / traffic / weather / media / update / state).
         std::wstring Request(const std::wstring& action, const std::string& payload = {},
@@ -56,10 +58,15 @@ namespace Cards
 
         HWND notify{};
         HANDLE wake{};
-        HANDLE stopEvent{};
         std::thread worker;
         mutable std::mutex mutex;
-        std::deque<std::string> outgoing;
+        struct Pending
+        {
+            std::string message;
+            std::wstring requestId;
+        };
+        std::condition_variable spaceAvailable;
+        std::deque<Pending> outgoing;
         std::deque<std::string> incoming;
         std::atomic<bool> connected{ false };
         std::atomic<bool> stopping{ false };

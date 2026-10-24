@@ -1,7 +1,5 @@
 using System.Collections.Concurrent;
-using System.IO;
 using System.Text.Json;
-using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using TaskbarLyrics.App;
 using TaskbarLyrics.Core.Models;
@@ -65,7 +63,6 @@ internal sealed class MediaCoordinator : IDisposable
     private string _coverIcon = "";
     private string _coverTrackId = "";
     private byte[]? _coverBytes;
-    private BitmapSource? _coverBitmap;
     private string? _localCoverIdentity;
     private DateTimeOffset _nextLocalCover;
 
@@ -525,7 +522,6 @@ internal sealed class MediaCoordinator : IDisposable
             capabilities.Next,
             capabilities.PlayPause,
             snapshot.CanSeek,
-            CreateCover(),
             sources,
             snapshot.SourceAppUserModelId);
 
@@ -681,7 +677,6 @@ internal sealed class MediaCoordinator : IDisposable
         if (bytes is { Length: > 0 } && bytes.Length <= 512 * 1024)
         {
             _coverBytes = bytes;
-            _coverBitmap = null;
             var mime = bytes.Length > 3 && bytes[0] == 0xff && bytes[1] == 0xd8
                 ? "image/jpeg"
                 : "image/png";
@@ -697,7 +692,6 @@ internal sealed class MediaCoordinator : IDisposable
                 return;
             }
             _coverBytes = null;
-            _coverBitmap = null;
             _coverData = "";
             _coverIcon = snapshot.Track is null
                 ? ""
@@ -726,27 +720,6 @@ internal sealed class MediaCoordinator : IDisposable
                 "rgba(67,160,71,1)",
                 _coverIcon,
                 _coverTrackId);
-        }
-    }
-
-    private BitmapSource? CreateCover()
-    {
-        if (_coverBytes is null) return null;
-        if (_coverBitmap is not null) return _coverBitmap;
-        try
-        {
-            var image = new BitmapImage();
-            image.BeginInit();
-            image.CacheOption = BitmapCacheOption.OnLoad;
-            image.DecodePixelWidth = 120;
-            image.StreamSource = new MemoryStream(_coverBytes);
-            image.EndInit();
-            image.Freeze();
-            return _coverBitmap = image;
-        }
-        catch (Exception exception) when (exception is NotSupportedException or IOException)
-        {
-            return null;
         }
     }
 

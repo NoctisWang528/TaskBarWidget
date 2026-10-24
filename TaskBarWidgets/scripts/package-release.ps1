@@ -20,7 +20,6 @@ $artifactPrefix = [IO.Path]::GetFullPath((Join-Path $productRoot 'artifacts')).T
 if (-not $releaseRoot.StartsWith($artifactPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'Release staging must be inside product artifacts.' }
 if (Test-Path -LiteralPath $releaseRoot) { throw 'Release staging already exists; inspect it before packaging again.' }
 $packageName = "TaskBarWidgets-$version-win-x64"
-$privateIni = @('WeatherPro.ini', 'Battery.dll.ini', 'PowerMonPlugin.dll.ini')
 $stage = Join-Path $releaseRoot $packageName
 New-Item -ItemType Directory -Path $stage | Out-Null
 # Only runtime roots are selected. Diagnostics and acceptance screenshots remain local.
@@ -33,9 +32,9 @@ foreach ($directory in @('Media','UI','language','licenses')) {
     foreach ($file in Get-ChildItem -LiteralPath $from -File -Recurse) {
         if ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Linked package inputs are not allowed.' }
         $relative = [IO.Path]::GetRelativePath($source, $file.FullName)
-        if ($file.Name -in $privateIni -or $file.Extension -in @('.log','.pdb','.dmp','.mdmp','.etl','.bak') -or $file.Name -match '\.log($|\.)' -or
-            $file.Name -match '^(config\.ini|global_cfg\.ini|history_traffic\.|media-settings\.json|.*-check\.json|template-probe\.json)' -or
-            $relative -match '(^|\\)(Data|database|.*\.WebView2|WebView2|EBWebView|User Data|Cache|logs|backups|ui-[a-z]+-check)(\\|$)' -or
+        if ($file.Extension -in @('.log','.pdb','.dmp','.mdmp','.etl','.bak') -or $file.Name -match '\.log($|\.)' -or
+            $file.Name -match '^(.*-check\.json|template-probe\.json)' -or
+            $relative -match '(^|\\)(Data|data|database|.*\.WebView2|WebView2|EBWebView|User Data|Cache|cache|logs|Logs|backups|migration|secrets)(\\|$)' -or
             $file.Extension -in @('.db','.sqlite','.sqlite3') -or $file.Name -match '(-wal|-shm)$') { continue }
         $destination = Join-Path $stage $relative
         New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
@@ -78,7 +77,10 @@ $manifest = [ordered]@{
 }
 $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $stage 'release-manifest.json') -Encoding utf8
 $forbidden = @(Get-ChildItem -LiteralPath $stage -File -Recurse | Where-Object {
-    $_.Name -in $privateIni -or $_.Name -match '^(config\.ini|global_cfg\.ini|history_traffic\..*|media-settings\.json|ChineseConverter\.dll)$' -or $_.Name -match '\.log($|\.)|(-wal|-shm)$' -or $_.Extension -in @('.log','.pdb','.dmp','.mdmp','.db','.sqlite','.sqlite3')
+    [IO.Path]::GetRelativePath($stage, $_.FullName) -match '^(Data|data|secrets|migration|backups|logs|Logs)(\\|$)' -or
+    $_.Name -match '^(ChineseConverter\.dll|config\.ini|global_cfg\.ini|history_traffic\..*|media-settings\.json)$' -or
+    $_.Name -match '\.log($|\.)|(-wal|-shm)$' -or
+    $_.Extension -in @('.log','.pdb','.dmp','.mdmp','.db','.sqlite','.sqlite3')
 })
 if ($forbidden.Count) { throw 'Personal data, diagnostics or a removed dependency was found in the release package.' }
 $programFiles = @(Get-ChildItem -LiteralPath $stage -File -Recurse | Sort-Object FullName | ForEach-Object {

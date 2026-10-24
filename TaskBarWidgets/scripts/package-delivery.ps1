@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$PersonalSourceDirectory,
-    [string]$MediaDataDirectory = (Join-Path $env:APPDATA 'TaskBarWidgets'),
+    [string]$MediaDataDirectory,
     [string]$BuildDirectory
 )
 $ErrorActionPreference = 'Stop'
@@ -14,11 +14,9 @@ $info = Get-Content -LiteralPath (Join-Path $clean 'build-info.json') -Raw | Con
 if ($info.component -ne 'All' -or $info.configuration -ne 'Release' -or $info.version -notmatch '^\d{6}-\d{4}$') { throw 'A complete successful Release build is required.' }
 $delivery = Join-Path $productRoot "artifacts\deliveries\$($info.version)"
 if (Test-Path -LiteralPath $delivery) { throw 'Delivery already exists; existing packages are never overwritten.' }
-foreach ($required in @('config.ini', 'global_cfg.ini', 'history_traffic.dat')) {
+foreach ($required in @('Data\layout.json', 'Data\config\app.ini', 'Data\history\traffic.dat')) {
     if (-not (Test-Path -LiteralPath (Join-Path $personal $required) -PathType Leaf)) { throw "Missing personal source data: $required" }
 }
-# The build variant must remain self-contained after being moved to another machine.
-if (-not (Test-PortableDataMode (Join-Path $personal 'global_cfg.ini'))) { throw 'Personal source must use portable_mode=true (or a nonzero integer).' }
 New-Item -ItemType Directory -Path $delivery | Out-Null
 $release = Join-Path $delivery 'release'
 # Release is assembled from the clean build before personal files enter the separate build folder.
@@ -27,8 +25,9 @@ $releaseFolder = Join-Path $release "TaskBarWidgets-$($info.version)-win-x64"
 $build = Join-Path $delivery 'build'
 Copy-Item -LiteralPath $releaseFolder -Destination $build -Recurse
 $snapshots = [Collections.Generic.List[object]]::new()
-foreach ($relative in @('config.ini', 'global_cfg.ini', 'history_traffic.dat', 'history_traffic.dat.bak',
-    'plugins\Battery.dll.ini', 'plugins\PowerMonPlugin.dll.ini', 'plugins\WeatherPro.ini')) {
+foreach ($relative in @('Data\layout.json', 'Data\config\app.ini', 'Data\config\battery.ini', 'Data\config\power.ini',
+    'Data\config\weather.ini', 'Data\config\media.json', 'Data\history\traffic.dat', 'Data\history\traffic.dat.bak',
+    'Data\secrets\weather-appkey.bin')) {
     $from = Join-Path $personal $relative
     if (Test-Path -LiteralPath $from -PathType Leaf) {
         Assert-UnlinkedPath $from
@@ -37,15 +36,15 @@ foreach ($relative in @('config.ini', 'global_cfg.ini', 'history_traffic.dat', '
         $snapshots.Add($record)
     }
 }
-$mediaSources = @((Join-Path $personal 'Data'), [IO.Path]::GetFullPath($MediaDataDirectory)) | Select-Object -Unique
+$mediaSources = @((Join-Path $personal 'Data')) | Select-Object -Unique
 $sqliteTool = $null
 foreach ($mediaSource in $mediaSources) {
     if (-not (Test-Path -LiteralPath $mediaSource -PathType Container)) { continue }
     Assert-UnlinkedPath $mediaSource
     $files = @()
-    $settings = Join-Path $mediaSource 'media-settings.json'
+    $settings = Join-Path $mediaSource 'config\media.json'
     if (Test-Path -LiteralPath $settings -PathType Leaf) { $files += Get-Item -LiteralPath $settings }
-    $database = Join-Path $mediaSource 'database'
+    $database = Join-Path $mediaSource 'lyrics'
     if (Test-Path -LiteralPath $database -PathType Container) {
         Assert-UnlinkedPath $database
         $files += @(Get-ChildItem -LiteralPath $database -File | Where-Object Extension -In @('.json', '.db', '.sqlite', '.sqlite3'))
@@ -83,8 +82,8 @@ TaskBarWidgets $($info.version) — 个人便携版本
 https://dotnet.microsoft.com/download/dotnet/8.0
 https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads
 只需运行库，无需开发 SDK。启动时检查缺失依赖并提供下载入口，不会自动安装。
-本目录含个人设置、历史和插件凭据，请勿作为公开 Release 上传或分享。
-Data/ 未包含网页缓存、Cookie 或运行日志。源安装目录与共享 AppData 未被覆盖。
+本目录含个人设置、历史、歌词数据和 DPAPI 天气密钥密文，请勿作为公开 Release 上传或分享。
+天气密钥只能在创建它的 Windows 用户与机器上解密。Data/ 未包含网页缓存、Cookie、日志或迁移归档。
 公开分发请使用相邻 release/ 内的干净 ZIP；源码状态见 release-manifest.json。
 "@ | Set-Content -LiteralPath (Join-Path $build 'README.txt') -Encoding utf8
 Write-Host "Personal build: $build"

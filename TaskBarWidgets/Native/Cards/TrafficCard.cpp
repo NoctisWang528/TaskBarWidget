@@ -17,7 +17,7 @@ namespace Cards::Paint
                 L"#4E97DC", L"#2365AA" };
             static const wchar_t* night[] = { L"#00202B37", L"#343E4B", L"#284764", L"#326B9C",
                 L"#55A1D5", L"#B4E6FF" };
-            if (level < 0) return Color{};
+            if (level < 0) return Color{ 0, 0, 0, 0 };
             level = std::clamp(level, 0, 5);
             return ParseColor(dark ? night[level] : light[level], Color{});
         }
@@ -26,7 +26,7 @@ namespace Cards::Paint
         {
             const COLORREF text = GetSysColor(COLOR_WINDOWTEXT);
             const COLORREF highlight = GetSysColor(COLOR_HIGHLIGHT);
-            if (level <= 0) return Color{};
+            if (level <= 0) return Color{ 0, 0, 0, 0 };
             if (level == 1)
                 return Color{ GetRValue(text) / 255.0f, GetGValue(text) / 255.0f,
                     GetBValue(text) / 255.0f, 0.18f };
@@ -38,7 +38,10 @@ namespace Cards::Paint
         std::wstring MonthLabel(const TrafficDay& day)
         {
             if (day.date.size() < 10) return {};
-            const int month = std::stoi(day.date.substr(5, 2));
+            if (day.date[5] < L'0' || day.date[5] > L'1' ||
+                day.date[6] < L'0' || day.date[6] > L'9') return {};
+            const int month = (day.date[5] - L'0') * 10 + day.date[6] - L'0';
+            if (month < 1 || month > 12) return {};
             return std::to_wstring(month) + L"\u6708";
         }
     }
@@ -102,12 +105,13 @@ namespace Cards::Paint
             const float cellTop = gridTop + day.weekday * SlotSize + (SlotSize - CellSize) / 2.0f;
             const D2D1_RECT_F cell = Draw::Rect(cellLeft, cellTop, cellLeft + CellSize,
                 cellTop + CellSize);
-            const Color fill = environment.highContrast ? HighContrastLevel(day.level)
-                : RampColor(day.level, environment.dark);
+            const Color fill = day.isFuture ? Color{ 0, 0, 0, 0 }
+                : environment.highContrast ? HighContrastLevel(day.level) : RampColor(day.level, environment.dark);
             if (fill.a > 0.0f) Draw::FillRound(context, cell, 4.0f, fill);
 
-            Draw::AddCell(regions, 300 + day.week * 7 + day.weekday, cell, L"selectDay",
-                day.date, !day.isFuture, day.selected);
+            const bool selected = day.date == (traffic.selectedDate.empty() ? traffic.today : traffic.selectedDate);
+            Draw::AddCell(regions, 300 + day.week * 7 + day.weekday, cell, L"selectDay:" + day.date,
+                day.date, !day.isFuture && !day.date.empty(), selected);
         }
 
         // Glow: every positive cell writes into one transparent mask which is
@@ -118,15 +122,16 @@ namespace Cards::Paint
             const Color halo = ParseColor(environment.dark ? L"#6969BDFA" : L"#345281D3", Color{});
             for (const auto& day : traffic.days)
             {
-                if (day.level < 2 || day.week < 0 || day.week >= Weeks ||
+                if (day.isFuture || day.level < 2 || day.week < 0 || day.week >= Weeks ||
                     day.weekday < 0 || day.weekday >= 7) continue;
                 const float cellLeft = gridLeft + WeekdayGutter + day.week * SlotSize +
                     (SlotSize - CellSize) / 2.0f;
                 const float cellTop = gridTop + day.weekday * SlotSize + (SlotSize - CellSize) / 2.0f;
-                const float spread = day.isToday ? 5.0f : 3.0f;
+                const bool selected = day.date == (traffic.selectedDate.empty() ? traffic.today : traffic.selectedDate);
+                const float spread = (day.isToday || selected) ? 5.0f : 3.0f;
                 Draw::FillRound(context, Draw::Rect(cellLeft - spread, cellTop - spread,
                     cellLeft + CellSize + spread, cellTop + CellSize + spread), 4.0f + spread,
-                    WithAlpha(halo, day.isToday ? 0.9f : 0.55f));
+                    WithAlpha(halo, (day.isToday || selected) ? 0.9f : 0.55f));
             }
             graphics.EndMask(context, 5.0f);
         }
@@ -134,8 +139,9 @@ namespace Cards::Paint
         for (const auto& day : traffic.days)
         {
             if (day.week < 0 || day.week >= Weeks || day.weekday < 0 || day.weekday >= 7) continue;
-            if (day.level < 0) continue;
-            const bool emphasized = day.isToday || day.selected;
+            if (day.isFuture || day.level < 0) continue;
+            const bool emphasized = day.isToday ||
+                day.date == (traffic.selectedDate.empty() ? traffic.today : traffic.selectedDate);
             if (!emphasized && day.level != 0) continue;
             const float cellLeft = gridLeft + WeekdayGutter + day.week * SlotSize +
                 (SlotSize - CellSize) / 2.0f;

@@ -34,7 +34,7 @@ static void WritePrivateProfileInt(const wchar_t* app_name, const wchar_t* key_n
 
 void PowerCDataManager::LoadConfig(const std::wstring& config_dir)
 {
-    m_config_path = config_dir + L"PowerMonPlugin.dll.ini";
+    m_config_path = config_dir + L"power.ini";
 
 
 	//TODO: 在此添加载入配置的代码

@@ -4,7 +4,8 @@ $testRoot = Join-Path $root ('artifacts\history-test-' + [Guid]::NewGuid().ToStr
 $targetDirectory = Join-Path $testRoot 'target'
 New-Item -ItemType Directory -Path $targetDirectory -Force | Out-Null
 $source = Join-Path $testRoot 'source.dat'
-$target = Join-Path $targetDirectory 'history_traffic.dat'
+$target = Join-Path $targetDirectory 'Data\history\traffic.dat'
+New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
 [IO.File]::WriteAllText($source, "lines: `"5`"`n2026/10/13 10/20`n2026/10/12 100`n2026/10/11 0/0`n2026/10/10 3/7`n2026/10/10 3/7`n")
 [IO.File]::WriteAllText($target, "lines: `"2`"`n2026/10/13 5/40`n2026/10/12 40/60`n")
 $originalHash = (Get-FileHash -LiteralPath $source).Hash

@@ -92,7 +92,7 @@ void CBattery::OnExtenedInfo(ExtendedInfoIndex index, const wchar_t* data)
     case ITMPlugin::EI_CONFIG_DIR:
         //从配置文件读取配置
         g_data.LoadConfig(std::wstring(data));
-        if (GetFileAttributesW((std::wstring(data) + L"Battery.dll.ini").c_str()) == INVALID_FILE_ATTRIBUTES) g_data.SaveConfig();
+        if (GetFileAttributesW((std::wstring(data) + L"battery.ini").c_str()) == INVALID_FILE_ATTRIBUTES) g_data.SaveConfig();
 
         break;
     default:

@@ -38,6 +38,7 @@ namespace Cards
         void End();
         void Release();
         bool Ready() const { return surface != nullptr; }
+        HRESULT LastResult() const { return lastResult; }
         int Width() const { return width; }
         int Height() const { return height; }
         SurfaceHandle Handle() const { return surface; }
@@ -48,6 +49,7 @@ namespace Cards
         int width{ 0 };
         int height{ 0 };
         bool drawing{ false };
+        HRESULT lastResult{ S_OK };
     };
 
     class Graphics
@@ -79,6 +81,7 @@ namespace Cards
         // Decodes a data: URL or a local file, downscaling to at most twice the
         // requested pixel size so a DPI change re-decodes crisply.
         ID2D1Bitmap1* DecodeImage(const std::wstring& source, int decodeWidthPixels, int decodeHeightPixels);
+        void ForgetImage(const std::wstring& source);
 
         IDWriteTextFormat* TextFormat(const std::wstring& family, float sizeDip, int weight,
             DWRITE_TEXT_ALIGNMENT alignment, bool wrap);
@@ -110,7 +113,8 @@ namespace Cards
         std::map<std::wstring, Microsoft::WRL::ComPtr<IDWriteTextFormat>> formats;
         std::map<std::wstring, Microsoft::WRL::ComPtr<ID2D1PathGeometry>> geometries;
         Microsoft::WRL::ComPtr<ID2D1Bitmap1> mask;
-        ID2D1DeviceContext* maskTarget{ nullptr };
+        Microsoft::WRL::ComPtr<ID2D1Image> maskTarget;
+        D2D1_MATRIX_3X2_F maskTransform{};
         Microsoft::WRL::ComPtr<ID2D1Effect> maskBlur;
         std::wstring diagnostic;
         bool ready{ false };
@@ -121,7 +125,6 @@ namespace Cards
     {
         explicit DrawScope(DrawingSurface& target) : surface(target)
         {
-            D2D1_POINT_2F offset{};
             context = surface.Begin(offset);
             if (context) context->SetTransform(D2D1::Matrix3x2F::Translation(offset.x, offset.y));
         }
@@ -133,6 +136,7 @@ namespace Cards
         ID2D1DeviceContext* Get() const { return context; }
 
         DrawingSurface& surface;
+        D2D1_POINT_2F offset{};
         ID2D1DeviceContext* context{ nullptr };
     };
 }

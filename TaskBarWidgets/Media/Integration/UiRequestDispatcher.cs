@@ -17,6 +17,7 @@ internal sealed class UiRequestDispatcher : IAsyncDisposable
     private readonly CancellationTokenSource _stop = new();
     private readonly Channel<Work> _audio;
     private readonly Channel<Work> _other;
+    private readonly Channel<Work> _control;
     private readonly Task[] _workers;
     private int _disposed;
     private sealed record Work(JsonElement Request, long Generation, Func<UiRequestResult, CancellationToken, Task> Complete, long Queued);
@@ -26,8 +27,9 @@ internal sealed class UiRequestDispatcher : IAsyncDisposable
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(capacity, 1);
         _execute = execute; _measure = measure; _isCurrent = isCurrent;
-        _audio = CreateLane(capacity); _other = CreateLane(capacity);
-        _workers = [Task.Run(() => RunLaneAsync(_audio, "audio")), Task.Run(() => RunLaneAsync(_other, "other"))];
+        _audio = CreateLane(capacity); _other = CreateLane(capacity); _control = CreateLane(capacity);
+        _workers = [Task.Run(() => RunLaneAsync(_audio, "audio")), Task.Run(() => RunLaneAsync(_other, "other")),
+            Task.Run(() => RunLaneAsync(_control, "control"))];
     }
     private static Channel<Work> CreateLane(int capacity) => Channel.CreateBounded<Work>(new BoundedChannelOptions(capacity) {
         SingleReader = true, FullMode = BoundedChannelFullMode.Wait, AllowSynchronousContinuations = false
@@ -37,7 +39,8 @@ internal sealed class UiRequestDispatcher : IAsyncDisposable
     internal bool TryPost(JsonElement request, long generation, Func<UiRequestResult, CancellationToken, Task> complete)
     {
         if (Volatile.Read(ref _disposed) != 0) return false;
-        var lane = IsAudio(Action(request)) ? _audio : _other;
+        var action = Action(request);
+        var lane = IsAudio(action) ? _audio : IsControl(action) ? _control : _other;
         return lane.Writer.TryWrite(new Work(request.Clone(), generation, complete, Stopwatch.GetTimestamp()));
     }
     private async Task RunLaneAsync(Channel<Work> lane, string name)
@@ -102,12 +105,14 @@ internal sealed class UiRequestDispatcher : IAsyncDisposable
     private static string Action(JsonElement request) => request.ValueKind == JsonValueKind.Object &&
         request.TryGetProperty("action", out var action) && action.ValueKind == JsonValueKind.String ? action.GetString() ?? "unknown" : "unknown";
     private static bool IsAudio(string action) => action is "getAudio" or "selectDevice" or "setVolume" or "setMute";
+    private static bool IsControl(string action) => action is "cardSnapshot" or "subscribeCardLyrics" or "mediaCommand" or
+        "getUpdateState" or "reportUiReady" or "openSettings" or "hideCards" or "previewCardMica" or "previewCardTheme";
     private static bool IsWeather(string action) => action == "weatherCommand";
-    private static string SafeAction(string action) => IsAudio(action) || IsWeather(action) || action is "getState" or "getNativeSettings" or "applyNativeSettings" or "getTrafficHistory" or "getMediaSettings" or "applyMediaSettings" or "getFonts" or "settingsCommand" or "mediaCommand" or "openPanel" ? action : "other";
+    private static string SafeAction(string action) => IsAudio(action) || IsWeather(action) || action is "getState" or "getNativeSettings" or "applyNativeSettings" or "getTrafficHistory" or "getMediaSettings" or "applyMediaSettings" or "getFonts" or "settingsCommand" or "mediaCommand" or "openPanel" or "getDataStatus" or "storageCommand" ? action : "other";
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-        _audio.Writer.TryComplete(); _other.Writer.TryComplete(); _stop.Cancel();
+        _audio.Writer.TryComplete(); _other.Writer.TryComplete(); _control.Writer.TryComplete(); _stop.Cancel();
         await Task.WhenAll(_workers).ConfigureAwait(false);
         _stop.Dispose();
     }

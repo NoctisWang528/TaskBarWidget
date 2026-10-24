@@ -13,19 +13,13 @@ namespace Cards
     {
         constexpr float Pi = 3.14159265358979323846f;
 
-        // The icon painters are only ever called from the card STA thread, so one
-        // factory is shared by all of them.
-        ID2D1Factory* IconFactory()
+        // Geometry and stroke styles must belong to the caller's D2D factory.
+        ComPtr<ID2D1Factory> IconFactory(ID2D1DeviceContext* context)
         {
-            static ComPtr<ID2D1Factory> factory = []()
-            {
-                ComPtr<ID2D1Factory> created;
-                D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, created.GetAddressOf());
-                return created;
-            }();
-            return factory.Get();
+            ComPtr<ID2D1Factory> factory;
+            if (context) context->GetFactory(factory.GetAddressOf());
+            return factory;
         }
-
         ComPtr<ID2D1SolidColorBrush> Solid(ID2D1DeviceContext* context, Color color)
         {
             ComPtr<ID2D1SolidColorBrush> brush;
@@ -50,12 +44,12 @@ namespace Cards
         }
 
         template <typename T>
-        ComPtr<T> MakeGeometry(const std::vector<D2D1_POINT_2F>& points, bool close)
+        ComPtr<T> MakeGeometry(ID2D1DeviceContext* context, const std::vector<D2D1_POINT_2F>& points, bool close)
         {
             ComPtr<ID2D1PathGeometry> geometry;
             ComPtr<ID2D1GeometrySink> sink;
-            if (!IconFactory() || points.size() < 2) return nullptr;
-            if (FAILED(IconFactory()->CreatePathGeometry(geometry.GetAddressOf()))) return nullptr;
+            if (!IconFactory(context) || points.size() < 2) return nullptr;
+            if (FAILED(IconFactory(context)->CreatePathGeometry(geometry.GetAddressOf()))) return nullptr;
             if (FAILED(geometry->Open(sink.GetAddressOf()))) return nullptr;
             sink->BeginFigure(points.front(), D2D1_FIGURE_BEGIN_FILLED);
             for (size_t index = 1; index < points.size(); ++index) sink->AddLine(points[index]);
@@ -109,7 +103,7 @@ namespace Cards
         {
             ComPtr<ID2D1PathGeometry> rays;
             ComPtr<ID2D1GeometrySink> sink;
-            if (IconFactory() && SUCCEEDED(IconFactory()->CreatePathGeometry(rays.GetAddressOf())) &&
+            if (IconFactory(context) && SUCCEEDED(IconFactory(context)->CreatePathGeometry(rays.GetAddressOf())) &&
                 SUCCEEDED(rays->Open(sink.GetAddressOf())))
             {
                 for (int index = 0; index < 8; ++index)
@@ -125,7 +119,7 @@ namespace Cards
                 ComPtr<ID2D1StrokeStyle> style;
                 const D2D1_STROKE_STYLE_PROPERTIES properties{ D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND,
                     D2D1_CAP_STYLE_ROUND, D2D1_LINE_JOIN_ROUND, 10.0f, D2D1_DASH_STYLE_SOLID, 0.0f };
-                IconFactory()->CreateStrokeStyle(properties, nullptr, 0, style.GetAddressOf());
+                IconFactory(context)->CreateStrokeStyle(properties, nullptr, 0, style.GetAddressOf());
                 const auto brush = Solid(context, palette.sun);
                 if (brush) context->DrawGeometry(rays.Get(), brush.Get(), rayWidth, style.Get());
             }
@@ -135,10 +129,10 @@ namespace Cards
         void AddMoon(ID2D1DeviceContext* context, const WeatherPalette& palette, float cx, float cy, float radius)
         {
             const auto brush = Solid(context, palette.moon);
-            if (!brush || !IconFactory()) return;
+            if (!brush || !IconFactory(context)) return;
             ComPtr<ID2D1PathGeometry> geometry;
             ComPtr<ID2D1GeometrySink> sink;
-            if (FAILED(IconFactory()->CreatePathGeometry(geometry.GetAddressOf()))) return;
+            if (FAILED(IconFactory(context)->CreatePathGeometry(geometry.GetAddressOf()))) return;
             if (FAILED(geometry->Open(sink.GetAddressOf()))) return;
             // Alternate fill: the outer disc minus an offset inner disc forms the
             // crescent. Both figures are closed so the subtraction is exact.
@@ -160,10 +154,10 @@ namespace Cards
 
         void AddDrop(ID2D1DeviceContext* context, const WeatherPalette& palette, float x, float y, float radius)
         {
-            if (!IconFactory()) return;
+            if (!IconFactory(context)) return;
             ComPtr<ID2D1PathGeometry> geometry;
             ComPtr<ID2D1GeometrySink> sink;
-            if (FAILED(IconFactory()->CreatePathGeometry(geometry.GetAddressOf()))) return;
+            if (FAILED(IconFactory(context)->CreatePathGeometry(geometry.GetAddressOf()))) return;
             if (FAILED(geometry->Open(sink.GetAddressOf()))) return;
             sink->BeginFigure(D2D1::Point2F(x, y), D2D1_FIGURE_BEGIN_FILLED);
             sink->AddBezier(D2D1::BezierSegment(D2D1::Point2F(x + 0.72f * radius, y + 0.94f * radius),
@@ -204,7 +198,7 @@ namespace Cards
 
         void AddStar(ID2D1DeviceContext* context, const WeatherPalette& palette, float x, float y, float radius)
         {
-            const auto geometry = MakeGeometry<ID2D1PathGeometry>({ D2D1::Point2F(x, y - radius),
+            const auto geometry = MakeGeometry<ID2D1PathGeometry>(context, { D2D1::Point2F(x, y - radius),
                 D2D1::Point2F(x + 0.34f * radius, y), D2D1::Point2F(x, y + radius),
                 D2D1::Point2F(x - 0.34f * radius, y) }, true);
             FillGeometry(context, palette.star, geometry.Get());
@@ -212,7 +206,7 @@ namespace Cards
 
         void AddBolt(ID2D1DeviceContext* context, const WeatherPalette& palette)
         {
-            const auto geometry = MakeGeometry<ID2D1PathGeometry>({ { 70.0f, 90.0f }, { 56.0f, 112.0f },
+            const auto geometry = MakeGeometry<ID2D1PathGeometry>(context, { { 70.0f, 90.0f }, { 56.0f, 112.0f },
                 { 68.0f, 112.0f }, { 62.0f, 126.0f }, { 84.0f, 102.0f }, { 71.0f, 102.0f },
                 { 80.0f, 90.0f } }, true);
             FillGeometry(context, palette.bolt, geometry.Get());
@@ -220,17 +214,17 @@ namespace Cards
 
         void AddWind(ID2D1DeviceContext* context, const WeatherPalette& palette, float thickness)
         {
-            if (!IconFactory()) return;
+            if (!IconFactory(context)) return;
             const auto brush = Solid(context, palette.fog);
             if (!brush) return;
             ComPtr<ID2D1StrokeStyle> style;
             const D2D1_STROKE_STYLE_PROPERTIES properties{ D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND,
                 D2D1_CAP_STYLE_ROUND, D2D1_LINE_JOIN_ROUND, 10.0f, D2D1_DASH_STYLE_SOLID, 0.0f };
-            IconFactory()->CreateStrokeStyle(properties, nullptr, 0, style.GetAddressOf());
+            IconFactory(context)->CreateStrokeStyle(properties, nullptr, 0, style.GetAddressOf());
 
             ComPtr<ID2D1PathGeometry> geometry;
             ComPtr<ID2D1GeometrySink> sink;
-            if (FAILED(IconFactory()->CreatePathGeometry(geometry.GetAddressOf())) ||
+            if (FAILED(IconFactory(context)->CreatePathGeometry(geometry.GetAddressOf())) ||
                 FAILED(geometry->Open(sink.GetAddressOf())))
                 return;
             sink->BeginFigure(D2D1::Point2F(16.0f, 48.0f), D2D1_FIGURE_BEGIN_HOLLOW);
@@ -257,10 +251,10 @@ namespace Cards
         void AddRing(ID2D1DeviceContext* context, Color color, float cx, float cy,
             float outer, float inner, float startDegrees, float endDegrees)
         {
-            if (!IconFactory()) return;
+            if (!IconFactory(context)) return;
             ComPtr<ID2D1PathGeometry> geometry;
             ComPtr<ID2D1GeometrySink> sink;
-            if (FAILED(IconFactory()->CreatePathGeometry(geometry.GetAddressOf())) ||
+            if (FAILED(IconFactory(context)->CreatePathGeometry(geometry.GetAddressOf())) ||
                 FAILED(geometry->Open(sink.GetAddressOf())))
                 return;
             const auto point = [&](float radius, float degrees)
@@ -338,7 +332,7 @@ namespace Cards
         D2D1_MATRIX_3X2_F previous{};
         context->GetTransform(&previous);
         const float scale = size / 128.0f;
-        context->SetTransform(D2D1::Matrix3x2F::Scale(scale, scale) * D2D1::Matrix3x2F::Translation(left, top));
+        context->SetTransform(D2D1::Matrix3x2F::Scale(scale, scale) * D2D1::Matrix3x2F::Translation(left, top) * previous);
 
         switch (symbol)
         {
@@ -399,11 +393,15 @@ namespace Cards
             AddBar(context, palette, 36.0f, 108.0f, 70.0f);
             break;
         case Symbol::Dust:
-            AddWind(context, palette, 6.0f);
+        {
+            auto dustPalette = palette;
+            dustPalette.fog = palette.dust;
+            AddWind(context, dustPalette, 6.0f);
             AddDot(context, palette, 30.0f, 108.0f, 3.4f);
             AddDot(context, palette, 62.0f, 118.0f, 2.6f);
             AddDot(context, palette, 96.0f, 108.0f, 3.0f);
             break;
+        }
         case Symbol::Thunder:
             AddCloud(context, palette, 0.0f, -14.0f);
             AddBolt(context, palette);
@@ -425,17 +423,17 @@ namespace Cards
         D2D1_MATRIX_3X2_F previous{};
         context->GetTransform(&previous);
         const float scale = size / 20.0f;
-        context->SetTransform(D2D1::Matrix3x2F::Scale(scale, scale) * D2D1::Matrix3x2F::Translation(left, top));
+        context->SetTransform(D2D1::Matrix3x2F::Scale(scale, scale) * D2D1::Matrix3x2F::Translation(left, top) * previous);
 
         switch (glyph)
         {
         case Glyph::Previous:
             FillRect(context, color, D2D1::RectF(3.4f, 3.5f, 5.6f, 16.5f), 0.0f);
-            FillGeometry(context, color, MakeGeometry<ID2D1PathGeometry>({ { 16.8f, 3.4f }, { 16.8f, 16.6f },
+            FillGeometry(context, color, MakeGeometry<ID2D1PathGeometry>(context, { { 16.8f, 3.4f }, { 16.8f, 16.6f },
                 { 7.2f, 10.0f } }, true).Get());
             break;
         case Glyph::Play:
-            FillGeometry(context, color, MakeGeometry<ID2D1PathGeometry>({ { 6.3f, 3.3f }, { 16.7f, 10.0f },
+            FillGeometry(context, color, MakeGeometry<ID2D1PathGeometry>(context, { { 6.3f, 3.3f }, { 16.7f, 10.0f },
                 { 6.3f, 16.7f } }, true).Get());
             break;
         case Glyph::Pause:
@@ -443,13 +441,13 @@ namespace Cards
             AddRoundRect(context, color, D2D1::RectF(11.3f, 3.4f, 14.9f, 16.6f), 1.4f);
             break;
         case Glyph::Next:
-            FillGeometry(context, color, MakeGeometry<ID2D1PathGeometry>({ { 3.2f, 3.4f }, { 12.8f, 10.0f },
+            FillGeometry(context, color, MakeGeometry<ID2D1PathGeometry>(context, { { 3.2f, 3.4f }, { 12.8f, 10.0f },
                 { 3.2f, 16.6f } }, true).Get());
             FillRect(context, color, D2D1::RectF(14.4f, 3.5f, 16.6f, 16.5f), 0.0f);
             break;
         case Glyph::Speaker:
         case Glyph::SpeakerMuted:
-            FillGeometry(context, color, MakeGeometry<ID2D1PathGeometry>({ { 1.8f, 7.2f }, { 5.8f, 7.2f },
+            FillGeometry(context, color, MakeGeometry<ID2D1PathGeometry>(context, { { 1.8f, 7.2f }, { 5.8f, 7.2f },
                 { 10.8f, 3.1f }, { 10.8f, 16.9f }, { 5.8f, 12.8f }, { 1.8f, 12.8f } }, true).Get());
             if (glyph == Glyph::Speaker)
             {
@@ -458,7 +456,7 @@ namespace Cards
             }
             else
             {
-                FillGeometry(context, color, MakeGeometry<ID2D1PathGeometry>({ { 13.2f, 6.2f }, { 15.2f, 4.2f },
+                FillGeometry(context, color, MakeGeometry<ID2D1PathGeometry>(context, { { 13.2f, 6.2f }, { 15.2f, 4.2f },
                     { 18.2f, 7.2f }, { 17.2f, 8.2f }, { 18.2f, 9.2f }, { 15.2f, 12.2f }, { 13.2f, 10.2f },
                     { 14.2f, 9.2f }, { 13.2f, 8.2f }, { 14.2f, 7.2f } }, true).Get());
             }
@@ -470,7 +468,7 @@ namespace Cards
             FillRect(context, color, D2D1::RectF(9.3f, 13.8f, 10.7f, 17.1f), 0.0f);
             AddRoundRect(context, color, D2D1::RectF(6.9f, 16.2f, 13.1f, 17.9f), 0.85f);
             if (glyph == Glyph::MicrophoneMuted)
-                FillGeometry(context, color, MakeGeometry<ID2D1PathGeometry>({ { 3.2f, 2.7f }, { 4.8f, 2.7f },
+                FillGeometry(context, color, MakeGeometry<ID2D1PathGeometry>(context, { { 3.2f, 2.7f }, { 4.8f, 2.7f },
                     { 17.2f, 17.3f }, { 15.6f, 17.3f } }, true).Get());
             break;
         case Glyph::Settings:
@@ -490,10 +488,10 @@ namespace Cards
                 points.push_back(point(9.3f, angle + 13.0f));
                 points.push_back(point(7.2f, angle + 22.0f));
             }
-            if (!IconFactory()) break;
+            if (!IconFactory(context)) break;
             ComPtr<ID2D1PathGeometry> geometry;
             ComPtr<ID2D1GeometrySink> sink;
-            if (FAILED(IconFactory()->CreatePathGeometry(geometry.GetAddressOf())) ||
+            if (FAILED(IconFactory(context)->CreatePathGeometry(geometry.GetAddressOf())) ||
                 FAILED(geometry->Open(sink.GetAddressOf())))
                 break;
             sink->SetFillMode(D2D1_FILL_MODE_ALTERNATE);
@@ -516,15 +514,15 @@ namespace Cards
         }
         case Glyph::Refresh:
             AddRing(context, color, 10.0f, 10.0f, 8.4f, 7.1f, 35.0f, 310.0f);
-            FillGeometry(context, color, MakeGeometry<ID2D1PathGeometry>({ { 12.5f, 1.4f }, { 12.5f, 7.5f },
+            FillGeometry(context, color, MakeGeometry<ID2D1PathGeometry>(context, { { 12.5f, 1.4f }, { 12.5f, 7.5f },
                 { 18.4f, 4.45f } }, true).Get());
             break;
         case Glyph::Check:
-            FillGeometry(context, color, MakeGeometry<ID2D1PathGeometry>({ { 4.0f, 10.4f }, { 5.9f, 8.5f },
+            FillGeometry(context, color, MakeGeometry<ID2D1PathGeometry>(context, { { 4.0f, 10.4f }, { 5.9f, 8.5f },
                 { 8.8f, 11.4f }, { 14.4f, 5.6f }, { 16.3f, 7.5f }, { 8.9f, 15.0f } }, true).Get());
             break;
         case Glyph::Chevron:
-            FillGeometry(context, color, MakeGeometry<ID2D1PathGeometry>({ { 6.2f, 8.2f }, { 10.0f, 12.0f },
+            FillGeometry(context, color, MakeGeometry<ID2D1PathGeometry>(context, { { 6.2f, 8.2f }, { 10.0f, 12.0f },
                 { 13.8f, 8.2f }, { 15.2f, 9.6f }, { 10.0f, 14.8f }, { 4.8f, 9.6f } }, true).Get());
             break;
         }

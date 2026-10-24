@@ -810,6 +810,7 @@
     <ClInclude Include="ColorStatic.h" />
     <ClInclude Include="Common.h" />
     <ClInclude Include="CommonData.h" />
+    <ClInclude Include="DataStartup.h" />
     <ClInclude Include="DrawCommon.h" />
     <ClInclude Include="GeneralSettingsDlg.h" />
     <ClInclude Include="HistoryTrafficDlg.h" />

@@ -3,6 +3,7 @@
 
 #include <Windows.h>
 
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -54,8 +55,9 @@ namespace DefaultConfigSeeder
         if (slash != std::wstring::npos && slash > 0)
         {
             const std::wstring parent = target.substr(0, slash);
-            if (::GetFileAttributesW(parent.c_str()) == INVALID_FILE_ATTRIBUTES &&
-                !::CreateDirectoryW(parent.c_str(), nullptr) && ::GetLastError() != ERROR_ALREADY_EXISTS)
+            std::error_code error;
+            std::filesystem::create_directories(parent, error);
+            if (error && ::GetFileAttributesW(parent.c_str()) == INVALID_FILE_ATTRIBUTES)
                 return Result::Failed;
         }
 
@@ -104,8 +106,16 @@ namespace DefaultConfigSeeder
         return WriteIfAbsent(target, bytes.data(), bytes.size());
     }
 
-    // Failures are intentionally silent: a read-only installation falls back to the
-    // built-in defaults instead of blocking startup.
+    inline bool EnsureDirectory(const std::wstring& directory)
+    {
+        if (directory.empty()) return false;
+        if (::GetFileAttributesW(directory.c_str()) != INVALID_FILE_ATTRIBUTES)
+            return (::GetFileAttributesW(directory.c_str()) & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        return ::CreateDirectoryW(directory.c_str(), nullptr) != FALSE || ::GetLastError() == ERROR_ALREADY_EXISTS;
+    }
+
+    // Filesystem preparation is fatal in the caller; factory files are still
+    // best-effort so a temporarily unwritable config keeps using embedded defaults.
     inline void SeedMissingDefaults(const std::wstring& config_dir)
     {
         if (config_dir.empty())
@@ -114,13 +124,21 @@ namespace DefaultConfigSeeder
         if (base.back() != L'\\' && base.back() != L'/')
             base += L'\\';
 
-        SeedOne(IDR_DEFAULT_CONFIG, base + L"config.ini");
+        const std::wstring config = base + L"config\\";
+        const std::wstring history = base + L"history\\";
+        const std::wstring lyrics = base + L"lyrics\\";
+        const std::wstring cache = base + L"cache\\lyrics\\";
+        const std::wstring secrets = base + L"secrets\\";
+        const std::wstring logs = base + L"logs\\";
+        const std::wstring migration = base + L"migration\\";
+        const std::wstring archive = migration + L"archive\\";
+        const std::wstring backups = base + L"backups\\";
+        for (const auto& directory : {config, history, lyrics, cache, secrets, logs, migration, archive, backups})
+            if (!EnsureDirectory(directory)) return;
 
-        const std::wstring plugins = base + L"plugins\\";
-        if (::GetFileAttributesW(plugins.c_str()) == INVALID_FILE_ATTRIBUTES)
-            ::CreateDirectoryW(plugins.c_str(), nullptr);
-        SeedOne(IDR_DEFAULT_BATTERY_INI, plugins + L"Battery.dll.ini");
-        SeedOne(IDR_DEFAULT_POWERMON_INI, plugins + L"PowerMonPlugin.dll.ini");
-        SeedOne(IDR_DEFAULT_WEATHER_INI, plugins + L"WeatherPro.ini");
+        SeedOne(IDR_DEFAULT_CONFIG, config + L"app.ini");
+        SeedOne(IDR_DEFAULT_BATTERY_INI, config + L"battery.ini");
+        SeedOne(IDR_DEFAULT_POWERMON_INI, config + L"power.ini");
+        SeedOne(IDR_DEFAULT_WEATHER_INI, config + L"weather.ini");
     }
 }

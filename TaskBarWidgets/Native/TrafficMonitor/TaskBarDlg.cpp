@@ -455,7 +455,9 @@ void CTaskBarDlg::DisableRenderFeatureIfNecessary(CSupportedRenderEnums& ref_sup
         ref_supported_render_enums.DisableD2D1();
     }
     // 不符合条件则启用Default（MFC）
-    if (!is_transparent || theApp.m_taskbar_data.auto_set_background_color || theApp.m_taskbar_data.disable_d2d)
+    // A transparent window must keep the alpha (D2D) renderer: forcing the default renderer paints an
+    // opaque background whose color key can no longer match after the transparency colors are paired.
+    if (!is_transparent || theApp.m_taskbar_data.disable_d2d)
     {
         ref_supported_render_enums.EnableDefaultOnly();
     }
@@ -521,7 +523,13 @@ bool CTaskBarDlg::AdjustWindowPos(bool force_adjust)
 
 void CTaskBarDlg::ApplyWindowTransparentColor()
 {
-    if (m_media_presented) return;
+    // Only the GDI color key must wait while the media composition surface is presented: the key
+    // punches transparent holes through media pixels that match the key color. The alpha renderers
+    // set plain window styles and must track settings in every presentation state, otherwise a
+    // save made while media is presented leaves stale transparency until restart.
+    if (m_media_presented
+        && m_supported_render_enums.GetAutoFitEnum() == DrawCommonHelper::RenderType::DEFAULT)
+        return;
 #ifndef COMPILE_FOR_WINXP
     if (theApp.IsWindows11Taskbar())      //Windows11下背景色不使用纯黑色，以解决深色模式下右键菜单无法弹出的问题
     {
@@ -577,6 +585,9 @@ bool CTaskBarDlg::SetMediaPresentation(bool visible)
         return false;
     }
     m_media_presented = visible;
+    // A window style application skipped while presented must be restored when the media
+    // surface hides, or the window keeps the pre-presentation transparency state.
+    if (!visible) ApplyWindowTransparentColor();
     if (m_media_host) m_media_host->GeometryChanged();
     // Switching surfaces never changes HWND layering or its hit-test region.
     RedrawWindow(nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW);
@@ -1244,7 +1255,10 @@ LRESULT CTaskBarDlg::WindowProc(UINT message, WPARAM wParam, LPARAM lParam)
 {
     if (message == WM_MEDIA_HOST_WAKE)
     {
+        // A wake consumed without a tick leaves the process-wide queue's uiWakePosted stuck and
+        // every later request unprocessed; always drain it, even without a bound window host.
         if (m_media_host) m_media_host->Tick();
+        else NativeMediaHost::TickShared();
         return 0;
     }
     if (message == WM_SIZE)

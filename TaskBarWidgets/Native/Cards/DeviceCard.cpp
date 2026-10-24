@@ -86,7 +86,9 @@ namespace Cards::Paint
         const Draw::Palette palette = Draw::Colors(environment);
         const float left = Layout::Padding;
         const float width = widthDip - Layout::Padding * 2.0f;
-        const bool busy = !snapshot.audio.message.empty();
+        // A status/error message is persistent data, not an in-flight command flag.
+        // Disabling selectors here would prevent recovery by switching devices.
+        const bool busy = false;
 
         float top = Layout::Padding;
         top = Section(top, L"输出设备", snapshot.audio.outputs, L"output", 200, context, environment,
@@ -94,7 +96,7 @@ namespace Cards::Paint
         top = Section(top, L"输入设备", snapshot.audio.inputs, L"input", 210, context, environment,
             regions, left, width, palette, busy);
 
-        if (busy)
+        if (!snapshot.audio.message.empty())
         {
             Draw::Text(context, graphics, snapshot.audio.message, environment.fontFamily, 10.0f, 400,
                 palette.secondary, Draw::Rect(left, top, left + width, top + 22.0f));

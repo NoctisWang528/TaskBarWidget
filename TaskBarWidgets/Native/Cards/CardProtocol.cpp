@@ -1,6 +1,7 @@
 ﻿#include "CardPch.h"
 #include "CardProtocol.h"
 #include "CardText.h"
+#include "../TrafficMonitor/NativeMediaJson.h"
 
 #include <winrt/Windows.Data.Json.h>
 
@@ -98,6 +99,8 @@ namespace Cards::Protocol
         bool ConfigFrom(const JsonObject& quickCards, Config& config)
         {
             if (!quickCards) return false;
+            const auto revision = static_cast<long long>(Number(quickCards, L"revision", -1));
+            if (revision >= 0 && revision <= config.revision) return false;
             const auto order = Strings(quickCards, L"order");
             if (!order.empty()) config.order = order;
             if (const auto columns = Object(quickCards, L"columns"))
@@ -115,7 +118,7 @@ namespace Cards::Protocol
             const auto font = Text(quickCards, L"font");
             if (!font.empty()) config.font = font;
             MicaTuningFrom(quickCards, config.mica);
-            config.revision += 1;
+            config.revision = revision >= 0 ? revision : config.revision + 1;
             return true;
         }
 
@@ -136,12 +139,13 @@ namespace Cards::Protocol
             state.canPlayPause = Boolean(media, L"canPlayPause");
             state.canSeek = Boolean(media, L"canSeek");
             state.selectedSourceId = Text(media, L"selectedSourceId");
-            const auto cover = Text(media, L"coverDataUrl");
+            const auto cover = Text(media, L"coverDataUrl", state.coverDataUrl);
             if (cover != state.coverDataUrl)
             {
                 state.coverDataUrl = cover;
                 state.coverKey = std::to_wstring(state.revision) + L"|" + std::to_wstring(cover.size());
             }
+            const auto oldSources = std::move(state.sources);
             state.sources.clear();
             if (const auto sources = Array(media, L"sources"))
             {
@@ -150,9 +154,10 @@ namespace Cards::Protocol
                     if (entry.ValueType() != JsonValueType::Object) continue;
                     const auto item = entry.GetObject();
                     MediaSource source;
-                    source.id = Text(item, L"id");
+                    source.id = Text(item, L"id", Text(item, L"Id"));
                     source.label = Text(item, L"label");
-                    source.iconDataUrl = Text(item, L"iconDataUrl");
+                    const auto old = std::find_if(oldSources.begin(), oldSources.end(), [&](const auto& previous) { return previous.id == source.id; });
+                    source.iconDataUrl = Text(item, L"iconDataUrl", old != oldSources.end() ? old->iconDataUrl : L"");
                     if (!source.id.empty()) state.sources.push_back(std::move(source));
                 }
             }
@@ -181,10 +186,11 @@ namespace Cards::Protocol
                     if (!endpoint.id.empty()) target.push_back(std::move(endpoint));
                 }
             };
+            const long long revision = static_cast<long long>(Number(audio, L"revision", -1));
+            if (revision >= 0 && revision <= state.revision) return false;
             read(Array(audio, L"outputs"), state.outputs);
             read(Array(audio, L"inputs"), state.inputs);
             state.message = Text(audio, L"message");
-            const long long revision = static_cast<long long>(Number(audio, L"revision", -1));
             if (revision >= 0) state.revision = revision;
             return true;
         }
@@ -198,22 +204,27 @@ namespace Cards::Protocol
             state.trackId = Text(lyrics, L"trackId");
             state.available = Boolean(lyrics, L"available");
             state.isPlaying = Boolean(lyrics, L"isPlaying");
-            state.animateTransition = Boolean(lyrics, L"animateTransition", true);
-            state.currentLineIndex = Integer(lyrics, L"currentLineIndex", -1);
-            state.progress = std::clamp(Number(lyrics, L"progress"), 0.0, 1.0);
-            state.wordScan = Number(lyrics, L"wordScanProgress", -1);
-            state.scene = Text(lyrics, L"scene");
-            state.current = Text(lyrics, L"current");
-            state.next = Text(lyrics, L"next");
-            state.currentTranslation = Text(lyrics, L"currentTranslation");
-            state.nextTranslation = Text(lyrics, L"nextTranslation");
-            state.isPureMusic = Boolean(lyrics, L"isPureMusic");
+            // CardSnapshotBuilder flattens the lines; raw renderVersion 2 frames
+            // carry the same fields under lyrics. Accept both at this boundary.
+            const auto nested = Object(lyrics, L"lyrics");
+            const auto lines = nested ? nested : lyrics;
+            state.translationMode = Boolean(lines, L"translationMode");
+            state.animateTransition = Boolean(lines, L"animateTransition", true);
+            state.currentLineIndex = Integer(lines, L"currentLineIndex", -1);
+            state.progress = std::clamp(Number(lines, L"progress"), 0.0, 1.0);
+            state.wordScan = Number(lines, L"wordScanProgress", -1);
+            state.scene = Text(lines, L"scene");
+            state.current = Text(lines, L"current");
+            state.next = Text(lines, L"next");
+            state.currentTranslation = Text(lines, L"currentTranslation");
+            state.nextTranslation = Text(lines, L"nextTranslation");
+            state.isPureMusic = Boolean(lines, L"isPureMusic");
             if (const auto style = Object(lyrics, L"style"))
             {
                 const auto font = Text(style, L"fontFamily");
                 if (!font.empty()) state.fontFamily = font;
                 state.fontSize = Number(style, L"fontSize", state.fontSize);
-                state.fontWeight = Integer(style, L"fontWeight", state.fontWeight);
+                state.fontWeight = NativeMedia::Json::FontWeight(style, L"fontWeight", state.fontWeight);
                 const auto primary = Text(style, L"primaryColor");
                 if (!primary.empty()) state.primaryColor = primary;
                 const auto secondary = Text(style, L"secondaryColor");
@@ -226,6 +237,18 @@ namespace Cards::Protocol
                 state.textAlignment = Text(style, L"textAlignment");
                 state.layoutScalePercent = Number(style, L"layoutScalePercent", state.layoutScalePercent);
             }
+            if (const auto appearance = Object(lyrics, L"nativeAppearance"))
+            {
+                const auto family = Text(appearance, L"fontFamily");
+                if (!family.empty()) state.fontFamily = family;
+                const double size = Number(appearance, L"fontSize");
+                if (size > 0) state.fontSize = size;
+                if (Number(appearance, L"fontWeight") > 0 || !Text(appearance, L"fontWeight").empty())
+                    state.fontWeight = NativeMedia::Json::FontWeight(appearance, L"fontWeight", state.fontWeight);
+                state.fontItalic = Boolean(appearance, L"fontItalic");
+                state.fontUnderline = Boolean(appearance, L"fontUnderline");
+                state.fontStrikeOut = Boolean(appearance, L"fontStrikeOut");
+            }
             return true;
         }
 
@@ -233,7 +256,7 @@ namespace Cards::Protocol
         {
             if (!traffic) return false;
             const long long revision = static_cast<long long>(Number(traffic, L"revision", -1));
-            if (revision >= 0 && revision < state.revision) return false;
+            if (revision >= 0 && revision <= state.revision) return false;
             state.revision = revision;
             state.today = Text(traffic, L"today");
             state.scopeLabel = Text(traffic, L"scopeLabel");
@@ -260,41 +283,92 @@ namespace Cards::Protocol
             }
             state.totalKiB = Number(traffic, L"totalKiB");
             state.peakKiB = Number(traffic, L"peakKiB");
-            state.available = !state.days.empty();
+            state.available = Boolean(traffic, L"available", !state.days.empty());
+            const auto selected = std::find_if(state.days.begin(), state.days.end(),
+                [&state](const TrafficDay& day) { return !day.isFuture && day.date == state.selectedDate; });
+            state.Select(selected != state.days.end() ? state.selectedDate : state.today);
             return true;
         }
 
-        bool WeatherFrom(const JsonObject& weather, WeatherState& state)
+        bool WeatherFrom(const JsonObject& payload, WeatherState& target)
         {
-            if (!weather) return false;
+            if (!payload) return false;
+            const auto status = Object(payload, L"status");
+            const auto weather = status ? status : payload;
             const long long revision = static_cast<long long>(Number(weather, L"revision", -1));
-            if (revision >= 0 && revision < state.revision) return false;
+            if (revision >= 0 && revision < target.revision) return false;
+            // These are complete weather blocks. Absent details clear old values
+            // instead of relabelling the previous city's data as a new result.
+            WeatherState state;
             state.revision = revision;
             state.provider = Text(weather, L"provider");
+            if (state.provider.empty())
+            {
+                const int provider = Integer(weather, L"provider", -1);
+                if (provider == 0) state.provider = L"中国天气网";
+                else if (provider == 1) state.provider = L"和风天气";
+            }
             state.city = Text(weather, L"city");
+            state.cityId = Text(weather, L"cityId");
             state.region = Text(weather, L"region");
+            if (const auto city = Object(weather, L"city"))
+            {
+                state.city = Text(city, L"name");
+                state.cityId = Text(city, L"id");
+                state.region = Text(city, L"region");
+            }
+            state.lastSuccessCity = Text(weather, L"lastSuccessCity");
+            state.lastSuccessCityId = Text(weather, L"lastSuccessCityId");
+            if (const auto city = Object(weather, L"lastSuccessCity"))
+            {
+                state.lastSuccessCity = Text(city, L"name");
+                state.lastSuccessCityId = Text(city, L"id");
+            }
+            state.lastAttempt = Text(weather, L"lastAttempt");
+            state.lastSuccess = Text(weather, L"lastSuccess");
             state.state = Text(weather, L"state");
             state.message = Text(weather, L"message");
-            state.stale = Boolean(weather, L"stale");
+            state.stale = Boolean(weather, L"stale") || (!state.cityId.empty() &&
+                !state.lastSuccessCityId.empty() && state.cityId != state.lastSuccessCityId);
             state.updating = Boolean(weather, L"updating");
-            state.hasData = Boolean(weather, L"hasData");
+            state.temperature = Text(weather, L"temperature");
+            state.feelsLike = Text(weather, L"feelsLike");
+            state.weather = Text(weather, L"weather");
+            state.conditionKind = Text(weather, L"conditionKind");
+            state.humidity = Text(weather, L"humidity");
+            state.wind = Text(weather, L"windDirection");
+            state.observedAt = Text(weather, L"observedAt");
             if (const auto details = Object(weather, L"details"))
             {
                 if (const auto current = Object(details, L"current"))
                 {
-                    state.temperature = Text(current, L"temperature");
-                    state.feelsLike = Text(current, L"feelsLike");
-                    state.weather = Text(current, L"weather");
-                    state.conditionKind = Text(current, L"conditionKind");
-                    state.humidity = Text(current, L"humidity");
-                    state.wind = Text(current, L"windDirection");
-                    state.observedAt = Text(current, L"observedAt");
+                    state.temperature = Text(current, L"temperature", state.temperature);
+                    state.feelsLike = Text(current, L"feelsLike", state.feelsLike);
+                    state.weather = Text(current, L"weather", state.weather);
+                    state.conditionKind = Text(current, L"conditionKind", state.conditionKind);
+                    state.humidity = Text(current, L"humidity", state.humidity);
+                    state.wind = Text(current, L"windDirection", state.wind);
+                    state.windScale = Text(current, L"windScale");
+                    state.windSpeed = Text(current, L"windSpeed");
+                    state.observedAt = Text(current, L"observedAt", state.observedAt);
                 }
                 if (const auto air = Object(details, L"airQuality"))
                 {
                     state.airQuality = Text(air, L"aqi");
+                    state.airLevel = Text(air, L"level");
+                    state.airCategory = Text(air, L"category");
+                    state.airIndexCode = Text(air, L"indexCode");
+                    state.airIndexName = Text(air, L"indexName");
+                    state.airPublishedAt = Text(air, L"publishedAt");
+                    state.airError = Text(air, L"error");
+                    state.airAttribution = Text(air, L"attribution");
+                    state.pm25 = Text(air, L"pm25");
+                    state.pm10 = Text(air, L"pm10");
+                    state.pm25Unit = Text(air, L"pm25Unit");
+                    state.pm10Unit = Text(air, L"pm10Unit");
                 }
-                state.forecast.clear();
+                state.alertsError = Text(details, L"alertsError");
+                state.alertsAttribution = Text(details, L"alertsAttribution");
                 if (const auto forecast = Array(details, L"forecast"))
                 {
                     for (const auto& entry : forecast)
@@ -311,7 +385,6 @@ namespace Cards::Protocol
                         state.forecast.push_back(std::move(day));
                     }
                 }
-                state.alerts.clear();
                 if (const auto alerts = Array(details, L"alerts"))
                 {
                     for (const auto& entry : alerts)
@@ -319,15 +392,19 @@ namespace Cards::Protocol
                         if (entry.ValueType() != JsonValueType::Object) continue;
                         const auto item = entry.GetObject();
                         WeatherAlert alert;
+                        alert.type = Text(item, L"type");
                         alert.typeName = Text(item, L"typeName");
                         alert.level = Text(item, L"level");
                         alert.title = Text(item, L"title");
                         alert.text = Text(item, L"text");
                         alert.severity = Text(item, L"severity");
+                        alert.publishedAt = Text(item, L"publishedAt");
                         state.alerts.push_back(std::move(alert));
                     }
                 }
             }
+            state.hasData = Boolean(weather, L"hasData", !state.temperature.empty() && state.temperature != L"--");
+            target = std::move(state);
             return true;
         }
 
@@ -335,7 +412,7 @@ namespace Cards::Protocol
         {
             if (!update) return false;
             const long long revision = static_cast<long long>(Number(update, L"revision", -1));
-            if (revision >= 0 && revision < state.revision) return false;
+            if (revision >= 0 && revision <= state.revision) return false;
             state.revision = revision;
             state.phase = Text(update, L"phase");
             state.currentVersion = Text(update, L"currentVersion");
@@ -379,6 +456,7 @@ namespace Cards::Protocol
         try
         {
             const auto object = JsonObject::Parse(message.raw);
+            if (Integer(object, L"version", -1) != 1) return message;
             message.action = Text(object, L"action");
             if (const auto type = Text(object, L"type"); type != L"command") return message;
             if (message.action == L"cardSnapshot")
@@ -390,7 +468,8 @@ namespace Cards::Protocol
                 message.success = Boolean(object, L"success");
                 message.error = Text(object, L"error");
             }
-            else if (message.action == L"cardReady" || message.action == L"shutdown")
+            else if (message.action == L"connectionStarted" ||
+                message.action == L"cardReady" || message.action == L"shutdown")
                 message.kind = Kind::Event;
             else
                 return message;
@@ -402,6 +481,17 @@ namespace Cards::Protocol
         }
         catch (...) { message.kind = Kind::Unknown; }
         return message;
+    }
+
+    void ResetRevisions(Snapshot& target)
+    {
+        target.config.revision = -1;
+        target.media.revision = -1;
+        target.audio.revision = -1;
+        target.lyrics.revision = -1;
+        target.traffic.revision = -1;
+        target.weather.revision = -1;
+        target.update.revision = -1;
     }
 
     bool ApplySnapshot(Snapshot& target, const std::wstring& payloadJson, Changes& changes)
@@ -426,6 +516,8 @@ namespace Cards::Protocol
                 changes.update = UpdateFrom(update, target.update);
             const auto status = Text(payload, L"statusText");
             if (status != target.statusText) { target.statusText = status; changes.status = true; }
+            const int theme = std::clamp(Integer(payload, L"toolWindowTheme", target.toolWindowTheme), 0, 2);
+            if (theme != target.toolWindowTheme) { target.toolWindowTheme = theme; changes.theme = true; }
             target.connected = Boolean(payload, L"connected", true);
             return true;
         }

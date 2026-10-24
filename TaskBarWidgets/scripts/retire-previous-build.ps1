@@ -90,14 +90,12 @@ $null = @(Get-SafeTree $next.Path)
 Assert-NoBuildProcesses @($previous.Path, $next.Path)
 Assert-Unlocked @($oldFiles.FullName)
 
-$userData = @('config.ini', 'global_cfg.ini', 'history_traffic.dat', 'history_traffic.dat.bak',
-    'plugins\Battery.dll.ini', 'plugins\PowerMonPlugin.dll.ini', 'plugins\WeatherPro.ini')
-$records = foreach ($relative in $userData + @('build-info.json', 'error.log', 'builtin-startup-check.log')) {
+$records = foreach ($relative in @('built-in-startup-check.log')) {
     $source = Join-Path $previous.Path $relative
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { continue }
     $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
     $destination = Join-Path $next.Path $relative
-    $migrate = $relative -in $userData
+    $migrate = $false
     $exists = Test-Path -LiteralPath $destination -PathType Leaf
     if ($migrate -and $exists -and (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash -ne $hash) {
         throw "User data differs in the new build; review/merge before retirement: $relative"

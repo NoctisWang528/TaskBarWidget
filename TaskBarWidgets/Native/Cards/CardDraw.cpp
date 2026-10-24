@@ -84,15 +84,29 @@ namespace Cards::Draw
 
     void Text(ID2D1DeviceContext* context, Graphics& graphics, const std::wstring& value,
         const std::wstring& family, float size, int weight, Color color, D2D1_RECT_F rect,
-        DWRITE_TEXT_ALIGNMENT alignment)
+        DWRITE_TEXT_ALIGNMENT alignment, bool italic, bool underline, bool strikeout)
     {
-        if (!context || value.empty() || !graphics.DWrite()) return;
+        if (!context || value.empty() || !graphics.DWrite() ||
+            rect.right <= rect.left || rect.bottom <= rect.top) return;
         const auto format = graphics.TextFormat(family, size, weight, alignment, false);
         if (!format) return;
+        ComPtr<IDWriteTextLayout> layout;
+        if (FAILED(graphics.DWrite()->CreateTextLayout(value.c_str(), static_cast<UINT32>(value.size()),
+            format, rect.right - rect.left, rect.bottom - rect.top, layout.GetAddressOf()))) return;
+        const DWRITE_TEXT_RANGE range{ 0, static_cast<UINT32>(value.size()) };
+        layout->SetFontStyle(italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL, range);
+        layout->SetUnderline(underline, range);
+        layout->SetStrikethrough(strikeout, range);
+        ComPtr<IDWriteInlineObject> ellipsis;
+        if (SUCCEEDED(graphics.DWrite()->CreateEllipsisTrimmingSign(format, ellipsis.GetAddressOf())))
+        {
+            const DWRITE_TRIMMING trimming{ DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0 };
+            layout->SetTrimming(&trimming, ellipsis.Get());
+        }
         const auto brush = Brush(context, color);
         if (!brush) return;
-        context->DrawTextW(value.c_str(), static_cast<UINT32>(value.size()), format, rect,
-            brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        context->DrawTextLayout(D2D1::Point2F(rect.left, rect.top), layout.Get(), brush,
+            D2D1_DRAW_TEXT_OPTIONS_CLIP);
         brush->Release();
     }
 
@@ -122,6 +136,9 @@ namespace Cards::Draw
             if (fits(value.substr(0, middle) + ellipsis)) low = middle;
             else high = middle - 1;
         }
+        // Do not cut between the two UTF-16 code units of a supplementary character.
+        if (low > 0 && low < value.size() && value[low - 1] >= 0xD800 &&
+            value[low - 1] <= 0xDBFF && value[low] >= 0xDC00 && value[low] <= 0xDFFF) --low;
         return value.substr(0, low) + ellipsis;
     }
 

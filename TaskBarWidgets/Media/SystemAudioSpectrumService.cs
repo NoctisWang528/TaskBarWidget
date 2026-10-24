@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Threading;
+using TaskBarWidgets.Media.Diagnostics;
 
 namespace TaskbarLyrics.App;
 
@@ -21,11 +23,16 @@ public sealed class SystemAudioSpectrumService : IDisposable
     private static readonly Guid IAudioClientId = new("1CB9AD4C-DBFA-4c32-B178-C2F568A703B2");
     private static readonly Guid IAudioCaptureClientId = new("C8ADBD64-E71E-48a0-A4DE-185C395CD317");
     private static readonly Guid IeeeFloatSubFormat = new("00000003-0000-0010-8000-00aa00389b71");
+    private static readonly Guid MMDeviceEnumeratorClassId = new("BCDE0395-E52F-467C-8E3D-C4579291692E");
+    // Hann windows depend only on the coerced sample window, which is 512, 1024 or 2048,
+    // so this cache stays bounded at three immutable arrays for the process lifetime.
+    private static readonly ConcurrentDictionary<int, double[]> HannWindows = new();
 
     private readonly object _lifecycleSync = new();
     private readonly object _sync = new();
     private float[][] _ringBuffers = [new float[RingBufferSize]];
     private float[] _smoothedBars = new float[SpectrumTuningSettings.DefaultBarCount];
+    private SpectrumScratch? _idleScratch;
     private CancellationTokenSource? _captureCancellation;
     private Thread? _captureThread;
     private int _consecutiveCaptureFailures;
@@ -149,62 +156,76 @@ public sealed class SystemAudioSpectrumService : IDisposable
 
     internal float[] GetSpectrum(long now, Action? beforeCommit = null)
     {
-        SpectrumTuningSettings settings;
-        float[][] samples;
-        int sampleRate;
-        int generation;
-
-        lock (_sync)
+        // One frame owns the scratch buffers from sample copy to bar commit. A concurrent or
+        // re-entrant call takes a fresh set instead of interleaving with a frame in flight.
+        var scratch = Interlocked.Exchange(ref _idleScratch, null) ?? new SpectrumScratch();
+        try
         {
-            settings = _tuningSettings.Clone();
-            var sampleWindow = CoerceSampleWindow(settings.SampleWindow);
-            sampleRate = _sampleRate;
-            if (_lastPacketTick is { } lastPacket && now - lastPacket >= PacketExpiryMs)
-            {
-                foreach (var channel in _ringBuffers) Array.Clear(channel);
-                _lastPacketTick = null;
-                _diagnosticInputPeak = 0;
-                _signalGeneration++;
-            }
+            int sampleRate;
+            int generation;
+            float[][] samples;
+            SpectrumTuningSettings settings;
 
-            generation = _signalGeneration;
-            samples = new float[_ringBuffers.Length][];
-            var start = (_writeIndex - sampleWindow + RingBufferSize) % RingBufferSize;
-            for (var channel = 0; channel < samples.Length; channel++)
+            lock (_sync)
             {
-                samples[channel] = new float[sampleWindow];
-                for (var i = 0; i < sampleWindow; i++)
+                // Capture the immutable settings reference with the sample window so the whole
+                // frame uses one generation of tuning, exactly like the previous Clone snapshot.
+                settings = _tuningSettings;
+                var sampleWindow = CoerceSampleWindow(settings.SampleWindow);
+                sampleRate = _sampleRate;
+                if (_lastPacketTick is { } lastPacket && now - lastPacket >= PacketExpiryMs)
                 {
-                    samples[channel][i] = _ringBuffers[channel][(start + i) % RingBufferSize];
+                    foreach (var channel in _ringBuffers) Array.Clear(channel);
+                    _lastPacketTick = null;
+                    _diagnosticInputPeak = 0;
+                    _signalGeneration++;
+                }
+
+                generation = _signalGeneration;
+                scratch.Prepare(_ringBuffers.Length, sampleWindow);
+                samples = scratch.Samples;
+                var start = (_writeIndex - sampleWindow + RingBufferSize) % RingBufferSize;
+                for (var channel = 0; channel < samples.Length; channel++)
+                {
+                    for (var i = 0; i < sampleWindow; i++)
+                    {
+                        samples[channel][i] = _ringBuffers[channel][(start + i) % RingBufferSize];
+                    }
                 }
             }
-        }
 
-        var magnitudes = CalculateFftMagnitudes(samples);
-        // The internal callback lets the signal test reproduce a reset during FFT
-        // without starting a real audio endpoint or relying on thread timing.
-        beforeCommit?.Invoke();
-        float[] bars;
-        lock (_sync)
+            var magnitudes = CalculateFftMagnitudes(scratch, samples);
+            // The internal callback lets the signal test reproduce a reset during FFT
+            // without starting a real audio endpoint or relying on thread timing.
+            beforeCommit?.Invoke();
+            float[] bars;
+            lock (_sync)
+            {
+                if (generation != _signalGeneration) return (float[])_smoothedBars.Clone();
+                bars = CalculateBars(magnitudes, samples[0].Length, sampleRate, settings, scratch);
+                if (_smoothedBars.Length != bars.Length)
+                {
+                    _smoothedBars = new float[bars.Length];
+                }
+
+                for (var i = 0; i < bars.Length; i++)
+                {
+                    var attack = bars[i] > _smoothedBars[i]
+                        ? (float)settings.BackendAttack
+                        : (float)settings.BackendRelease;
+                    _smoothedBars[i] += (bars[i] - _smoothedBars[i]) * attack;
+                    bars[i] = Math.Clamp(_smoothedBars[i], 0f, 1f);
+                }
+            }
+
+            // The coordinator stores the returned array for later frames and the diagnostics
+            // snapshot outlives the call, so the reused bar buffer is copied once per frame.
+            return (float[])bars.Clone();
+        }
+        finally
         {
-            if (generation != _signalGeneration) return (float[])_smoothedBars.Clone();
-            bars = CalculateBars(magnitudes, samples[0].Length, sampleRate, settings);
-            if (_smoothedBars.Length != bars.Length)
-            {
-                _smoothedBars = new float[bars.Length];
-            }
-
-            for (var i = 0; i < bars.Length; i++)
-            {
-                var attack = bars[i] > _smoothedBars[i]
-                    ? (float)settings.BackendAttack
-                    : (float)settings.BackendRelease;
-                _smoothedBars[i] += (bars[i] - _smoothedBars[i]) * attack;
-                bars[i] = Math.Clamp(_smoothedBars[i], 0f, 1f);
-            }
+            Volatile.Write(ref _idleScratch, scratch);
         }
-
-        return bars;
     }
 
     private void CaptureLoop(CancellationToken cancellationToken)
@@ -253,7 +274,15 @@ public sealed class SystemAudioSpectrumService : IDisposable
             {
                 ResetSignal();
             }
-            enumerator = (IMMDeviceEnumerator)(object)new MMDeviceEnumerator();
+            // Request the interface directly: another audio feature can register a different
+            // managed coclass for this CLSID, making a typed coclass constructor cast fail.
+            var classId = MMDeviceEnumeratorClassId;
+            var enumeratorInterfaceId = typeof(IMMDeviceEnumerator).GUID;
+            Marshal.ThrowExceptionForHR(CoCreateInstance(ref classId, IntPtr.Zero, ClsctxAll, ref enumeratorInterfaceId, out enumerator));
+            if (enumerator is null)
+            {
+                throw new InvalidOperationException("CoCreateInstance did not return the IMMDeviceEnumerator interface.");
+            }
             Marshal.ThrowExceptionForHR(enumerator.GetDefaultAudioEndpoint(EDataFlow.Render, ERole.Console, out device));
             var activeDeviceId = GetDeviceId(device);
             var audioClientId = IAudioClientId;
@@ -478,13 +507,18 @@ public sealed class SystemAudioSpectrumService : IDisposable
         return Math.Clamp(sample / 8388608f, -1f, 1f);
     }
 
-    private float[] CalculateBars(float[] magnitudes, int sampleWindow, int sampleRate, SpectrumTuningSettings settings)
+    private float[] CalculateBars(
+        float[] magnitudes,
+        int sampleWindow,
+        int sampleRate,
+        SpectrumTuningSettings settings,
+        SpectrumScratch scratch)
     {
         var barCount = Math.Clamp(
             settings.BarCount,
             SpectrumTuningSettings.MinBarCount,
             SpectrumTuningSettings.MaxBarCount);
-        var bars = new float[barCount];
+        var bars = scratch.GetBars(barCount);
         var nyquist = Math.Max(1000, sampleRate / 2);
         var maximumAvailableFrequency = Math.Min(SpectrumTuningSettings.MaximumFrequency, nyquist * 0.92);
         var maxFrequency = Math.Clamp(
@@ -554,18 +588,38 @@ public sealed class SystemAudioSpectrumService : IDisposable
         };
     }
 
-    private static float[] CalculateFftMagnitudes(float[][] channels)
+    private static double[] GetHannWindow(int length) =>
+        HannWindows.GetOrAdd(length, static size => CreateHannWindow(size));
+
+    private static double[] CreateHannWindow(int length)
     {
+        var window = new double[length];
+        for (var i = 0; i < length; i++)
+        {
+            window[i] = 0.5 - (0.5 * Math.Cos((2.0 * Math.PI * i) / (length - 1)));
+        }
+
+        return window;
+    }
+
+    private float[] CalculateFftMagnitudes(SpectrumScratch scratch, float[][] channels)
+    {
+        FootprintMetrics.NoteFft();
         var length = channels[0].Length;
-        var powers = new double[(length / 2) + 1];
+        var powers = scratch.Powers;
+        var real = scratch.Real;
+        var imaginary = scratch.Imaginary;
+        var window = scratch.HannWindow;
+        // Reused buffers: the power accumulator must start at zero, bin 0 stays unused and
+        // the window is the cached table for this length instead of a per-sample cosine.
+        Array.Clear(powers);
         foreach (var samples in channels)
         {
-            var real = new double[length];
-            var imaginary = new double[length];
+            // Only the imaginary part needs a reset per channel; real is fully rewritten.
+            Array.Clear(imaginary);
             for (var i = 0; i < length; i++)
             {
-                var window = 0.5 - (0.5 * Math.Cos((2.0 * Math.PI * i) / (length - 1)));
-                real[i] = samples[i] * window;
+                real[i] = samples[i] * window[i];
             }
 
             FastFourierTransform(real, imaginary);
@@ -576,8 +630,9 @@ public sealed class SystemAudioSpectrumService : IDisposable
         }
 
         // Combine power after FFT so channel phase cannot cancel or create harmonics.
-        var magnitudes = new float[(length / 2) + 1];
+        var magnitudes = scratch.Magnitudes;
         var scale = 2.0 / length;
+        magnitudes[0] = 0f;
         for (var i = 1; i < magnitudes.Length; i++)
         {
             magnitudes[i] = (float)(Math.Sqrt(powers[i] / channels.Length) * scale);
@@ -637,6 +692,14 @@ public sealed class SystemAudioSpectrumService : IDisposable
             }
         }
     }
+
+    [DllImport("ole32.dll", ExactSpelling = true)]
+    private static extern int CoCreateInstance(
+        ref Guid classId,
+        IntPtr outer,
+        uint classContext,
+        ref Guid interfaceId,
+        [MarshalAs(UnmanagedType.Interface)] out IMMDeviceEnumerator? enumerator);
 
     private static void ReleaseCom(object? value)
     {
@@ -705,6 +768,58 @@ public sealed class SystemAudioSpectrumService : IDisposable
             (float)_tuningSettings.PeakFloor, (float)_tuningSettings.PeakCeiling);
     }
 
+    // Per-frame scratch buffers. The shape fields make sure the channel, window, power,
+    // magnitude and bar arrays are only reallocated when the audio format changes.
+    private sealed class SpectrumScratch
+    {
+        internal float[][] Samples = [];
+        internal double[] Powers = [];
+        internal double[] Real = [];
+        internal double[] Imaginary = [];
+        internal float[] Magnitudes = [];
+        internal float[] Bars = [];
+        internal double[] HannWindow = [];
+        internal int WindowLength;
+
+        internal void Prepare(int channelCount, int windowLength)
+        {
+            if (WindowLength != windowLength)
+            {
+                WindowLength = windowLength;
+                HannWindow = GetHannWindow(windowLength);
+                var binCount = (windowLength / 2) + 1;
+                Powers = new double[binCount];
+                Real = new double[windowLength];
+                Imaginary = new double[windowLength];
+                Magnitudes = new float[binCount];
+                Samples = [];
+            }
+
+            if (Samples.Length == channelCount)
+            {
+                return;
+            }
+
+            var samples = new float[channelCount][];
+            for (var channel = 0; channel < channelCount; channel++)
+            {
+                samples[channel] = new float[windowLength];
+            }
+
+            Samples = samples;
+        }
+
+        internal float[] GetBars(int barCount)
+        {
+            if (Bars.Length != barCount)
+            {
+                Bars = new float[barCount];
+            }
+
+            return Bars;
+        }
+    }
+
     internal sealed class AudioFormat
     {
         internal AudioFormat(int channels, int sampleRate, int blockAlign, int bytesPerSample, bool isFloat)
@@ -754,12 +869,6 @@ public sealed class SystemAudioSpectrumService : IDisposable
         Console,
         Multimedia,
         Communications
-    }
-
-    [ComImport]
-    [Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
-    private sealed class MMDeviceEnumerator
-    {
     }
 
     [ComImport]

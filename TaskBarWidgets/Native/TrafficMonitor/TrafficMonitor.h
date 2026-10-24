@@ -34,14 +34,16 @@ public:
     //各种路径
     static CTrafficMonitorApp* self;
     wstring m_module_dir;       //程序exe文件的目录
-    wstring m_appdata_dir;
+    wstring m_data_dir;
     wstring m_module_path;      //程序exe文件的路径
     wstring m_module_path_reg;  //用于作为写入注册表开机自项的exe文件的路径（如果路径中有空格，加上引号）
     wstring m_config_path;
     wstring m_history_traffic_path;
     wstring m_log_path;
     wstring m_system_dir;
-    wstring m_config_dir;
+    wstring m_battery_config_path;
+    wstring m_power_config_path;
+    wstring m_weather_config_path;
 
     //以下数据定义为App类中的公共成员，以便于在主对话框和任务栏窗口中都能访问
     unsigned __int64 m_in_speed{};      //下载速度
@@ -64,8 +66,7 @@ public:
     bool m_cannot_save_config_warning{ true };  //指示是否会在无法保存设置时弹出提示框
     bool m_silent_settings_errors{};
     DWORD m_startup_error{};
-    bool m_cannot_save_global_config_warning{ true };   //指示是否会在无法保存设置时弹出提示框
-
+    HANDLE m_startup_mutex{};
     bool m_module_dir_writable{ true };         //指示程序所在目录是否可写
 
     //选项设置数据
@@ -115,8 +116,7 @@ public:
     bool SaveConfig();
     void LoadPluginDisabledSettings();
 
-    void LoadGlobalConfig();
-    void SaveGlobalConfig();
+    bool PrepareDataDirectory();
 
     int DPI(int pixel);
     void DPI(CRect& rect);
@@ -174,7 +174,6 @@ public:
 
 private:
     //int m_no_multistart_warning_time{};       //用于设置在开机后多长时间内不弹出“已经有一个程序正在运行”的警告提示
-    bool m_no_multistart_warning{};         //如果为false，则永远都不会弹出“已经有一个程序正在运行”的警告提示
     bool m_exit_when_start_by_restart_manager{ true };      //如果程序被Windows重启管理器重新启动，则退出程序
     int m_dpi{ 96 };
 

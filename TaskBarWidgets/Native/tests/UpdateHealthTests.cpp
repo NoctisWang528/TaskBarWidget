@@ -54,7 +54,7 @@ int wmain(int count, wchar_t** arguments)
         fs::copy_file(own, helperPath);
         Helper helper(helperPath);
         const std::wstring nonce(64, L'a');
-        Json job; job.SetNamedValue(L"protocolVersion", Value::CreateNumberValue(1));
+        Json job; job.SetNamedValue(L"protocolVersion", Value::CreateNumberValue(2));
         job.SetNamedValue(L"installRoot", Value::CreateStringValue(root.wstring()));
         job.SetNamedValue(L"workRoot", Value::CreateStringValue(work.wstring()));
         job.SetNamedValue(L"version", Value::CreateStringValue(L"261018-1700"));
@@ -75,6 +75,31 @@ int wmain(int count, wchar_t** arguments)
         const auto health = Read(work / L"health.json");
         Check(health.GetNamedString(L"nonce") == nonce && health.GetNamedString(L"version") == L"261018-1700" &&
             health.GetNamedBoolean(L"ready"), "Health acknowledgement is incomplete");
+        Json legacyJob;
+        legacyJob.SetNamedValue(L"protocolVersion", Value::CreateNumberValue(1));
+        legacyJob.SetNamedValue(L"installRoot", Value::CreateStringValue(root.wstring()));
+        legacyJob.SetNamedValue(L"workRoot", Value::CreateStringValue(work.wstring()));
+        legacyJob.SetNamedValue(L"nativeDataRoot", Value::CreateStringValue(root.wstring()));
+        legacyJob.SetNamedValue(L"mediaDataRoot", Value::CreateStringValue((root / L"Data").wstring()));
+        legacyJob.SetNamedValue(L"version", Value::CreateStringValue(L"261018-1700"));
+        legacyJob.SetNamedValue(L"nonce", Value::CreateStringValue(nonce));
+        Write(work / L"job.json", legacyJob);
+        Current() = VerifyInCache(work / L"job.json", nonce, root, cache);
+        Check(Current().version == L"261018-1700", "Legacy protocol-1 health job was not accepted");
+        legacyJob.SetNamedValue(L"protocolVersion", Value::CreateNumberValue(3));
+        Write(work / L"job.json", legacyJob);
+        Reject([&] { VerifyInCache(work / L"job.json", nonce, root, cache); }, "Unsupported job protocol accepted");
+        Write(work / L"job.json", job);
+        Json journal;
+        journal.SetNamedValue(L"protocolVersion", Value::CreateNumberValue(1));
+        journal.SetNamedValue(L"nonce", Value::CreateStringValue(nonce));
+        journal.SetNamedValue(L"phase", Value::CreateStringValue(L"rolledBack"));
+        Write(work / L"journal.json", journal);
+        Check(InterruptedJob(cache, root).empty(), "Legacy rolled-back transaction blocks startup");
+        journal.SetNamedValue(L"phase", Value::CreateStringValue(L"installing")); Write(work / L"journal.json", journal);
+        Check(InterruptedJob(cache, root) == work, "Legacy interrupted transaction bypassed startup guard");
+        fs::remove(work / L"journal.json");
+        Write(work / L"job.json", job);
         Reject([&] { VerifyInCache(work / L"job.json", std::wstring(64, L'b'), root, cache); }, "Wrong nonce accepted");
         status.SetNamedValue(L"helperPid", Value::CreateNumberValue(GetCurrentProcessId()));
         Write(work / L"status.json", status);
@@ -83,7 +108,7 @@ int wmain(int count, wchar_t** arguments)
         Write(work / L"status.json", status);
         Reject([&] { VerifyInCache(work / L"job.json", nonce, directory / L"other-install", cache); }, "Wrong installation accepted");
         Check(InterruptedJob(cache, root).empty(), "Preflight-only job incorrectly blocks intact startup");
-        Json journal; journal.SetNamedValue(L"protocolVersion", Value::CreateNumberValue(1));
+        journal.SetNamedValue(L"protocolVersion", Value::CreateNumberValue(1));
         journal.SetNamedValue(L"nonce", Value::CreateStringValue(nonce));
         journal.SetNamedValue(L"phase", Value::CreateStringValue(L"installing"));
         Write(work / L"journal.json", journal);
@@ -101,7 +126,7 @@ int wmain(int count, wchar_t** arguments)
         status.SetNamedValue(L"phase", Value::CreateStringValue(L"installing")); Write(work / L"status.json", status);
         Check(InterruptedJob(cache, root) == work, "Missing journal during installation bypassed guard");
         Check(InterruptedJob(cache, directory / L"other-install").empty(), "Other installation cache affects this startup");
-        std::cout << "PASS canonical job/helper/nonce identity, health writer, managed cache key and interrupted startup guard\n";
+        std::cout << "PASS canonical job/helper/nonce identity, legacy protocol compatibility, health writer, managed cache key and interrupted startup guard\n";
         return 0;
     }
     catch (const winrt::hresult_error& error) { std::cerr << winrt::to_string(error.message()) << '\n'; return 1; }

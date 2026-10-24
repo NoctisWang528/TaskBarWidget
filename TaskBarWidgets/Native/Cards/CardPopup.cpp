@@ -2,6 +2,7 @@
 #include "CardPopup.h"
 
 #include "CardDraw.h"
+#include "CardAccessibility.h"
 #include "CardWindow.h"
 
 #include <windows.ui.composition.interop.h>
@@ -35,6 +36,9 @@ namespace Cards
         winrt::Windows::UI::Composition::ContainerVisual motion{ nullptr };
         winrt::Windows::UI::Composition::SpriteVisual content{ nullptr };
         DrawingSurface surface;
+        SurfaceHandle boundSurface{ nullptr };
+        CardAccessibility accessibility;
+        Layout::Table regions;
         CardEnvironment environment{};
         std::wstring menu;
         std::function<void()> activate;
@@ -78,6 +82,13 @@ namespace Cards
             return Padding * 2 + RowHeight * static_cast<float>(VisibleRows());
         }
 
+        int ItemAt(float y) const
+        {
+            if (y < Padding || y >= Padding + VisibleRows() * RowHeight) return -1;
+            const int index = firstVisible + static_cast<int>((y - Padding) / RowHeight);
+            return index >= 0 && index < static_cast<int>(items.size()) ? index : -1;
+        }
+
         void Paint();
         void Place(POINT anchorPoint, RECT anchor);
     };
@@ -87,42 +98,58 @@ namespace Cards
         if (!visible || !compositor || !device || !graphics) return;
         const int widthPixels = (std::max)(1, static_cast<int>(std::lround(WidthDip() * scale)));
         const int heightPixels = (std::max)(1, static_cast<int>(std::lround(HeightDip() * scale)));
+        root.Size({ static_cast<float>(widthPixels), static_cast<float>(heightPixels) });
         surface.Ensure(device, widthPixels, heightPixels);
         if (!surface.Ready()) return;
+        if (boundSurface != surface.Handle())
+        {
+            const auto brush = compositor.CreateSurfaceBrush(surface.Handle());
+            brush.Stretch(winrt::Windows::UI::Composition::CompositionStretch::Fill);
+            content.Brush(brush);
+            boundSurface = surface.Handle();
+        }
         DrawScope scope(surface);
         if (!scope) return;
         ID2D1DeviceContext* context = scope.Get();
-        context->SetDpi(96.0f * scale, 96.0f * scale);
-        context->SetTransform(D2D1::Matrix3x2F::Identity());
+        D2D1_MATRIX_3X2_F surfaceTransform{};
+        context->GetTransform(&surfaceTransform);
+        context->SetDpi(96.0f, 96.0f);
         context->Clear(D2D1::ColorF(0, 0.0f));
-        context->SetTransform(D2D1::Matrix3x2F::Scale(scale, scale));
+        context->SetTransform(D2D1::Matrix3x2F::Scale(scale, scale) * surfaceTransform);
 
         const Draw::Palette palette = Draw::Colors(environment);
         const float width = WidthDip();
         const float height = HeightDip();
         // A popup is a floating surface over arbitrary content, so it paints its
         // own opaque rounded panel instead of relying on Mica.
-        Draw::FillRound(context, Draw::Rect(0, 0, width, height), 8.0f, palette.panel);
+        Draw::FillRound(context, Draw::Rect(0, 0, width, height), 8.0f,
+            environment.highContrast ? palette.panel : environment.dark ? Color{0.125f, 0.125f, 0.125f, 1} : Color{0.953f, 0.953f, 0.953f, 1});
         Draw::StrokeRound(context, Draw::Rect(0.5f, 0.5f, width - 0.5f, height - 0.5f), 8.0f,
-            WithAlpha(palette.border, environment.dark ? 60 : 40), 1.0f);
+            WithAlpha(palette.border, environment.dark ? 0.24f : 0.16f), 1.0f);
         const int rows = VisibleRows();
+        regions.Clear();
         for (int index = 0; index < rows; ++index)
         {
             const int itemIndex = firstVisible + index;
             if (itemIndex >= static_cast<int>(items.size())) break;
             const auto& item = items[static_cast<size_t>(itemIndex)];
             const float top = Padding + RowHeight * static_cast<float>(index);
+            auto region = item;
+            region.id = itemIndex + 1;
+            region.bounds = RECT{ 0, static_cast<LONG>(top), static_cast<LONG>(width),
+                static_cast<LONG>(top + RowHeight) };
+            regions.Add(std::move(region));
             if (itemIndex == selected || itemIndex == hot)
             {
                 const auto highlight = WithAlpha(palette.accent,
-                    itemIndex == selected ? 58 : 32);
+                    itemIndex == selected ? 0.23f : 0.125f);
                 Draw::FillRound(context, Draw::Rect(4.0f, top + 1.0f, width - 4.0f, top + RowHeight - 1.0f),
                     5.0f, highlight);
             }
             Draw::Text(context, *graphics, item.name, environment.fontFamily, TextSize,
-                itemIndex == selected ? 600 : 400, palette.primary,
+                item.selected ? 600 : 400, item.enabled ? palette.primary : palette.secondary,
                 Draw::Rect(14.0f, top, width - 24.0f, top + RowHeight));
-            if (itemIndex == selected)
+            if (item.selected)
                 Draw::FillRound(context, Draw::Rect(width - 18.0f, top + RowHeight / 2 - 3.0f,
                     width - 12.0f, top + RowHeight / 2 + 3.0f), 3.0f, palette.accent);
         }
@@ -147,6 +174,10 @@ namespace Cards
         MONITORINFO info{ sizeof(info) };
         const RECT work = GetMonitorInfoW(monitor, &info) ? info.rcWork : RECT{ 0, 0, 1920, 1080 };
         // The popup picks its own monitor and DPI instead of inheriting the card's.
+        // Move the hidden/no-activate HWND onto the target monitor before asking
+        // for its DPI; the old monitor's DPI is wrong on a mixed-DPI desktop.
+        SetWindowPos(window, nullptr, anchorPoint.x, anchorPoint.y, 0, 0,
+            SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
         scale = static_cast<float>(GetDpiForWindow(window)) / 96.0f;
         if (scale <= 0.0f) scale = 1.0f;
 
@@ -171,7 +202,7 @@ namespace Cards
         impl->environment = environment;
         impl->graphics = environment.graphics;
         impl->dark = environment.dark;
-        if (impl->window) return true;
+        if (impl->window) { ApplyEnvironment(environment); return true; }
 
         WNDCLASSEXW definition{ sizeof(definition) };
         definition.lpfnWndProc = [](HWND window, UINT message, WPARAM keys, LPARAM position) -> LRESULT
@@ -180,16 +211,28 @@ namespace Cards
             if (!self) return DefWindowProcW(window, message, keys, position);
             switch (message)
             {
+            case WM_GETOBJECT:
+                return self->accessibility.OnGetObject(keys, position);
+            case WM_DPICHANGED:
+            {
+                self->scale = static_cast<float>(HIWORD(keys)) / 96.0f;
+                const auto* suggested = reinterpret_cast<const RECT*>(position);
+                SetWindowPos(window, nullptr, suggested->left, suggested->top,
+                    static_cast<int>(std::lround(self->WidthDip() * self->scale)),
+                    static_cast<int>(std::lround(self->HeightDip() * self->scale)),
+                    SWP_NOACTIVATE | SWP_NOZORDER);
+                self->Paint();
+                return 0;
+            }
             case WM_MOUSEACTIVATE:
                 // The popup never takes activation away from the user's app.
                 return MA_NOACTIVATE;
             case WM_MOUSEMOVE:
             {
-                const int index = self->items.empty() ? -1 :
-                    self->firstVisible + (static_cast<int>(GET_Y_LPARAM(position) / self->scale) -
-                        static_cast<int>(Padding)) / static_cast<int>(RowHeight);
-                const int clamped = index >= 0 && index < static_cast<int>(self->items.size()) ? index : -1;
-                if (clamped != self->hot) { self->hot = clamped; self->Paint(); }
+                TRACKMOUSEEVENT tracking{ sizeof(tracking), TME_LEAVE, window, 0 };
+                TrackMouseEvent(&tracking);
+                const int index = self->ItemAt(GET_Y_LPARAM(position) / self->scale);
+                if (index != self->hot) { self->hot = index; self->Paint(); }
                 return 0;
             }
             case WM_MOUSELEAVE:
@@ -198,10 +241,8 @@ namespace Cards
                 return 0;
             case WM_LBUTTONDOWN:
             {
-                const int index = self->items.empty() ? -1 :
-                    self->firstVisible + (static_cast<int>(GET_Y_LPARAM(position) / self->scale) -
-                        static_cast<int>(Padding)) / static_cast<int>(RowHeight);
-                if (index >= 0 && index < static_cast<int>(self->items.size()))
+                const int index = self->ItemAt(GET_Y_LPARAM(position) / self->scale);
+                if (index >= 0 && self->items[static_cast<size_t>(index)].enabled)
                 {
                     self->selected = index;
                     // The popup stays a pure view: the host reads Selected() from its
@@ -234,10 +275,19 @@ namespace Cards
     void CardPopup::Destroy()
     {
         if (!impl) return;
+        impl->accessibility.Detach();
+        impl->visible = false;
         if (impl->target)
         {
-            try { impl->target = nullptr; } catch (...) { }
+            try { impl->target.Root(nullptr); impl->target.Close(); } catch (...) { }
+            impl->target = nullptr;
         }
+        impl->root = nullptr;
+        impl->motion = nullptr;
+        impl->content = nullptr;
+        impl->boundSurface = nullptr;
+        impl->device = nullptr;
+        impl->compositor = nullptr;
         if (impl->window)
         {
             DestroyWindow(impl->window);
@@ -253,18 +303,31 @@ namespace Cards
         impl->graphics = environment.graphics;
         impl->dark = environment.dark;
         if (!impl->window || !environment.compositor || !environment.device) return;
+        if (impl->device != environment.device || impl->compositor != environment.compositor)
+        {
+            impl->surface.Release();
+            impl->boundSurface = nullptr;
+            if (impl->content) impl->content.Brush(nullptr);
+        }
         if (impl->compositor != environment.compositor || !impl->root)
         {
             impl->compositor = environment.compositor;
             impl->device = environment.device;
             impl->root = impl->compositor.CreateSpriteVisual();
             impl->motion = impl->compositor.CreateContainerVisual();
+            impl->motion.RelativeSizeAdjustment({ 1.0f, 1.0f });
             impl->content = impl->compositor.CreateSpriteVisual();
             impl->content.RelativeSizeAdjustment({ 1.0f, 1.0f });
             impl->motion.Children().InsertAtTop(impl->content);
             impl->root.Children().InsertAtTop(impl->motion);
             winrt::Windows::UI::Composition::Desktop::DesktopWindowTarget created{ nullptr };
             const auto interop = impl->compositor.as<ABI::Windows::UI::Composition::Desktop::ICompositorDesktopInterop>();
+            if (impl->target)
+            {
+                impl->target.Root(nullptr);
+                impl->target.Close();
+                impl->target = nullptr;
+            }
             winrt::check_hresult(interop->CreateDesktopWindowTarget(impl->window, TRUE,
                 reinterpret_cast<ABI::Windows::UI::Composition::Desktop::IDesktopWindowTarget**>(
                     winrt::put_abi(created))));
@@ -277,33 +340,34 @@ namespace Cards
     void CardPopup::Show(const std::wstring& menu, const std::vector<Layout::Region>& items, RECT anchor)
     {
         if (!impl->window) return;
+        impl->accessibility.Detach();
         impl->menu = menu;
         impl->items = items;
-        impl->selected = items.empty() ? -1 : 0;
+        impl->selected = -1;
+        for (size_t index = 0; index < items.size(); ++index)
+        {
+            if (!items[index].enabled) continue;
+            if (impl->selected < 0 || items[index].selected) impl->selected = static_cast<int>(index);
+            if (items[index].selected) break;
+        }
         impl->hot = -1;
-        impl->firstVisible = 0;
+        impl->firstVisible = (std::max)(0, impl->selected - impl->VisibleRows() + 1);
         impl->visible = true;
         const POINT anchorPoint{ anchor.left, anchor.top };
         impl->Place(anchorPoint, anchor);
-        if (impl->content && impl->surface.Handle())
-        {
-            try
-            {
-                const auto brush = impl->compositor.CreateSurfaceBrush(impl->surface.Handle());
-                impl->content.Brush(brush);
-            }
-            catch (const winrt::hresult_error&) { }
-        }
         impl->Paint();
-        if (impl->content && impl->surface.Handle())
-        {
-            try
+        auto* self = impl.get();
+        impl->accessibility.Attach(impl->window, menu,
+            [self]() -> const Layout::Table& { return self->regions; },
+            [self] { return self->scale; }, {},
+            [self](const Layout::Region& region, const std::wstring&)
             {
-                const auto brush = impl->compositor.CreateSurfaceBrush(impl->surface.Handle());
-                impl->content.Brush(brush);
-            }
-            catch (const winrt::hresult_error&) { }
-        }
+                const int index = region.id - 1;
+                if (index < 0 || index >= static_cast<int>(self->items.size()) ||
+                    !self->items[static_cast<size_t>(index)].enabled) return;
+                self->selected = index;
+                if (self->activate) self->activate();
+            });
         ShowWindow(impl->window, SW_SHOWNOACTIVATE);
     }
 
@@ -311,6 +375,8 @@ namespace Cards
     {
         if (!impl->visible) return;
         impl->visible = false;
+        impl->accessibility.Detach();
+        impl->regions.Clear();
         impl->items.clear();
         impl->selected = -1;
         impl->menu.clear();
@@ -341,18 +407,18 @@ namespace Cards
         const RECT bounds = Bounds();
         if (pixels.x < bounds.left || pixels.x >= bounds.right ||
             pixels.y < bounds.top || pixels.y >= bounds.bottom) return -1;
-        const int row = static_cast<int>((pixels.y - bounds.top) / impl->scale - Padding) /
-            static_cast<int>(RowHeight);
-        const int index = impl->firstVisible + row;
-        return index >= 0 && index < static_cast<int>(impl->items.size()) ? index : -1;
+        return impl->ItemAt((pixels.y - bounds.top) / impl->scale);
     }
 
     void CardPopup::MoveSelection(int delta)
     {
         if (impl->items.empty()) return;
         const int count = static_cast<int>(impl->items.size());
-        const int next = (std::max)(0, (std::min)(count - 1, impl->selected + delta));
-        if (next == impl->selected) return;
+        if (!delta) return;
+        int next = impl->selected + (delta > 0 ? 1 : -1);
+        while (next >= 0 && next < count && !impl->items[static_cast<size_t>(next)].enabled)
+            next += delta > 0 ? 1 : -1;
+        if (next < 0 || next >= count) return;
         impl->selected = next;
         const int rows = impl->VisibleRows();
         if (next < impl->firstVisible) impl->firstVisible = next;
@@ -362,8 +428,8 @@ namespace Cards
 
     int CardPopup::ActivateSelected() const
     {
-        return impl->selected >= 0 && impl->selected < static_cast<int>(impl->items.size())
-            ? impl->selected : -1;
+        return impl->selected >= 0 && impl->selected < static_cast<int>(impl->items.size()) &&
+            impl->items[static_cast<size_t>(impl->selected)].enabled ? impl->selected : -1;
     }
 
     int CardPopup::Selected() const { return impl->selected; }

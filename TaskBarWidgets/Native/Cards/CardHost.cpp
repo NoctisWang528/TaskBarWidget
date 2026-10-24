@@ -1,4 +1,4 @@
-﻿#include "CardPch.h"
+#include "CardPch.h"
 #include <winreg.h>
 #include "CardHost.h"
 #include "CardPopup.h"
@@ -6,6 +6,7 @@
 #include "CardDraw.h"
 #include "CardProtocol.h"
 #include "CardWindow.h"
+#include "CardRuntime.h"
 
 #include <future>
 
@@ -30,6 +31,9 @@ namespace Cards
         constexpr UINT COMMAND_MENU = 10;
         constexpr UINT COMMAND_MENU_ACTIVATE = 11;
         constexpr UINT COMMAND_MENU_CLOSE = 12;
+        constexpr UINT COMMAND_OWNER = 13;
+        constexpr UINT COMMAND_TOGGLE = 14;
+        constexpr UINT COMMAND_RECOVER = 15;
 
         struct Command
         {
@@ -39,12 +43,14 @@ namespace Cards
             std::wstring reason;
             bool previewMica{};
             bool previewTheme{};
+            bool setTheme{};
             bool previewVivid{};
             bool previewDark{};
             MicaTuning previewTuning{};
             std::wstring menu;
             std::vector<Layout::Region> items;
             RECT menuAnchor{};
+            HWND owner{};
         };
     }
 
@@ -56,7 +62,7 @@ namespace Cards
         static inline std::atomic<Impl*> activeHook{ nullptr };
 
         HWND owner{};
-        HWND window{};
+        std::atomic<HWND> window{};
         HINSTANCE instance{};
         std::thread thread;
         DWORD threadId{};
@@ -77,6 +83,7 @@ namespace Cards
         bool reducedMotion{ false };
         POINT anchor{};
         std::wstring lastError;
+        ULONGLONG errorUntil{};
         int menuDepth{ 0 };
         std::chrono::steady_clock::time_point lastInteraction{};
         bool resident{ true };
@@ -84,6 +91,7 @@ namespace Cards
         // The popup list remembers what an accepted index means.
         std::wstring popupMenu;
         std::vector<std::wstring> popupIds;
+        std::map<std::wstring, std::wstring> pendingSliders;
         // The settings process previews draft Mica and theme on the real cards.
         // A preview never replaces the committed configuration.
         bool previewMica{ false };
@@ -101,7 +109,9 @@ namespace Cards
         {
             {
                 std::lock_guard lock(queueGate);
-                if (queue.size() >= 32) queue.pop_front();
+                if (command->kind != COMMAND_TOGGLE)
+                    std::erase_if(queue, [&](const auto& pending) { return pending->kind == command->kind; });
+                if (queue.size() >= 32 && command->kind == COMMAND_TOGGLE) return;
                 queue.push_back(std::move(command));
             }
             if (window) PostMessageW(window, WM_CARD_TASK, 0, 0);
@@ -125,6 +135,18 @@ namespace Cards
         void OnOpenSettings() override;
         void OnMenuOpened(bool open) override;
         void OnLayoutInvalidated() override;
+        void OnGraphicsFailure(HRESULT result) override
+        {
+            if (result != D2DERR_RECREATE_TARGET && result != DXGI_ERROR_DEVICE_REMOVED &&
+                result != DXGI_ERROR_DEVICE_RESET && result != DXGI_ERROR_DEVICE_HUNG) return;
+            auto command = std::make_unique<Command>(); command->kind = COMMAND_RECOVER; Post(std::move(command));
+        }
+        bool IsMenuExpanded(const std::wstring& action) const override
+        {
+            if (!popup || !popup->Visible()) return false;
+            return (action == L"showSources" && popupMenu == L"sources") ||
+                (action.starts_with(L"showDevices:") && popupMenu == action.substr(12));
+        }
 
         // ---- lifecycle ------------------------------------------------------
 
@@ -135,15 +157,16 @@ namespace Cards
             instance = application;
             std::promise<bool> ready;
             auto future = ready.get_future();
-            thread = std::thread([this, &ready] { Run(std::move(ready)); });
+            thread = std::thread([this, ready = std::move(ready)]() mutable { Run(std::move(ready)); });
             const bool ok = future.get();
             started = ok;
+            if (!ok && thread.joinable()) thread.join();
             return ok;
         }
 
         void Stop()
         {
-            if (!started) return;
+            if (!thread.joinable()) return;
             auto command = std::make_unique<Command>();
             command->kind = COMMAND_STOP;
             Post(std::move(command));
@@ -192,7 +215,7 @@ namespace Cards
     {
         // cardSnapshot arrives unsolicited on connect. The explicit request keeps
         // a reconnect deterministic even when the first push is coalesced away.
-        client.Request(L"cardSnapshot");
+        client.Request(L"cardSnapshot", "{\"artworkDelta\":true}", L"state");
     }
 
     void CardHost::Impl::RequestInitialState()
@@ -200,7 +223,7 @@ namespace Cards
         client.Request(L"getAudio", {}, L"audio");
         client.Request(L"getTrafficHistory", {}, L"traffic");
         client.Request(L"weatherCommand", "{\"operation\":\"status\"}", L"weather");
-        client.Request(L"getState", {}, L"state");
+        client.Request(L"getState", "{\"artworkDelta\":true}", L"state");
         client.Request(L"getUpdateState", {}, L"update");
         client.Request(L"subscribeCardLyrics", "{\"visible\":true,\"session\":1}", L"lyrics");
     }
@@ -211,13 +234,16 @@ namespace Cards
         environment.graphics = &graphics;
         environment.compositor = compositor;
         environment.device = device;
-        environment.dark = dark;
+        environment.dark = previewTheme ? previewDark : snapshot.toolWindowTheme == 1 ? false : snapshot.toolWindowTheme == 2 ? true : dark;
         environment.highContrast = highContrast;
         environment.reducedMotion = reducedMotion;
-        environment.mica = config.mica;
+        environment.mica = previewMica ? previewTuning : config.mica;
+        if (previewMica) environment.mica.vivid = previewVivid;
         environment.fontFamily = config.font.empty() ? L"Microsoft YaHei UI" : config.font;
         for (Kind kind : { Kind::Weather, Kind::Traffic, Kind::Device, Kind::Media, Kind::Update })
         {
+            const bool enabled = kind == Kind::Update ? snapshot.update.Visible() : config.IsEnabled(kind);
+            if (!enabled) { cards.erase(kind); continue; }
             if (cards.find(kind) != cards.end()) continue;
             auto card = std::make_unique<CardWindow>(kind, *this);
             if (!card->Create(environment, instance))
@@ -241,12 +267,12 @@ namespace Cards
     // signals WinUI used, so light/dark, contrast and motion stay consistent.
     void CardHost::Impl::DetectEnvironment()
     {
-        bool appsLight = false;
+        DWORD appsLight = 1;
         DWORD size = sizeof(appsLight);
         if (RegGetValueW(HKEY_CURRENT_USER,
             L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
             L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &appsLight, &size) == ERROR_SUCCESS)
-            dark = !appsLight;
+            dark = appsLight == 0;
         HIGHCONTRASTW contrast{ sizeof(contrast) };
         highContrast = SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0) &&
             (contrast.dwFlags & HCF_HIGHCONTRASTON) != 0;
@@ -260,7 +286,7 @@ namespace Cards
         environment.graphics = &graphics;
         environment.compositor = compositor;
         environment.device = device;
-        environment.dark = previewTheme ? previewDark : dark;
+        environment.dark = previewTheme ? previewDark : snapshot.toolWindowTheme == 1 ? false : snapshot.toolWindowTheme == 2 ? true : dark;
         environment.highContrast = highContrast;
         environment.reducedMotion = reducedMotion;
         environment.mica = previewMica ? previewTuning : config.mica;
@@ -280,10 +306,11 @@ namespace Cards
         environment.graphics = &graphics;
         environment.compositor = compositor;
         environment.device = device;
-        environment.dark = dark;
+        environment.dark = previewTheme ? previewDark : snapshot.toolWindowTheme == 1 ? false : snapshot.toolWindowTheme == 2 ? true : dark;
         environment.highContrast = highContrast;
         environment.reducedMotion = reducedMotion;
-        environment.mica = config.mica;
+        environment.mica = previewMica ? previewTuning : config.mica;
+        if (previewMica) environment.mica.vivid = previewVivid;
         environment.fontFamily = config.font.empty() ? L"Microsoft YaHei UI" : config.font;
 
         std::map<Kind, float> heights;
@@ -343,6 +370,9 @@ namespace Cards
             card->Destroy();
         }
         cards.clear();
+        popup.reset();
+        device = nullptr;
+        graphics.Release();
     }
 
     void CardHost::Impl::ShowCards()
@@ -355,18 +385,14 @@ namespace Cards
                 return;
             }
         }
-        if (!device)
-        {
-            std::wstring error;
-            // A graphics device belongs to a compositor, so create one per card
-            // window lazily and hand it over; the shared D3D device is reused.
-            device = nullptr;
-            UNREFERENCED_PARAMETER(error);
-        }
+        if (!device) { std::wstring error; device = graphics.CreateGraphicsDevice(compositor, error); }
+        if (!device) return;
+        UpdateEnvironment(true);
         visible = true;
         if (window) KillTimer(window, IdleTimer);
         if (cards.empty()) CreateCards();
         PlaceGroup(true, true);
+        if (auto* card = Card(Kind::Media); card && card->Visible()) SetForegroundWindow(card->Handle());
         InstallHooks();
         RequestInitialState();
     }
@@ -374,11 +400,13 @@ namespace Cards
     void CardHost::Impl::ApplyConfig(const Config& value)
     {
         config = value;
+        snapshot.config = value;
         resident = !config.OnDemand();
         UpdateEnvironment(true);
         if (visible)
         {
-            PlaceGroup(false, false);
+            CreateCards();
+            PlaceGroup(false, true);
             return;
         }
         // Resident mode prewarms the enabled cards while the group stays hidden, so
@@ -386,6 +414,8 @@ namespace Cards
         // them on the first click instead.
         if (resident && !shuttingDown)
         {
+            if (!device) { std::wstring error; device = graphics.CreateGraphicsDevice(compositor, error); }
+            if (!device) return;
             CreateCards();
             PlaceGroup(false, false);
         }
@@ -395,15 +425,26 @@ namespace Cards
     {
         for (auto& [kind, card] : cards)
         {
-            UNREFERENCED_PARAMETER(kind);
+            const bool changed = changes.config || changes.theme || changes.status ||
+                (kind == Kind::Media && (changes.media || changes.lyrics)) ||
+                (kind == Kind::Device && changes.audio) || (kind == Kind::Traffic && changes.traffic) ||
+                (kind == Kind::Weather && changes.weather) || (kind == Kind::Update && changes.update);
+            if (!changed) continue;
             card->SetSnapshot(snapshot);
         }
         if (changes.config)
         {
+            config = snapshot.config;
             resident = !config.OnDemand();
             UpdateEnvironment(true);
         }
-        if (visible && (changes.config || changes.update)) PlaceGroup(false, false);
+        else if (changes.theme) UpdateEnvironment(true);
+        if ((visible || resident) && (changes.config || changes.update))
+        {
+            if (!device) { std::wstring error; device = graphics.CreateGraphicsDevice(compositor, error); }
+            if (device) CreateCards();
+        }
+        if (visible && (changes.config || changes.update || changes.weather || changes.audio)) PlaceGroup(false, true);
         // A ready update must never open the group by itself: the update card only
         // joins the layout while the user already has cards open.
         if (changes.update && !snapshot.update.Visible() && visible)
@@ -431,6 +472,7 @@ namespace Cards
                 {
                     changed = true;
                     accumulated.config |= changes.config;
+                    accumulated.theme |= changes.theme;
                     accumulated.media |= changes.media;
                     accumulated.audio |= changes.audio;
                     accumulated.lyrics |= changes.lyrics;
@@ -443,6 +485,19 @@ namespace Cards
             else if (message.kind == Protocol::Kind::Reply)
             {
                 const auto reply = Protocol::ParseReply(message);
+                for (auto iter = pendingSliders.begin(); iter != pendingSliders.end();)
+                {
+                    if (iter->second != reply.requestId) { ++iter; continue; }
+                    if (auto* card = Card(iter->first == L"seek" ? Kind::Media : Kind::Device))
+                        card->AcknowledgeSlider(iter->first);
+                    iter = pendingSliders.erase(iter);
+                }
+                if (!reply.success)
+                {
+                    snapshot.statusText = reply.error;
+                    lastError = reply.error; errorUntil = GetTickCount64() + 5000;
+                    accumulated.status = true; changed = true; continue;
+                }
                 const auto colon = reply.requestId.find(L':');
                 if (reply.payloadJson.empty()) continue;
                 if (reply.requestId.rfind(L"audio", 0) == 0)
@@ -483,6 +538,7 @@ namespace Cards
                     if (Protocol::ApplySnapshot(snapshot, reply.payloadJson, stateChanges))
                     {
                         accumulated.config |= stateChanges.config;
+                        accumulated.theme |= stateChanges.theme;
                         accumulated.media |= stateChanges.media;
                         accumulated.audio |= stateChanges.audio;
                         accumulated.lyrics |= stateChanges.lyrics;
@@ -503,11 +559,18 @@ namespace Cards
                 }
                 UNREFERENCED_PARAMETER(colon);
             }
+            else if (message.kind == Protocol::Kind::Event && message.action == L"connectionStarted")
+            {
+                Protocol::ResetRevisions(snapshot);
+                pendingSliders.clear();
+                if (visible) RequestInitialState();
+            }
             else if (message.kind == Protocol::Kind::Event && message.action == L"shutdown")
             {
                 HideAll(L"shutdown", false);
             }
         }
+        if (errorUntil > GetTickCount64()) snapshot.statusText = lastError;
         if (changed) RefreshSnapshot(accumulated);
     }
 
@@ -517,6 +580,19 @@ namespace Cards
         {
             switch (command->kind)
             {
+            case COMMAND_RECOVER:
+            {
+                const bool restore = visible;
+                HideAll(L"device-lost", false);
+                popup.reset(); cards.clear(); device = nullptr;
+                graphics.OnDeviceLost();
+                if (restore) ShowCards();
+                break;
+            }
+            case COMMAND_TOGGLE:
+                if (visible) HideAll(L"toggle", true);
+                else { anchor = command->anchor; ShowCards(); }
+                break;
             case COMMAND_SHOW:
                 anchor = command->anchor;
                 ShowCards();
@@ -544,12 +620,15 @@ namespace Cards
                     previewVivid = command->previewVivid;
                     previewTuning = command->previewTuning;
                 }
-                if (command->previewTheme)
+                if (command->setTheme)
                 {
-                    previewTheme = true;
+                    previewTheme = command->previewTheme;
                     previewDark = command->previewDark;
                 }
                 UpdateEnvironment(true);
+                break;
+            case COMMAND_OWNER:
+                owner = command->owner;
                 break;
             case COMMAND_CLEAR_PREVIEW:
                 previewMica = false;
@@ -577,7 +656,7 @@ namespace Cards
         if (shuttingDown)
         {
             HideAll(L"shutdown", false);
-            PostMessageW(window, WM_CLOSE, 0, 0);
+            PostQuitMessage(0);
         }
     }
 
@@ -607,8 +686,13 @@ namespace Cards
             {
                 auto* self = Impl::activeHook.load();
                 const auto* info = reinterpret_cast<KBDLLHOOKSTRUCT*>(data);
-                if (self && self->visible && info->vkCode == VK_ESCAPE)
-                    PostMessageW(self->window, WM_CARD_TASK, COMMAND_ESCAPE, 0);
+                if (self && self->visible && info->vkCode == VK_ESCAPE &&
+                    GetWindowThreadProcessId(GetForegroundWindow(), nullptr) != self->threadId)
+                {
+                    auto command = std::make_unique<Command>();
+                    command->kind = COMMAND_ESCAPE;
+                    self->Post(std::move(command));
+                }
             }
             return CallNextHookEx(nullptr, code, keys, data);
         }, nullptr, 0);
@@ -635,8 +719,14 @@ namespace Cards
                 point.y >= bounds.top && point.y < bounds.bottom)
                 return;
         }
-        UNREFERENCED_PARAMETER(leftButton);
-        HideAll(L"outside", true);
+        // The taskbar entry owns its left-click toggle; dismissing here first
+        // would make that same click reopen the group.
+        RECT entry{};
+        if (leftButton && IsWindow(owner) && GetWindowRect(owner, &entry) && PtInRect(&entry, point)) return;
+        auto command = std::make_unique<Command>();
+        command->kind = COMMAND_HIDE;
+        command->reason = L"outside";
+        Post(std::move(command));
     }
 
     // ---- services ------------------------------------------------------------
@@ -650,6 +740,11 @@ namespace Cards
         const wchar_t* kind = L"misc";
         const auto quote = [](const std::wstring& value) { return Cards::Protocol::JsonString(value); };
 
+        if (action == L"escape")
+        {
+            if (!EscapeCard()) HideAll(L"escape", true);
+            return;
+        }
         if (action == L"previous" || action == L"playPause" || action == L"next")
         {
             payload = L"{\"action\":" + quote(action) + L"}";
@@ -674,6 +769,19 @@ namespace Cards
         else if (action == L"openSettings")
         {
             OnOpenSettings();
+            return;
+        }
+        else if (action == L"openWeatherSettings")
+        {
+            HideAll(L"weather-settings", false);
+            client.Request(L"openSettings", "{\"page\":\"hardware\"}");
+            return;
+        }
+        else if (action == L"openWeatherProvider" || action == L"openWeatherAttribution")
+        {
+            const wchar_t* url = action == L"openWeatherProvider" ? L"https://www.qweather.com/"
+                : L"https://developer.qweather.com/attribution.html";
+            ShellExecuteW(window, L"open", url, nullptr, nullptr, SW_SHOWNORMAL);
             return;
         }
         else if (action == L"installUpdate" || action == L"downloadUpdate" ||
@@ -710,21 +818,28 @@ namespace Cards
         }
         else if (action.rfind(L"showDevices:", 0) == 0)
         {
+            if (jsonPayload == L"collapse") { CloseMenu(); return; }
             ShowDeviceMenu(action.substr(12));
             return;
         }
-        else if (action == L"selectDay")
+        else if (action == L"selectDay" || action.starts_with(L"selectDay:"))
         {
-            snapshot.traffic.Select(jsonPayload);
+            snapshot.traffic.Select(action.starts_with(L"selectDay:") ? action.substr(10) : jsonPayload);
             if (auto* card = Card(Kind::Traffic)) card->SetSnapshot(snapshot);
             return;
         }
         else if (action == L"showSources")
         {
+            if (jsonPayload == L"collapse") { CloseMenu(); return; }
             ShowSourceMenu();
             return;
         }
-        if (!request.empty()) client.Request(request, Cards::WideToUtf8(payload), kind);
+        if (!request.empty())
+        {
+            const auto id = client.Request(request, Cards::WideToUtf8(payload), kind);
+            if (action == L"seek" || action.rfind(L"setVolume:", 0) == 0)
+                pendingSliders[action] = id;
+        }
     }
 
     void CardHost::Impl::OnHideCards(const std::wstring& reason) { HideAll(reason, true); }
@@ -760,7 +875,7 @@ namespace Cards
             item.name = L"没有可用设备";
             items.push_back(std::move(item));
         }
-        OpenMenu(L"devices", items, card->Bounds());
+        OpenMenu(flow, items, card->Bounds());
     }
 
     void CardHost::Impl::ShowSourceMenu()
@@ -805,7 +920,7 @@ namespace Cards
             const std::wstring id = rest.substr(split + 1);
             const std::wstring payload = L"{\"flow\":" + Protocol::JsonString(flow) +
                 L",\"deviceId\":" + Protocol::JsonString(id) + L"}";
-            client.Request(L"selectDevice", Cards::WideToUtf8(payload));
+            client.Request(L"selectDevice", Cards::WideToUtf8(payload), L"audio");
             return;
         }
         if (action.rfind(L"selectSource:", 0) == 0)
@@ -813,7 +928,7 @@ namespace Cards
             const std::wstring id = action.substr(13);
             const std::wstring payload = L"{\"action\":\"selectSource\",\"sourceId\":" +
                 Protocol::JsonString(id) + L"}";
-            client.Request(L"mediaCommand", Cards::WideToUtf8(payload));
+            client.Request(L"mediaCommand", Cards::WideToUtf8(payload), L"media");
         }
     }
 
@@ -826,10 +941,11 @@ namespace Cards
         environment.graphics = &graphics;
         environment.compositor = compositor;
         environment.device = device;
-        environment.dark = previewTheme ? previewDark : dark;
+        environment.dark = previewTheme ? previewDark : snapshot.toolWindowTheme == 1 ? false : snapshot.toolWindowTheme == 2 ? true : dark;
         environment.highContrast = highContrast;
         environment.reducedMotion = reducedMotion;
-        environment.mica = config.mica;
+        environment.mica = previewMica ? previewTuning : config.mica;
+        if (previewMica) environment.mica.vivid = previewVivid;
         environment.fontFamily = config.font.empty() ? L"Microsoft YaHei UI" : config.font;
         if (!popup->Create(instance, environment))
         {
@@ -890,6 +1006,7 @@ namespace Cards
 
     void CardHost::Impl::OnOpenSettings()
     {
+        HideAll(L"settings", false);
         // Media owns the settings window; the card asks it to start WinUI on demand.
         client.Request(L"openSettings");
     }
@@ -910,10 +1027,15 @@ namespace Cards
         // The card thread owns its own STA apartment. RoInitialize is idempotent
         // per apartment and this thread never initialized MFC.
         const HRESULT apartment = RoInitialize(RO_INIT_SINGLETHREADED);
-        const bool apartmentOk = SUCCEEDED(apartment) || apartment == RPC_E_CHANGED_MODE;
+        if (FAILED(apartment)) { ready.set_value(false); return; }
+        // Destroy Runtime (including its dispatcher) before uninitializing COM.
+        struct Apartment { ~Apartment() { RoUninitialize(); } } apartmentLifetime;
+        Runtime runtime;
+        if (FAILED(runtime.Initialize())) { ready.set_value(false); return; }
 
         DetectEnvironment();
         const bool graphicsOk = graphics.Initialize();
+        if (!graphicsOk) { graphics.Release(); ready.set_value(false); return; }
         lastError = graphics.Diagnostic();
 
         WNDCLASSEXW definition{ sizeof(definition) };
@@ -962,11 +1084,11 @@ namespace Cards
         definition.lpszClassName = L"TaskBarWidgetsCardHost";
         RegisterClassExW(&definition);
 
-        window = CreateWindowExW(0, definition.lpszClassName, L"", 0, 0, 0, 0, 0, HWND_MESSAGE,
+        window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, definition.lpszClassName, L"", WS_POPUP, 0, 0, 0, 0, nullptr,
             nullptr, instance, nullptr);
         if (!window)
         {
-            if (apartmentOk) RoUninitialize();
+            graphics.Release();
             ready.set_value(false);
             return;
         }
@@ -988,11 +1110,12 @@ namespace Cards
                 lastError = std::wstring(error.message().c_str());
             }
         }
+        if (!device)
         {
-            std::lock_guard lock(queueGate);
-            started = true;
+            compositor = nullptr; graphics.Release(); DestroyWindow(window); window = nullptr;
+            ready.set_value(false); return;
         }
-        ready.set_value(graphicsOk);
+        ready.set_value(true);
 
         client.Start(window);
         SendSnapshotRequest();
@@ -1006,6 +1129,8 @@ namespace Cards
 
         // Teardown: stop producers first, then release device-bound resources.
         client.Stop();
+        UninstallHooks();
+        popup.reset();
         for (auto& [kind, card] : cards)
         {
             UNREFERENCED_PARAMETER(kind);
@@ -1014,13 +1139,13 @@ namespace Cards
         cards.clear();
         device = nullptr;
         graphics.Release();
+        compositor = nullptr;
         if (window)
         {
             SetWindowLongPtrW(window, GWLP_USERDATA, 0);
             DestroyWindow(window);
             window = nullptr;
         }
-        if (apartmentOk && SUCCEEDED(apartment)) RoUninitialize();
     }
 
     // ---- CardHost facade ----------------------------------------------------
@@ -1037,8 +1162,10 @@ namespace Cards
 
     void CardHost::Toggle(POINT anchor)
     {
-        if (impl->visible) Hide(L"toggle");
-        else Show(anchor);
+        auto command = std::make_unique<Command>();
+        command->kind = COMMAND_TOGGLE;
+        command->anchor = anchor;
+        impl->Post(std::move(command));
     }
 
     void CardHost::Show(POINT anchor)
@@ -1077,14 +1204,11 @@ namespace Cards
         impl->Post(std::move(command));
     }
 
-    bool CardHost::HasPreview() const { return impl->previewMica || impl->previewTheme; }
-
-    MicaTuning CardHost::CommittedMica() const { return impl->config.mica; }
-
     void CardHost::PreviewTheme(bool darkMode, bool enabled)
     {
         auto command = std::make_unique<Command>();
         command->kind = COMMAND_PREVIEW;
+        command->setTheme = true;
         command->previewTheme = enabled;
         command->previewDark = darkMode;
         impl->Post(std::move(command));
@@ -1101,6 +1225,14 @@ namespace Cards
     {
         auto command = std::make_unique<Command>();
         command->kind = COMMAND_PLACE;
+        impl->Post(std::move(command));
+    }
+
+    void CardHost::SetOwner(HWND owner)
+    {
+        auto command = std::make_unique<Command>();
+        command->kind = COMMAND_OWNER;
+        command->owner = owner;
         impl->Post(std::move(command));
     }
 

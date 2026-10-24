@@ -22,15 +22,18 @@ public sealed partial class SettingsWindow
         internal readonly TextBlock CityName = Copy("正在读取已保存城市…", 14);
         internal readonly Button SaveCity = new() { Content = "保存城市并刷新", IsEnabled = false };
         internal readonly Button Refresh = new() { Content = "立即刷新已保存城市" };
+        internal readonly Button SwitchProvider = new() { Content = "切换来源并刷新" };
+        internal readonly TextBlock Active = Copy("正在读取当前生效来源和城市…", 14);
+        internal readonly TextBlock Draft = Copy("");
         internal readonly TextBlock Status = Copy("正在读取天气状态…", 14);
         internal readonly TextBlock LastSuccess = Copy("上次成功：尚无记录");
         internal readonly TextBlock LastAttempt = Copy("上次尝试：尚无记录");
         internal readonly InfoBar Message = new() { IsClosable = false };
         internal readonly StackPanel Credentials = new() { Spacing = 10 };
         internal readonly PasswordBox ApiKey = new() { Header = "和风天气 API Key", PlaceholderText = "留空保留已有密钥", MaxLength = 512, PasswordRevealMode = PasswordRevealMode.Hidden };
-        internal readonly TextBox ApiHost = new() { Header = "API Host", PlaceholderText = "填写和风控制台分配的 API Host", MaxLength = 255 };
+        internal readonly TextBox ApiHost = new() { Header = "API Host", PlaceholderText = "从已登录账户控制台 → 设置 → APIHost 复制", MaxLength = 255 };
         internal readonly TextBlock KeyStatus = Copy("密钥状态：正在读取");
-        internal readonly Button SaveCredentials = new() { Content = "保存连接配置" };
+        internal readonly Button SaveCredentials = new() { Content = "保存并验证连接" };
         internal readonly Button ClearKey = new() { Content = "清除已保存密钥" };
         internal JsonObject? SelectedCity;
         internal JsonObject? SavedCity;
@@ -42,6 +45,9 @@ public sealed partial class SettingsWindow
         internal bool LoadingStatus;
         internal bool Searching;
         internal bool HostEdited;
+        internal string SavedHost = "";
+        internal string AlertsError = "";
+        internal string AirQualityError = "";
         internal void CancelOperation() { Operation?.Cancel(); Operation?.Dispose(); Operation = null; }
         public void Dispose() { CancelOperation(); Lifetime.Cancel(); ApiKey.Password = string.Empty; Lifetime.Dispose(); }
     }
@@ -68,20 +74,21 @@ public sealed partial class SettingsWindow
             FontSize = 14,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
         });
-        var body = Section("天气", "搜索后选择城市，再保存并刷新。以下操作立即保存；更新频率使用上方“应用更改”。");
+        var body = Section("天气", "修改后可点击上方“应用更改”统一保存，也可使用下方按钮单独保存。城市需先搜索并选择；连接配置会先验证再保存。");
         page.Provider.Items.Add("中国天气网"); page.Provider.Items.Add("和风天气");
         page.Provider.SelectedIndex = 0;
         var searchRow = new Grid { ColumnSpacing = 8 };
         searchRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         searchRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         searchRow.Children.Add(page.Query); Grid.SetColumn(page.Search, 1); page.Search.VerticalAlignment = VerticalAlignment.Bottom; searchRow.Children.Add(page.Search);
-        body.Children.Add(page.Provider); body.Children.Add(searchRow); body.Children.Add(page.Results);
+        body.Children.Add(page.Active); body.Children.Add(page.Provider); body.Children.Add(page.Draft); body.Children.Add(searchRow); body.Children.Add(page.Results);
         body.Children.Add(page.CityName); body.Children.Add(page.CityCode);
         var cityActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         cityActions.Children.Add(page.SaveCity); cityActions.Children.Add(page.Refresh); body.Children.Add(cityActions);
+        body.Children.Add(page.SwitchProvider);
         body.Children.Add(page.Status); body.Children.Add(page.LastAttempt); body.Children.Add(page.LastSuccess); body.Children.Add(page.Message);
         page.Credentials.Children.Add(new TextBlock { Text = "和风天气连接", FontSize = 16, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        page.Credentials.Children.Add(Copy("从和风天气控制台获取 API Host 和 API Key。密钥仅在点击保存时写入本机；不会读取或显示已保存的值。保存连接后可重新搜索或刷新天气。"));
+        page.Credentials.Children.Add(Copy("请原样填写账户控制台提供的完整 API Host，不要自行修改主机名或后缀。程序仅检查域名格式，连接是否可用由实际请求结果判断。API Key 使用同一账户的凭据。保存前验证连接，失败保留输入且不保存；留空保留已有值。验证成功不会切换当前来源或城市，请搜索选择城市后保存，或点击“切换来源并刷新”。"));
         page.Credentials.Children.Add(page.ApiHost); page.Credentials.Children.Add(page.ApiKey); page.Credentials.Children.Add(page.KeyStatus);
         var connectionActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         connectionActions.Children.Add(page.SaveCredentials); connectionActions.Children.Add(page.ClearKey); page.Credentials.Children.Add(connectionActions);
@@ -89,7 +96,7 @@ public sealed partial class SettingsWindow
 
         foreach (var (element, id) in new (FrameworkElement, string)[] {
             (page.Provider, "provider"), (page.Query, "query"), (page.Search, "search"), (page.Results, "results"),
-            (page.CityCode, "city-code"), (page.SaveCity, "save-city"), (page.Refresh, "refresh"),
+            (page.CityCode, "city-code"), (page.SaveCity, "save-city"), (page.Refresh, "refresh"), (page.SwitchProvider, "switch-provider"),
             (page.ApiHost, "api-host"), (page.ApiKey, "api-key"), (page.SaveCredentials, "save-connection"), (page.ClearKey, "clear-key"), (page.Message, "message") })
             AutomationProperties.SetAutomationId(element, "weather-" + id);
         AutomationProperties.SetName(page.Results, "城市搜索结果，选择后保存");
@@ -97,23 +104,25 @@ public sealed partial class SettingsWindow
             if (page.Binding || !IsWeatherCurrent(page)) return;
             page.ProviderEdited = true; page.CancelOperation(); page.Searching = false; page.LoadingStatus = false;
             page.Results.Items.Clear(); page.SelectedCity = null; page.Message.IsOpen = false;
-            UpdateWeatherSelection(page); UpdateWeatherButtons(page);
+            UpdateWeatherSelection(page); UpdateSaveStatus();
         };
         page.Results.SelectionChanged += (_, _) => {
             page.SelectedCity = (page.Results.SelectedItem as ListViewItem)?.Tag as JsonObject;
-            UpdateWeatherSelection(page); UpdateWeatherButtons(page);
+            UpdateWeatherSelection(page); UpdateSaveStatus();
         };
         page.Search.Click += async (_, _) => await SearchWeatherCityAsync(page);
         page.Query.KeyDown += async (_, args) => { if (args.Key == VirtualKey.Enter) { args.Handled = true; await SearchWeatherCityAsync(page); } };
         page.SaveCity.Click += async (_, _) => await SaveWeatherCityAsync(page);
         page.Refresh.Click += async (_, _) => await RefreshWeatherAsync(page);
+        page.SwitchProvider.Click += async (_, _) => await SwitchWeatherProviderAsync(page);
         page.SaveCredentials.Click += async (_, _) => await SaveWeatherCredentialsAsync(page, false);
         page.ClearKey.Click += async (_, _) => await SaveWeatherCredentialsAsync(page, true);
-        page.ApiHost.TextChanged += (_, _) => { if (!page.Binding) page.HostEdited = true; };
+        page.ApiHost.TextChanged += (_, _) => { if (!page.Binding) { page.HostEdited = true; UpdateSaveStatus(); } };
+        page.ApiKey.PasswordChanged += (_, _) => { if (!page.Binding) UpdateSaveStatus(); };
         page.Query.TextChanged += (_, _) => {
             if (!page.Searching || page.Committing) return;
             page.CancelOperation(); page.Searching = false; page.Results.Items.Clear(); page.SelectedCity = null;
-            UpdateWeatherSelection(page); UpdateWeatherButtons(page);
+            UpdateWeatherSelection(page); UpdateSaveStatus();
         };
         body.Loaded += async (_, _) => { if (IsWeatherCurrent(page) && _connection.IsConnected) await ReadWeatherStatusAsync(page); };
         UpdateWeatherButtons(page);
@@ -154,6 +163,23 @@ public sealed partial class SettingsWindow
     }
 
     private static string WeatherCityLabel(JsonObject city) => string.Join(" · ", new[] { Text(city["name"]), Text(city["region"]), Text(city["id"]) }.Where(part => part.Length > 0));
+    private static string WeatherProviderLabel(int provider) => provider == 1 ? "和风天气" : "中国天气网";
+    private static bool WeatherCredentialsPending(WeatherEditor page) =>
+        page.Provider.SelectedIndex == 1 && (!string.IsNullOrWhiteSpace(page.ApiKey.Password) ||
+        (!string.IsNullOrWhiteSpace(page.ApiHost.Text) && page.ApiHost.Text.Trim() != page.SavedHost));
+    private static bool CanSwitchWeatherProvider(WeatherEditor page) => page.HasStatus &&
+        page.Provider.SelectedIndex != page.SavedProvider && page.Provider.SelectedIndex is 0 or 1 &&
+        page.SelectedCity is null && !WeatherCredentialsPending(page) &&
+        Text(page.SavedCity?["id"]) is { Length: 9 } id && id.All(character => character is >= '0' and <= '9');
+
+    private static void WeatherRefreshMessage(WeatherEditor page, string action)
+    {
+        var text = action + "：" + WeatherProviderLabel(page.SavedProvider) + " · " +
+            (page.SavedCity is JsonObject city ? WeatherCityLabel(city) : "未知城市");
+        var errors = string.Join("；", new[] { page.AlertsError, page.AirQualityError }.Where(value => value.Length > 0));
+        WeatherMessage(page, text + (errors.Length > 0 ? "；" + errors : "。"),
+            errors.Length > 0 ? InfoBarSeverity.Warning : InfoBarSeverity.Success);
+    }
 
     private void UpdateWeatherButtons(WeatherEditor page)
     {
@@ -164,8 +190,16 @@ public sealed partial class SettingsWindow
         page.Search.Content = page.Searching ? "重新搜索" : "搜索";
         page.Query.IsEnabled = available;
         page.Results.IsEnabled = !_busy && !page.Committing;
-        page.SaveCity.IsEnabled = available && !page.Searching && page.SelectedCity is not null;
-        page.Refresh.IsEnabled = available && page.HasStatus;
+        page.SaveCity.IsEnabled = available && !page.Searching && page.SelectedCity is not null && !WeatherCredentialsPending(page);
+        page.Refresh.IsEnabled = available && page.HasStatus && !page.Searching &&
+            page.Provider.SelectedIndex == page.SavedProvider && page.SelectedCity is null && !WeatherCredentialsPending(page);
+        page.SwitchProvider.IsEnabled = available && !page.Searching && CanSwitchWeatherProvider(page);
+        page.Draft.Text = !page.HasStatus ? "" : page.Provider.SelectedIndex != page.SavedProvider
+            ? CanSwitchWeatherProvider(page) ? "来源尚未保存；点击“切换来源并刷新”可继续使用已保存城市。"
+                : WeatherCredentialsPending(page) ? "来源和连接配置尚未保存，请先保存并验证连接。"
+                : "来源尚未保存；请重新搜索并选择城市后保存。"
+            : page.SelectedCity is not null ? "城市尚未保存，请点击“保存城市并刷新”。"
+            : WeatherCredentialsPending(page) ? "连接配置尚未保存，请先保存并验证连接。" : "";
         page.Credentials.Visibility = page.Provider.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
         page.SaveCredentials.IsEnabled = available;
         page.ClearKey.IsEnabled = available && page.HasStatus;
@@ -177,10 +211,19 @@ public sealed partial class SettingsWindow
     {
         if (!IsWeatherCurrent(page)) return;
         page.HasStatus = true; page.SavedProvider = (int)Number(status["provider"]);
+        page.SavedHost = Text(status["apiHost"]);
+        page.AlertsError = Text(status["details"]?["alertsError"]);
+        var airError = Text(status["details"]?["airQuality"]?["error"]);
+        page.AirQualityError = airError;
         page.SavedCity = status["city"] is JsonObject city ? (JsonObject)city.DeepClone() : null;
+        page.Active.Text = "当前生效：" + WeatherProviderLabel(page.SavedProvider) + " · " +
+            (page.SavedCity is JsonObject activeCity ? WeatherCityLabel(activeCity) : "尚未设置城市");
         if (page.Committing && page.SelectedCity is JsonObject selected && page.SavedProvider == page.Provider.SelectedIndex && Text(selected["id"]) == Text(page.SavedCity?["id"]))
             page.SelectedCity = null;
         page.Status.Text = string.Join(" · ", new[] { status["updating"]?.ToString() == "true" ? "正在更新" : "当前天气", Text(status["temperature"]), Text(status["message"]) }.Where(value => value.Length > 0));
+        var warnings = string.Join("；", new[] { page.AlertsError, page.AirQualityError }.Where(value => value.Length > 0));
+        if (warnings.Length > 0) { page.Status.Text += " · " + warnings; WeatherMessage(page, warnings, InfoBarSeverity.Warning); }
+        else if (page.Message.Severity == InfoBarSeverity.Warning) page.Message.IsOpen = false;
         page.LastAttempt.Text = "上次尝试：" + (Text(status["lastAttempt"]).Length > 0 ? Text(status["lastAttempt"]) : "尚无记录");
         page.LastSuccess.Text = "上次成功：" + (Text(status["lastSuccess"]).Length > 0 ? Text(status["lastSuccess"]) : "尚无记录");
         if (status["lastSuccessCity"] is JsonObject lastCity && Text(lastCity["name"]).Length > 0)
@@ -193,7 +236,7 @@ public sealed partial class SettingsWindow
             page.Binding = false;
         }
         if (!page.HostEdited) { page.Binding = true; page.ApiHost.Text = Text(status["apiHost"]); page.Binding = false; }
-        UpdateWeatherSelection(page); UpdateWeatherButtons(page);
+        UpdateWeatherSelection(page); UpdateSaveStatus();
     }
 
     private async Task<JsonObject> WeatherCommandAsync(WeatherEditor page, object payload, CancellationToken token)
@@ -270,9 +313,27 @@ public sealed partial class SettingsWindow
         });
     }
 
+    private async Task<bool> SaveWeatherDraftAsync(WeatherEditor page)
+    {
+        if (WeatherCredentialsPending(page)) {
+            await SaveWeatherCredentialsAsync(page, false);
+            if (!IsWeatherCurrent(page) || page.Message.Severity == InfoBarSeverity.Error || WeatherCredentialsPending(page)) return false;
+        }
+        if (page.SelectedCity is not null) await SaveWeatherCityAsync(page);
+        else if (page.Provider.SelectedIndex != page.SavedProvider) {
+            if (!CanSwitchWeatherProvider(page)) {
+                WeatherMessage(page, "请先搜索并选择适用于当前来源的城市，再应用更改。", InfoBarSeverity.Warning);
+                return false;
+            }
+            await SwitchWeatherProviderAsync(page);
+        }
+        return IsWeatherCurrent(page) && !HasWeatherDraft() && page.Message.Severity != InfoBarSeverity.Error;
+    }
+
     private async Task SaveWeatherCityAsync(WeatherEditor page)
     {
-        if (_busy || page.SelectedCity is not JsonObject city || page.Committing) return;
+        if (!IsWeatherCurrent(page) || _busy || page.SelectedCity is not JsonObject city || page.Committing ||
+            page.LoadingStatus || page.Searching || WeatherCredentialsPending(page)) return;
         var provider = page.Provider.SelectedIndex;
         var selected = (JsonObject)city.DeepClone();
         await RunWeatherAsync(page, true, async token => {
@@ -281,31 +342,52 @@ public sealed partial class SettingsWindow
             page.ProviderEdited = false; page.SelectedCity = null;
             if (reply["status"] is JsonObject status) ApplyWeatherStatus(page, status);
             else { page.SavedCity = selected; page.SavedProvider = provider; UpdateWeatherSelection(page); }
-            WeatherMessage(page, "城市已保存，天气刷新完成。", InfoBarSeverity.Success);
+            WeatherRefreshMessage(page, "城市已保存，天气刷新完成");
         });
     }
 
-    private async Task RefreshWeatherAsync(WeatherEditor page) => await RunWeatherAsync(page, true, async token => {
-        var reply = await WeatherCommandAsync(page, new { operation = "refresh" }, token);
-        if (!IsWeatherOperationCurrent(page, token)) return;
-        if (reply["status"] is JsonObject status) ApplyWeatherStatus(page, status);
-        WeatherMessage(page, "已完成刷新。", InfoBarSeverity.Success);
-    });
+    private async Task RefreshWeatherAsync(WeatherEditor page)
+    {
+        UpdateWeatherButtons(page);
+        if (!page.Refresh.IsEnabled) return;
+        await RunWeatherAsync(page, true, async token => {
+            var reply = await WeatherCommandAsync(page, new { operation = "refresh" }, token);
+            if (!IsWeatherOperationCurrent(page, token)) return;
+            if (reply["status"] is JsonObject status) ApplyWeatherStatus(page, status);
+            WeatherRefreshMessage(page, "已完成刷新");
+        });
+    }
+
+    private async Task SwitchWeatherProviderAsync(WeatherEditor page)
+    {
+        UpdateWeatherButtons(page);
+        if (!page.SwitchProvider.IsEnabled || page.SavedCity is not JsonObject city) return;
+        var provider = page.Provider.SelectedIndex;
+        var savedCity = (JsonObject)city.DeepClone();
+        await RunWeatherAsync(page, true, async token => {
+            var reply = await WeatherCommandAsync(page, new { operation = "configure", provider, city = savedCity }, token);
+            if (!IsWeatherOperationCurrent(page, token)) return;
+            page.ProviderEdited = false;
+            if (reply["status"] is JsonObject status) ApplyWeatherStatus(page, status);
+            WeatherRefreshMessage(page, "来源已切换，天气刷新完成");
+        });
+    }
 
     private async Task SaveWeatherCredentialsAsync(WeatherEditor page, bool clear)
     {
-        if (!IsWeatherCurrent(page) || _busy || page.Committing) return;
-        var payload = new JsonObject { ["operation"] = "configure", ["credentialsOnly"] = true, ["apiHost"] = page.ApiHost.Text.Trim(), ["clearApiKey"] = clear };
+        if (!IsWeatherCurrent(page) || _busy || page.Committing || page.LoadingStatus) return;
+        var payload = new JsonObject { ["operation"] = "configure", ["credentialsOnly"] = true, ["clearApiKey"] = clear };
+        if (!clear) payload["apiHost"] = page.ApiHost.Text.Trim();
         if (!clear && !string.IsNullOrWhiteSpace(page.ApiKey.Password)) payload["apiKey"] = page.ApiKey.Password;
-        page.ApiKey.Password = string.Empty;
         await RunWeatherAsync(page, true, async token => {
             try
             {
                 var reply = await WeatherCommandAsync(page, payload, token);
                 if (!IsWeatherOperationCurrent(page, token)) return;
-                page.HostEdited = false;
+                page.ApiKey.Password = string.Empty;
+                if (!clear) page.HostEdited = false;
                 if (reply["status"] is JsonObject status) ApplyWeatherStatus(page, status);
-                WeatherMessage(page, clear ? "已清除保存的密钥。" : "连接配置已保存；可重新搜索城市或刷新天气。", InfoBarSeverity.Success);
+                WeatherMessage(page, clear ? "已清除保存的密钥。" : "和风天气连接已验证并保存；当前生效来源和城市未改变。", InfoBarSeverity.Success);
             }
             finally { payload.Remove("apiKey"); }
         });

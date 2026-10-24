@@ -26,10 +26,10 @@ try {
     & $testExecutable $executable $work
     if ($LASTEXITCODE -ne 0) { throw "Factory default seeding tests failed ($LASTEXITCODE)." }
     $defaults = [ordered]@{
-        'config.default.ini' = 'Native\TrafficMonitor\defaults\config.default.ini'
-        'Battery.dll.default.ini' = 'Native\TrafficMonitor\defaults\Battery.dll.default.ini'
-        'PowerMonPlugin.dll.default.ini' = 'Native\TrafficMonitor\defaults\PowerMonPlugin.dll.default.ini'
-        'WeatherPro.default.ini' = 'Native\TrafficMonitor\defaults\WeatherPro.default.ini'
+        'app.default.ini' = 'Native\TrafficMonitor\defaults\config.default.ini'
+        'battery.default.ini' = 'Native\TrafficMonitor\defaults\Battery.dll.default.ini'
+        'power.default.ini' = 'Native\TrafficMonitor\defaults\PowerMonPlugin.dll.default.ini'
+        'weather.default.ini' = 'Native\TrafficMonitor\defaults\WeatherPro.default.ini'
     }
     foreach ($name in $defaults.Keys) {
         $packaged = Join-Path (Join-Path $work 'extracted') $name

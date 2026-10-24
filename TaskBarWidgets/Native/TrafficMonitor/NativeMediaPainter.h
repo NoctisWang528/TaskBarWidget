@@ -102,7 +102,7 @@ namespace NativeMedia
         void PaintCover(ID2D1DeviceContext* context, const CoverPaint& paint);
         void PaintBrowser(ID2D1DeviceContext* context, const BrowserPaint& paint);
 
-        bool PrepareCover(const Cover& cover, float dpiScale, CoverBitmap& result);
+        bool PrepareCover(const Cover& cover, UINT coverEdgePx, CoverBitmap& result);
         bool HitTest(const BrowserPaint& paint, float x, float y, HitAction& action) const;
 
         void BeginPaintFrame();
@@ -112,6 +112,17 @@ namespace NativeMedia
 
         static D2D1_COLOR_F ParseColor(const std::wstring& value, D2D1_COLOR_F fallback);
         static std::uint64_t HashText(const std::wstring& value);
+        // Single derivation for cover cache keys: PrepareCover and the renderer's
+        // decode-failure fallback must agree on the key for a cover and decode edge.
+        static std::uint64_t CoverCacheKey(const Cover& cover, UINT coverEdgePx);
+
+        // Built-in footprint counters sampled by the native metrics line.
+        std::size_t TextLayoutCount() const { return m_layouts.size(); }
+        std::size_t TextFormatCount() const { return m_formats.size(); }
+        std::size_t BrushCount() const { return m_brushes.size(); }
+        std::size_t CoverCount() const { return m_covers.size(); }
+        // Cached cover bitmaps are 32bpp PBGRA, so each pixel costs 4 bytes.
+        std::uint64_t CoverCacheBytes() const;
 
     private:
         struct TextFormatKey
@@ -224,12 +235,15 @@ namespace NativeMedia
             const std::wstring& text, float fontSize, float dpiScale, float left, float top, float width,
             float height, int alignment, D2D1_COLOR_F color, float opacity,
             std::optional<double> scanProgress, bool translationPlaceholder);
+        float MeasureBrowserLine(ID2D1DeviceContext* context, const EffectiveStyle& style,
+            const std::wstring& text, float width, float fontSize, int weight);
         void DrawBrowserText(ID2D1DeviceContext* context, const EffectiveStyle& style,
-            const std::wstring& text, float left, float top, float width, float height,
+            const std::wstring& text, float left, float top, float width, float lineHeight,
             float fontSize, int weight, D2D1_COLOR_F color, float opacity);
         void TrimLayouts();
         void TrimBrushes();
         static Microsoft::WRL::ComPtr<ID2D1Bitmap1> DecodeBitmap(ID2D1DeviceContext* context,
-            IWICImagingFactory* wic, const std::wstring& uri, bool appIcon, std::wstring& error);
+            IWICImagingFactory* wic, const std::wstring& uri, UINT coverEdgePx, bool appIcon,
+            std::wstring& error);
     };
 }

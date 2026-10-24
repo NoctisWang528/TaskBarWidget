@@ -39,7 +39,7 @@ void CPluginManager::LoadPlugins()
         {L"PowerMonPlugin.dll", PowerTMPluginGetInstance()},
         {L"WeatherPro.dll", WeatherTMPluginGetInstance()}
     };
-    const std::wstring config_dir = theApp.m_config_dir + L"plugins\\";
+    const std::wstring config_dir = theApp.m_data_dir + L"\\config\\";
     CreateDirectoryW(config_dir.c_str(), nullptr);
     for (const auto& feature : features)
     {

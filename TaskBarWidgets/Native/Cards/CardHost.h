@@ -43,13 +43,11 @@ namespace Cards
 
         // Device or monitor geometry changed: re-place the group.
         void Refresh();
+        void SetOwner(HWND owner);
 
         // Draft appearance from the settings process. \`preview\` may be null to
         // drop the preview and fall back to the committed configuration.
         void PreviewMica(bool vivid, const MicaTuning& tuning);
-        bool HasPreview() const;
-        // The last committed tuning, used as the base for a partial preview.
-        MicaTuning CommittedMica() const;
         void PreviewTheme(bool dark, bool enabled);
         void ClearPreview();
 

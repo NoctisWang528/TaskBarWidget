@@ -16,6 +16,11 @@ namespace UpdateHealth
     using Value = winrt::Windows::Data::Json::JsonValue;
     struct Job { std::filesystem::path path, work; std::wstring nonce, version; bool reported{}; };
     inline Job& Current() { static Job job; return job; }
+    inline bool SupportedJobProtocol(const Json& job)
+    {
+        const auto version = job.GetNamedNumber(L"protocolVersion", 0);
+        return version == 1 || version == 2;
+    }
     inline std::wstring Normal(const std::filesystem::path& path)
     {
         auto normalized = std::filesystem::absolute(path).lexically_normal();
@@ -96,7 +101,7 @@ namespace UpdateHealth
         if (full.filename() != L"job.json" || _wcsicmp(Normal(work.parent_path()).c_str(), Normal(jobs).c_str()) != 0)
             throw std::runtime_error("Unexpected update job location.");
         auto job = Read(full);
-        if (job.GetNamedNumber(L"protocolVersion", 0) != 1 || job.GetNamedString(L"nonce", L"") != nonce ||
+        if (!SupportedJobProtocol(job) || job.GetNamedString(L"nonce", L"") != nonce ||
             _wcsicmp(Normal(job.GetNamedString(L"installRoot").c_str()).c_str(), Normal(root).c_str()) != 0 ||
             _wcsicmp(Normal(job.GetNamedString(L"workRoot").c_str()).c_str(), work.c_str()) != 0)
             throw std::runtime_error("Update job does not match this installation.");
@@ -138,7 +143,7 @@ namespace UpdateHealth
             try {
                 const auto job = Read(directory.path() / L"job.json");
                 const auto nonce = job.GetNamedString(L"nonce");
-                if (job.GetNamedNumber(L"protocolVersion", 0) != 1 ||
+                if (!SupportedJobProtocol(job) ||
                     nonce.size() != 64 || std::wstring(nonce).find_first_not_of(L"0123456789abcdef") != std::wstring::npos ||
                     _wcsicmp(Normal(job.GetNamedString(L"installRoot").c_str()).c_str(), Normal(root).c_str()) != 0 ||
                     _wcsicmp(Normal(job.GetNamedString(L"workRoot").c_str()).c_str(), Normal(directory.path()).c_str()) != 0)

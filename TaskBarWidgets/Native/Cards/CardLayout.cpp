@@ -249,7 +249,8 @@ namespace Cards::Layout
         if (focusable.empty()) return nullptr;
         const auto found = current ? std::find(focusable.begin(), focusable.end(), current)
             : focusable.end();
-        long index = found == focusable.end() ? -1 : static_cast<long>(found - focusable.begin());
+        long index = found == focusable.end() ? (direction < 0 ? 0 : -1)
+            : static_cast<long>(found - focusable.begin());
         const long count = static_cast<long>(focusable.size());
         index = (index + direction % count + count) % count;
         return focusable[static_cast<size_t>(index)];

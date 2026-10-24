@@ -31,11 +31,13 @@ if (-not $result.weatherControls.typedCitySearch -or -not $result.weatherControl
     $result.weatherControls.realWeatherOrCredentialsTouched) { throw 'Weather settings component checks did not complete.' }
 if (-not $result.offsetSettings.bothPayloadsVisible -or
     $result.offsetSettings.initialActivations -ne 1 -or $result.offsetSettings.initialBatches -ne 1 -or
-    $result.offsetSettings.initialFinalRenders -ne 1 -or $result.offsetSettings.redrawQueries -ne 0 -or
+    $result.offsetSettings.initialPageRenders -ne 1 -or $result.offsetSettings.initialFinalRenders -ne 0 -or
+    -not $result.offsetSettings.pageControlsRetained -or -not $result.offsetSettings.pendingInputRetained -or
+    $result.offsetSettings.redrawQueries -ne 0 -or
     $result.offsetSettings.samePageReopenActivations -ne 1 -or $result.offsetSettings.stormActivations -ne 1 -or
     -not $result.offsetSettings.staleEntryIgnored -or -not $result.offsetSettings.searchWithoutActivation -or
     -not $result.offsetSettings.pagingWithoutActivation -or -not $result.offsetSettings.staleRequestIgnored -or
-    -not $result.offsetSettings.requestIdsMonotonic -or $result.offsetSettings.validBatchFinalRenders -ne 1) {
+    -not $result.offsetSettings.requestIdsMonotonic -or $result.offsetSettings.validBatchFinalRenders -ne 0) {
     throw 'Track-offset page lifecycle, request ordering or single-render checks did not complete.'
 }
 if (-not $result.reorderControls.sameColumn -or -not $result.reorderControls.crossColumn -or
@@ -52,6 +54,9 @@ foreach ($layout in @($result.layoutChecks | Where-Object { $_.kind -eq 'setting
 }
 foreach ($spectrum in @($result.layoutChecks | Where-Object { $_.kind -eq 'settingsSpectrumAdvancedFields' })) {
     if ($spectrum.fieldCount -lt 1) { throw 'Spectrum tuning fields were not directly realized.' }
+}
+if (-not $result.weatherControls.airQualityWarning -or -not $result.weatherControls.connectionDraftPreserved) {
+    throw 'Weather settings did not verify partial air-quality errors and connection draft preservation.'
 }
 foreach ($pointer in @($result.layoutChecks | Where-Object kind -eq 'modulePointerMessages')) {
     if (-not $pointer.available) { Write-Host "Actual pointer verification unavailable: $($pointer.reason). Desktop acceptance remains pending." }

@@ -56,6 +56,12 @@ namespace NativeWeatherBridge
         air.SetNamedValue(L"pm25", text(details.AirQuality.PM2p5));
         air.SetNamedValue(L"pm10", text(details.AirQuality.PM10));
         air.SetNamedValue(L"publishedAt", text(details.AirQuality.PublishTime));
+        air.SetNamedValue(L"indexCode", text(details.AirQuality.IndexCode));
+        air.SetNamedValue(L"indexName", text(details.AirQuality.IndexName));
+        air.SetNamedValue(L"pm25Unit", text(details.AirQuality.PM2p5Unit));
+        air.SetNamedValue(L"pm10Unit", text(details.AirQuality.PM10Unit));
+        air.SetNamedValue(L"error", text(details.AirQuality.Error));
+        air.SetNamedValue(L"attribution", text(details.AirQuality.Attribution));
 
         JsonArray alerts;
         for (size_t index = 0; index < details.Alerts.size() && index < 16; ++index) {
@@ -76,11 +82,13 @@ namespace NativeWeatherBridge
         result.SetNamedValue(L"forecast", forecast);
         result.SetNamedValue(L"airQuality", air);
         result.SetNamedValue(L"alerts", alerts);
+        result.SetNamedValue(L"alertsError", text(details.AlertsError));
+        result.SetNamedValue(L"alertsAttribution", text(details.AlertsAttribution));
         JsonObject capabilities;
         capabilities.SetNamedValue(L"forecast", JsonValue::CreateBooleanValue(!details.Forecast.empty()));
         capabilities.SetNamedValue(L"humidity", JsonValue::CreateBooleanValue(!details.Current.Humidity.empty()));
         capabilities.SetNamedValue(L"wind", JsonValue::CreateBooleanValue(!details.Current.WindDirection.empty() || !details.Current.WindScale.empty()));
-        capabilities.SetNamedValue(L"airQuality", JsonValue::CreateBooleanValue(!details.AirQuality.AQI.empty() || !details.AirQuality.PM2p5.empty()));
+        capabilities.SetNamedValue(L"airQuality", JsonValue::CreateBooleanValue(!details.AirQuality.AQI.empty() || !details.AirQuality.PM2p5.empty() || !details.AirQuality.PM10.empty()));
         capabilities.SetNamedValue(L"precipitation", JsonValue::CreateBooleanValue(false));
         capabilities.SetNamedValue(L"alerts", JsonValue::CreateBooleanValue(!details.Alerts.empty()));
         capabilities.SetNamedValue(L"updatedAt", JsonValue::CreateBooleanValue(!details.Current.ObservedAt.empty()));

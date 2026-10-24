@@ -19,6 +19,7 @@
 
 #include "SettingsHelper.h"
 #include "DefaultConfigSeeder.h"
+#include "DataStartup.h"
 #include <gdiplus.h>
 
 #ifdef _DEBUG
@@ -445,7 +446,6 @@ bool CTrafficMonitorApp::SaveConfig()
     ini.WriteBool(L"histroy_traffic", L"sunday_first", m_cfg_data.m_sunday_first);
     ini.WriteInt(L"histroy_traffic", L"view_type", static_cast<int>(m_cfg_data.m_view_type));
 
-    ini.WriteBool(_T("other"), _T("no_multistart_warning"), m_no_multistart_warning);
     ini.WriteBool(_T("other"), _T("exit_when_start_by_restart_manager"), m_exit_when_start_by_restart_manager);
     ini.WriteBool(_T("other"), _T("debug_log"), m_debug_log);
     ini.WriteBool(_T("other"), _T("taksbar_transparent_color_enable"), m_taksbar_transparent_color_enable);
@@ -478,53 +478,16 @@ void CTrafficMonitorApp::LoadPluginDisabledSettings()
     m_cfg_data.plugin_disabled.FromString(ini.GetString(L"config", L"plugin_disabled", L""));
 }
 
-void CTrafficMonitorApp::LoadGlobalConfig()
+bool CTrafficMonitorApp::PrepareDataDirectory()
 {
-    bool portable_mode_default{ false };
-    wstring global_cfg_path{ m_module_dir + L"global_cfg.ini" };
-    if (!CCommon::FileExist(global_cfg_path.c_str()))       //如果global_cfg.ini不存在，则根据AppData/Roaming/TrafficMonitor目录下是否存在config.ini来判断配置文件的保存位置
-    {
-        portable_mode_default = !CCommon::FileExist((m_appdata_dir + L"config.ini").c_str());
-    }
-
-    CIniHelper ini{ global_cfg_path };
-    m_general_data.portable_mode = ini.GetBool(L"config", L"portable_mode", portable_mode_default);
-    //写出推导结果，避免首次运行时 ini.Save() 只创建了一个只有 BOM 的空文件，
-    //导致下次启动因“文件已存在”而把 portable_mode 误判为 false。
-    ini.WriteBool(L"config", L"portable_mode", m_general_data.portable_mode);
-
-    //执行一次保存操作，以检查当前目录是否有写入权限
-    m_module_dir_writable = ini.Save();
-
-    if (m_module_dir.find(CCommon::GetTemplateDir()) != wstring::npos)      //如果当前路径是在Temp目录下，则强制将数据保存到Appdata
-    {
-        m_module_dir_writable = false;
-    }
-
-    if (!m_module_dir_writable)              //如果当前目录没有写入权限，则设置配置保存到AppData目录
-    {
-        m_general_data.portable_mode = false;
-    }
-}
-
-void CTrafficMonitorApp::SaveGlobalConfig()
-{
-    CIniHelper ini{ m_module_dir + L"global_cfg.ini" };
-    ini.WriteBool(L"config", L"portable_mode", m_general_data.portable_mode);
-
-    //检查是否保存成功
-    if (!ini.Save())
-    {
-        //if (m_cannot_save_global_config_warning)
-        //{
-        //    CString info;
-        //    info.LoadString(IDS_CONNOT_SAVE_CONFIG_WARNING);
-        //    info.Replace(_T("<%file_path%>"), m_module_dir.c_str());
-        //    AfxMessageBox(info, MB_ICONWARNING);
-        //}
-        //m_cannot_save_global_config_warning = false;
-        //return;
-    }
+    const auto paths = NativeDataPaths::ForInstallRoot(m_module_dir);
+    m_data_dir = paths.DataRoot.wstring();
+    m_module_dir_writable = DefaultConfigSeeder::EnsureDirectory(m_data_dir);
+    if (!m_module_dir_writable) return false;
+    const DWORD attributes = GetFileAttributesW(m_data_dir.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES || !(attributes & FILE_ATTRIBUTE_DIRECTORY)) return false;
+    if (attributes & FILE_ATTRIBUTE_REPARSE_POINT) return false;
+    return true;
 }
 
 int CTrafficMonitorApp::DPI(int pixel)
@@ -835,21 +798,78 @@ BOOL CTrafficMonitorApp::InitInstance()
     }
     m_module_dir = CCommon::GetModuleDir();
     m_system_dir = CCommon::GetSystemDir();
-    m_appdata_dir = CCommon::GetAppDataConfigDir();
+    constexpr wchar_t mutex_name[] = L"TaskBarWidgets-1419J3XLKL1w8OZc";
+    m_startup_mutex = ::CreateMutexW(nullptr, TRUE, mutex_name);
+    if (m_startup_mutex == nullptr)
+    {
+        ::MessageBoxW(nullptr, L"TaskBarWidgets 无法创建实例互斥锁。", L"TaskBarWidgets 启动失败", MB_OK | MB_ICONERROR);
+        return FALSE;
+    }
+    if (::GetLastError() == ERROR_ALREADY_EXISTS)
+    {
+        ::MessageBoxW(nullptr, L"TaskBarWidgets 已经在运行。", L"TaskBarWidgets", MB_OK | MB_ICONINFORMATION);
+        return FALSE;
+    }
+    if (!PrepareDataDirectory())
+    {
+        CString message;
+        message.Format(L"无法创建或访问数据目录：\n%s\n\n请检查目录权限、磁盘空间以及是否包含文件系统链接。", m_data_dir.c_str());
+        TASKDIALOGCONFIG dialog{ sizeof(dialog) };
+        const TASKDIALOG_BUTTON buttons[] = {
+            { 100, L"打开安装目录" }, { 101, L"查看目录权限" }
+        };
+        dialog.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_SIZE_TO_CONTENT;
+        dialog.dwCommonButtons = TDCBF_CLOSE_BUTTON;
+        dialog.pszWindowTitle = L"TaskBarWidgets 启动失败";
+        dialog.pszMainIcon = TD_ERROR_ICON;
+        dialog.pszMainInstruction = L"数据目录不可用";
+        dialog.pszContent = message;
+        dialog.cButtons = ARRAYSIZE(buttons);
+        dialog.pButtons = buttons;
+        int selected{};
+        if (FAILED(TaskDialogIndirect(&dialog, &selected, nullptr, nullptr))) ::MessageBoxW(nullptr, message,
+            L"TaskBarWidgets 启动失败", MB_OK | MB_ICONERROR);
+        else if (selected == 100) ShellExecuteW(nullptr, L"open", m_module_dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        else if (selected == 101) ShellExecuteW(nullptr, L"properties", m_module_dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        return FALSE;
+    }
 
-    LoadGlobalConfig();
+    const auto migration = NativeDataStartup::RunMigration(m_module_dir, m_data_dir);
+    if (!migration.Success)
+    {
+        CString message;
+        message.Format(L"数据目录：\n%s\n\n原因：\n%s\n\n源文件未被删除。请检查目录权限、磁盘空间和文件完整性后重新启动。",
+            m_data_dir.c_str(), migration.Message.c_str());
+        TASKDIALOGCONFIG dialog{ sizeof(dialog) };
+        const TASKDIALOG_BUTTON buttons[] = {
+            { 100, L"打开数据目录" }, { 101, L"查看目录权限" }
+        };
+        dialog.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_SIZE_TO_CONTENT;
+        dialog.dwCommonButtons = TDCBF_CLOSE_BUTTON;
+        dialog.pszWindowTitle = L"TaskBarWidgets 启动失败";
+        dialog.pszMainIcon = TD_ERROR_ICON;
+        dialog.pszMainInstruction = L"旧数据迁移未完成";
+        dialog.pszContent = message;
+        dialog.cButtons = ARRAYSIZE(buttons);
+        dialog.pButtons = buttons;
+        int selected{};
+        if (FAILED(TaskDialogIndirect(&dialog, &selected, nullptr, nullptr))) ::MessageBoxW(nullptr, message,
+            L"TaskBarWidgets 启动失败", MB_OK | MB_ICONERROR);
+        else if (selected == 100) ShellExecuteW(nullptr, L"open", m_data_dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        else if (selected == 101) ShellExecuteW(nullptr, L"properties", m_data_dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        return FALSE;
+    }
 
-    if (m_general_data.portable_mode)
-        m_config_dir = m_module_dir;
-    else
-        m_config_dir = m_appdata_dir;
-    //AppData里面的程序配置文件路径
-    m_config_path = m_config_dir + L"config.ini";
-    m_history_traffic_path = m_config_dir + L"history_traffic.dat";
-    m_log_path = m_config_dir + L"error.log";
+    const auto paths = NativeDataPaths::ForInstallRoot(m_module_dir);
+    m_config_path = (paths.ConfigDirectory / L"app.ini").wstring();
+    m_history_traffic_path = (paths.HistoryDirectory / L"traffic.dat").wstring();
+    m_log_path = (paths.LogsDirectory / L"error.log").wstring();
+    m_battery_config_path = (paths.ConfigDirectory / L"battery.ini").wstring();
+    m_power_config_path = (paths.ConfigDirectory / L"power.ini").wstring();
+    m_weather_config_path = (paths.ConfigDirectory / L"weather.ini").wstring();
 
     //首次运行时播种出厂默认配置（含三个内置模块的 INI）。已有配置文件不会被改动。
-    DefaultConfigSeeder::SeedMissingDefaults(m_config_dir);
+    DefaultConfigSeeder::SeedMissingDefaults(m_data_dir);
 
     //#ifndef _DEBUG
     //  //原来的、程序所在目录下的配置文件的路径
@@ -871,43 +891,6 @@ BOOL CTrafficMonitorApp::InitInstance()
 
     //初始化字符串资源
     m_str_table.Init();
-
-    //检查是否已有实例正在运行
-    CIniHelper ini{ m_config_path };
-    m_no_multistart_warning = ini.GetBool(_T("other"), _T("no_multistart_warning"), false);
-    LPCTSTR mutex_name{};
-#ifdef _DEBUG
-    mutex_name = _T("TaskBarWidgets-1419J3XLKL1w8OZc");
-#else
-    mutex_name = _T("TaskBarWidgets-1419J3XLKL1w8OZc");
-#endif
-    HANDLE hMutex = ::CreateMutex(NULL, TRUE, mutex_name);
-    if (hMutex != NULL)
-    {
-        if (GetLastError() == ERROR_ALREADY_EXISTS)
-        {
-            //char buff[128];
-            //string cmd_line_str{ CCommon::UnicodeToStr(cmd_line.c_str()) };
-            //sprintf_s(buff, "when_start=%d, m_no_multistart_warning=%d, cmd_line=%s", when_start, m_no_multistart_warning, cmd_line_str.c_str());
-            //CCommon::WriteLog(buff, _T(".\\start.log"));
-            if (!m_no_multistart_warning)
-            {
-                //查找已存在TrafficMonitor进程的主窗口的句柄
-                HWND exist_handel = ::FindWindow(APP_CLASS_NAME, NULL);
-                if (exist_handel != NULL)
-                {
-                    //弹出“TrafficMonitor已在运行”对话框
-                    CAppAlreadyRuningDlg dlg(exist_handel);
-                    dlg.DoModal();
-                }
-                else
-                {
-                    AfxMessageBox(CCommon::LoadText(IDS_AN_INSTANCE_RUNNING));
-                }
-            }
-            return FALSE;
-        }
-    }
 
     //初始化GDI+
     Gdiplus::GdiplusStartupInput gdiplusStartupInput;
@@ -1286,6 +1269,11 @@ void CTrafficMonitorApp::OnUpdateLog()
 
 int CTrafficMonitorApp::ExitInstance()
 {
+    if (m_startup_mutex)
+    {
+        ::CloseHandle(m_startup_mutex);
+        m_startup_mutex = nullptr;
+    }
     // 释放GDI+
     if (m_gdiplusToken != 0)
         Gdiplus::GdiplusShutdown(m_gdiplusToken);
@@ -1379,8 +1367,7 @@ unsigned short CTrafficMonitorApp::GetLanguageId() const
 const wchar_t* CTrafficMonitorApp::GetPluginConfigDir() const
 {
     static std::wstring config_dir;
-    config_dir = m_config_dir;
-    config_dir += L"plugins\\";
+    config_dir = m_data_dir + L"\\config\\";
     return config_dir.c_str();
 }
 

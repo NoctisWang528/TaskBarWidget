@@ -15,6 +15,7 @@ public partial class App : Application
     private Window? _lifetimeWindow;
     private DispatcherQueue? _dispatcher;
     private bool _stopping;
+    private bool _healthProbe;
     private UpdateUiState _updateState = new();
     private bool _installConfirmationOpen, _uiReadyReported, _installAfterDownload;
 
@@ -57,7 +58,8 @@ public partial class App : Application
         }
 
         _dispatcher = DispatcherQueue.GetForCurrentThread();
-        // Keep the UI process alive when the last user window closes; never activate this host.
+        _healthProbe = arguments.Contains("--health-probe");
+        // Keep a hidden owner only while awaiting the first command or health reply.
         _lifetimeWindow = new Window { Title = "TaskBarWidgets UI lifecycle" };
         _lifetimeWindow.AppWindow.Hide();
         _connection = new UiConnection(arguments[pipeIndex + 1]);
@@ -91,6 +93,10 @@ public partial class App : Application
                 OpenSettings(payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("page", out var page)
                     && page.ValueKind == JsonValueKind.String ? page.GetString() : null);
                 break;
+            case "confirmInstallUpdate":
+                _healthProbe = false;
+                Observe(ConfirmCardUpdateAsync());
+                break;
             case "uiReady":
                 _ = RefreshUpdateStateAsync();
                 break;
@@ -106,9 +112,12 @@ public partial class App : Application
     private void OpenSettings(string? page)
     {
         if (_connection is null) return;
+        _healthProbe = false; // A user opening settings takes ownership from the health probe.
         // The cards live in the native process now; opening settings must still
         // dismiss them so the two surfaces never overlap.
         RequestCardHide();
+        // The window is reused across opens; only the first creation pays for the shell.
+        var reused = _settings is not null;
         if (_settings is null)
         {
             _settings = new SettingsWindow(_connection);
@@ -122,20 +131,23 @@ public partial class App : Application
             // The settings process exists only while settings is open. Save and
             // discard both run inside the window before Closed fires, so a deferred
             // save still finishes; only an unfinished save keeps the process alive.
-            _settings.Closed += (_, args) =>
+            _settings.Closed += (_, _) =>
             {
-                if (args.Handled) return;
                 _settings = null;
-                if (!_stopping) _dispatcher?.TryEnqueue(Stop);
+                if (!_stopping) Stop();
             };
         }
-        _settings.ShowPage(page);
+        // A second open command must not dispose a weather editor or move away
+        // from an active save before the shared update path can guard it.
+        if (!reused || !_settings.HasPendingChanges) _settings.ShowPage(page);
         _settings.Activate();
+        UiDiagnosticLog.Write("ui-lifecycle.log", $"settings-shown page={page ?? "default"} reused={reused}");
     }
 
     private void PreviewCardTheme(ElementTheme theme)
     {
         if (_connection is null || _stopping) return;
+        if (theme == ElementTheme.Default && _settings?.Content is FrameworkElement root) theme = root.ActualTheme;
         Observe(_connection.RequestAsync("previewCardTheme",
             new { dark = theme == ElementTheme.Dark, enabled = true }, _lifetime.Token));
     }
@@ -184,9 +196,18 @@ public partial class App : Application
                 _uiReadyReported = true;
                 try { await _connection.RequestAsync("reportUiReady", cancellationToken: _lifetime.Token); }
                 catch { _uiReadyReported = false; throw; }
+                if (_healthProbe && _settings is null) Stop();
             }
         }
         catch (Exception error) when (error is IOException or InvalidOperationException or OperationCanceledException or ObjectDisposedException) { }
+    }
+
+    private async Task ConfirmCardUpdateAsync()
+    {
+        await RefreshUpdateStateAsync();
+        if (_stopping) return;
+        if (_updateState.Phase == "ready" && _updateState.CanInstall) OnInstallUpdateRequested();
+        else OpenSettings("about");
     }
 
     private void AcceptUpdateState(JsonElement payload)

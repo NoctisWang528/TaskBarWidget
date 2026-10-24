@@ -203,6 +203,103 @@ public sealed class SpectrumSignalTests
         Assert.Equal(8, service.GetSpectrum(PacketTick + 1).Length);
     }
 
+    [Fact]
+    public void ReusedBuffersKeepEveryFrameEqualToFreshlyAllocatedBuffers()
+    {
+        var frames = new[]
+        {
+            Tone(750, 0.01),
+            Tone(2250, 0.4),
+            new float[SampleWindow],
+            PianoTone().Select(value => value * 0.02f).ToArray()
+        };
+
+        // LinearTuning pins the adaptive peak and applies every frame at full attack, so one
+        // frame's bars depend only on that frame: a fresh service is the pre-reuse reference.
+        using var reused = CreateService();
+        for (var frame = 0; frame < frames.Length; frame++)
+        {
+            var now = PacketTick + (frame * 10);
+            using var fresh = CreateService();
+            Feed(reused, now, frames[frame]);
+            Feed(fresh, now, frames[frame]);
+            AssertBarsEqual(fresh.GetSpectrum(now), reused.GetSpectrum(now));
+        }
+    }
+
+    [Fact]
+    public void RepeatedCallsWithIdenticalInputKeepProducingTheSameBars()
+    {
+        var tone = Tone(750, 0.01);
+        using var service = CreateService();
+        Feed(service, PacketTick, tone);
+        var first = service.GetSpectrum(PacketTick);
+        var second = service.GetSpectrum(PacketTick);
+        AssertBarsEqual(first, second);
+
+        using var fresh = CreateService();
+        Feed(fresh, PacketTick, tone);
+        AssertBarsEqual(fresh.GetSpectrum(PacketTick), second);
+    }
+
+    [Fact]
+    public void MonoAndSilentFramesKeepTheirBars()
+    {
+        var tone = Tone(750, 0.01);
+        var silence = new float[SampleWindow];
+        using var reused = CreateService();
+        Feed(reused, PacketTick, tone, tone);
+        Assert.True(reused.GetSpectrum(PacketTick).Max() > 0.001f);
+
+        Feed(reused, PacketTick + 10, silence);
+        Assert.All(reused.GetSpectrum(PacketTick + 10), value => Assert.Equal(0f, value));
+
+        // The stereo frame after a mono frame reshapes the reused channel buffers.
+        using var fresh = CreateService();
+        Feed(reused, PacketTick + 20, tone, tone);
+        Feed(fresh, PacketTick + 20, tone, tone);
+        AssertBarsEqual(fresh.GetSpectrum(PacketTick + 20), reused.GetSpectrum(PacketTick + 20));
+
+        using var mono = CreateService();
+        Feed(mono, PacketTick, silence);
+        var monoBars = mono.GetSpectrum(PacketTick);
+        Assert.Equal(SpectrumTuningSettings.DefaultBarCount, monoBars.Length);
+        Assert.All(monoBars, value => Assert.Equal(0f, value));
+    }
+
+    [Fact]
+    public void SampleWindowChangesKeepBarsEqualToFreshBuffers()
+    {
+        var tone = Tone(750, 0.01);
+        using var reused = CreateService();
+        Feed(reused, PacketTick, tone);
+        foreach (var window in new[] { 512, 1024, 2048, 512 })
+        {
+            var tuning = LinearTuning();
+            tuning.SampleWindow = window;
+            reused.ApplyTuning(tuning);
+            using var fresh = CreateService(tuning);
+            Feed(fresh, PacketTick, tone);
+            AssertBarsEqual(fresh.GetSpectrum(PacketTick), reused.GetSpectrum(PacketTick));
+        }
+    }
+
+    [Fact]
+    public void ReturnedBarsStayOwnedByTheCaller()
+    {
+        using var service = CreateService();
+        Feed(service, PacketTick, Tone(750, 0.01));
+        var retained = service.GetSpectrum(PacketTick);
+        var snapshot = (float[])retained.Clone();
+        Assert.True(retained.Max() > 0.001f);
+
+        Feed(service, PacketTick + 10, Tone(2250, 0.8), Tone(2250, 0.8));
+        service.GetSpectrum(PacketTick + 10);
+        service.GetSpectrum(PacketTick + 20);
+
+        AssertBarsEqual(snapshot, retained);
+    }
+
     private static SpectrumTuningSettings LinearTuning() => new()
     {
         PeakInitial = 0.08, PeakFloor = 0.08, PeakCeiling = 0.08,

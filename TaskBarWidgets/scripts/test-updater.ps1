@@ -22,17 +22,18 @@ function Write-Json($Path, $Value) { [IO.File]::WriteAllText($Path, ($Value | Co
 function Check($Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
 function New-Case([string]$Name) {
     $base = Join-Path $testRoot $Name
-    $install = Join-Path $base 'install'; $stage = Join-Path $base 'stage'; $work = Join-Path $base 'jobs\test'; $native = Join-Path $base 'native'; $media = Join-Path $base 'media'
-    New-Item -ItemType Directory -Path $install,$stage,$work,$native,(Join-Path $media 'database') -Force | Out-Null
+    $install = Join-Path $base 'install'; $stage = Join-Path $base 'stage'; $work = Join-Path $base 'jobs\test'; $data = Join-Path $install 'Data'
+    New-Item -ItemType Directory -Path $install,$stage,$work,(Join-Path $data 'config'),(Join-Path $data 'history'),(Join-Path $data 'lyrics'),(Join-Path $data 'secrets') -Force | Out-Null
     Copy-Item -LiteralPath $fake -Destination (Join-Path $install 'TaskBarWidgets.exe')
     Copy-Item -LiteralPath $fake -Destination (Join-Path $stage 'TaskBarWidgets.exe')
     Copy-Item -LiteralPath $testUpdater -Destination (Join-Path $work 'TaskBarWidgets.Updater.exe')
     [IO.File]::WriteAllText((Join-Path $install 'OpenHardwareMonitorApi.dll'), 'old program')
     [IO.File]::WriteAllText((Join-Path $stage 'OpenHardwareMonitorApi.dll'), 'new program')
-    [IO.File]::WriteAllText((Join-Path $native 'config.ini'), 'private config')
-    [IO.File]::WriteAllText((Join-Path $install 'global_cfg.ini'), 'global marker')
-    [IO.File]::WriteAllText((Join-Path $media 'media-settings.json'), 'private settings')
-    [IO.File]::WriteAllText((Join-Path $media 'database\user_data.db'), 'private db')
+    [IO.File]::WriteAllText((Join-Path $data 'config\app.ini'), 'private config')
+    [IO.File]::WriteAllText((Join-Path $data 'config\media.json'), 'private settings')
+    [IO.File]::WriteAllText((Join-Path $data 'history\traffic.dat'), "lines:`"0`"`r`n")
+    [IO.File]::WriteAllText((Join-Path $data 'lyrics\user_data.db'), 'private db')
+    [IO.File]::WriteAllText((Join-Path $data 'secrets\weather-appkey.bin'), 'private key')
     New-Item -ItemType Directory -Path (Join-Path $install 'UI'),(Join-Path $install 'Media') -Force | Out-Null
     [IO.File]::WriteAllText((Join-Path $install 'UI\my-note.txt'), 'unknown user note')
     [IO.File]::WriteAllText((Join-Path $install 'Media\custom.json'), 'unknown user file')
@@ -42,10 +43,10 @@ function New-Case([string]$Name) {
         $inventory.files += @{ path=$name; bytes=$file.Length; sha256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
     }
     Write-Json (Join-Path $stage 'app-files.json') $inventory
-    $job = [ordered]@{ protocolVersion=1; installRoot=$install;stageRoot=$stage;workRoot=$work;nativeDataRoot=$native;mediaDataRoot=$media;version=$inventory.version; fileManifestSha256=(Get-FileHash -LiteralPath (Join-Path $stage 'app-files.json')).Hash.ToLowerInvariant(); nonce=[guid]::NewGuid().ToString('N');nativePid=0;mediaPid=0;uiPid=0;requirements=@{dotnetDesktop='8.0.0';windowsAppRuntime='2.5.1.0';windowsBuild=22000} }
+    $job = [ordered]@{ protocolVersion=2; installRoot=$install;stageRoot=$stage;workRoot=$work;dataRoot=$data;version=$inventory.version; fileManifestSha256=(Get-FileHash -LiteralPath (Join-Path $stage 'app-files.json')).Hash.ToLowerInvariant(); nonce=[guid]::NewGuid().ToString('N');nativePid=0;mediaPid=0;uiPid=0;requirements=@{dotnetDesktop='8.0.0';windowsAppRuntime='2.5.1.0';windowsBuild=22000} }
     $path=Join-Path $work 'job.json'; Write-Json $path $job
     Write-Json (Join-Path $work 'shutdown-approved.json') @{nonce=$job.nonce}
-    return @{install=$install;stage=$stage;work=$work;native=$native;media=$media;job=$job;path=$path}
+    return @{install=$install;stage=$stage;work=$work;data=$data;job=$job;path=$path}
 }
 function Invoke-Case($Case,[switch]$Recover,[scriptblock]$OnReady) {
     $verb=if($Recover){'--recover'}else{'--job'}
@@ -66,10 +67,10 @@ function Invoke-Case($Case,[switch]$Recover,[scriptblock]$OnReady) {
 }
 function Assert-Original($Case) {
     Check (([IO.File]::ReadAllText((Join-Path $Case.install 'OpenHardwareMonitorApi.dll'))) -eq 'old program') 'Original program was not preserved/restored.'
-    Check (([IO.File]::ReadAllText((Join-Path $Case.native 'config.ini'))) -eq 'private config') 'Native config changed.'
-    Check (([IO.File]::ReadAllText((Join-Path $Case.media 'media-settings.json'))) -eq 'private settings') 'Media settings changed.'
-    Check (([IO.File]::ReadAllText((Join-Path $Case.media 'database\user_data.db'))) -eq 'private db') 'Media database changed.'
-    Check (([IO.File]::ReadAllText((Join-Path $Case.install 'global_cfg.ini'))) -eq 'global marker') 'Global marker changed.'
+    Check (([IO.File]::ReadAllText((Join-Path $Case.data 'config\app.ini'))) -eq 'private config') 'Native config changed.'
+    Check (([IO.File]::ReadAllText((Join-Path $Case.data 'config\media.json'))) -eq 'private settings') 'Media settings changed.'
+    Check (([IO.File]::ReadAllText((Join-Path $Case.data 'lyrics\user_data.db'))) -eq 'private db') 'Lyrics database changed.'
+    Check (([IO.File]::ReadAllText((Join-Path $Case.data 'secrets\weather-appkey.bin'))) -eq 'private key') 'Weather credential changed.'
     Check (([IO.File]::ReadAllText((Join-Path $Case.install 'UI\my-note.txt'))) -eq 'unknown user note') 'Uninventoried UI file was deleted.'
     Check (([IO.File]::ReadAllText((Join-Path $Case.install 'Media\custom.json'))) -eq 'unknown user file') 'Uninventoried Media file was deleted.'
 }
@@ -117,7 +118,7 @@ Check ($status.phase -eq 'complete') "Success case: $($status | ConvertTo-Json -
 Check (([IO.File]::ReadAllText((Join-Path $case.install 'OpenHardwareMonitorApi.dll'))) -eq 'new program') 'New program missing.'
 Check (Test-Path -LiteralPath (Join-Path $case.work 'backup\program\OpenHardwareMonitorApi.dll')) 'Rollback backup missing.'
 Check (-not (Test-Path -LiteralPath (Join-Path $previous 'backup'))) 'Previous completed backup was not rotated after health.'
-Check (([IO.File]::ReadAllText((Join-Path $case.native 'config.ini'))) -eq 'private config') 'Success overwrote personal data.'
+Check (([IO.File]::ReadAllText((Join-Path $case.data 'config\app.ini'))) -eq 'private config') 'Success overwrote personal data.'
 Check (([IO.File]::ReadAllText((Join-Path $case.install 'UI\my-note.txt'))) -eq 'unknown user note') 'Success deleted an unknown UI file.'
 Check (([IO.File]::ReadAllText((Join-Path $case.install 'Media\custom.json'))) -eq 'unknown user file') 'Success deleted an unknown Media file.'
 Write-Host 'PASS successful transaction and personal data preservation'
@@ -180,7 +181,7 @@ Write-Host 'PASS licenses subtree does not bypass protected personal filenames'
 $case=New-Case 'old-inventory';$oldInventory=Get-Content (Join-Path $case.stage 'app-files.json') -Raw|ConvertFrom-Json;$oldInventory.files[0].path='config.ini';Write-Json (Join-Path $case.install 'app-files.json') $oldInventory;$status=Invoke-Case $case
 Check ($status.phase -eq 'error' -and -not (Test-Path (Join-Path $case.work 'journal.json'))) 'Malformed old inventory must fail preflight.';Assert-Original $case
 Write-Host 'PASS old managed inventory validated before shutdown'
-$case=New-Case 'trailing-root-separators';foreach($key in @('installRoot','stageRoot','workRoot','nativeDataRoot','mediaDataRoot')){$case.job[$key]+='\'};Write-Json $case.path $case.job;$status=Invoke-Case $case
+$case=New-Case 'trailing-root-separators';foreach($key in @('installRoot','stageRoot','workRoot','dataRoot')){$case.job[$key]+='\'};Write-Json $case.path $case.job;$status=Invoke-Case $case
 Check ($status.phase -eq 'complete') 'Canonical trailing root separators should be supported.'
 Write-Host 'PASS root separator normalization'
 $case=New-Case 'locked';$locked=[IO.File]::Open((Join-Path $case.install 'OpenHardwareMonitorApi.dll'),[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
@@ -192,7 +193,7 @@ Check ($status.phase -eq 'error' -and (Test-Path (Join-Path $case.work 'test-old
 Write-Host 'PASS post-exit verification failure restarts intact old host'
 $case=New-Case 'backup-failure-after-exit';Remove-Item -LiteralPath (Join-Path $case.work 'shutdown-approved.json')
 try{
-    $status=Invoke-Case $case -OnReady {param($readyCase);$readyCase.testLock=[IO.File]::Open((Join-Path $readyCase.native 'config.ini'),[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None);Write-Json (Join-Path $readyCase.work 'shutdown-approved.json') @{nonce=$readyCase.job.nonce}}
+    $status=Invoke-Case $case -OnReady {param($readyCase);$readyCase.testLock=[IO.File]::Open((Join-Path $readyCase.data 'config\app.ini'),[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None);Write-Json (Join-Path $readyCase.work 'shutdown-approved.json') @{nonce=$readyCase.job.nonce}}
     Check ($status.phase -eq 'error' -and (Test-Path (Join-Path $case.work 'test-old-restarted'))) 'Post-exit backup failure did not safely restart old host.'
 }finally{if($case.testLock){$case.testLock.Dispose()}}
 Assert-Original $case
@@ -207,10 +208,26 @@ Write-Host 'PASS shutdown requires explicit nonce approval even after all proces
 $case=New-Case 'cancel';[IO.File]::WriteAllText((Join-Path $case.work 'cancel.request'),'1');$status=Invoke-Case $case
 Check ($status.phase -eq 'error') 'Cancelled preflight should not install.';Assert-Original $case
 Write-Host 'PASS cancellation before mutation'
-$case=New-Case 'rollback-data';[IO.File]::WriteAllText((Join-Path $case.work 'test-mode.txt'),'fail-data');$status=Invoke-Case $case
+$case=New-Case 'rollback-data';[IO.File]::WriteAllText((Join-Path $case.work 'test-mode.txt'),'fail-data')
+[IO.File]::WriteAllText((Join-Path $case.data 'lyrics\user_data.db-wal.notes'),'unknown user note')
+$status=Invoke-Case $case
 Check ($status.phase -eq 'rolledBack') "Failed health should roll back: $($status.phase)";Assert-Original $case
-Check (-not (Test-Path -LiteralPath (Join-Path $case.media 'database\user_data.db-wal'))) 'New SQLite WAL survived rollback.'
+Check (-not (Test-Path -LiteralPath (Join-Path $case.data 'lyrics\user_data.db-wal'))) 'New SQLite WAL survived rollback.'
+Check (-not (Test-Path -LiteralPath (Join-Path $case.data 'lyrics\user_data.db-shm'))) 'New SQLite SHM survived rollback.'
+Check (-not (Test-Path -LiteralPath (Join-Path $case.data 'lyrics\user_data.db-journal'))) 'New SQLite rollback journal survived rollback.'
+Check (([IO.File]::ReadAllText((Join-Path $case.data 'lyrics\user_data.db-wal.notes'))) -eq 'unknown user note') 'Unrecognized sidecar-like file was deleted.'
 Write-Host 'PASS failed health rolls programs/settings/database/sidecars back'
+$case=New-Case 'rollback-existing-sidecars';[IO.File]::WriteAllText((Join-Path $case.work 'test-mode.txt'),'fail-data')
+foreach($suffix in @('wal','shm','journal')) {
+    [IO.File]::WriteAllText((Join-Path $case.data "lyrics\user_data.db-$suffix"), "private $suffix")
+}
+$status=Invoke-Case $case
+Check ($status.phase -eq 'rolledBack') "Existing-sidecar rollback failed: $($status.phase)";Assert-Original $case
+foreach($suffix in @('wal','shm','journal')) {
+    Check (([IO.File]::ReadAllText((Join-Path $case.data "lyrics\user_data.db-$suffix"))) -eq "private $suffix") "Original SQLite $suffix was not restored."
+    Check (([IO.File]::ReadAllText((Join-Path $case.work "backup\media\lyrics\user_data.db-$suffix"))) -eq "private $suffix") "Original SQLite $suffix was not backed up."
+}
+Write-Host 'PASS pre-existing SQLite sidecars backed up and restored with the database'
 $case=New-Case 'normal-close';[IO.File]::WriteAllText((Join-Path $case.work 'test-mode.txt'),'no-health');$status=Invoke-Case $case
 Check ($status.phase -eq 'rolledBack') 'Unhealthy host was not normally closed and rolled back.';Assert-Original $case
 Write-Host 'PASS unhealthy host normal close before rollback'
