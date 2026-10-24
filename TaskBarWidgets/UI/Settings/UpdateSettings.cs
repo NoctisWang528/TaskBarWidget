@@ -17,11 +17,10 @@ public sealed partial class SettingsWindow
     private bool _bindingUpdates, _updateCommandBusy;
     internal event Action<JsonElement>? UpdateStateReceived;
     internal event Action? InstallUpdateRequested;
-    public bool HasPendingChanges => _native.Pending.Count > 0 || _media.Pending.Count > 0 || _busy || _weatherPage is { } weather &&
-        (weather.Committing || weather.Searching || weather.LoadingStatus || weather.ProviderEdited || weather.HostEdited || weather.SelectedCity is not null || weather.ApiKey.Password.Length > 0);
+    public bool HasPendingChanges => _native.Pending.Count > 0 || _media.Pending.Count > 0 || _busy || HasWeatherDraft() ||
+        _weatherPage is { Committing: true } or { Searching: true } or { LoadingStatus: true };
     private bool HasWeatherDraft() => _weatherPage is { } weather &&
-        (weather.Committing || weather.Searching || weather.LoadingStatus || weather.ProviderEdited || weather.HostEdited ||
-         weather.SelectedCity is not null || weather.ApiKey.Password.Length > 0);
+        (weather.Provider.SelectedIndex != weather.SavedProvider || weather.SelectedCity is not null || WeatherCredentialsPending(weather));
 
     internal void SetUpdateState(UpdateUiState state)
     {

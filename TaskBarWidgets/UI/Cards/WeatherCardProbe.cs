@@ -194,6 +194,12 @@ public sealed partial class CardGroup
                 alerts = System.Array.Empty<object>()
             }
         });
+        cards.RenderWeatherAttribution(new[] { "https://developer.qweather.com/attribution.html", "https://developer.qweather.com/attribution.html" });
+        var attributionLinks = cards._weatherAttribution.Inlines.OfType<Microsoft.UI.Xaml.Documents.Hyperlink>().ToArray();
+        if (attributionLinks.Length != 2 || attributionLinks[0].NavigateUri.AbsoluteUri != "https://www.qweather.com/" ||
+            attributionLinks[1].NavigateUri.AbsoluteUri != "https://developer.qweather.com/attribution.html" ||
+            attributionLinks[1].Inlines.OfType<Microsoft.UI.Xaml.Documents.Run>().Single().Text != "数据来源")
+            throw new InvalidOperationException("Weather attribution did not render compact named links.");
         cards.RenderWeather(gradientStatus);
         if (cards._weatherStatus.Visibility != Visibility.Collapsed || cards._weatherAttribution.Visibility != Visibility.Collapsed ||
             cards._weatherAirQuality.Visibility != Visibility.Collapsed || cards._weatherAirQuality.Text.Length != 0 || cards._weatherAttribution.Text.Length != 0)

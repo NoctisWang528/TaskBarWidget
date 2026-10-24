@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Media;
 using TaskBarWidgets.UI.Cards;
 using Windows.UI;
@@ -359,9 +360,7 @@ public sealed partial class CardGroup
         _weatherStatus.Text = WeatherStatus(status);
         _weatherStatus.Visibility = HasValue(_weatherStatus.Text) ? Visibility.Visible : Visibility.Collapsed;
         RenderAirQuality(Object(details, "airQuality"));
-        _weatherAttribution.Text = string.Join("\n", new[] { String(details, "alertsAttribution"), String(Object(details, "airQuality"), "attribution") }
-            .SelectMany(value => value.Split('\n')).Select(value => value.Trim()).Where(HasValue).Distinct(StringComparer.Ordinal));
-        _weatherAttribution.Visibility = HasValue(_weatherAttribution.Text) ? Visibility.Visible : Visibility.Collapsed;
+        RenderWeatherAttribution(new[] { String(details, "alertsAttribution"), String(Object(details, "airQuality"), "attribution") });
 
         var forecast = Array(details, "forecast").ToArray();
         var alerts = Array(details, "alerts").ToArray();
@@ -397,6 +396,26 @@ public sealed partial class CardGroup
         var alerts = Array(details, "alerts").ToArray();
         RenderForecast(forecast);
         RenderAlerts(alerts);
+    }
+
+    private void RenderWeatherAttribution(IEnumerable<string> values)
+    {
+        const string sourceUrl = "https://developer.qweather.com/attribution.html";
+        var lines = values.SelectMany(value => value.Split('\n')).Select(value => value.Trim())
+            .Where(HasValue).Distinct(StringComparer.Ordinal).ToArray();
+        _weatherAttribution.Inlines.Clear();
+        _weatherAttribution.Text = string.Join("\n", lines.Where(value => value != sourceUrl));
+        if (lines.Contains(sourceUrl, StringComparer.Ordinal)) {
+            if (_weatherAttribution.Text.Length > 0) _weatherAttribution.Inlines.Add(new LineBreak());
+            var provider = new Hyperlink { NavigateUri = new Uri("https://www.qweather.com/") };
+            provider.Inlines.Add(new Run { Text = "和风天气" });
+            var sources = new Hyperlink { NavigateUri = new Uri(sourceUrl) };
+            sources.Inlines.Add(new Run { Text = "数据来源" });
+            _weatherAttribution.Inlines.Add(provider);
+            _weatherAttribution.Inlines.Add(new Run { Text = " · " });
+            _weatherAttribution.Inlines.Add(sources);
+        }
+        _weatherAttribution.Visibility = lines.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void RenderAirQuality(JsonElement air)

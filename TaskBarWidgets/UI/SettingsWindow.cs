@@ -333,7 +333,7 @@ public sealed partial class SettingsWindow : Window
         if (result == ContentDialogResult.Primary && !weatherBusy)
         {
             await GuardAsync(SaveAsync);
-            if (_native.Pending.Count + _media.Pending.Count > 0 || HasWeatherDraft()) return;
+            if (_native.Pending.Count + _media.Pending.Count > 0 || HasWeatherDraft() || _weatherPage?.Message.Severity == InfoBarSeverity.Error) return;
         }
         else if (result == ContentDialogResult.Primary || result == ContentDialogResult.None)
         {
@@ -457,7 +457,9 @@ public sealed partial class SettingsWindow : Window
     }
     private async Task SaveAsync()
     {
-        if (_busy || !_loaded || _weatherPage?.Committing == true) return;
+        if (_busy || !_loaded || _weatherPage is { Committing: true } or { Searching: true } or { LoadingStatus: true }) return;
+        if (_weatherPage is { } weather && HasWeatherDraft() && !await SaveWeatherDraftAsync(weather)) return;
+        if (_native.Pending.Count + _media.Pending.Count == 0) { UpdateSaveStatus(); return; }
         CancelModulePointerDrag();
         _busy = true; UpdateSaveStatus();
         var native = _native.Capture(); var media = _media.Capture();
@@ -477,7 +479,14 @@ public sealed partial class SettingsWindow : Window
                 RefreshCardMicaAfterReadback();
             _notice.Severity = InfoBarSeverity.Success; _notice.Message = "已保存并读回主程序配置。"; _notice.IsOpen = true;
         }
-        finally { _busy = false; if (!themeOnly) RenderPage(); UpdateSaveStatus(); }
+        finally {
+            _busy = false;
+            if (!themeOnly) {
+                if (_weatherPage is { } page) { page.HasStatus = false; await ReadWeatherStatusAsync(page); }
+                else RenderPage();
+            }
+            UpdateSaveStatus();
+        }
     }
     private void ApplyTheme()
     {
@@ -644,10 +653,10 @@ public sealed partial class SettingsWindow : Window
     private void ShowNotice(string message, InfoBarSeverity severity) { _notice.Message = message; _notice.Severity = severity; _notice.IsOpen = true; }
     private void UpdateSaveStatus()
     {
-        var count = _native.Pending.Count + _media.Pending.Count;
+        var count = _native.Pending.Count + _media.Pending.Count + (HasWeatherDraft() ? 1 : 0);
         var empty = _loaded && _layout is not null && !_layout.Modules.Any(module => _layout.Enabled(module.Id));
         var weatherSaving = _weatherPage?.Committing == true;
-        _apply.IsEnabled = !_busy && !weatherSaving && count > 0;
+        _apply.IsEnabled = !_busy && !weatherSaving && _weatherPage is not { Searching: true } and not { LoadingStatus: true } && count > 0;
         _saveStatus.Text = _busy ? "正在保存或读取；新的编辑会保留在草稿中…" : weatherSaving ? "正在保存或刷新天气…" : empty ? "请至少添加一个显示模块再应用。" : count > 0 ? $"{count} 项更改待应用" : "配置已同步";
         if (_weatherPage is not null) UpdateWeatherButtons(_weatherPage);
     }

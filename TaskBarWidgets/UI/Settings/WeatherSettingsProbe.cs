@@ -142,15 +142,20 @@ public sealed partial class SettingsWindow
             while (!searchStarted) await Task.Delay(10, timeout.Token);
             page.Provider.SelectedIndex = 1;
             await staleSearch.WaitAsync(timeout.Token);
+            if (!window._apply.IsEnabled || !window._saveStatus.Text.Contains("待应用"))
+                throw new InvalidOperationException("Weather provider draft did not enable global Apply.");
             if (page.Results.Items.Count != 0 || Text(page.SavedCity?["id"]) != "101010100") throw new InvalidOperationException("Changing provider accepted stale search results or changed saved city.");
             if (page.Refresh.IsEnabled || !page.SwitchProvider.IsEnabled || !page.Active.Text.Contains("中国天气网") || !page.Draft.Text.Contains("尚未保存"))
                 throw new InvalidOperationException("Provider draft was confused with the active provider.");
             await window.RefreshWeatherAsync(page);
             if (refreshCount != 0) throw new InvalidOperationException("Draft provider refreshed the old provider.");
-            var switchSave = window.SwitchWeatherProviderAsync(page);
+            window._native.Pending.Clear();
+            var switchSave = window.SaveAsync();
             if (window._apply.IsEnabled || page.ApiHost.IsEnabled || page.SwitchProvider.IsEnabled)
                 throw new InvalidOperationException("Pending provider switch did not exclude other writes.");
             await switchSave.WaitAsync(timeout.Token);
+            if (window._apply.IsEnabled || window.HasWeatherDraft() || !ReferenceEquals(window._weatherPage, page))
+                throw new InvalidOperationException("Global Apply did not clear the weather draft or preserved status was lost.");
             if (provider != 1 || Text(savedCity["id"]) != "101010100" || !page.Message.Message.Contains("和风天气") || !page.Message.Message.Contains("北京"))
                 throw new InvalidOperationException("Explicit switch did not configure the saved city and chosen provider.");
             page.SavedCity!["id"] = "non-cn-city"; page.Provider.SelectedIndex = 0;
@@ -167,7 +172,8 @@ public sealed partial class SettingsWindow
             if (refreshCount != 0) throw new InvalidOperationException("Unsaved city reached refresh.");
             alertsError = "预警获取失败：模拟错误";
             airError = "空气质量获取失败：模拟错误";
-            var citySave = window.SaveWeatherCityAsync(page);
+            if (!window._apply.IsEnabled) throw new InvalidOperationException("City selection did not enable global Apply.");
+            var citySave = window.SaveAsync();
             if (window._apply.IsEnabled) throw new InvalidOperationException("Weather commit did not disable global Apply.");
             await citySave.WaitAsync(timeout.Token);
             if (Text(savedCity["id"]) != "101190101" || provider != 1 || !page.LastSuccess.Text.Contains("2026-10-16")) throw new InvalidOperationException("City save did not apply the chosen provider/city and weather status.");
@@ -195,14 +201,18 @@ public sealed partial class SettingsWindow
             window.ApplyWeatherStatus(page, Status());
             page.Provider.SelectedIndex = 1;
             failCredentials = true;
-            await window.SaveWeatherCredentialsAsync(page, false).WaitAsync(timeout.Token);
+            await window.SaveAsync().WaitAsync(timeout.Token);
             if (hasKey || apiHost.Length != 0 || page.Message.Severity != InfoBarSeverity.Error || page.ApiKey.Password != "synthetic-probe-key" ||
                 page.ApiHost.Text != "probe.qweatherapi.com" || !page.Message.Message.Contains("模拟连接验证失败") || page.Provider.SelectedIndex != 1 || !page.ProviderEdited || page.Refresh.IsEnabled)
                 throw new InvalidOperationException("Failed credential validation lost its draft or changed saved credentials.");
+            if (!window._apply.IsEnabled || !window.HasWeatherDraft())
+                throw new InvalidOperationException("Failed global Apply lost retryable weather drafts.");
             failCredentials = false;
-            var connectionSave = window.SaveWeatherCredentialsAsync(page, false);
+            var connectionSave = window.SaveAsync();
             if (window._apply.IsEnabled || page.ApiKey.IsEnabled) throw new InvalidOperationException("Credential validation did not exclude other writes.");
             await connectionSave.WaitAsync(timeout.Token);
+            if (window._apply.IsEnabled || window.HasWeatherDraft())
+                throw new InvalidOperationException("Successful global Apply left a stale weather dirty flag.");
             if (!hasKey || page.ApiKey.Password.Length != 0 || !page.KeyStatus.Text.Contains("已保存")) throw new InvalidOperationException("Key was not write-only or persisted status is missing.");
             if (!page.Message.Message.Contains("已验证") || !page.Message.Message.Contains("未改变") || page.Message.Message.Contains("尚未切换") || provider != 1 || Text(savedCity["id"]) != "101190101")
                 throw new InvalidOperationException("Credential success implied a weather refresh or source switch.");

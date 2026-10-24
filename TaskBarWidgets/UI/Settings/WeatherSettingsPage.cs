@@ -74,7 +74,7 @@ public sealed partial class SettingsWindow
             FontSize = 14,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
         });
-        var body = Section("天气", "搜索后选择城市，再保存并刷新。以下操作立即保存；更新频率使用上方“应用更改”。");
+        var body = Section("天气", "修改后可点击上方“应用更改”统一保存，也可使用下方按钮单独保存。城市需先搜索并选择；连接配置会先验证再保存。");
         page.Provider.Items.Add("中国天气网"); page.Provider.Items.Add("和风天气");
         page.Provider.SelectedIndex = 0;
         var searchRow = new Grid { ColumnSpacing = 8 };
@@ -104,11 +104,11 @@ public sealed partial class SettingsWindow
             if (page.Binding || !IsWeatherCurrent(page)) return;
             page.ProviderEdited = true; page.CancelOperation(); page.Searching = false; page.LoadingStatus = false;
             page.Results.Items.Clear(); page.SelectedCity = null; page.Message.IsOpen = false;
-            UpdateWeatherSelection(page); UpdateWeatherButtons(page);
+            UpdateWeatherSelection(page); UpdateSaveStatus();
         };
         page.Results.SelectionChanged += (_, _) => {
             page.SelectedCity = (page.Results.SelectedItem as ListViewItem)?.Tag as JsonObject;
-            UpdateWeatherSelection(page); UpdateWeatherButtons(page);
+            UpdateWeatherSelection(page); UpdateSaveStatus();
         };
         page.Search.Click += async (_, _) => await SearchWeatherCityAsync(page);
         page.Query.KeyDown += async (_, args) => { if (args.Key == VirtualKey.Enter) { args.Handled = true; await SearchWeatherCityAsync(page); } };
@@ -117,12 +117,12 @@ public sealed partial class SettingsWindow
         page.SwitchProvider.Click += async (_, _) => await SwitchWeatherProviderAsync(page);
         page.SaveCredentials.Click += async (_, _) => await SaveWeatherCredentialsAsync(page, false);
         page.ClearKey.Click += async (_, _) => await SaveWeatherCredentialsAsync(page, true);
-        page.ApiHost.TextChanged += (_, _) => { if (!page.Binding) { page.HostEdited = true; UpdateWeatherButtons(page); } };
-        page.ApiKey.PasswordChanged += (_, _) => { if (!page.Binding) UpdateWeatherButtons(page); };
+        page.ApiHost.TextChanged += (_, _) => { if (!page.Binding) { page.HostEdited = true; UpdateSaveStatus(); } };
+        page.ApiKey.PasswordChanged += (_, _) => { if (!page.Binding) UpdateSaveStatus(); };
         page.Query.TextChanged += (_, _) => {
             if (!page.Searching || page.Committing) return;
             page.CancelOperation(); page.Searching = false; page.Results.Items.Clear(); page.SelectedCity = null;
-            UpdateWeatherSelection(page); UpdateWeatherButtons(page);
+            UpdateWeatherSelection(page); UpdateSaveStatus();
         };
         body.Loaded += async (_, _) => { if (IsWeatherCurrent(page) && _connection.IsConnected) await ReadWeatherStatusAsync(page); };
         UpdateWeatherButtons(page);
@@ -236,7 +236,7 @@ public sealed partial class SettingsWindow
             page.Binding = false;
         }
         if (!page.HostEdited) { page.Binding = true; page.ApiHost.Text = Text(status["apiHost"]); page.Binding = false; }
-        UpdateWeatherSelection(page); UpdateWeatherButtons(page);
+        UpdateWeatherSelection(page); UpdateSaveStatus();
     }
 
     private async Task<JsonObject> WeatherCommandAsync(WeatherEditor page, object payload, CancellationToken token)
@@ -311,6 +311,23 @@ public sealed partial class SettingsWindow
                 page.Results.Items.Add(new ListViewItem { Content = new TextBlock { Text = WeatherCityLabel(city), TextWrapping = TextWrapping.Wrap }, Tag = city.DeepClone(), HorizontalContentAlignment = HorizontalAlignment.Stretch });
             WeatherMessage(page, page.Results.Items.Count == 0 ? "未找到城市，请尝试更完整的城市或区县名称。" : $"找到 {page.Results.Items.Count} 个城市，请选择一项后保存。", InfoBarSeverity.Informational);
         });
+    }
+
+    private async Task<bool> SaveWeatherDraftAsync(WeatherEditor page)
+    {
+        if (WeatherCredentialsPending(page)) {
+            await SaveWeatherCredentialsAsync(page, false);
+            if (!IsWeatherCurrent(page) || page.Message.Severity == InfoBarSeverity.Error || WeatherCredentialsPending(page)) return false;
+        }
+        if (page.SelectedCity is not null) await SaveWeatherCityAsync(page);
+        else if (page.Provider.SelectedIndex != page.SavedProvider) {
+            if (!CanSwitchWeatherProvider(page)) {
+                WeatherMessage(page, "请先搜索并选择适用于当前来源的城市，再应用更改。", InfoBarSeverity.Warning);
+                return false;
+            }
+            await SwitchWeatherProviderAsync(page);
+        }
+        return IsWeatherCurrent(page) && !HasWeatherDraft() && page.Message.Severity != InfoBarSeverity.Error;
     }
 
     private async Task SaveWeatherCityAsync(WeatherEditor page)
