@@ -131,6 +131,14 @@ namespace Cards
         float sliderRatio{};
         bool sliderSeeking{};
         ULONGLONG lastSliderSent{};
+        // Lyric scanning is interpolated on the card thread: a line frame carries
+        // the position within that line, so the card learns the rate from two
+        // consecutive frames and advances the highlight until the next one.
+        long long lyricsRevision{ -1 };
+        double lyricsProgress{};
+        double lyricsRate{};
+        ULONGLONG lastLyricPaint{};
+        ULONGLONG lyricsTick{};
         std::wstring draggingFlow;
         std::wstring openMenu;         // "output" / "input" / "source"
         int openMenuSelected{ 0 };
@@ -324,6 +332,24 @@ namespace Cards
 
     void CardWindow::SetSnapshot(const Snapshot& value)
     {
+        const auto now = GetTickCount64();
+        if (value.lyrics.revision != impl->lyricsRevision)
+        {
+            if (impl->lyricsRevision >= 0 && impl->lyricsTick != 0 && value.lyrics.isPlaying)
+            {
+                const double delta = static_cast<double>(now - impl->lyricsTick) / 1000.0;
+                const double advance = value.lyrics.progress - impl->lyricsProgress;
+                // Only a forward move inside one line teaches a usable rate.
+                if (delta > 0.05 && advance >= 0.0 && advance < 0.9) impl->lyricsRate = advance / delta;
+            }
+            else if (value.lyrics.revision != impl->lyricsRevision)
+            {
+                impl->lyricsRate = 0.0;
+            }
+            impl->lyricsRevision = value.lyrics.revision;
+            impl->lyricsProgress = value.lyrics.progress;
+            impl->lyricsTick = now;
+        }
         snapshot = value;
         impl->dirty = true;
         impl->damage = RECT{};
@@ -424,6 +450,27 @@ namespace Cards
 
     bool CardWindow::Tick()
     {
+        // Lyrics advance between snapshots, so the media card keeps a timer while
+        // it is visible and playing even when no motion animation is running.
+        if (!impl->animating && visible && kind == Kind::Media && snapshot.lyrics.isPlaying &&
+            impl->lyricsRate > 0.0)
+        {
+            // The scan advances between frames; repaint at roughly 30 Hz instead of
+            // the 60 Hz timer so a playing card never redraws at full rate.
+            const ULONGLONG now = GetTickCount64();
+            if (now - impl->lastLyricPaint >= 33)
+            {
+                impl->lastLyricPaint = now;
+                const double position = impl->lyricsProgress + impl->lyricsRate *
+                    (static_cast<double>(now - impl->lyricsTick) / 1000.0);
+                if (position < 1.0)
+                {
+                    impl->dirty = true;
+                    Paint();
+                }
+            }
+            return true;
+        }
         if (!impl->animating) return false;
         const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - impl->started).count();
@@ -472,6 +519,12 @@ namespace Cards
             // A dragged slider is painted from the pointer until the gesture ends,
             // so an older snapshot can never drag the knob back mid-drag.
             Snapshot painted = snapshot;
+            if (painted.lyrics.isPlaying && impl->lyricsRate > 0.0 && impl->lyricsTick != 0)
+            {
+                const double elapsed = static_cast<double>(GetTickCount64() - impl->lyricsTick) / 1000.0;
+                painted.lyrics.progress = std::clamp(
+                    impl->lyricsProgress + impl->lyricsRate * elapsed, 0.0, 1.0);
+            }
             if (impl->sliderId != 0 && !impl->sliderSeeking)
             {
                 for (auto* list : { &painted.audio.outputs, &painted.audio.inputs })

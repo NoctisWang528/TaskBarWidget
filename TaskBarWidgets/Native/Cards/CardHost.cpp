@@ -376,7 +376,19 @@ namespace Cards
         config = value;
         resident = !config.OnDemand();
         UpdateEnvironment(true);
-        if (visible) PlaceGroup(false, false);
+        if (visible)
+        {
+            PlaceGroup(false, false);
+            return;
+        }
+        // Resident mode prewarms the enabled cards while the group stays hidden, so
+        // the first click only shows already-created windows. On-demand creates
+        // them on the first click instead.
+        if (resident && !shuttingDown)
+        {
+            CreateCards();
+            PlaceGroup(false, false);
+        }
     }
 
     void CardHost::Impl::RefreshSnapshot(const Protocol::Changes& changes)
