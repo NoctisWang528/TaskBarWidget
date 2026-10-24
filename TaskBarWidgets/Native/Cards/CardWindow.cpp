@@ -1,4 +1,4 @@
-﻿#include "CardPch.h"
+#include "CardPch.h"
 #include "CardWindow.h"
 #include "CardDraw.h"
 #include "CardText.h"
@@ -15,6 +15,7 @@ namespace Cards
         constexpr int AnimationMilliseconds = 150;
         constexpr float AnimationOffsetDip = 6.0f;
         constexpr UINT_PTR AnimationTimer = 0xCD01;
+        constexpr UINT BackdropChanged = WM_APP + 0x215;
         constexpr ULONGLONG CoverFadeMilliseconds = 200;
         constexpr ULONGLONG LyricWrapMilliseconds = 180;
 
@@ -24,6 +25,14 @@ namespace Cards
             if (!card) return DefWindowProcW(window, message, keys, position);
             switch (message)
             {
+            case BackdropChanged:
+                card->RefreshBackdropConfiguration();
+                return 0;
+            case WM_ACTIVATE:
+            case WM_NCACTIVATE:
+                // Run after the HWND backdrop policy has handled activation.
+                PostMessageW(window, BackdropChanged, 0, 0);
+                break;
             case WM_ERASEBKGND:
                 return 1;
             case WM_PAINT:
@@ -49,6 +58,9 @@ namespace Cards
             case WM_MOUSELEAVE:
                 card->OnMouseLeave();
                 return 0;
+            case WM_MOUSEWHEEL:
+                if (card->Host() && card->Host()->OnMenuWheel(GET_WHEEL_DELTA_WPARAM(keys))) return 0;
+                break;
             case WM_CAPTURECHANGED:
             case WM_CANCELMODE:
                 card->CancelPointer();
@@ -135,7 +147,6 @@ namespace Cards
         muxc::MicaController mica{ nullptr };
         muxc::SystemBackdropConfiguration micaConfiguration{ nullptr };
         bool micaReady{ false };
-        bool micaFailed{ false };
         bool dirty{ true };
         RECT damage{};                 // DIP; empty means the whole card
         int hotRegion{ 0 };
@@ -225,7 +236,14 @@ namespace Cards
             [this](const Layout::Region& region, const std::wstring& payload)
             {
                 if (auto* host = Host()) host->OnRequest(region.action, payload);
-            }, [this](const Layout::Region& region) { return host.IsMenuExpanded(region.action); });
+            }, [this](const Layout::Region& region) { return host.IsMenuExpanded(region.action); },
+            [this](int id)
+            {
+                impl->focusedRegion = id;
+                SetFocus(window);
+                impl->dirty = true;
+                if (visible) Paint();
+            });
         return true;
     }
 
@@ -282,9 +300,11 @@ namespace Cards
         if (impl->mica)
         {
             try { impl->mica.RemoveAllSystemBackdropTargets(); } catch (...) { }
+            try { impl->mica.Close(); } catch (...) { }
             impl->mica = nullptr;
         }
         impl->micaConfiguration = nullptr;
+        impl->micaReady = false;
         impl->surface.Release();
         if (impl->content) impl->content.Brush(nullptr);
         impl->content = nullptr;
@@ -307,15 +327,11 @@ namespace Cards
         environment = cardEnvironment;
 
         // One controller per window: a theme or tuning change only reconfigures it.
-        if (!impl->mica && !impl->micaFailed && window && impl->target)
+        if (!impl->mica && window && impl->target)
         {
             try
             {
-                if (!muxc::MicaController::IsSupported())
-                {
-                    impl->micaFailed = true;
-                }
-                else
+                if (muxc::MicaController::IsSupported())
                 {
                     auto controller = muxc::MicaController();
                     auto configuration = muxc::SystemBackdropConfiguration();
@@ -323,17 +339,17 @@ namespace Cards
                     configuration.IsInputActive(true);
                     configuration.Theme(environment.dark ? muxc::SystemBackdropTheme::Dark
                         : muxc::SystemBackdropTheme::Light);
-                    controller.SetSystemBackdropConfiguration(configuration);
-                    const winrt::Microsoft::UI::WindowId windowId{
-                        static_cast<uint64_t>(reinterpret_cast<INT_PTR>(window)) };
+                    const winrt::Microsoft::UI::WindowId windowId{static_cast<uint64_t>(reinterpret_cast<INT_PTR>(window))};
                     if (controller.SetTarget(windowId, impl->target))
                     {
+                        // SetTarget installs HWND policy; apply the group policy afterwards.
+                        controller.SetSystemBackdropConfiguration(configuration);
                         impl->mica = controller;
                         impl->micaReady = true;
                     }
                     else
                     {
-                        impl->micaFailed = true;
+                        controller.Close();
                     }
                 }
             }
@@ -341,7 +357,6 @@ namespace Cards
             {
                 impl->mica = nullptr;
                 impl->micaReady = false;
-                impl->micaFailed = true;
             }
         }
 
@@ -350,13 +365,15 @@ namespace Cards
             try
             {
                 const auto& tuning = environment.mica;
+                impl->micaConfiguration.IsInputActive(true);
+                impl->mica.SetSystemBackdropConfiguration(impl->micaConfiguration);
                 impl->micaConfiguration.Theme(environment.dark ? muxc::SystemBackdropTheme::Dark : muxc::SystemBackdropTheme::Light);
                 const auto fallback = FallbackColor(environment.dark);
-                impl->mica.TintColor(fallback);
-                impl->mica.FallbackColor(fallback);
                 if (tuning.vivid)
                 {
                     impl->mica.Kind(MicaKindFor(environment.dark));
+                    impl->mica.TintColor(fallback);
+                    impl->mica.FallbackColor(fallback);
                     impl->mica.TintOpacity(static_cast<float>(tuning.TintFor(environment.dark)));
                     impl->mica.LuminosityOpacity(static_cast<float>(tuning.LuminosityFor(environment.dark)));
                 }
@@ -371,7 +388,7 @@ namespace Cards
             }
             catch (const winrt::hresult_error&)
             {
-                impl->micaFailed = true;
+                impl->micaReady = false;
             }
         }
 
@@ -467,6 +484,12 @@ namespace Cards
 
     void CardWindow::Place(const RECT& targetBounds, float targetScale)
     {
+        targetScale = targetScale > 0.0f ? targetScale : 1.0f;
+        if (EqualRect(&bounds, &targetBounds) && scale == targetScale)
+        {
+            Paint();
+            return;
+        }
         bounds = targetBounds;
         scale = targetScale > 0.0f ? targetScale : 1.0f;
         measuredHeightDip = static_cast<float>(targetBounds.bottom - targetBounds.top) / scale;
@@ -479,7 +502,7 @@ namespace Cards
         {
             SetWindowPos(window, HWND_TOPMOST, bounds.left, bounds.top,
                 bounds.right - bounds.left, bounds.bottom - bounds.top,
-                SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+                SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER);
         }
         impl->dirty = true;
         impl->damage = RECT{};
@@ -498,6 +521,8 @@ namespace Cards
     void CardWindow::Show(bool animate)
     {
         if (!window) return;
+        // Snapshot/layout refreshes must not restart an entrance or cover a menu.
+        if (visible) { Paint(); return; }
         visible = true;
         ShowWindow(window, SW_SHOWNOACTIVATE);
         SetWindowPos(window, HWND_TOPMOST, bounds.left, bounds.top,
@@ -754,6 +779,7 @@ namespace Cards
         }
         impl->dirty = false;
         impl->damage = RECT{};
+        ++contentPaintCount;
     }
 
     void CardWindow::PaintPopup()
@@ -772,6 +798,23 @@ namespace Cards
     bool CardWindow::HasRenderedContent() const
     {
         return impl->surface.Ready() && impl->content && impl->content.Brush() && !impl->dirty;
+    }
+
+    bool CardWindow::HasActiveBackdropConfiguration() const
+    {
+        return impl->micaReady && impl->micaConfiguration && impl->micaConfiguration.IsInputActive() &&
+            impl->mica.State() == muxc::SystemBackdropState::Active;
+    }
+
+    void CardWindow::RefreshBackdropConfiguration()
+    {
+        if (!impl->mica || !impl->micaConfiguration) return;
+        try
+        {
+            impl->micaConfiguration.IsInputActive(true);
+            impl->mica.SetSystemBackdropConfiguration(impl->micaConfiguration);
+        }
+        catch (const winrt::hresult_error&) { impl->micaReady = false; }
     }
 
     void CardWindow::ClosePopup()
@@ -919,6 +962,7 @@ namespace Cards
 
     bool CardWindow::OnKey(UINT virtualKey, bool control, bool shift)
     {
+        if (host.OnMenuKey(virtualKey)) return true;
         UNREFERENCED_PARAMETER(control);
         UNREFERENCED_PARAMETER(shift);
         if (virtualKey == VK_ESCAPE)

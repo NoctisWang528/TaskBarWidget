@@ -84,7 +84,8 @@ namespace Cards::Draw
 
     void Text(ID2D1DeviceContext* context, Graphics& graphics, const std::wstring& value,
         const std::wstring& family, float size, int weight, Color color, D2D1_RECT_F rect,
-        DWRITE_TEXT_ALIGNMENT alignment, bool italic, bool underline, bool strikeout)
+        DWRITE_TEXT_ALIGNMENT alignment, bool italic, bool underline, bool strikeout,
+        DWRITE_PARAGRAPH_ALIGNMENT vertical)
     {
         if (!context || value.empty() || !graphics.DWrite() ||
             rect.right <= rect.left || rect.bottom <= rect.top) return;
@@ -94,6 +95,7 @@ namespace Cards::Draw
         if (FAILED(graphics.DWrite()->CreateTextLayout(value.c_str(), static_cast<UINT32>(value.size()),
             format, rect.right - rect.left, rect.bottom - rect.top, layout.GetAddressOf()))) return;
         const DWRITE_TEXT_RANGE range{ 0, static_cast<UINT32>(value.size()) };
+        layout->SetParagraphAlignment(vertical);
         layout->SetFontStyle(italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL, range);
         layout->SetUnderline(underline, range);
         layout->SetStrikethrough(strikeout, range);

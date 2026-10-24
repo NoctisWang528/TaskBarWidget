@@ -37,8 +37,11 @@ void WriteTrafficPreviews(Cards::Graphics& graphics, const wchar_t* directory)
     ComPtr<IWICImageEncoder> imageEncoder;
     winrt::check_hresult(graphics.Wic()->CreateImageEncoder(device.Get(), imageEncoder.GetAddressOf()));
     for (bool dark : {true, false})
+    for (bool media : {false, true})
     {
-        constexpr UINT width = 480, height = 355;
+        constexpr UINT width = 480;
+        const float heightDip = media ? Cards::Layout::HeightMedia : Cards::Layout::HeightTraffic;
+        const UINT height = static_cast<UINT>(heightDip * 1.25f);
         constexpr float dpi = 120.0f;
         const auto format = D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED);
         ComPtr<ID2D1Bitmap1> bitmap;
@@ -48,19 +51,24 @@ void WriteTrafficPreviews(Cards::Graphics& graphics, const wchar_t* directory)
         context->SetDpi(dpi, dpi);
         context->BeginDraw();
         context->Clear(D2D1::ColorF(0, 0.0f));
-        const auto rect = D2D1::RectF(0.5f, 0.5f, 383.5f, 283.5f);
+        const auto rect = D2D1::RectF(0.5f, 0.5f, 383.5f, heightDip - 0.5f);
         Cards::Draw::FillRound(context, rect, Cards::Layout::CornerRadius,
             Cards::ParseColor(dark ? L"#30262B" : L"#F3EFF1", {}));
         Cards::CardEnvironment environment;
         environment.graphics = &graphics; environment.dark = dark;
         Cards::Layout::Table regions;
-        Cards::Paint::Traffic(context, snapshot, environment, regions, 384, 284);
+        if (media)
+        {
+            snapshot.media.title = L"没有媒体";
+            Cards::Paint::Media(context, snapshot, {}, {}, environment, regions, 384, heightDip);
+        }
+        else Cards::Paint::Traffic(context, snapshot, environment, regions, 384, heightDip);
         Cards::Draw::StrokeRound(context, rect, Cards::Layout::CornerRadius,
             Cards::Draw::Colors(environment).border, 0.5f);
         winrt::check_hresult(context->EndDraw());
         context->SetTarget(nullptr);
 
-        const auto path = folder / (dark ? L"traffic-dark.png" : L"traffic-light.png");
+        const auto path = folder / (std::wstring(media ? L"media-empty" : L"traffic") + (dark ? L"-dark.png" : L"-light.png"));
         ComPtr<IWICStream> stream;
         winrt::check_hresult(graphics.Wic()->CreateStream(stream.GetAddressOf()));
         winrt::check_hresult(stream->InitializeFromFilename(path.c_str(), GENERIC_WRITE));

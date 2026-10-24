@@ -14,7 +14,7 @@ namespace Cards::Paint
         {
             for (const auto& source : snapshot.media.sources)
                 if (source.id == snapshot.media.selectedSourceId) return source.label;
-            return snapshot.media.source;
+            return snapshot.media.source.empty() ? L"暂无播放来源" : snapshot.media.source;
         }
 
         void DrawTransport(ID2D1DeviceContext* context, Graphics& graphics, const Draw::Palette& palette,
@@ -68,7 +68,7 @@ namespace Cards::Paint
             const float layoutScale = std::clamp(static_cast<float>(lyrics.layoutScalePercent) / 100.0f,
                 0.25f, 4.0f);
             const float requestedSize = std::clamp(static_cast<float>(lyrics.fontSize), 5.0f, 72.0f);
-            const bool twoRows = LyricHeight >= requestedSize * 2.4f;
+            const bool twoRows = displayable && !secondary.empty() && LyricHeight >= requestedSize * 2.4f;
             const float rowHeight = LyricHeight / (twoRows ? 2.0f : 1.0f);
             const float mainSize = std::min(requestedSize, std::max(11.2f * layoutScale, rowHeight * 0.92f));
             const float secondarySize = std::max(9.0f * layoutScale, mainSize * 0.92f);
@@ -94,6 +94,7 @@ namespace Cards::Paint
                 winrt::com_ptr<IDWriteTextLayout> layout;
                 if (FAILED(graphics.DWrite()->CreateTextLayout(text.c_str(),
                     static_cast<UINT32>(text.size()), format, width, rowHeight, layout.put()))) return;
+                layout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
                 // Apply before measuring: italic glyph widths must drive both
                 // alignment/scrolling and the scan clip, without changing cached formats.
                 const DWRITE_TEXT_RANGE range{ 0, static_cast<UINT32>(text.size()) };
@@ -198,18 +199,9 @@ namespace Cards::Paint
         }
         else
         {
-            const auto format = graphics.TextFormat(environment.fontFamily, 27.0f, 400,
-                DWRITE_TEXT_ALIGNMENT_CENTER, false);
-            if (format)
-            {
-                const auto brush = Draw::Brush(context, WithAlpha(palette.primary, 0.45f));
-                if (brush)
-                {
-                    context->DrawTextW(L"\u266B", 1, format, cover, brush,
-                        D2D1_DRAW_TEXT_OPTIONS_CLIP);
-                    brush->Release();
-                }
-            }
+            Draw::Text(context, graphics, L"\u266B", environment.fontFamily, 27.0f, 400,
+                WithAlpha(palette.primary, 0.45f), cover, DWRITE_TEXT_ALIGNMENT_CENTER,
+                false, false, false, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         }
         Draw::AddButton(regions, 1, cover, L"cover", L"封面", false, false);
 
@@ -218,9 +210,12 @@ namespace Cards::Paint
         const float metadataWidth = contentWidth - Cover - Gap - 44.0f;
         Draw::Text(context, graphics, snapshot.media.title.empty() ? L"未在播放" : snapshot.media.title,
             environment.fontFamily, 15.0f, 600, palette.primary,
-            Draw::Rect(metadataLeft, top, metadataLeft + metadataWidth, top + 22.0f));
+            Draw::Rect(metadataLeft, top, metadataLeft + metadataWidth,
+                top + (snapshot.media.artist.empty() ? 40.0f : 22.0f)),
+            DWRITE_TEXT_ALIGNMENT_LEADING, false, false, false, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         Draw::Text(context, graphics, snapshot.media.artist, environment.fontFamily, 12.0f, 400,
-            palette.secondary, Draw::Rect(metadataLeft, top + 22.0f, metadataLeft + metadataWidth, top + 40.0f));
+            palette.secondary, Draw::Rect(metadataLeft, top + 22.0f, metadataLeft + metadataWidth, top + 40.0f),
+            DWRITE_TEXT_ALIGNMENT_LEADING, false, false, false, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 
         // Source selector with its icon and chevron.
         const float sourceTop = top + 46.0f;
@@ -239,8 +234,9 @@ namespace Cards::Paint
         }
         Draw::Text(context, graphics, Draw::Ellipsize(context, graphics, SourceLabel(snapshot),
             environment.fontFamily, 12.0f, 400, metadataWidth - 46.0f), environment.fontFamily, 12.0f,
-            400, palette.secondary, Draw::Rect(iconLeft + 28.0f, sourceTop + 8.0f,
-                sourceRect.right - 20.0f, sourceTop + 28.0f));
+            400, palette.secondary, Draw::Rect(iconLeft + 28.0f, sourceTop,
+                sourceRect.right - 20.0f, sourceRect.bottom), DWRITE_TEXT_ALIGNMENT_LEADING,
+            false, false, false, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         DrawGlyph(context, Glyph::Chevron, WithAlpha(palette.secondary, 0.9f),
             sourceRect.right - 22.0f, sourceTop + 11.0f, 12.0f);
 

@@ -45,6 +45,7 @@ namespace Cards
         std::vector<Layout::Region> items;
         int selected{ -1 };
         int hot{ -1 };
+        int pressed{ -1 };
         int firstVisible{};
         float scale{ 1.0f };
         bool visible{};
@@ -90,7 +91,7 @@ namespace Cards
         }
 
         void Paint();
-        void Place(POINT anchorPoint, RECT anchor);
+        void Place(POINT anchorPoint, RECT anchor, bool diagnosticOffscreen);
     };
 
     void CardPopup::Impl::Paint()
@@ -148,7 +149,8 @@ namespace Cards
             }
             Draw::Text(context, *graphics, item.name, environment.fontFamily, TextSize,
                 item.selected ? 600 : 400, item.enabled ? palette.primary : palette.secondary,
-                Draw::Rect(14.0f, top, width - 24.0f, top + RowHeight));
+                Draw::Rect(14.0f, top, width - 24.0f, top + RowHeight),
+                DWRITE_TEXT_ALIGNMENT_LEADING, false, false, false, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
             if (item.selected)
                 Draw::FillRound(context, Draw::Rect(width - 18.0f, top + RowHeight / 2 - 3.0f,
                     width - 12.0f, top + RowHeight / 2 + 3.0f), 3.0f, palette.accent);
@@ -164,11 +166,11 @@ namespace Cards
                 (static_cast<float>(firstVisible) / static_cast<float>((std::max)(1,
                     static_cast<int>(items.size()) - rows)));
             Draw::FillRound(context, Draw::Rect(width - 5.0f, start, width - 3.0f, start + thumb),
-                1.0f, WithAlpha(palette.secondary, 70));
+                1.0f, WithAlpha(palette.secondary, 0.70f));
         }
     }
 
-    void CardPopup::Impl::Place(POINT anchorPoint, RECT anchor)
+    void CardPopup::Impl::Place(POINT anchorPoint, RECT anchor, bool diagnosticOffscreen)
     {
         const HMONITOR monitor = MonitorFromPoint(anchorPoint, MONITOR_DEFAULTTONEAREST);
         MONITORINFO info{ sizeof(info) };
@@ -190,6 +192,11 @@ namespace Cards
         if (top + height > work.bottom) top = anchor.top - height - static_cast<int>(std::lround(4 * scale));
         top = (std::max)(static_cast<int>(work.top), (std::min)(top, static_cast<int>(work.bottom) - height));
         left = (std::max)(static_cast<int>(work.left), (std::min)(left, static_cast<int>(work.right) - width));
+        if (diagnosticOffscreen)
+        {
+            left = GetSystemMetrics(SM_XVIRTUALSCREEN) - width - 1000;
+            top = GetSystemMetrics(SM_YVIRTUALSCREEN) - height - 1000;
+        }
         SetWindowPos(window, HWND_TOPMOST, left, top, width, height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
     }
 
@@ -211,6 +218,15 @@ namespace Cards
             if (!self) return DefWindowProcW(window, message, keys, position);
             switch (message)
             {
+            case WM_ERASEBKGND: return 1;
+            case WM_PAINT:
+            {
+                PAINTSTRUCT paint{};
+                BeginPaint(window, &paint);
+                EndPaint(window, &paint);
+                self->Paint();
+                return 0;
+            }
             case WM_GETOBJECT:
                 return self->accessibility.OnGetObject(keys, position);
             case WM_DPICHANGED:
@@ -244,13 +260,30 @@ namespace Cards
                 const int index = self->ItemAt(GET_Y_LPARAM(position) / self->scale);
                 if (index >= 0 && self->items[static_cast<size_t>(index)].enabled)
                 {
+                    SetCapture(window);
+                    self->pressed = index;
                     self->selected = index;
-                    // The popup stays a pure view: the host reads Selected() from its
-                    // own command loop after this notification.
-                    if (self->activate) self->activate();
+                    self->Paint();
                 }
                 return 0;
             }
+            case WM_LBUTTONUP:
+            {
+                const POINT point{GET_X_LPARAM(position), GET_Y_LPARAM(position)};
+                RECT client{}; GetClientRect(window, &client);
+                const int index = self->ItemAt(point.y / self->scale);
+                const bool activate = GetCapture() == window && PtInRect(&client, point) &&
+                    index >= 0 && index == self->pressed && self->items[static_cast<size_t>(index)].enabled;
+                self->pressed = -1;
+                if (GetCapture() == window) ReleaseCapture();
+                if (activate && self->activate) self->activate();
+                return 0;
+            }
+            case WM_CAPTURECHANGED:
+            case WM_CANCELMODE:
+                self->pressed = -1;
+                if (message == WM_CANCELMODE && GetCapture() == window) ReleaseCapture();
+                return 0;
             case WM_MOUSEWHEEL:
                 self->firstVisible = (std::max)(0, (std::min)(
                     static_cast<int>(self->items.size()) - self->VisibleRows(),
@@ -337,7 +370,8 @@ namespace Cards
         impl->device = environment.device;
     }
 
-    void CardPopup::Show(const std::wstring& menu, const std::vector<Layout::Region>& items, RECT anchor)
+    void CardPopup::Show(const std::wstring& menu, const std::vector<Layout::Region>& items, RECT anchor,
+        bool diagnosticOffscreen)
     {
         if (!impl->window) return;
         impl->accessibility.Detach();
@@ -354,7 +388,7 @@ namespace Cards
         impl->firstVisible = (std::max)(0, impl->selected - impl->VisibleRows() + 1);
         impl->visible = true;
         const POINT anchorPoint{ anchor.left, anchor.top };
-        impl->Place(anchorPoint, anchor);
+        impl->Place(anchorPoint, anchor, diagnosticOffscreen);
         impl->Paint();
         auto* self = impl.get();
         impl->accessibility.Attach(impl->window, menu,
@@ -367,6 +401,13 @@ namespace Cards
                     !self->items[static_cast<size_t>(index)].enabled) return;
                 self->selected = index;
                 if (self->activate) self->activate();
+            }, {}, [self](int id)
+            {
+                const int index = id - 1;
+                if (index < 0 || index >= static_cast<int>(self->items.size())) return;
+                self->selected = index;
+                self->firstVisible = (std::max)(0, index - self->VisibleRows() + 1);
+                self->Paint();
             });
         ShowWindow(impl->window, SW_SHOWNOACTIVATE);
     }
@@ -375,6 +416,8 @@ namespace Cards
     {
         if (!impl->visible) return;
         impl->visible = false;
+        impl->pressed = -1;
+        if (GetCapture() == impl->window) ReleaseCapture();
         impl->accessibility.Detach();
         impl->regions.Clear();
         impl->items.clear();

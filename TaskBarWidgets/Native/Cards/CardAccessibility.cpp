@@ -50,6 +50,7 @@ namespace Cards
         SliderSource slider;
         ActionSink action;
         ExpandedSource expanded;
+        FocusSink focus;
         std::vector<winrt::com_ptr<IRawElementProviderFragment>> children;
         // Children hold this token weakly: a screen reader may keep an element
         // alive after the card window is gone, and every call must then no-op
@@ -437,6 +438,7 @@ namespace Cards
             if (!Alive()) return UIA_E_ELEMENTNOTAVAILABLE;
             if (!Enabled()) return UIA_E_ELEMENTNOTENABLED;
             root->focusedId = id;
+            if (root->focus) root->focus(id);
             return UiaRaiseAutomationEvent(static_cast<IRawElementProviderSimple*>(this),
                 UIA_AutomationFocusChangedEventId);
         }
@@ -575,7 +577,7 @@ namespace Cards
     CardAccessibility::~CardAccessibility() { Detach(); }
 
     void CardAccessibility::Attach(HWND window, std::wstring name, TableSource table,
-        ScaleSource scale, SliderSource slider, ActionSink action, ExpandedSource expanded)
+        ScaleSource scale, SliderSource slider, ActionSink action, ExpandedSource expanded, FocusSink focus)
     {
         Detach();
         root = winrt::make_self<Root>();
@@ -586,6 +588,7 @@ namespace Cards
         root->slider = std::move(slider);
         root->action = std::move(action);
         root->expanded = std::move(expanded);
+        root->focus = std::move(focus);
     }
 
     void CardAccessibility::Detach()
@@ -599,6 +602,7 @@ namespace Cards
         root->slider = nullptr;
         root->action = nullptr;
         root->expanded = nullptr;
+        root->focus = nullptr;
         root = nullptr;
     }
 

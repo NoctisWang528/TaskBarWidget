@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // One native card window.
 //
 // A card owns its HWND, its compositor, its visual tree, its drawing surfaces,
@@ -41,6 +41,8 @@ namespace Cards
         virtual void OnLayoutInvalidated() = 0;
         virtual void OnGraphicsFailure(HRESULT) {}
         virtual bool IsMenuExpanded(const std::wstring&) const { return false; }
+        virtual bool OnMenuKey(UINT) { return false; }
+        virtual bool OnMenuWheel(int) { return false; }
     };
 
     struct CardEnvironment
@@ -114,6 +116,9 @@ namespace Cards
         const CardEnvironment& Environment() const { return environment; }
         HWND Handle() const { return window; }
         bool HasRenderedContent() const;
+        bool HasActiveBackdropConfiguration() const;
+        void RefreshBackdropConfiguration();
+        uint64_t ContentPaintCount() const { return contentPaintCount; }
 
     private:
         friend class CardHost;
@@ -147,6 +152,7 @@ namespace Cards
         Layout::Table menuTable;
         Snapshot snapshot;
         RECT bounds{};
+        uint64_t contentPaintCount{};
         float scale{ 1.0f };
         float measuredHeightDip{ 0.0f };
         bool visible{ false };

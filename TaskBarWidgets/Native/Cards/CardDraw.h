@@ -39,7 +39,8 @@ namespace Cards::Draw
     void Text(ID2D1DeviceContext* context, Graphics& graphics, const std::wstring& value,
         const std::wstring& family, float size, int weight, Color color, D2D1_RECT_F rect,
         DWRITE_TEXT_ALIGNMENT alignment = DWRITE_TEXT_ALIGNMENT_LEADING,
-        bool italic = false, bool underline = false, bool strikeout = false);
+        bool italic = false, bool underline = false, bool strikeout = false,
+        DWRITE_PARAGRAPH_ALIGNMENT vertical = DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
     std::wstring Ellipsize(ID2D1DeviceContext* context, Graphics& graphics, const std::wstring& value,
         const std::wstring& family, float size, int weight, float maxWidth);
 

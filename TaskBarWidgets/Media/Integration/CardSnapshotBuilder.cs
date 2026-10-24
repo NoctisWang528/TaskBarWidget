@@ -26,8 +26,10 @@ internal sealed class CardSnapshotBuilder
 
     internal object SetTraffic(JsonElement payload)
     {
+        // Invalid/partial responses are failures, not a newer empty heatmap.
+        var heatmap = TrafficHeatmap.Parse(payload);
         Interlocked.Increment(ref _trafficRevision);
-        return _lastTraffic = DescribeTraffic(payload);
+        return _lastTraffic = DescribeTraffic(heatmap);
     }
 
     internal object SetWeather(JsonElement payload)
@@ -37,7 +39,7 @@ internal sealed class CardSnapshotBuilder
         if (status.ValueKind == JsonValueKind.Object && status.TryGetProperty("revision", out var revision) && revision.ValueKind == JsonValueKind.Number &&
             revision.TryGetInt64(out var sourceRevision))
         {
-            if (sourceRevision < _weatherSourceRevision && _lastWeather is not null) return _lastWeather;
+            if (sourceRevision <= _weatherSourceRevision && _lastWeather is not null) return _lastWeather;
             _weatherSourceRevision = sourceRevision;
         }
         Interlocked.Increment(ref _weatherRevision);
@@ -206,14 +208,8 @@ internal sealed class CardSnapshotBuilder
 
     // The traffic display model stays in Media: 84 days, relative to the twelve
     // week peak, with future, unknown, recorded zero and positive kept distinct.
-    internal object DescribeTraffic(JsonElement payload)
+    private object DescribeTraffic(TrafficHeatmap heatmap)
     {
-        TrafficHeatmap heatmap;
-        try { heatmap = TrafficHeatmap.Parse(payload); }
-        catch (FormatException)
-        {
-            return new { revision = TrafficRevision, available = false, days = Array.Empty<object>() };
-        }
         var days = heatmap.Days.Select(day => new
         {
             week = day.Week,

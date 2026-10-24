@@ -1365,7 +1365,7 @@ namespace NativeMedia
     bool NativeMediaRenderer::HitTest(float x, float y, HitAction& action)
     {
         action = HitAction::None;
-        if (!m_hasState || !m_ready) return false;
+        if (!m_hasState || !m_ready || !m_requestedVisible) return false;
         if (m_pendingFrame.isBrowser && m_pendingFrame.browser.active)
         {
             const auto state = MakePaintState(m_effectiveStyle, m_pendingFrame,

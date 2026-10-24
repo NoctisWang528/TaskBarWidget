@@ -38,6 +38,8 @@ public sealed class CardSnapshotBuilderTests
         Assert.Equal("2026-10-24 19:00:00", details.GetProperty("alerts")[0].GetProperty("publishedAt").GetString());
         Assert.True(first.GetProperty("hasData").GetBoolean());
         Assert.Same(current, builder.SetWeather(JsonSerializer.SerializeToElement(new { revision = 7 })));
+        Assert.Same(current, builder.SetWeather(job));
+        Assert.Equal(1, builder.WeatherRevision);
         var empty = JsonSerializer.SerializeToElement(builder.SetWeather(JsonSerializer.SerializeToElement(new { revision = 9 })));
         Assert.Equal(2, empty.GetProperty("revision").GetInt64());
         Assert.False(empty.GetProperty("hasData").GetBoolean());
@@ -55,5 +57,19 @@ public sealed class CardSnapshotBuilderTests
         Assert.Equal(84, first.GetProperty("days").GetArrayLength());
         var second = JsonSerializer.SerializeToElement(builder.SetTraffic(history));
         Assert.Equal(2, second.GetProperty("revision").GetInt64());
+    }
+
+    [Fact]
+    public void InvalidTrafficDoesNotReplaceTheLastValidHeatmap()
+    {
+        var builder = new CardSnapshotBuilder();
+        var history = JsonSerializer.SerializeToElement(new { today = "2026-10-25", days = Array.Empty<object>() });
+        var valid = builder.SetTraffic(history);
+        Assert.Throws<FormatException>(() => builder.SetTraffic(JsonSerializer.SerializeToElement(new { pending = true })));
+        Assert.Equal(1, builder.TrafficRevision);
+        var cache = typeof(CardSnapshotBuilder).GetField("_lastTraffic",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.Same(valid, cache!.GetValue(builder));
+        Assert.Equal(84, JsonSerializer.SerializeToElement(valid).GetProperty("days").GetArrayLength());
     }
 }

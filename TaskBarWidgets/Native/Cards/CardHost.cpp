@@ -55,6 +55,8 @@ namespace Cards
     }
 
 
+    static RECT MenuAnchor(const CardWindow& card, const std::wstring& action);
+
     struct CardHost::Impl : public CardHostServices
     {
         // The low-level hooks are process-wide, so the live instance is stored in
@@ -91,6 +93,7 @@ namespace Cards
         std::unique_ptr<CardPopup> popup;
         // The popup list remembers what an accepted index means.
         std::wstring popupMenu;
+        RECT popupAnchor{};
         std::vector<std::wstring> popupIds;
         std::map<std::wstring, std::wstring> pendingSliders;
         // The settings process previews draft Mica and theme on the real cards.
@@ -147,6 +150,26 @@ namespace Cards
             if (!popup || !popup->Visible()) return false;
             return (action == L"showSources" && popupMenu == L"sources") ||
                 (action.starts_with(L"showDevices:") && popupMenu == action.substr(12));
+        }
+        bool OnMenuKey(UINT key) override
+        {
+            if (!popup || !popup->Visible()) return false;
+            switch (key)
+            {
+            case VK_UP: popup->MoveSelection(-1); return true;
+            case VK_DOWN: popup->MoveSelection(1); return true;
+            case VK_RETURN: case VK_SPACE: ActivateMenu(); return true;
+            case VK_ESCAPE: CloseMenu(); return true;
+            case VK_TAB: CloseMenu(); return false;
+            case VK_LEFT: case VK_RIGHT: return true;
+            default: return false;
+            }
+        }
+        bool OnMenuWheel(int delta) override
+        {
+            if (!popup || !popup->Visible()) return false;
+            popup->Wheel(delta);
+            return true;
         }
 
         // ---- lifecycle ------------------------------------------------------
@@ -231,6 +254,8 @@ namespace Cards
 
     void CardHost::Impl::CreateCards()
     {
+        if (popup && popup->Visible() && !config.IsEnabled(popupMenu == L"sources" ? Kind::Media : Kind::Device))
+            CloseMenu();
         CardEnvironment environment;
         environment.graphics = &graphics;
         environment.compositor = compositor;
@@ -347,6 +372,13 @@ namespace Cards
             if (kind == Kind::Update) { if (!updateVisible) card->Hide(animate); continue; }
             if (!config.IsEnabled(kind)) card->Hide(animate);
         }
+        if (popup && popup->Visible())
+        {
+            const auto* ownerCard = Card(popupMenu == L"sources" ? Kind::Media : Kind::Device);
+            const auto current = ownerCard ? MenuAnchor(*ownerCard,
+                popupMenu == L"sources" ? L"showSources" : L"showDevices:" + popupMenu) : RECT{};
+            if (!ownerCard || !ownerCard->Visible() || !EqualRect(&current, &popupAnchor)) CloseMenu();
+        }
     }
 
     void CardHost::Impl::HideAll(const std::wstring& reason, bool animate)
@@ -395,8 +427,10 @@ namespace Cards
         UpdateEnvironment(true);
         visible = true;
         if (window) KillTimer(window, IdleTimer);
-        if (cards.empty()) CreateCards();
+        CreateCards();
         PlaceGroup(true, true);
+        visible = std::any_of(cards.begin(), cards.end(), [](const auto& entry) { return entry.second->Visible(); });
+        if (!visible) return;
         if (!diagnosticOffscreen)
             if (auto* card = Card(Kind::Media); card && card->Visible()) SetForegroundWindow(card->Handle());
         InstallHooks();
@@ -724,7 +758,14 @@ namespace Cards
             RECT bounds = card->Bounds();
             if (point.x >= bounds.left && point.x < bounds.right &&
                 point.y >= bounds.top && point.y < bounds.bottom)
+            {
+                // Clicking a card dismisses its flyout, without dismissing cards.
+                // Selector clicks are handled below in OnRequest as a toggle.
+                const POINT dip = Layout::ToDip(POINT{point.x - bounds.left, point.y - bounds.top}, card->DpiScale());
+                const auto* hit = card->Regions().Hit(dip);
+                if (!hit || !IsMenuExpanded(hit->action)) CloseMenu();
                 return;
+            }
         }
         // The taskbar entry owns its left-click toggle; dismissing here first
         // would make that same click reopen the group.
@@ -825,7 +866,7 @@ namespace Cards
         }
         else if (action.rfind(L"showDevices:", 0) == 0)
         {
-            if (jsonPayload == L"collapse") { CloseMenu(); return; }
+            if (jsonPayload == L"collapse" || IsMenuExpanded(action)) { CloseMenu(); return; }
             ShowDeviceMenu(action.substr(12));
             return;
         }
@@ -837,7 +878,7 @@ namespace Cards
         }
         else if (action == L"showSources")
         {
-            if (jsonPayload == L"collapse") { CloseMenu(); return; }
+            if (jsonPayload == L"collapse" || IsMenuExpanded(action)) { CloseMenu(); return; }
             ShowSourceMenu();
             return;
         }
@@ -850,6 +891,18 @@ namespace Cards
     }
 
     void CardHost::Impl::OnHideCards(const std::wstring& reason) { HideAll(reason, true); }
+
+    static RECT MenuAnchor(const CardWindow& card, const std::wstring& action)
+    {
+        const auto bounds = card.Bounds();
+        for (const auto& region : card.Regions().All())
+            if (region.action == action)
+                return RECT{ bounds.left + static_cast<LONG>(std::lround(region.bounds.left * card.DpiScale())),
+                    bounds.top + static_cast<LONG>(std::lround(region.bounds.top * card.DpiScale())),
+                    bounds.left + static_cast<LONG>(std::lround(region.bounds.right * card.DpiScale())),
+                    bounds.top + static_cast<LONG>(std::lround(region.bounds.bottom * card.DpiScale())) };
+        return bounds;
+    }
 
     // The menu is drawn by the shared popup window; selection is turned back into
     // the same cardRequest a card widget would send.
@@ -882,7 +935,7 @@ namespace Cards
             item.name = L"没有可用设备";
             items.push_back(std::move(item));
         }
-        OpenMenu(flow, items, card->Bounds());
+        OpenMenu(flow, items, MenuAnchor(*card, L"showDevices:" + flow));
     }
 
     void CardHost::Impl::ShowSourceMenu()
@@ -911,7 +964,7 @@ namespace Cards
             item.name = L"没有可切换的播放源";
             items.push_back(std::move(item));
         }
-        OpenMenu(L"sources", items, card->Bounds());
+        OpenMenu(L"sources", items, MenuAnchor(*card, L"showSources"));
     }
 
     // A menu selection re-enters the ordinary card action path.
@@ -966,7 +1019,8 @@ namespace Cards
             Post(std::move(command));
         });
         popupMenu = menu;
-        popup->Show(menu, items, anchor);
+        popupAnchor = anchor;
+        popup->Show(menu, items, anchor, diagnosticOffscreen);
     }
 
     void CardHost::Impl::ActivateMenu()
@@ -985,7 +1039,6 @@ namespace Cards
     {
         if (popup) popup->Hide();
         popupMenu.clear();
-        if (visible) PlaceGroup(false, false);
     }
 
     bool CardHost::Impl::MenuContains(POINT point) const

@@ -38,8 +38,9 @@ namespace Cards::Paint
             const std::wstring name = current ? current->name : L"没有可用设备";
             Draw::Text(context, graphics, Draw::Ellipsize(context, graphics, name, environment.fontFamily,
                 12.0f, 400, width - 44.0f), environment.fontFamily, 12.0f, 400, palette.primary,
-                Draw::Rect(selector.left + 10.0f, selector.top + 7.0f, selector.right - 28.0f,
-                    selector.bottom - 5.0f));
+                Draw::Rect(selector.left + 10.0f, selector.top, selector.right - 28.0f,
+                    selector.bottom), DWRITE_TEXT_ALIGNMENT_LEADING, false, false, false,
+                DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
             DrawGlyph(context, Glyph::Chevron, palette.secondary, selector.right - 24.0f,
                 selector.top + 9.0f, 12.0f);
             Draw::AddButton(regions, baseId, selector, L"showDevices:" + flow, title + L"选择设备",

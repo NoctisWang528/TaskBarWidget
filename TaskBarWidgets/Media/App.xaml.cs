@@ -29,7 +29,7 @@ public partial class App : System.Windows.Application
     private CardSnapshotBuilder? _cardSnapshot;
     private AudioSnapshot? _lastAudio;
     private readonly SemaphoreSlim _audioRequests = new(1, 1);
-    private bool _cardRefreshRunning, _cardDetailsRunning, _cardWasVisible;
+    private bool _cardRefreshRunning, _cardWeatherRunning, _cardTrafficRunning, _cardWasVisible;
     private DateTimeOffset _nextCardAudio, _nextCardWeather, _nextCardTraffic;
     private System.Windows.Threading.DispatcherTimer? _cardTimer;
     private UpdateCoordinator? _updates;
@@ -263,6 +263,7 @@ public partial class App : System.Windows.Application
             case "getTrafficHistory":
             {
                 var history = await GetTrafficHistoryAsync(token);
+                if (!_cards.IsConnectionCurrent(generation)) throw new OperationCanceledException("卡片连接已失效。");
                 var traffic = _cardSnapshot!.SetTraffic(history);
                 _cards.PublishSnapshot();
                 return traffic;
@@ -318,12 +319,16 @@ public partial class App : System.Windows.Application
     // not hold it. Snapshot coalescing happens on the writer, not on this timer.
     private async Task RefreshVisibleCardsAsync()
     {
-        if (_shutdownRequested || _cards?.CardLyricsVisible != true || _cardRefreshRunning) return;
+        if (_shutdownRequested || _cards?.CardLyricsVisible != true) return;
+        // Each lane has its own in-flight guard. Slow audio must not delay a
+        // traffic retry or the media controls/position snapshot either.
+        _cards.PublishSnapshot();
+        TaskObserver.Observe(RefreshCardWeatherAsync(), "card weather refresh");
+        TaskObserver.Observe(RefreshCardTrafficAsync(), "card traffic refresh");
+        if (_cardRefreshRunning) return;
         _cardRefreshRunning = true;
         try
         {
-            _cards.PublishSnapshot(); // Controls/position and completed source icons, even during a slow audio read.
-            if (!_cardDetailsRunning) TaskObserver.Observe(RefreshCardDetailsAsync(), "card details refresh");
             if (DateTimeOffset.UtcNow >= _nextCardAudio)
             {
                 _nextCardAudio = DateTimeOffset.UtcNow.AddSeconds(1);
@@ -337,36 +342,53 @@ public partial class App : System.Windows.Application
         finally { _cardRefreshRunning = false; }
     }
 
-    private async Task RefreshCardDetailsAsync()
+    private async Task RefreshCardWeatherAsync()
     {
-        if (_shutdownRequested || _cards?.CardLyricsVisible != true || _cardDetailsRunning) return;
-        _cardDetailsRunning = true;
+        if (_shutdownRequested || _cards?.CardLyricsVisible != true || _cardWeatherRunning ||
+            _nativeSettings is null || DateTimeOffset.UtcNow < _nextCardWeather) return;
+        _cardWeatherRunning = true;
         try
         {
             var generation = _cards.ConnectionGeneration;
-            if (_nativeSettings is null) return;
-            if (DateTimeOffset.UtcNow >= _nextCardWeather)
-            {
-                _nextCardWeather = DateTimeOffset.UtcNow.AddSeconds(5);
-                var weather = await _nativeSettings.RequestAsync("weatherCommand", JsonSerializer.SerializeToElement(new { operation = "status" }), _stop.Token);
-                if (!_cards.IsConnectionCurrent(generation) || !_cards.CardLyricsVisible) return;
-                _cardSnapshot!.SetWeather(weather);
-                _cards.PublishSnapshot();
-            }
-            if (DateTimeOffset.UtcNow >= _nextCardTraffic)
-            {
-                _nextCardTraffic = DateTimeOffset.UtcNow.AddMinutes(1);
-                var traffic = await GetTrafficHistoryAsync(_stop.Token);
-                if (!_cards.IsConnectionCurrent(generation) || !_cards.CardLyricsVisible) return;
-                _cardSnapshot!.SetTraffic(traffic);
-                _cards.PublishSnapshot();
-            }
+            var weather = await _nativeSettings.RequestAsync("weatherCommand", JsonSerializer.SerializeToElement(new { operation = "status" }), _stop.Token);
+            if (!_cards.IsConnectionCurrent(generation) || !_cards.CardLyricsVisible) return;
+            _cardSnapshot!.SetWeather(weather);
+            _cards.PublishSnapshot();
         }
         catch (Exception error) when (error is IOException or InvalidOperationException or TimeoutException or OperationCanceledException or System.Runtime.InteropServices.COMException)
         {
-            if (!_shutdownRequested) Log.Warn("Card refresh failed: " + error.GetType().Name);
+            if (!_shutdownRequested) Log.Warn("Card weather refresh failed: " + error.GetType().Name);
         }
-        finally { _cardDetailsRunning = false; }
+        finally { _nextCardWeather = DateTimeOffset.UtcNow.AddSeconds(5); _cardWeatherRunning = false; }
+    }
+
+    private async Task RefreshCardTrafficAsync()
+    {
+        if (_shutdownRequested || _cards?.CardLyricsVisible != true || _cardTrafficRunning ||
+            _nativeSettings is null || DateTimeOffset.UtcNow < _nextCardTraffic) return;
+        _cardTrafficRunning = true;
+        var succeeded = false;
+        try
+        {
+            var generation = _cards.ConnectionGeneration;
+            using var request = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
+            request.CancelAfter(TimeSpan.FromSeconds(5));
+            var traffic = await GetTrafficHistoryAsync(request.Token);
+            if (!_cards.IsConnectionCurrent(generation) || !_cards.CardLyricsVisible) return;
+            _cardSnapshot!.SetTraffic(traffic);
+            _cards.PublishSnapshot();
+            succeeded = true;
+        }
+        catch (Exception error) when (error is IOException or InvalidOperationException or TimeoutException or
+            OperationCanceledException or FormatException or System.Runtime.InteropServices.COMException)
+        {
+            if (!_shutdownRequested) Log.Warn("Card traffic refresh failed; retrying: " + error.GetType().Name);
+        }
+        finally
+        {
+            _nextCardTraffic = DateTimeOffset.UtcNow.AddSeconds(succeeded ? 60 : 2);
+            _cardTrafficRunning = false;
+        }
     }
 
     // The gate covers the entire operation plus readback, rather than individual

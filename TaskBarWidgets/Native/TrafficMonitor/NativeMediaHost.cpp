@@ -145,6 +145,7 @@ struct NativeMediaHost::Impl
     bool lastAnnounced{};
     bool firstFramePending{};
     bool pointerDown{};
+    bool pointerMediaPresented{};
     POINT pointerOrigin{};
     std::wstring pointerSource;
     unsigned long long gestureSerial{};
@@ -1448,6 +1449,9 @@ struct NativeMediaHost::Impl
         POINT point{ static_cast<short>(LOWORD(position)), static_cast<short>(HIWORD(position)) };
         if (message == WM_CANCELMODE || message == WM_CAPTURECHANGED)
         {
+            if (pointerDown && clickLogs++ < 192)
+                Log(L"Panel gesture=" + std::to_wstring(gestureSerial) +
+                    (message == WM_CANCELMODE ? L" cancelled" : L" capture-lost"));
             pointerDown = false;
             if (message == WM_CANCELMODE && ::GetCapture() == owner)
                 ::ReleaseCapture();
@@ -1457,6 +1461,8 @@ struct NativeMediaHost::Impl
         {
             pointerDown = true;
             pointerOrigin = point;
+            ClientToScreen(owner, &pointerOrigin);
+            pointerMediaPresented = mediaPresented;
             pointerSource = state.source;
             ++gestureSerial;
             if (clickLogs++ < 192)
@@ -1470,13 +1476,18 @@ struct NativeMediaHost::Impl
             pointerDown = false;
             if (::GetCapture() == owner) ::ReleaseCapture();
             RECT bounds{}; GetClientRect(owner, &bounds);
+            POINT screenPoint = point;
+            ClientToScreen(owner, &screenPoint);
             activate = activate && PtInRect(&bounds, point) &&
-                std::abs(point.x - pointerOrigin.x) <= GetSystemMetrics(SM_CXDRAG) &&
-                std::abs(point.y - pointerOrigin.y) <= GetSystemMetrics(SM_CYDRAG);
+                std::abs(screenPoint.x - pointerOrigin.x) <= GetSystemMetrics(SM_CXDRAG) &&
+                std::abs(screenPoint.y - pointerOrigin.y) <= GetSystemMetrics(SM_CYDRAG);
+            if (!activate && clickLogs++ < 192)
+                Log(L"Panel gesture=" + std::to_wstring(gestureSerial) + L" release rejected (capture/bounds/movement)");
             if (activate)
             {
                 NativeMedia::HitAction action{ NativeMedia::HitAction::Panel };
-                const bool hit = renderer.HitTest(static_cast<float>(point.x),
+                const bool hit = mediaPresented && pointerMediaPresented && pointerSource == state.source &&
+                    renderer.HitTest(static_cast<float>(point.x),
                     static_cast<float>(point.y), action);
                 if (hit && action != NativeMedia::HitAction::None &&
                     pointerSource == state.source)
@@ -1489,6 +1500,7 @@ struct NativeMediaHost::Impl
                 else if (hit && action == NativeMedia::HitAction::None)
                 {
                     // A disabled browser control consumes the gesture without opening the card.
+                    if (clickLogs++ < 192) Log(L"Panel gesture=" + std::to_wstring(gestureSerial) + L" disabled media control");
                 }
                 else Panel(gestureSerial);
             }

@@ -3,6 +3,8 @@
 #include "CardHost.h"
 #include "CardWindow.h"
 #include "CardDraw.h"
+#include "CardProtocol.h"
+#include "CardPopup.h"
 #include <iostream>
 #include <stdexcept>
 #include <dbghelp.h>
@@ -108,6 +110,18 @@ int wmain(int argc, wchar_t** argv)
             std::wstring error;
             auto device = graphics.CreateGraphicsDevice(compositor, error);
             Require(device != nullptr, "composition must be backed by the D2D device");
+            Cards::Snapshot duplicate;
+            Cards::Protocol::Changes initial, repeated;
+            const std::wstring weather = LR"({"weather":{"revision":7,"temperature":"23"}})";
+            Require(Cards::Protocol::ApplySnapshot(duplicate, weather, initial) && initial.weather, "first weather frame");
+            Require(Cards::Protocol::ApplySnapshot(duplicate, weather, repeated) && !repeated.Any(),
+                "unchanged weather must not invalidate the whole group");
+            Cards::AudioState audio;
+            Require(Cards::Protocol::ApplyAudioReply(audio, LR"({"revision":3,"outputs":[],"inputs":[]})"), "initial audio state");
+            Require(Cards::Protocol::ApplyAudioReply(audio, LR"({"revision":3,"message":"selection failed"})") &&
+                audio.message == L"selection failed", "same-revision reply preserves operation feedback");
+            Require(!Cards::Protocol::ApplyAudioReply(audio, LR"({"revision":2,"message":"stale"})") &&
+                audio.message == L"selection failed", "stale reply cannot overwrite operation feedback");
             Cards::DrawingSurface surface;
             surface.Ensure(device, 160, 120);
             {
@@ -150,11 +164,62 @@ int wmain(int argc, wchar_t** argv)
             Cards::CardEnvironment environment;
             environment.graphics = &graphics; environment.compositor = compositor; environment.device = device;
             environment.reducedMotion = true;
+            {
+                Cards::CardPopup popup;
+                Require(popup.Create(GetModuleHandleW(nullptr), environment), "popup creation");
+                std::vector<Cards::Layout::Region> items(3);
+                for (int i = 0; i < 3; ++i)
+                {
+                    items[i].name = L"Fixture device";
+                    items[i].enabled = i != 1;
+                    items[i].selected = i == 0;
+                }
+                int activated = 0;
+                popup.SetActivation([&] { ++activated; });
+                popup.Show(L"output", items, RECT{0, 0, 100, 30}, true);
+                Require(popup.Bounds().right < GetSystemMetrics(SM_XVIRTUALSCREEN), "popup remains offscreen");
+                HWND popupWindow{};
+                EnumWindows([](HWND window, LPARAM data) -> BOOL
+                {
+                    DWORD process{}; GetWindowThreadProcessId(window, &process);
+                    wchar_t name[80]{}; GetClassNameW(window, name, ARRAYSIZE(name));
+                    if (process == GetCurrentProcessId() && wcscmp(name, L"TaskBarWidgetsCardPopup") == 0)
+                        *reinterpret_cast<HWND*>(data) = window;
+                    return TRUE;
+                }, reinterpret_cast<LPARAM>(&popupWindow));
+                Require(popupWindow != nullptr, "popup HWND");
+                const float dpi = GetDpiForWindow(popupWindow) / 96.0f;
+                const LPARAM first = MAKELPARAM(static_cast<int>(15 * dpi), static_cast<int>(21 * dpi));
+                SendMessageW(popupWindow, WM_LBUTTONDOWN, MK_LBUTTON, first);
+                Require(activated == 0, "menu must not commit on press");
+                SendMessageW(popupWindow, WM_LBUTTONUP, 0, MAKELPARAM(-10, -10));
+                Require(activated == 0, "releasing outside must cancel menu selection");
+                SendMessageW(popupWindow, WM_LBUTTONDOWN, MK_LBUTTON, first);
+                SendMessageW(popupWindow, WM_LBUTTONUP, 0, first);
+                Require(activated == 1, "menu commits once on release");
+                popup.MoveSelection(1);
+                Require(popup.Selected() == 2, "menu keyboard navigation skips disabled rows");
+                popup.Hide();
+            }
             for (const float scale : {1.0f, 1.5f, 2.0f})
             for (const auto kind : {Cards::Kind::Weather, Cards::Kind::Traffic, Cards::Kind::Device, Cards::Kind::Media, Cards::Kind::Update})
             {
                 Cards::CardWindow card(kind, services);
                 Require(card.Create(environment, GetModuleHandleW(nullptr)), "native card window creation");
+                if (winrt::Microsoft::UI::Composition::SystemBackdrops::MicaController::IsSupported())
+                {
+                    SendMessageW(card.Handle(), WM_ACTIVATE, WA_INACTIVE, 0);
+                    SendMessageW(card.Handle(), WM_NCACTIVATE, FALSE, 0);
+                    const auto deadline = GetTickCount64() + 500;
+                    while (GetTickCount64() < deadline)
+                    {
+                        MSG message{};
+                        while (GetTickCount64() < deadline && PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE))
+                        { TranslateMessage(&message); DispatchMessageW(&message); }
+                        Sleep(5);
+                    }
+                    Require(card.HasActiveBackdropConfiguration(), "inactive cards retain an Active Mica controller");
+                }
                 card.SetSnapshot(snapshot);
                 const LONG width = static_cast<LONG>(Cards::Layout::WidthDip(kind) * scale);
                 const LONG height = static_cast<LONG>(Cards::Layout::DefaultHeightDip(kind) * scale);
@@ -162,6 +227,18 @@ int wmain(int argc, wchar_t** argv)
                 card.Paint();
                 Require(card.HasRenderedContent(), "card must commit content while hidden");
                 Require(!IsWindowVisible(card.Handle()), "probe must not show or activate a card");
+                if (kind == Cards::Kind::Traffic)
+                {
+                    card.Show(false); // remains entirely outside the virtual desktop
+                    const auto paints = card.ContentPaintCount();
+                    for (int refresh = 0; refresh < 20; ++refresh)
+                    {
+                        card.Place(card.Bounds(), scale);
+                        card.Show(false);
+                    }
+                    Require(card.ContentPaintCount() == paints, "unchanged layout must not repaint traffic");
+                    card.Hide(false);
+                }
                 if (kind == Cards::Kind::Media)
                 {
                     auto regions = card.Regions().All();

@@ -9,6 +9,23 @@ namespace NativeMedia
 {
     struct NativeMediaRendererTestAccess
     {
+        static void CheckHiddenHitTesting()
+        {
+            NativeMediaRenderer renderer;
+            renderer.m_ready = true;
+            renderer.m_hasState = true;
+            renderer.m_requestedVisible = true;
+            HitAction action{};
+            RequireVisibleHit(renderer, action);
+            renderer.m_requestedVisible = false;
+            if (renderer.HitTest(1, 1, action)) throw std::runtime_error("Hidden media must not intercept monitoring clicks.");
+            renderer.m_ready = false;
+        }
+        static void RequireVisibleHit(NativeMediaRenderer& renderer, HitAction& action)
+        {
+            if (!renderer.HitTest(1, 1, action) || action != HitAction::Panel)
+                throw std::runtime_error("Visible panel hit testing.");
+        }
         static bool ActiveCoverWasPainted(NativeMediaRenderer& renderer)
         {
             const auto& layer = renderer.m_coverFrontIsActive ? renderer.m_coverFront : renderer.m_coverBack;
@@ -301,6 +318,7 @@ try
         reveal.Apply(MakeUpdate(paused, true));
         RequireScan(reveal.AdvanceHeadlessTest(50000), 0.62, "Paused scan is presented.");
 
+        NativeMediaRendererTestAccess::CheckHiddenHitTesting();
         reveal.SetVisible(false, false);
         reveal.SetVisible(true, false);
         RequireScan(reveal.AdvanceHeadlessTest(50100), 0.62,

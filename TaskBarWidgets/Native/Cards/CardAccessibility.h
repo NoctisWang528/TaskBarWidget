@@ -35,6 +35,7 @@ namespace Cards
         using ScaleSource = std::function<float()>;
         using SliderSource = std::function<double(int)>;
         using ExpandedSource = std::function<bool(const Layout::Region&)>;
+        using FocusSink = std::function<void(int)>;
 
         CardAccessibility();
         ~CardAccessibility();
@@ -43,7 +44,7 @@ namespace Cards
         CardAccessibility& operator=(const CardAccessibility&) = delete;
 
         void Attach(HWND window, std::wstring name, TableSource table, ScaleSource scale,
-            SliderSource slider, ActionSink action, ExpandedSource expanded = {});
+            SliderSource slider, ActionSink action, ExpandedSource expanded = {}, FocusSink focus = {});
         void Detach();
         void NotifyFocus(const Layout::Region* region);
         void NotifyStructureChanged();

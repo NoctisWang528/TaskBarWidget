@@ -296,7 +296,7 @@ namespace Cards::Protocol
             const auto status = Object(payload, L"status");
             const auto weather = status ? status : payload;
             const long long revision = static_cast<long long>(Number(weather, L"revision", -1));
-            if (revision >= 0 && revision < target.revision) return false;
+            if (revision >= 0 && revision <= target.revision) return false;
             // These are complete weather blocks. Absent details clear old values
             // instead of relabelling the previous city's data as a new result.
             WeatherState state;
@@ -536,7 +536,18 @@ namespace Cards::Protocol
 
     bool ApplyAudioReply(AudioState& target, const std::wstring& payloadJson)
     {
-        try { return AudioFrom(JsonObject::Parse(payloadJson), target); }
+        try
+        {
+            const auto payload = JsonObject::Parse(payloadJson);
+            if (AudioFrom(payload, target)) return true;
+            // The writer can publish the new endpoints before their command
+            // reply. Keep the reply's outcome even when that revision is applied.
+            if (Number(payload, L"revision", -1) != target.revision) return false;
+            const auto message = Text(payload, L"message");
+            if (target.message == message) return false;
+            target.message = message;
+            return true;
+        }
         catch (...) { return false; }
     }
 
