@@ -333,7 +333,7 @@ public sealed partial class SettingsWindow : Window
         if (result == ContentDialogResult.Primary && !weatherBusy)
         {
             await GuardAsync(SaveAsync);
-            if (_native.Pending.Count + _media.Pending.Count > 0 || HasWeatherDraft() || _weatherPage?.Message.Severity == InfoBarSeverity.Error) return;
+            if (_native.Pending.Count + _media.Pending.Count > 0 || HasWeatherDraft() || _weatherPage?.Message is { IsOpen: true, Severity: InfoBarSeverity.Error }) return;
         }
         else if (result == ContentDialogResult.Primary || result == ContentDialogResult.None)
         {
