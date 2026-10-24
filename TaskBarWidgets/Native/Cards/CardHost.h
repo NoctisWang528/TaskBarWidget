@@ -27,7 +27,9 @@ namespace Cards
 
         // Creates the card STA thread and its message loop. \`owner\` is the native
         // taskbar window, used only for monitor and DPI queries.
-        bool Start(HWND owner, HINSTANCE instance);
+        // Diagnostic mode uses the real show/hide path offscreen, without a
+        // backend connection, global hooks or foreground activation.
+        bool Start(HWND owner, HINSTANCE instance, bool diagnosticOffscreen = false);
         void Stop();
 
         // Opens or closes the card group at the taskbar click point. Thread-safe:

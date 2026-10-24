@@ -97,6 +97,28 @@ namespace Cards::Paint
                     gridLeft + WeekdayGutter, gridTop + (row + 1) * SlotSize));
         }
 
+        // Draw the restrained halo under the opaque cells so it cannot wash out
+        // the heatmap levels. Keep one shared mask and blur pass; never expand
+        // a cell into its four-DIP gutter before blurring.
+        if (!environment.highContrast && graphics.BeginMask(context))
+        {
+            const Color halo = ParseColor(environment.dark ? L"#6969BDFA" : L"#345281D3", Color{});
+            for (const auto& day : traffic.days)
+            {
+                if (day.isFuture || day.level < 2 || day.week < 0 || day.week >= Weeks ||
+                    day.weekday < 0 || day.weekday >= 7) continue;
+                const float cellLeft = gridLeft + WeekdayGutter + day.week * SlotSize +
+                    (SlotSize - CellSize) / 2.0f;
+                const float cellTop = gridTop + day.weekday * SlotSize + (SlotSize - CellSize) / 2.0f;
+                const bool selected = day.date == (traffic.selectedDate.empty() ? traffic.today : traffic.selectedDate);
+                const float inset = (day.isToday || selected) ? 0.0f : 1.0f;
+                Draw::FillRound(context, Draw::Rect(cellLeft + inset, cellTop + inset,
+                    cellLeft + CellSize - inset, cellTop + CellSize - inset), 4.0f - inset,
+                    WithAlpha(halo, halo.a * ((day.isToday || selected) ? 0.65f : 0.35f)));
+            }
+            graphics.EndMask(context, 2.0f);
+        }
+
         for (const auto& day : traffic.days)
         {
             if (day.week < 0 || day.week >= Weeks || day.weekday < 0 || day.weekday >= 7) continue;
@@ -112,28 +134,6 @@ namespace Cards::Paint
             const bool selected = day.date == (traffic.selectedDate.empty() ? traffic.today : traffic.selectedDate);
             Draw::AddCell(regions, 300 + day.week * 7 + day.weekday, cell, L"selectDay:" + day.date,
                 day.date, !day.isFuture && !day.date.empty(), selected);
-        }
-
-        // Glow: every positive cell writes into one transparent mask which is
-        // blurred once and composited in a single pass, instead of a shadow object
-        // per cell. Borders then sit on top of the halo.
-        if (!environment.highContrast && graphics.BeginMask(context))
-        {
-            const Color halo = ParseColor(environment.dark ? L"#6969BDFA" : L"#345281D3", Color{});
-            for (const auto& day : traffic.days)
-            {
-                if (day.isFuture || day.level < 2 || day.week < 0 || day.week >= Weeks ||
-                    day.weekday < 0 || day.weekday >= 7) continue;
-                const float cellLeft = gridLeft + WeekdayGutter + day.week * SlotSize +
-                    (SlotSize - CellSize) / 2.0f;
-                const float cellTop = gridTop + day.weekday * SlotSize + (SlotSize - CellSize) / 2.0f;
-                const bool selected = day.date == (traffic.selectedDate.empty() ? traffic.today : traffic.selectedDate);
-                const float spread = (day.isToday || selected) ? 5.0f : 3.0f;
-                Draw::FillRound(context, Draw::Rect(cellLeft - spread, cellTop - spread,
-                    cellLeft + CellSize + spread, cellTop + CellSize + spread), 4.0f + spread,
-                    WithAlpha(halo, (day.isToday || selected) ? 0.9f : 0.55f));
-            }
-            graphics.EndMask(context, 5.0f);
         }
 
         for (const auto& day : traffic.days)

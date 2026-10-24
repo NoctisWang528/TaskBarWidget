@@ -75,6 +75,7 @@ namespace Cards
         Client client;
         std::atomic<bool> visible{ false };
         bool started{ false };
+        bool diagnosticOffscreen{ false };
         HHOOK mouseHook{};
         HHOOK keyboardHook{};
         bool shuttingDown{ false };
@@ -333,7 +334,11 @@ namespace Cards
             auto* card = Card(slot.kind);
             if (!card) continue;
             if (slot.kind == Kind::Update && !updateVisible) continue;
-            card->Place(slot.bounds, slot.scale);
+            RECT bounds = slot.bounds;
+            if (diagnosticOffscreen) OffsetRect(&bounds,
+                GetSystemMetrics(SM_XVIRTUALSCREEN) - bounds.right - 1000,
+                GetSystemMetrics(SM_YVIRTUALSCREEN) - bounds.bottom - 1000);
+            card->Place(bounds, slot.scale);
             if (showAll) card->Show(animate);
         }
         // Cards that are no longer part of the layout must hide, not linger.
@@ -392,7 +397,8 @@ namespace Cards
         if (window) KillTimer(window, IdleTimer);
         if (cards.empty()) CreateCards();
         PlaceGroup(true, true);
-        if (auto* card = Card(Kind::Media); card && card->Visible()) SetForegroundWindow(card->Handle());
+        if (!diagnosticOffscreen)
+            if (auto* card = Card(Kind::Media); card && card->Visible()) SetForegroundWindow(card->Handle());
         InstallHooks();
         RequestInitialState();
     }
@@ -668,6 +674,7 @@ namespace Cards
 
     void CardHost::Impl::InstallHooks()
     {
+        if (diagnosticOffscreen) return;
         if (mouseHook || keyboardHook) return;
         Impl::activeHook = this;
         mouseHook = SetWindowsHookExW(WH_MOUSE_LL, [](int code, WPARAM keys, LPARAM data) -> LRESULT
@@ -1117,8 +1124,11 @@ namespace Cards
         }
         ready.set_value(true);
 
-        client.Start(window);
-        SendSnapshotRequest();
+        if (!diagnosticOffscreen)
+        {
+            client.Start(window);
+            SendSnapshotRequest();
+        }
 
         MSG message{};
         while (GetMessageW(&message, nullptr, 0, 0) > 0)
@@ -1153,8 +1163,9 @@ namespace Cards
     CardHost::CardHost() : impl(std::make_shared<Impl>()) {}
     CardHost::~CardHost() { Stop(); }
 
-    bool CardHost::Start(HWND owner, HINSTANCE instance)
+    bool CardHost::Start(HWND owner, HINSTANCE instance, bool diagnosticOffscreen)
     {
+        impl->diagnosticOffscreen = diagnosticOffscreen;
         return impl->Start(owner, instance);
     }
 

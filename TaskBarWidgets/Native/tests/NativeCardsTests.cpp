@@ -5,8 +5,70 @@
 #include "CardDraw.h"
 #include <iostream>
 #include <stdexcept>
+#include <dbghelp.h>
+#pragma comment(lib, "dbghelp.lib")
+
+static LONG WINAPI ReportCrash(EXCEPTION_POINTERS* exception)
+{
+    const HANDLE process = GetCurrentProcess();
+    SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
+    SymInitialize(process, nullptr, TRUE);
+    CONTEXT context = *exception->ContextRecord;
+    STACKFRAME64 frame{};
+    frame.AddrPC.Offset = context.Rip; frame.AddrPC.Mode = AddrModeFlat;
+    frame.AddrStack.Offset = context.Rsp; frame.AddrStack.Mode = AddrModeFlat;
+    frame.AddrFrame.Offset = context.Rbp; frame.AddrFrame.Mode = AddrModeFlat;
+    std::cerr << "Native probe exception: 0x" << std::hex << exception->ExceptionRecord->ExceptionCode << '\n';
+    for (int depth = 0; depth < 20 && frame.AddrPC.Offset; ++depth)
+    {
+        char storage[sizeof(SYMBOL_INFO) + MAX_SYM_NAME]{};
+        auto* symbol = reinterpret_cast<SYMBOL_INFO*>(storage);
+        symbol->SizeOfStruct = sizeof(SYMBOL_INFO); symbol->MaxNameLen = MAX_SYM_NAME;
+        DWORD64 displacement{};
+        if (SymFromAddr(process, frame.AddrPC.Offset, &displacement, symbol))
+            std::cerr << symbol->Name << "+0x" << displacement << '\n';
+        else std::cerr << "0x" << frame.AddrPC.Offset << '\n';
+        IMAGEHLP_LINE64 line{sizeof(line)};
+        DWORD lineOffset{};
+        if (SymGetLineFromAddr64(process, frame.AddrPC.Offset, &lineOffset, &line))
+            std::cerr << line.FileName << ':' << std::dec << line.LineNumber << std::hex << '\n';
+        if (!StackWalk64(IMAGE_FILE_MACHINE_AMD64, process, GetCurrentThread(), &frame, &context,
+            nullptr, SymFunctionTableAccess64, SymGetModuleBase64, nullptr)) break;
+    }
+    return EXCEPTION_EXECUTE_HANDLER;
+}
 
 static void Require(bool ok, const char* message) { if (!ok) throw std::runtime_error(message); }
+static int VisibleProbeCards()
+{
+    int count = 0;
+    EnumWindows([](HWND window, LPARAM data) -> BOOL
+    {
+        DWORD process{};
+        GetWindowThreadProcessId(window, &process);
+        wchar_t name[80]{};
+        GetClassNameW(window, name, ARRAYSIZE(name));
+        if (process == GetCurrentProcessId() && wcscmp(name, L"TaskBarWidgetsCardWindow") == 0 && IsWindowVisible(window))
+        {
+            RECT bounds{}; GetWindowRect(window, &bounds);
+            if (bounds.right < GetSystemMetrics(SM_XVIRTUALSCREEN) &&
+                bounds.bottom < GetSystemMetrics(SM_YVIRTUALSCREEN)) ++*reinterpret_cast<int*>(data);
+        }
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&count));
+    return count;
+}
+
+static void WaitForCards(Cards::CardHost& host, int count)
+{
+    const auto deadline = GetTickCount64() + 10000;
+    while (GetTickCount64() < deadline)
+    {
+        if (host.Visible() == (count != 0) && VisibleProbeCards() == count) return;
+        Sleep(10);
+    }
+    throw std::runtime_error("host toggle did not show/hide the expected offscreen windows");
+}
 struct Services : Cards::CardHostServices
 {
     std::wstring action;
@@ -17,11 +79,26 @@ struct Services : Cards::CardHostServices
     void OnLayoutInvalidated() override {}
 };
 
-int main()
+void WriteTrafficPreviews(Cards::Graphics& graphics, const wchar_t* directory);
+
+int wmain(int argc, wchar_t** argv)
 {
+    SetUnhandledExceptionFilter(ReportCrash);
+    std::cout.setf(std::ios::unitbuf);
     try
     {
         winrt::init_apartment(winrt::apartment_type::single_threaded);
+        if (argc == 3 && wcscmp(argv[1], L"--traffic-preview") == 0)
+        {
+            {
+                Cards::Graphics graphics;
+                Require(graphics.Initialize(), "preview graphics initialization");
+                WriteTrafficPreviews(graphics, argv[2]);
+            }
+            winrt::uninit_apartment();
+            std::cout << "Traffic previews exported using the product painter.\n";
+            return 0;
+        }
         {
             Cards::Runtime runtime;
             winrt::check_hresult(runtime.Initialize());
@@ -102,10 +179,23 @@ int main()
         winrt::uninit_apartment();
         {
             Cards::CardHost host;
-            Require(host.Start(nullptr, GetModuleHandleW(nullptr)), "card STA bootstrap");
+            std::cout << "Checking the card host toggle path...\n";
+            Require(host.Start(nullptr, GetModuleHandleW(nullptr), true), "card STA bootstrap");
+            Cards::Config config;
+            config.resourceMode = L"OnDemand";
+            for (auto& [id, enabled] : config.enabled) enabled = true;
+            host.ApplyConfig(config);
+            const POINT anchor{ GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN) };
+            host.Toggle(anchor);
+            WaitForCards(host, 4);
+            host.Toggle(anchor);
+            WaitForCards(host, 0);
+            host.Toggle(anchor);
+            WaitForCards(host, 4);
             host.Stop();
+            Require(VisibleProbeCards() == 0, "host shutdown must destroy the card windows");
         }
-        std::cout << "Native card rendering, mask restore, scaled hit-testing and STA shutdown passed.\n";
+        std::cout << "Native card rendering, mask restore, scaled hit-testing, host toggle/reopen and STA shutdown passed.\n";
         return 0;
     }
     catch (const winrt::hresult_error& e) { std::cerr << "HRESULT " << std::hex << e.code().value << '\n'; return 1; }

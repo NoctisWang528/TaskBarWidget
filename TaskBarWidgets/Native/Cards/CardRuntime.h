@@ -56,7 +56,14 @@ namespace Cards
                 }
                 dispatcher = nullptr;
             }
-            if (initialized) shutdown();
+            // C++/WinRT caches activation factories across apartments. Release
+            // those references before the bootstrap can unload their runtime;
+            // a later card STA must not call a factory in an unloaded module.
+            if (initialized)
+            {
+                winrt::clear_factory_cache();
+                shutdown();
+            }
             if (module) FreeLibrary(module);
         }
     private:

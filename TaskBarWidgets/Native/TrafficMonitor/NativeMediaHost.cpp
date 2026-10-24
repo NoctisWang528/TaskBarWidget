@@ -339,7 +339,7 @@ struct NativeMediaHost::Impl
     void Send(const JsonObject& message)
     {
         const auto action = message.GetNamedString(L"action", L"");
-        if (action == L"togglePanel" || action == L"openSettings")
+        if (action == L"openSettings")
         {
             if (UpdateHealth::AwaitingHealth()) return;
             const DWORD pid = helperPid;
@@ -1000,6 +1000,13 @@ struct NativeMediaHost::Impl
                 WeatherCommand(message);
             else if (action == L"quickCards")
                 ApplyQuickCards(message);
+            else if (action == L"toggleCards")
+            {
+                const double x = Number(message, L"x");
+                const double y = Number(message, L"y");
+                if (x >= LONG_MIN && x <= LONG_MAX && y >= LONG_MIN && y <= LONG_MAX)
+                    NativeMediaHost::ToggleCards(POINT{ static_cast<LONG>(x), static_cast<LONG>(y) });
+            }
             else if (action == L"hideCards")
             {
                 if (cards) cards->Hide(L"settings");
@@ -1360,15 +1367,10 @@ struct NativeMediaHost::Impl
         if (clickLogs++ < 192)
             Log(L"Panel gesture=" + std::to_wstring(gesture));
         RECT bounds{};
-        GetWindowRect(owner, &bounds);
-        auto message = Command(L"togglePanel");
-        message.SetNamedValue(L"x", JsonValue::CreateNumberValue((bounds.left + bounds.right) / 2));
-        message.SetNamedValue(L"y", JsonValue::CreateNumberValue(bounds.top));
-        message.SetNamedValue(L"entryWindow",
-            JsonValue::CreateNumberValue(static_cast<double>(reinterpret_cast<INT_PTR>(owner))));
-        message.SetNamedValue(L"gestureId",
-            JsonValue::CreateNumberValue(static_cast<double>(gesture)));
-        Send(message);
+        if (!GetWindowRect(owner, &bounds)) return;
+        // Monitoring, media and tray clicks share this entry. Cards now live in
+        // this process; forwarding to the retired WinUI togglePanel is a no-op.
+        NativeMediaHost::ToggleCards(POINT{ bounds.left + (bounds.right - bounds.left) / 2, bounds.top });
     }
 
     void ShowMenu()
@@ -1538,6 +1540,7 @@ NativeMediaHost::~NativeMediaHost()
 
 void NativeMediaHost::ToggleCards(POINT anchor)
 {
+    if (UpdateHealth::AwaitingHealth()) return;
     auto& instance = Shared();
     if (!instance) return;
     if (!instance->cards)
@@ -1547,12 +1550,14 @@ void NativeMediaHost::ToggleCards(POINT anchor)
         instance->cards = std::make_shared<Cards::CardHost>();
         if (!instance->cards->Start(instance->owner, AfxGetInstanceHandle()))
         {
+            instance->Log(L"Native card host startup failed.", E_FAIL);
             instance->cards.reset();
             return;
         }
         if (instance->cardConfigReady) instance->cards->ApplyConfig(instance->cardConfig);
     }
     instance->cards->SetOwner(instance->owner);
+    if (instance->clickLogs++ < 192) instance->Log(L"Native card toggle requested.");
     instance->cards->Toggle(anchor);
 }
 

@@ -159,10 +159,8 @@ public partial class App : System.Windows.Application
                 _ = Dispatcher.BeginInvoke(() => TaskObserver.Observe(ShutdownAsync(), "helper shutdown"));
                 break;
             case "togglePanel":
-                if (TryNumber(command, "x", out var x) && TryNumber(command, "y", out var y) && _ui is not null)
-                    await _ui.SendAsync("togglePanel", x, y, entryWindow: ValidatedEntryWindow(command),
-                        gestureId: command.TryGetProperty("gestureId", out var gesture) && gesture.TryGetInt64(out var gestureId) ? gestureId : 0,
-                        toolWindowTheme: (int)Settings.ToolWindowTheme, quickCards: QuickCards());
+                if (TryNumber(command, "x", out var x) && TryNumber(command, "y", out var y))
+                    await ToggleNativeCardsAsync(x, y);
                 break;
             case "openSettings":
                 if (_ui is not null) await _ui.SendAsync("openSettings", page: command.TryGetProperty("page", out var page) ? page.GetString() : null);
@@ -300,17 +298,6 @@ public partial class App : System.Windows.Application
                 throw new ArgumentException("不支持的卡片操作。");
         }
     }
-
-    private long ValidatedEntryWindow(JsonElement command)
-    {
-        if (!command.TryGetProperty("entryWindow", out var value) || !value.TryGetInt64(out var handle) || handle <= 0) return 0;
-        var window = (nint)handle;
-        if (!IsWindow(window)) return 0;
-        GetWindowThreadProcessId(window, out var process);
-        return process == _host.Id ? handle : 0;
-    }
-    [DllImport("user32.dll")] private static extern bool IsWindow(nint window);
-    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
 
     // Runs on the dispatcher. Reading the bridge's visible flag here, instead of
     // pushing a captured boolean from the pipe thread, makes the last state win.
@@ -622,9 +609,11 @@ public partial class App : System.Windows.Application
     {
         var screen = System.Windows.Forms.Screen.FromPoint(System.Windows.Forms.Cursor.Position);
         var area = screen.WorkingArea;
-        if (_ui is not null) TaskObserver.Observe(_ui.SendAsync("togglePanel", area.Left + area.Width / 2.0, area.Bottom,
-            toolWindowTheme: (int)Settings.ToolWindowTheme, quickCards: QuickCards()), "WinUI cards");
+        TaskObserver.Observe(ToggleNativeCardsAsync(area.Left + area.Width / 2.0, area.Bottom), "native cards");
     }
+    private Task ToggleNativeCardsAsync(double x, double y) => _pipe is not null
+        ? _pipe.SendCommandAsync(new { version = 1, type = "command", action = "toggleCards", x, y }, _stop.Token)
+        : Task.CompletedTask;
     private object QuickCards() => new { order = Settings.QuickCardOrder, columns = Settings.QuickCardColumns, enabled = Settings.QuickCardEnabled,
         resourceMode = Settings.QuickCardResourceMode.ToString(), font = Settings.CardFontFamily,
         mica = new
