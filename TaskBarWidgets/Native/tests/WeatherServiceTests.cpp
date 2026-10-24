@@ -15,22 +15,62 @@ namespace {
     std::atomic<bool> badRealtime{}, optionalFailure{}, invalidAuthorization{}, blockRealtime{};
     std::atomic<int> qweatherCode{}, alertMode{}, chinaAlertMode{};
     std::wstring lastAlertUrl;
+    std::wstring lastAirUrl, errorType, failurePath;
+    int airMode{}, requestCount{}, geoCount{}, failureHttp{};
+    bool transportFailure{};
+    bool interruptedBody{};
     HANDLE requestEntered{}, releaseRequest{};
     void Require(bool condition, const char* message) { if (!condition) throw std::runtime_error(message); }
     bool Transport(const wchar_t* address, const wchar_t* header, std::wstring& content, bool redirects)
     {
         const std::wstring url(address), headers(header ? header : L"");
         if (url.find(L"qweatherapi.com") != std::wstring::npos) {
+            ++requestCount;
+            if (interruptedBody) {
+                WeatherCCommon::SetTestResponse(failureHttp ? failureHttp : 200, 12030, WeatherCCommon::RequestStage::Read);
+                content = LR"({"code":"200","now":{"temp":"99","icon":"100","text":"晴"}})";
+                return false;
+            }
+            if (transportFailure) {
+                WeatherCCommon::SetTestResponse(0, 12029, WeatherCCommon::RequestStage::Connect);
+                return false;
+            }
+            if (failureHttp && (failurePath.empty() || url.find(failurePath) != std::wstring::npos)) {
+                WeatherCCommon::SetTestResponse(failureHttp, 0);
+                content = L"{\"error\":{\"type\":\"" + errorType + L"\",\"title\":\"fixture-key\",\"detail\":\"fixture-key\"}}";
+                return false;
+            }
             if (redirects || headers.find(L"X-QW-Api-Key: fixture-key") == std::wstring::npos || url.find(L"fixture-key") != std::wstring::npos || url.find(L"https://test.qweatherapi.com/") != 0) invalidAuthorization = true;
             if (qweatherCode) { content = L"{\"code\":\"" + std::to_wstring(qweatherCode.load()) + L"\"}"; return true; }
             if (url.find(L"/geo/v2/city/lookup") != std::wstring::npos) {
+                ++geoCount;
                 const auto cityId = url.find(L"location=101010100") != std::wstring::npos ? L"101010100" : L"101190101";
                 content = L"{\"code\":\"200\",\"location\":[{\"name\":\"南京\",\"id\":\"" + std::wstring(cityId) +
                     L"\",\"adm2\":\"南京\",\"adm1\":\"江苏\",\"lat\":\"32.05838\",\"lon\":\"118.79647\"}]}";
                 if (alertMode == 6) content = LR"({"code":"200","location":[{"id":"101010100","lat":"NaN","lon":"181"}]})";
+                if (alertMode == 8) content = LR"({"code":"200","location":[{"id":"unrelated","lat":"32.05","lon":"118.79"}]})";
             }
             else if (url.find(L"/v7/weather/now") != std::wstring::npos) content = LR"({"code":"200","now":{"temp":"23","feelsLike":"22","obsTime":"bad","text":"晴","icon":"100"}})";
             else if (url.find(L"/v7/weather/3d") != std::wstring::npos) content = LR"({"code":"200","daily":[{"tempMin":"19","tempMax":"25"},{"tempMin":"20","tempMax":"26"},{"tempMin":"21","tempMax":"27"}]})";
+            else if (url.find(L"/airquality/v1/current/") != std::wstring::npos) {
+                lastAirUrl = url;
+                if (airMode == 7) {
+                    WeatherCCommon::SetTestResponse(403, 0);
+                    content = LR"({"error":{"type":"https://dev.qweather.com/docs/resource/error-code/#no-credit","detail":"fixture-key"}})";
+                    return false;
+                }
+                if (airMode == 1) {
+                    WeatherCCommon::SetTestResponse(403, 0);
+                    content = LR"({"error":{"type":"https://dev.qweather.com/docs/resource/error-code/#forbidden","detail":"fixture-key"}})";
+                    return false;
+                }
+                if (airMode == 2) content = LR"({"metadata":{"zeroResult":true,"attributions":["Zero result attribution"]}})";
+                else if (airMode == 3) content = LR"({"metadata":{},"indexes":[]})";
+                else if (airMode == 4) content = LR"({"metadata":{},"indexes":[{"code":"qaqi","name":"QAQI","aqiDisplay":"0.8","level":"1","category":"Excellent"},{"code":"us-epa","name":"US","aqiDisplay":"40","level":"1","category":"Good"}],"pollutants":[{"code":"pm2p5","concentration":{"value":-1,"unit":"ug/m3"}},{"code":"pm10","concentration":{"unit":"ug/m3"}}]})";
+                else if (airMode == 5 || airMode == 6) content = airMode == 5 ? LR"({"metadata":{},"indexes":[{"code":"qaqi","name":"QAQI","aqiDisplay":"0.8","level":"1","category":"Excellent"}],"pollutants":[]})" : LR"({"metadata":{},"indexes":[{"code":"qaqi","name":"QAQI","aqiDisplay":"0.8","level":"1","category":"Excellent"}],"pollutants":[{"code":"pm2p5","concentration":{"value":4}}]})";
+                else content = LR"({"metadata":{"attributions":["Air fixture attribution"]},"indexes":[{"code":"qaqi","name":"QAQI","aqiDisplay":"0.8","level":"1","category":"Excellent"},{"code":"us-epa","name":"US","aqiDisplay":"40","level":"1","category":"Good"},{"code":"cn-mee","name":"中国 AQI","aqiDisplay":"25","level":"1","category":"优"}],"pollutants":[{"code":"pm2p5","concentration":{"value":0,"unit":"ug/m3"}},{"code":"pm10","concentration":{"value":12.5,"unit":"ug/m3"}}]})";
+            }
+            else if (url.find(L"/v7/air/now") != std::wstring::npos) throw std::runtime_error("retired air endpoint used");
             else if (url.find(L"/weatheralert/v1/current/") != std::wstring::npos) {
                 lastAlertUrl = url;
                 if (alertMode == 1) return false;
@@ -162,6 +202,90 @@ int wmain(int argc, wchar_t** argv)
             result.status.details.Alerts[0].Text == L"注意防范大风。" && result.status.details.Alerts[0].Severity == L"moderate" &&
             result.status.details.Alerts[0].Level == L"黄色" && result.status.details.AlertsAttribution.find(L"QWeather synthetic attribution") != std::wstring::npos &&
             lastAlertUrl.find(L"/weatheralert/v1/current/32.06/118.80") != std::wstring::npos, "new QWeather warning URL, mapping or cancellation filtering failed");
+        Require(result.status.details.AirQuality.IndexCode == L"cn-mee" && result.status.details.AirQuality.AQI == L"25" &&
+            result.status.details.AirQuality.PM2p5 == L"0" && result.status.details.AirQuality.PM10 == L"12.5" &&
+            result.status.details.AirQuality.PM2p5Unit == L"ug/m3" && result.status.details.AirQuality.PM10Unit == L"ug/m3" &&
+            result.status.details.AirQuality.PublishTime.empty() && result.status.details.AirQuality.Attribution == L"Air fixture attribution" &&
+            lastAirUrl.find(L"/airquality/v1/current/32.06/118.80") != std::wstring::npos, "v1 air mapping, zero concentration or invented time");
+        geoCount = 0; result = Wait(service.StartRefresh());
+        Require(geoCount == 1, "air and alerts did not share one Geo lookup");
+        result = Wait(service.StartRefresh()); Require(geoCount == 2, "Geo coordinates persisted across refreshes");
+        airMode = 1; lastAlertUrl.clear(); result = Wait(service.StartRefresh());
+        Require(result.state == L"success" && result.status.details.AirQuality.AQI == L"25" &&
+            result.status.details.AirQuality.Error.find(L"上次数据可能过时") != std::wstring::npos && !lastAlertUrl.empty() &&
+            result.message.find(L"fixture-key") == std::wstring::npos, "endpoint air permission failure blocked alerts or lost stale data");
+        airMode = 3; result = Wait(service.StartRefresh());
+        Require(result.status.details.AirQuality.AQI == L"25" && !result.status.details.AirQuality.Error.empty(), "malformed air discarded cache");
+        airMode = 0; result = Wait(service.StartRefresh());
+        Require(result.status.details.AirQuality.Error.empty(), "air recovery retained error");
+        airMode = 2; result = Wait(service.StartRefresh());
+        Require(result.status.details.AirQuality.AQI.empty() && result.status.details.AirQuality.Error.empty() &&
+            result.status.details.AirQuality.Attribution == L"Zero result attribution", "zero-result air did not clear cache or retain current attribution");
+        airMode = 4; result = Wait(service.StartRefresh());
+        Require(result.status.details.AirQuality.IndexCode == L"us-epa" && result.status.details.AirQuality.PM2p5.empty() &&
+            result.status.details.AirQuality.PM10.empty(), "local index fallback or missing/negative concentration became zero");
+        airMode = 5; result = Wait(service.StartRefresh());
+        Require(result.status.details.AirQuality.IndexCode == L"qaqi", "QAQI fallback missing");
+        airMode = 6; result = Wait(service.StartRefresh());
+        Require(result.status.details.AirQuality.PM2p5 == L"4" && result.status.details.AirQuality.PM2p5Unit.empty(), "missing concentration unit invented");
+        airMode = 7; lastAlertUrl.clear(); requestCount = 0; result = Wait(service.StartRefresh());
+        Require(result.state == L"success" && requestCount == 4 && lastAlertUrl.empty() &&
+            result.status.details.AirQuality.Error.find(L"上次数据可能过时") != std::wstring::npos &&
+            data.m_api_hfw->GetLastError().find(L"空气质量获取失败") == std::wstring::npos &&
+            result.status.details.AirQuality.Error.find(L"空气质量获取失败", 1) == std::wstring::npos,
+            "shared air failure repeated reason or did not short circuit alerts");
+        airMode = 0; result = Wait(service.StartRefresh());
+        data.m_api_hfw->config.ShowAirQuality = false;
+        Require(data.m_api_hfw->QueryRealtimeAirQuality(city.cityId.value()) &&
+            data.m_api_hfw->GetWeatherDetails()->AirQuality.AQI.empty(), "disabled air retained data");
+        data.m_api_hfw->config.ShowAirQuality = true;
+        const auto geoBeforeCoordinates = geoCount;
+        Require(data.m_api_hfw->QueryRealtimeAirQuality(L"120.12,30.34") &&
+            lastAirUrl.find(L"/airquality/v1/current/30.34/120.12") != std::wstring::npos && geoCount == geoBeforeCoordinates,
+            "direct coordinate air query changed coordinates or requested Geo");
+        airMode = 1;
+        Require(!data.m_api_hfw->QueryRealtimeAirQuality(L"101010100") &&
+            data.m_api_hfw->GetWeatherDetails()->AirQuality.AQI.empty() &&
+            data.m_api_hfw->GetWeatherDetails()->AirQuality.Error.find(L"无可用的上次信息") != std::wstring::npos &&
+            data.m_api_hfw->GetLastError().find(L"空气质量获取失败") == std::wstring::npos,
+            "air query city switch retained previous city or nested module error");
+        airMode = 0;
+        const std::wstring typePrefix = L"https://dev.qweather.com/docs/resource/error-code/#";
+        for (const auto* kind : {L"unauthorized", L"invalid-host", L"security-restriction", L"no-credit", L"overdue", L"account-suspension", L"too-many-requests"}) {
+            failureHttp = std::wstring(kind) == L"unauthorized" ? 401 : std::wstring(kind) == L"too-many-requests" ? 429 : 403;
+            errorType = typePrefix + kind; requestCount = 0;
+            result = Wait(service.StartRefresh());
+            Require(result.state == L"error" && requestCount == 1 && result.message.find(L"fixture-key") == std::wstring::npos,
+                "shared account failure did not short circuit or leaked error body");
+        }
+        for (const auto* kind : {L"forbidden", L"deprecated", L"data-not-available", L"unknown"}) {
+            failureHttp = 403; errorType = typePrefix + kind; requestCount = 0;
+            result = Wait(service.StartRefresh());
+            Require(requestCount > 1 && result.message.find(L"fixture-key") == std::wstring::npos,
+                "endpoint-only failure blocked independent requests or leaked body");
+        }
+        failureHttp = 403; errorType = typePrefix + L"security-restriction"; failurePath = L"/v7/weather/3d"; requestCount = 0;
+        result = Wait(service.StartRefresh());
+        Require(result.state == L"error" && result.status.stale && requestCount == 2 && result.message.find(L"安全限制") != std::wstring::npos,
+            "forecast shared failure was hidden by successful current weather");
+        failurePath.clear();
+        failureHttp = 0; transportFailure = true; requestCount = 0;
+        result = Wait(service.StartRefresh());
+        Require(result.state == L"error" && requestCount == 1 && result.message.find(L"连接") != std::wstring::npos &&
+            result.message.find(L"fixture-key") == std::wstring::npos, "transport failure classification or short circuit missing");
+        transportFailure = false; interruptedBody = true; requestCount = 0;
+        result = Wait(service.StartRefresh());
+        Require(result.state == L"error" && requestCount == 1 && result.message.find(L"HTTP 200") == std::wstring::npos &&
+            result.message.find(L"读取响应体") != std::wstring::npos && result.status.details.Current.Temperature != L"99",
+            "HTTP 200 interrupted body parsed as success or hid Read stage");
+        Require(!data.m_api_hfw->QueryRealtimeWeather(city.cityId.value()) &&
+            data.m_api_hfw->GetWeatherDetails()->Current.Temperature != L"99", "incomplete body mutated provider data");
+        failureHttp = 401; requestCount = 0; result = Wait(service.StartRefresh());
+        Require(result.state == L"error" && requestCount == 1 && result.message.find(L"HTTP 401") != std::wstring::npos &&
+            result.message.find(L"读取响应体") != std::wstring::npos, "HTTP auth failure lost status or Read diagnosis");
+        failureHttp = 0;
+        interruptedBody = false; result = Wait(service.StartRefresh());
+        Require(result.state == L"success" && result.status.details.AirQuality.Error.empty(), "shared failure recovery failed");
         alertMode = 1; result = Wait(service.StartRefresh());
         Require(result.state == L"success" && result.status.details.Alerts.size() == 1 && !result.status.details.AlertsError.empty() &&
             !result.status.details.AlertsAttribution.empty(), "QWeather warning failure hidden or cache discarded");
@@ -185,6 +309,26 @@ int wmain(int argc, wchar_t** argv)
         Require(data.m_api_hfw->QueryWeatherAlerts(L"120.12,30.34") &&
             lastAlertUrl.find(L"/weatheralert/v1/current/30.34/120.12") != std::wstring::npos,
             "coordinate warning query used a nearby city's coordinates");
+        alertMode = 8; lastAirUrl.clear();
+        Require(!data.m_api_hfw->QueryRealtimeAirQuality(L"101010100") && lastAirUrl.empty(), "Geo accepted another city ID");
+        alertMode = 0;
+        {
+            const auto originalIni = Read(ini);
+            auto legacyIni = originalIni;
+            Require(PluginIniOptions::SetValue(legacyIni, "hfw", "ApiHost", "h2a9cf3mhs.xy.qweatherapi.com"), "legacy host fixture missing");
+            { std::ofstream file(ini, std::ios::binary); file << legacyIni; }
+            data.ReloadConfigs(); requestCount = 0;
+            const auto rejectedSearch = Wait(service.StartSearch(1, L"南京"));
+            const auto rejectedRefresh = Wait(service.StartRefresh());
+            Require(rejectedSearch.state == L"error" && rejectedRefresh.state == L"error" && requestCount == 0 &&
+                !rejectedSearch.message.empty(), "legacy placeholder host caused network traffic");
+            CityInfoList unused;
+            Require(!data.m_api_hfw->QueryCity(L"南京", unused) && !data.m_api_hfw->QueryRealtimeWeather(L"101010100") &&
+                !data.m_api_hfw->QueryForecastWeather(L"101010100") && !data.m_api_hfw->QueryRealtimeAirQuality(L"101010100") &&
+                !data.m_api_hfw->QueryWeatherAlerts(L"101010100") && requestCount == 0, "provider entry bypassed placeholder validation");
+            { std::ofstream file(ini, std::ios::binary); file << originalIni; }
+            data.ReloadConfigs();
+        }
         credentials.clearApiKey = true; result = Wait(service.StartConfigure(credentials)); Require(result.state == L"success" && !result.status.hasApiKey, "explicit key clearing");
         city.provider = 1; result = Wait(service.StartConfigure(city)); Require(result.state == L"error" && result.status.lastAttemptUnix > 0 && result.message.find(L"API Key") != std::wstring::npos, "missing credential status");
         Require(!invalidAuthorization, "unsafe request transport");

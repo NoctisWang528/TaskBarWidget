@@ -17,8 +17,12 @@ public:
     static bool GetUrl(const wchar_t* url, const wchar_t* headers, std::wstring& content, bool allow_redirects = true);
     static unsigned long LastHttpStatus();
     static unsigned long LastTransportError();
+    enum class RequestStage { None, Url, Session, Options, Connect, Request, Send, Receive, Headers, Read };
+    static RequestStage LastRequestStage();
+    static std::wstring LastTransportErrorMessage();
 #ifdef TBW_WEATHER_TESTS
     using TestTransport = bool (*)(const wchar_t*, const wchar_t*, std::wstring&, bool);
     static void SetTestTransport(TestTransport transport);
+    static void SetTestResponse(unsigned long httpStatus, unsigned long transportError, RequestStage stage = RequestStage::None);
 #endif
 };
