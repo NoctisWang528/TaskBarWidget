@@ -85,7 +85,6 @@ std::wstring WeatherService::ApiHostError(const std::wstring& value)
 {
     const auto host = NormalizeApiHost(value);
     if (!host) return L"请输入控制台分配的专属 qweatherapi.com 域名；仅支持 HTTPS，不接受路径、端口或账户信息。";
-    if (*host == L"h2a9cf3mhs.xy.qweatherapi.com") return L"这是和风天气文档的示例 Host，请填写账户控制台分配的专属 Host。";
     return L"";
 }
 void WeatherService::Validate(const ConfigPatch& patch)

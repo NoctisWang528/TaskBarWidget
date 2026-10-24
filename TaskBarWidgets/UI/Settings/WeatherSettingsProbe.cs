@@ -69,7 +69,7 @@ public sealed partial class SettingsWindow
                             if (payload.ContainsKey("provider") || payload.ContainsKey("city")) throw new InvalidOperationException("Credential save changed the city/provider.");
                             if (failCredentials && payload["clearApiKey"]?.ToString() != "true")
                             {
-                                completed["success"] = false; completed["error"] = "模拟连接验证失败：不可使用文档示例，请从已登录账户控制台 → 设置 → APIHost 复制，不要修改后缀。";
+                                completed["success"] = false; completed["error"] = "模拟连接验证失败：网络连接失败（阶段：发送请求）。";
                             }
                             else
                             {
@@ -197,7 +197,7 @@ public sealed partial class SettingsWindow
             failCredentials = true;
             await window.SaveWeatherCredentialsAsync(page, false).WaitAsync(timeout.Token);
             if (hasKey || apiHost.Length != 0 || page.Message.Severity != InfoBarSeverity.Error || page.ApiKey.Password != "synthetic-probe-key" ||
-                page.ApiHost.Text != "probe.qweatherapi.com" || !page.Message.Message.Contains("不可使用文档示例") || page.Provider.SelectedIndex != 1 || !page.ProviderEdited || page.Refresh.IsEnabled)
+                page.ApiHost.Text != "probe.qweatherapi.com" || !page.Message.Message.Contains("模拟连接验证失败") || page.Provider.SelectedIndex != 1 || !page.ProviderEdited || page.Refresh.IsEnabled)
                 throw new InvalidOperationException("Failed credential validation lost its draft or changed saved credentials.");
             failCredentials = false;
             var connectionSave = window.SaveWeatherCredentialsAsync(page, false);
@@ -234,7 +234,7 @@ public sealed partial class SettingsWindow
             window.ShowPage("general"); await pending.WaitAsync(timeout.Token);
             if (window._weatherPage is not null || activated) throw new InvalidOperationException("Leaving the weather page retained it or probe activated a window.");
             if (backend.IsFaulted) await backend;
-            return new { typedCitySearch = true, explicitSelectionAndSave = true, staleProviderResultsDiscarded = true, writeOnlyPassword = true, blankKeyPreserved = true, explicitClear = true, refreshErrorAndRecovery = true, airQualityWarning = true, exampleHostDraftPreserved = true, initialUpdatingStatusPolled = true, globalSaveMutualExclusion = true, pageCancellation = true, realWeatherOrCredentialsTouched = false };
+            return new { typedCitySearch = true, explicitSelectionAndSave = true, staleProviderResultsDiscarded = true, writeOnlyPassword = true, blankKeyPreserved = true, explicitClear = true, refreshErrorAndRecovery = true, airQualityWarning = true, connectionDraftPreserved = true, initialUpdatingStatusPolled = true, globalSaveMutualExclusion = true, pageCancellation = true, realWeatherOrCredentialsTouched = false };
         }
         finally
         {
