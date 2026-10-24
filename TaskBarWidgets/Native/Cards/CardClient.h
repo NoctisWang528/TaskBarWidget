@@ -39,7 +39,10 @@ namespace Cards
         // Queues one request. \`payload\` is raw JSON for the \`payload\` member and
         // may be empty. Returns the request id used, or an empty string when the
         // queue is full.
-        std::wstring Request(const std::wstring& action, const std::string& payload = {});
+        // \`kind\` prefixes the request id so the host can route the reply
+        // (audio / traffic / weather / media / update / state).
+        std::wstring Request(const std::wstring& action, const std::string& payload = {},
+            const wchar_t* kind = L"misc");
 
         // Drains received messages. Only called on the card UI thread.
         std::vector<std::string> TakeMessages();

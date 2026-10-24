@@ -167,6 +167,9 @@ internal sealed class UiHostBridge : IAsyncDisposable
         if (connected) BeginConnection(generation);
         else EndConnection(generation);
     }
+    // Health mode asks for the process without a settings command.
+    internal void StartOnDemand() => EnsureProcess();
+
     private void EnsureProcess()
     {
         if (_disposed || _process is { HasExited: false }) return;

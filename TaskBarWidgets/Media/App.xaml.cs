@@ -27,6 +27,7 @@ public partial class App : System.Windows.Application
     private CardSnapshotBuilder? _cardSnapshot;
     private AudioSnapshot? _lastAudio;
     private UpdateSnapshot? _lastUpdate;
+    private bool _healthUiStarted;
     private UpdateCoordinator? _updates;
     private UpdateInstallBridge? _updateInstaller;
     private UpdateSnapshot _updateUnavailable = new() { Phase = "error", Error = "更新服务尚未准备好。" };
@@ -72,7 +73,7 @@ public partial class App : System.Windows.Application
             // this one implementation of audio/media/weather/history so the two
             // front-ends can never disagree about device state.
             _cardSnapshot = new CardSnapshotBuilder();
-            _cards = new NativeCardBridge($"TaskBarWidgets.Cards.{Environment.ProcessId}",
+            _cards = new NativeCardBridge($"TaskBarWidgets.Cards.{_host.Id}",
                 BuildCardSnapshot,
                 (request, generation, token) => Dispatcher.InvokeAsync(() =>
                     HandleCardRequestAsync(request, generation, token)).Task.Unwrap());
@@ -145,6 +146,12 @@ public partial class App : System.Windows.Application
             case "openSettings":
                 if (_ui is not null) await _ui.SendAsync("openSettings", page: command.TryGetProperty("page", out var page) ? page.GetString() : null);
                 break;
+            case "startUiHealth":
+                // Health mode is the only path that starts settings without a user
+                // action; the window itself stays hidden until the user opens it.
+                _healthUiStarted = _healthUiStarted || (_ui is not null);
+                _ui?.StartOnDemand();
+                break;
             case "hideCards":
                 // The settings window owns dismissal: native cards hide, but the
                 // WinUI cards no longer exist to hide.
@@ -198,7 +205,8 @@ public partial class App : System.Windows.Application
             case "getState":
                 return BuildCardSnapshot();
             case "getUpdateState":
-                return _updates?.Snapshot ?? _updateUnavailable;
+                return _cardSnapshot?.DescribeUpdate(_updates?.Snapshot ?? _updateUnavailable)
+                    ?? _updateUnavailable;
             case "downloadUpdate": return _updates?.Download() ?? _updateUnavailable;
             case "cancelUpdateDownload": return _updates?.CancelDownload() ?? _updateUnavailable;
             case "installUpdate":
@@ -266,7 +274,8 @@ public partial class App : System.Windows.Application
                     throw new ArgumentException("不支持的媒体操作。");
                 await _media.CommandAsync(command,
                     TryNumber(payload, "positionSeconds", out var position) ? position : null);
-                return BuildCardSnapshot();
+                // The reply is the media block itself: the card applies it directly.
+                return _cardSnapshot!.DescribeMedia(_media);
             }
             case "getTrafficHistory":
             {
@@ -335,6 +344,14 @@ public partial class App : System.Windows.Application
                 return _updateInstaller?.Begin(_stop.Token) ?? _updateUnavailable;
             case "reportUiReady":
                 await _nativeSettings!.RequestAsync("updateUiReady", cancellationToken: token);
+                // A health-only UI exits immediately after reporting; an ordinary
+                // settings process keeps living with its window.
+                if (_healthUiStarted)
+                {
+                    _healthUiStarted = false;
+                    if (_ui is not null)
+                        TaskObserver.Observe(_ui.SendAsync("shutdown"), "health ui shutdown");
+                }
                 return new { success = true };
             case "subscribeCardLyrics":
                 var cardVisible = payload.GetProperty("visible").GetBoolean();

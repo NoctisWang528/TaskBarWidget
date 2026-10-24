@@ -44,11 +44,12 @@ namespace Cards
         if (stopEvent) { CloseHandle(stopEvent); stopEvent = nullptr; }
     }
 
-    std::wstring Client::Request(const std::wstring& action, const std::string& payload)
+    std::wstring Client::Request(const std::wstring& action, const std::string& payload,
+        const wchar_t* kind)
     {
         const unsigned long long id = ++sequence;
-        wchar_t identifier[32]{};
-        swprintf_s(identifier, L"c%llu", id);
+        wchar_t identifier[64]{};
+        swprintf_s(identifier, L"%s%llu", kind ? kind : L"misc", id);
         std::wstring message = L"{\"version\":1,\"type\":\"command\",\"action\":\"cardRequest\",\"requestId\":\"";
         message += identifier;
         message += L"\",\"payload\":{\"action\":\"";

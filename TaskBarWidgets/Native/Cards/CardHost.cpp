@@ -197,12 +197,12 @@ namespace Cards
 
     void CardHost::Impl::RequestInitialState()
     {
-        client.Request(L"getAudio");
-        client.Request(L"getTrafficHistory");
-        client.Request(L"weatherCommand", "{\"operation\":\"status\"}");
-        client.Request(L"getState");
-        client.Request(L"getUpdateState");
-        client.Request(L"subscribeCardLyrics", "{\"visible\":true,\"session\":1}");
+        client.Request(L"getAudio", {}, L"audio");
+        client.Request(L"getTrafficHistory", {}, L"traffic");
+        client.Request(L"weatherCommand", "{\"operation\":\"status\"}", L"weather");
+        client.Request(L"getState", {}, L"state");
+        client.Request(L"getUpdateState", {}, L"update");
+        client.Request(L"subscribeCardLyrics", "{\"visible\":true,\"session\":1}", L"lyrics");
     }
 
     void CardHost::Impl::CreateCards()
@@ -477,6 +477,30 @@ namespace Cards
                         changed = true;
                     }
                 }
+                else if (reply.requestId.rfind(L"state", 0) == 0)
+                {
+                    Protocol::Changes stateChanges;
+                    if (Protocol::ApplySnapshot(snapshot, reply.payloadJson, stateChanges))
+                    {
+                        accumulated.config |= stateChanges.config;
+                        accumulated.media |= stateChanges.media;
+                        accumulated.audio |= stateChanges.audio;
+                        accumulated.lyrics |= stateChanges.lyrics;
+                        accumulated.traffic |= stateChanges.traffic;
+                        accumulated.weather |= stateChanges.weather;
+                        accumulated.update |= stateChanges.update;
+                        accumulated.status |= stateChanges.status;
+                        changed = true;
+                    }
+                }
+                else if (reply.requestId.rfind(L"update", 0) == 0)
+                {
+                    if (Protocol::ApplyUpdateReply(snapshot.update, reply.payloadJson))
+                    {
+                        accumulated.update = true;
+                        changed = true;
+                    }
+                }
                 UNREFERENCED_PARAMETER(colon);
             }
             else if (message.kind == Protocol::Kind::Event && message.action == L"shutdown")
@@ -619,25 +643,33 @@ namespace Cards
 
     void CardHost::Impl::OnRequest(const std::wstring& action, const std::wstring& jsonPayload)
     {
-        // Card actions map onto the small set of card-channel requests.
+        // Card actions map onto the small set of card-channel requests. The request
+        // `kind` tags the reply so it lands in the right state block.
         std::wstring request = action;
         std::wstring payload;
+        const wchar_t* kind = L"misc";
         const auto quote = [](const std::wstring& value) { return Cards::Protocol::JsonString(value); };
 
         if (action == L"previous" || action == L"playPause" || action == L"next")
         {
             payload = L"{\"action\":" + quote(action) + L"}";
             request = L"mediaCommand";
+            kind = L"media";
         }
         else if (action == L"seek")
         {
-            payload = L"{\"action\":\"seek\",\"positionSeconds\":" + jsonPayload + L"}";
+            // The slider reports a 0..1 ratio; Media needs seconds.
+            const double ratio = std::clamp(_wtof(jsonPayload.c_str()), 0.0, 1.0);
+            const double seconds = ratio * (std::max)(0.0, snapshot.media.duration);
+            payload = L"{\"action\":\"seek\",\"positionSeconds\":" + std::to_wstring(seconds) + L"}";
             request = L"mediaCommand";
+            kind = L"media";
         }
         else if (action == L"refreshWeather")
         {
             request = L"weatherCommand";
             payload = L"{\"operation\":\"refresh\"}";
+            kind = L"weather";
         }
         else if (action == L"openSettings")
         {
@@ -648,6 +680,7 @@ namespace Cards
             action == L"cancelUpdateDownload")
         {
             request = action;
+            kind = L"update";
         }
         else if (action.rfind(L"toggleMute:", 0) == 0)
         {
@@ -660,6 +693,7 @@ namespace Cards
             payload = L"{\"muted\":" + std::wstring(endpoint->isMuted ? L"false" : L"true") +
                 L",\"flow\":" + quote(flow) + L",\"deviceId\":" + quote(endpoint->id) + L"}";
             request = L"setMute";
+            kind = L"audio";
         }
         else if (action.rfind(L"setVolume:", 0) == 0)
         {
@@ -672,11 +706,12 @@ namespace Cards
             payload = L"{\"volume\":" + jsonPayload + L",\"flow\":" + quote(flow) +
                 L",\"deviceId\":" + quote(endpoint->id) + L"}";
             request = L"setVolume";
+            kind = L"audio";
         }
         else if (action.rfind(L"showDevices:", 0) == 0)
         {
-            request = L"openMenu";
-            payload = L"{\"menu\":\"devices\",\"flow\":" + quote(action.substr(12)) + L"}";
+            ShowDeviceMenu(action.substr(12));
+            return;
         }
         else if (action == L"selectDay")
         {
@@ -686,10 +721,12 @@ namespace Cards
         }
         else if (action == L"showSources")
         {
+            ShowSourceMenu();
             return;
         }
-        if (!request.empty()) client.Request(request, Cards::WideToUtf8(payload));
+        if (!request.empty()) client.Request(request, Cards::WideToUtf8(payload), kind);
     }
+
     void CardHost::Impl::OnHideCards(const std::wstring& reason) { HideAll(reason, true); }
 
     // The menu is drawn by the shared popup window; selection is turned back into

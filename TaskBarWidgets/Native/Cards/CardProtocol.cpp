@@ -465,6 +465,19 @@ namespace Cards::Protocol
         catch (...) { return false; }
     }
 
+    bool ApplyUpdateReply(UpdateState& target, const std::wstring& payloadJson)
+    {
+        try
+        {
+            const auto payload = JsonObject::Parse(payloadJson);
+            if (!payload) return false;
+            Protocol::Changes changes;
+            UNREFERENCED_PARAMETER(changes);
+            return UpdateFrom(payload, target);
+        }
+        catch (...) { return false; }
+    }
+
     bool ApplyMediaReply(MediaState& target, const std::wstring& payloadJson)
     {
         try { return MediaFrom(JsonObject::Parse(payloadJson), target); }

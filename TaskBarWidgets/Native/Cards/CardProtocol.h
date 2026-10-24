@@ -73,6 +73,7 @@ namespace Cards::Protocol
     bool ApplyAudioReply(AudioState& target, const std::wstring& payloadJson);
     bool ApplyTrafficReply(TrafficState& target, const std::wstring& payloadJson);
     bool ApplyWeatherReply(WeatherState& target, const std::wstring& payloadJson);
+    bool ApplyUpdateReply(UpdateState& target, const std::wstring& payloadJson);
     bool ApplyMediaReply(MediaState& target, const std::wstring& payloadJson);
 
     // Builders for the requests the card UI issues.

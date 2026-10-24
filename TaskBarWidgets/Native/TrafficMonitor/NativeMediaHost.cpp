@@ -862,6 +862,9 @@ struct NativeMediaHost::Impl
             appearancePending = true;
             renderer.SetVisible(false, false);
             Log(L"Native media renderer initialized; waiting for the first full frame.");
+            // The post-update health check needs the settings UI once, to prove the
+            // WinUI half of the product still loads. Normal startup never does this.
+            if (UpdateHealth::AwaitingHealth()) Send(Command(L"startUiHealth"));
             return true;
         }
         if (type == L"frame")
