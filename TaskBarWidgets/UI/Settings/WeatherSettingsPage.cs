@@ -88,7 +88,7 @@ public sealed partial class SettingsWindow
         body.Children.Add(page.SwitchProvider);
         body.Children.Add(page.Status); body.Children.Add(page.LastAttempt); body.Children.Add(page.LastSuccess); body.Children.Add(page.Message);
         page.Credentials.Children.Add(new TextBlock { Text = "和风天气连接", FontSize = 16, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        page.Credentials.Children.Add(Copy("登录自己的和风天气账户，从控制台 → 设置 → APIHost 复制完整主机名；不可使用文档示例，也不要自行修改后缀。API Key 使用同一账户的凭据。保存前验证连接，失败保留输入且不保存；留空保留已有值。验证成功不会切换当前来源或城市，请搜索选择城市后保存，或点击“切换来源并刷新”。"));
+        page.Credentials.Children.Add(Copy("请原样填写账户控制台提供的完整 API Host，不要自行修改主机名或后缀。程序仅检查域名格式，连接是否可用由实际请求结果判断。API Key 使用同一账户的凭据。保存前验证连接，失败保留输入且不保存；留空保留已有值。验证成功不会切换当前来源或城市，请搜索选择城市后保存，或点击“切换来源并刷新”。"));
         page.Credentials.Children.Add(page.ApiHost); page.Credentials.Children.Add(page.ApiKey); page.Credentials.Children.Add(page.KeyStatus);
         var connectionActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         connectionActions.Children.Add(page.SaveCredentials); connectionActions.Children.Add(page.ClearKey); page.Credentials.Children.Add(connectionActions);

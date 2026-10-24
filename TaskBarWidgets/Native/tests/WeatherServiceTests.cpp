@@ -15,7 +15,7 @@ namespace {
     std::atomic<bool> badRealtime{}, optionalFailure{}, invalidAuthorization{}, blockRealtime{};
     std::atomic<int> qweatherCode{}, alertMode{}, chinaAlertMode{};
     std::wstring lastAlertUrl;
-    std::wstring lastAirUrl, errorType, failurePath;
+    std::wstring lastAirUrl, errorType, failurePath, transportHost{L"test.qweatherapi.com"};
     int airMode{}, requestCount{}, geoCount{}, failureHttp{};
     bool transportFailure{};
     bool interruptedBody{};
@@ -40,7 +40,7 @@ namespace {
                 content = L"{\"error\":{\"type\":\"" + errorType + L"\",\"title\":\"fixture-key\",\"detail\":\"fixture-key\"}}";
                 return false;
             }
-            if (redirects || headers.find(L"X-QW-Api-Key: fixture-key") == std::wstring::npos || url.find(L"fixture-key") != std::wstring::npos || url.find(L"https://test.qweatherapi.com/") != 0) invalidAuthorization = true;
+            if (redirects || headers.find(L"X-QW-Api-Key: fixture-key") == std::wstring::npos || url.find(L"fixture-key") != std::wstring::npos || url.find(L"https://" + transportHost + L"/") != 0) invalidAuthorization = true;
             if (qweatherCode) { content = L"{\"code\":\"" + std::to_wstring(qweatherCode.load()) + L"\"}"; return true; }
             if (url.find(L"/geo/v2/city/lookup") != std::wstring::npos) {
                 ++geoCount;
@@ -314,19 +314,24 @@ int wmain(int argc, wchar_t** argv)
         alertMode = 0;
         {
             const auto originalIni = Read(ini);
-            auto legacyIni = originalIni;
-            Require(PluginIniOptions::SetValue(legacyIni, "hfw", "ApiHost", "h2a9cf3mhs.xy.qweatherapi.com"), "legacy host fixture missing");
-            { std::ofstream file(ini, std::ios::binary); file << legacyIni; }
-            data.ReloadConfigs(); requestCount = 0;
-            const auto rejectedSearch = Wait(service.StartSearch(1, L"南京"));
-            const auto rejectedRefresh = Wait(service.StartRefresh());
-            Require(rejectedSearch.state == L"error" && rejectedRefresh.state == L"error" && requestCount == 0 &&
-                !rejectedSearch.message.empty(), "legacy placeholder host caused network traffic");
-            CityInfoList unused;
-            Require(!data.m_api_hfw->QueryCity(L"南京", unused) && !data.m_api_hfw->QueryRealtimeWeather(L"101010100") &&
-                !data.m_api_hfw->QueryForecastWeather(L"101010100") && !data.m_api_hfw->QueryRealtimeAirQuality(L"101010100") &&
-                !data.m_api_hfw->QueryWeatherAlerts(L"101010100") && requestCount == 0, "provider entry bypassed placeholder validation");
+            for (const auto* customHost : {L"test.xy.qweatherapi.com", L"test.re.qweatherapi.com"}) {
+                Require(WeatherService::ApiHostError(customHost).empty(), "valid custom host rejected before request");
+                transportHost = customHost;
+                auto customIni = originalIni;
+                Require(PluginIniOptions::SetValue(customIni, "hfw", "ApiHost", WeatherCCommon::UnicodeToStr(customHost, true)), "custom host fixture missing");
+                { std::ofstream file(ini, std::ios::binary); file << customIni; }
+                data.ReloadConfigs(); requestCount = 0;
+                const auto searched = Wait(service.StartSearch(1, L"南京"));
+                const auto refreshed = Wait(service.StartRefresh());
+                Require(searched.state == L"success" && refreshed.state == L"success" && requestCount > 0 && !invalidAuthorization,
+                    "custom host did not reach provider request path");
+                WeatherService::ConfigPatch connection; connection.credentialsOnly = true; connection.apiHost = customHost;
+                const auto configured = Wait(service.StartConfigure(connection));
+                Require(configured.state == L"success" && configured.status.apiHost == customHost && configured.status.hasApiKey,
+                    "custom host verification or saving rejected valid provider response");
+            }
             { std::ofstream file(ini, std::ios::binary); file << originalIni; }
+            transportHost = L"test.qweatherapi.com";
             data.ReloadConfigs();
         }
         credentials.clearApiKey = true; result = Wait(service.StartConfigure(credentials)); Require(result.state == L"success" && !result.status.hasApiKey, "explicit key clearing");

@@ -101,7 +101,7 @@ if (-not $result.weatherCardControls.providerNeutralSnapshot -or -not $result.we
     -not $result.weatherCardControls.staleRetained -or -not $result.weatherCardControls.emptyStateRefresh -or
     -not $result.weatherCardControls.disabledCardWindowReleased -or
     -not $result.weatherCardControls.reenabledCardWindowRecreated) { throw 'Weather card component checks did not complete.' }
-if (-not $result.weatherControls.airQualityWarning -or -not $result.weatherControls.exampleHostDraftPreserved) {
+if (-not $result.weatherControls.airQualityWarning -or -not $result.weatherControls.connectionDraftPreserved) {
     throw 'Weather settings did not verify partial air-quality errors and connection draft preservation.'
 }
 foreach ($pointer in @($result.layoutChecks | Where-Object kind -eq 'modulePointerMessages')) {
