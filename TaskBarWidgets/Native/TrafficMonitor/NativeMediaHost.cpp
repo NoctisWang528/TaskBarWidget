@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "NativeMediaHost.h"
+#include "../Cards/CardHost.h"
 #include "MediaAnimation.h"
 #include "MediaDisplayState.h"
 #include "MediaFrameContract.h"
@@ -135,6 +136,11 @@ struct NativeMediaHost::Impl
     bool rendererNeedsState{ true };
     bool coverDirty{ true };
     std::uint64_t coverVersion{};
+    std::shared_ptr<Cards::CardHost> cards;
+    // Configuration can arrive before the first click; it is cached so the card
+    // thread and its graphics device are created only when cards are opened.
+    bool cardConfigReady{};
+    Cards::Config cardConfig;
 
     explicit Impl(HWND hwnd) : owner(hwnd)
     {
@@ -891,6 +897,7 @@ struct NativeMediaHost::Impl
             }
             firstFramePending = false;
             stateDirty = true;
+            ApplyQuickCards(message);
             if (update.cover) coverDirty = true;
             state.Frame(update.frame.sourceId, update.frame.isPlaying,
                 update.frame.hasMedia);
@@ -927,6 +934,16 @@ struct NativeMediaHost::Impl
                 TrafficHistory(message);
             else if (action == L"weatherCommand")
                 WeatherCommand(message);
+            else if (action == L"quickCards")
+                ApplyQuickCards(message);
+            else if (action == L"hideCards")
+            {
+                if (cards) cards->Hide(L"settings");
+            }
+            else if (action == L"cardMicaPreview")
+                ApplyCardMicaPreview(message);
+            else if (action == L"cardThemePreview")
+                ApplyCardThemePreview(message);
             else if (action == L"openMonitorSettings")
                 Send(Command(L"openSettings"));
             else if (action == L"showMedia")
@@ -991,6 +1008,128 @@ struct NativeMediaHost::Impl
                 break;
             }
         }
+    }
+
+    // The card group's configuration travels with the media frame so ordering,
+    // enablement, resource mode, font and Mica tuning stay in one owner.
+    // The card group's configuration travels from Media (its single owner) as a
+    // `quickCards` command. Ordering, enablement, resource mode, font and Mica
+    // tuning are adopted verbatim rather than re-derived here.
+    void ApplyQuickCards(const winrt::Windows::Data::Json::JsonObject& message)
+    {
+        try
+        {
+            winrt::Windows::Data::Json::JsonObject quick{ nullptr };
+            if (message.HasKey(L"payload"))
+            {
+                const auto payload = message.GetNamedValue(L"payload");
+                if (payload.ValueType() == winrt::Windows::Data::Json::JsonValueType::Object)
+                    quick = payload.GetObject();
+            }
+            if (!quick && message.HasKey(L"quickCards")) quick = message.GetNamedObject(L"quickCards");
+            if (!quick) return;
+
+            Cards::Config config;
+            if (quick.HasKey(L"order"))
+            {
+                config.order.clear();
+                for (const auto& entry : quick.GetNamedArray(L"order"))
+                    config.order.push_back(entry.GetString().c_str());
+            }
+            if (quick.HasKey(L"columns"))
+            {
+                const auto columns = quick.GetNamedObject(L"columns");
+                for (const wchar_t* id : { L"weather", L"traffic", L"device", L"media" })
+                    if (columns.HasKey(id))
+                        config.columns[id] = static_cast<int>(columns.GetNamedNumber(id));
+            }
+            if (quick.HasKey(L"enabled"))
+            {
+                const auto enabled = quick.GetNamedObject(L"enabled");
+                for (const wchar_t* id : { L"weather", L"traffic", L"device", L"media" })
+                    if (enabled.HasKey(id))
+                        config.enabled[id] = enabled.GetNamedBoolean(id);
+            }
+            if (quick.HasKey(L"resourceMode"))
+                config.resourceMode = quick.GetNamedString(L"resourceMode").c_str();
+            if (quick.HasKey(L"font"))
+                config.font = quick.GetNamedString(L"font").c_str();
+            if (quick.HasKey(L"mica"))
+            {
+                const auto mica = quick.GetNamedObject(L"mica");
+                const auto number = [&mica](const wchar_t* key, double fallback)
+                {
+                    return mica.HasKey(key) ? mica.GetNamedNumber(key) : fallback;
+                };
+                config.mica.vivid = mica.HasKey(L"vivid") ? mica.GetNamedBoolean(L"vivid") : true;
+                config.mica.tint = number(L"tintOpacity", config.mica.tint);
+                config.mica.luminosity = number(L"luminosityOpacity", config.mica.luminosity);
+                config.mica.darkTint = number(L"darkTintOpacity", config.mica.darkTint);
+                config.mica.darkLuminosity = number(L"darkLuminosityOpacity", config.mica.darkLuminosity);
+            }
+            cardConfigReady = true;
+            cardConfig = config;
+            if (cards) cards->ApplyConfig(config);
+        }
+        catch (const winrt::hresult_error&) { }
+    }
+
+    // Draft appearance from the settings window: it changes what the cards draw
+    // and is discarded without touching the committed configuration.
+    void ApplyCardMicaPreview(const winrt::Windows::Data::Json::JsonObject& message)
+    {
+        if (!cards) return;
+        Cards::MicaTuning tuning;
+        tuning.tint = cards->CommittedMica().tint;
+        tuning.luminosity = cards->CommittedMica().luminosity;
+        tuning.darkTint = cards->CommittedMica().darkTint;
+        tuning.darkLuminosity = cards->CommittedMica().darkLuminosity;
+        bool enabled = false, vivid = false;
+        try
+        {
+            if (message.HasKey(L"payload"))
+            {
+                const auto payload = message.GetNamedValue(L"payload");
+                if (payload.ValueType() == winrt::Windows::Data::Json::JsonValueType::Object)
+                {
+                    const auto body = payload.GetObject();
+                    enabled = body.HasKey(L"enabled") && body.GetNamedBoolean(L"enabled");
+                    vivid = body.HasKey(L"vivid") && body.GetNamedBoolean(L"vivid");
+                    const auto number = [&body](const wchar_t* key, double fallback)
+                    {
+                        return body.HasKey(key) ? body.GetNamedNumber(key) : fallback;
+                    };
+                    tuning.tint = number(L"tintOpacity", tuning.tint);
+                    tuning.luminosity = number(L"luminosityOpacity", tuning.luminosity);
+                    tuning.darkTint = number(L"darkTintOpacity", tuning.darkTint);
+                    tuning.darkLuminosity = number(L"darkLuminosityOpacity", tuning.darkLuminosity);
+                }
+            }
+        }
+        catch (const winrt::hresult_error&) { return; }
+        if (enabled) cards->PreviewMica(vivid, tuning);
+        else if (cards->HasPreview()) cards->ClearPreview();
+    }
+
+    void ApplyCardThemePreview(const winrt::Windows::Data::Json::JsonObject& message)
+    {
+        if (!cards) return;
+        bool enabled = false, dark = false;
+        try
+        {
+            if (message.HasKey(L"payload"))
+            {
+                const auto payload = message.GetNamedValue(L"payload");
+                if (payload.ValueType() == winrt::Windows::Data::Json::JsonValueType::Object)
+                {
+                    const auto body = payload.GetObject();
+                    enabled = body.HasKey(L"enabled") && body.GetNamedBoolean(L"enabled");
+                    dark = body.HasKey(L"dark") && body.GetNamedBoolean(L"dark");
+                }
+            }
+        }
+        catch (const winrt::hresult_error&) { return; }
+        cards->PreviewTheme(dark, enabled);
     }
 
     NativeMedia::NativeAppearance CurrentAppearance() const
@@ -1320,6 +1459,36 @@ NativeMediaHost::~NativeMediaHost()
     m_impl->mediaPresented = false;
     m_impl->owner = nullptr;
     m_impl->wakeOwner = nullptr;
+}
+
+void NativeMediaHost::ToggleCards(POINT anchor)
+{
+    auto& instance = Shared();
+    if (!instance) return;
+    if (!instance->cards)
+    {
+        // The card thread, its compositor and graphics device exist only once the
+        // user actually opens cards.
+        instance->cards = std::make_shared<Cards::CardHost>();
+        if (!instance->cards->Start(instance->owner, AfxGetInstanceHandle()))
+        {
+            instance->cards.reset();
+            return;
+        }
+        if (instance->cardConfigReady) instance->cards->ApplyConfig(instance->cardConfig);
+    }
+    if (instance->cards->Visible()) instance->cards->Hide(L"toggle");
+    else
+    {
+        instance->cards->Refresh();
+        instance->cards->Show(anchor);
+    }
+}
+
+bool NativeMediaHost::CardsVisible()
+{
+    auto& instance = Shared();
+    return instance && instance->cards && instance->cards->Visible();
 }
 
 void NativeMediaHost::Shutdown()

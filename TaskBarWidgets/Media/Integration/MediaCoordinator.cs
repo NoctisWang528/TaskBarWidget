@@ -74,6 +74,9 @@ internal sealed class MediaCoordinator : IDisposable
 
     internal object Snapshot() => Volatile.Read(ref _frame);
     internal object CardSnapshot => Volatile.Read(ref _card);
+    // Typed accessor for the native card pipe, which needs the structure rather
+    // than the already-serialized object.
+    internal CardFrame? CardFrame => Volatile.Read(ref _card);
     internal string CoverDataUrl => _coverData;
     internal MediaControlState ControlState { get; private set; } =
         new("没有媒体", "", "", 0, 0, false, false, false, false, false);

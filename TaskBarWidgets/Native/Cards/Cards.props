@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Native quick-card front-end (C++/WinRT + Direct2D + Composition).
+
+     The Microsoft.UI projection headers are generated at build time from the
+     Windows App SDK metadata already restored into .packages, so no generated
+     code is checked in and the build stays reproducible without extra tooling. -->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <CardPackageRoot>$(MSBuildThisFileDirectory)..\..\.packages</CardPackageRoot>
+    <CardMetadata>$(CardPackageRoot)\microsoft.windowsappsdk.interactiveexperiences\2.1.9\metadata\10.0.18362.0</CardMetadata>
+    <CardProjectionDir>$(IntDir)CardProjection</CardProjectionDir>
+    <CardWinAppSdkInclude>$(CardPackageRoot)\microsoft.windowsappsdk.runtime\2.5.1\include</CardWinAppSdkInclude>
+    <!-- Resolved from the platform toolset so the SDK pick matches the rest of
+         the native build. -->
+    <CardCppWinRT>$(WindowsSdkDir)bin\$(TargetPlatformVersion)\x64\cppwinrt.exe</CardCppWinRT>
+  </PropertyGroup>
+
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(CardProjectionDir);$(MSBuildThisFileDirectory);$(CardWinAppSdkInclude);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <!-- NOMINMAX is defined by CardPch.h instead of here: the project-wide
+           definitions would also apply to the MFC sources that rely on max(). -->
+    </ClCompile>
+    <Link>
+      <!-- WindowsApp.lib carries the WinRT activation for the composition and
+           system-backdrop factories; the rest are the card graphics stack. -->
+      <AdditionalDependencies>windowsapp.lib;d2d1.lib;d3d11.lib;dwrite.lib;dxgi.lib;windowscodecs.lib;dcomp.lib;crypt32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+
+  <ItemGroup>
+    <ClCompile Include="$(MSBuildThisFileDirectory)CardTypes.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)CardText.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)CardLayout.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)CardDraw.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)CardGraphics.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)CardIcons.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)CardProtocol.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)CardClient.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)CardWindow.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)CardPopup.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)CardHost.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)CardMeasure.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)MediaCard.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)DeviceCard.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)TrafficCard.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)WeatherCard.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)UpdateCard.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClInclude Include="$(MSBuildThisFileDirectory)CardPch.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)CardTypes.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)CardText.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)CardLayout.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)CardDraw.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)CardGraphics.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)CardIcons.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)CardProtocol.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)CardClient.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)CardWindow.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)CardPopup.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)CardHost.h" />
+  </ItemGroup>
+
+  <Target Name="GenerateCardProjection"
+          BeforeTargets="ClCompile"
+          Condition="!Exists('$(CardProjectionDir)\winrt\Microsoft.UI.Composition.SystemBackdrops.h')"
+          Inputs="$(CardMetadata)\Microsoft.UI.winmd"
+          Outputs="$(CardProjectionDir)\winrt\Microsoft.UI.Composition.SystemBackdrops.h">
+    <MakeDir Directories="$(CardProjectionDir)" />
+    <Error Condition="!Exists('$(CardCppWinRT)')" Text="cppwinrt.exe was not found at $(CardCppWinRT). Install the Windows SDK matching the project toolset." />
+    <Error Condition="!Exists('$(CardMetadata)\Microsoft.UI.winmd')" Text="Windows App SDK metadata was not restored. Run: dotnet restore scripts/NativePackages.csproj" />
+    <Exec Command="&quot;$(CardCppWinRT)&quot; -in &quot;$(CardMetadata)&quot; -ref sdk -out &quot;$(CardProjectionDir)&quot;"
+          StandardOutputImportance="low" />
+  </Target>
+</Project>

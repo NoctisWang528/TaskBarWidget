@@ -1070,6 +1070,10 @@
     <Touch Files="defaults.rc" AlwaysCreate="false" />
   </Target>
   <Import Project="..\Builtins\Builtins.props" />
+  <!-- Native quick cards: C++/WinRT + Direct2D + system Composition on their own
+       STA thread. The projection headers are generated from the restored
+       Windows App SDK metadata. -->
+  <Import Project="..\Cards\Cards.props" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

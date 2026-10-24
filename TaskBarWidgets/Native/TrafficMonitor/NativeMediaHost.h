@@ -17,6 +17,10 @@ public:
     void AppearanceChanged();
     bool MouseInput(UINT message, WPARAM keys, LPARAM position);
     bool IsVisible() const;
+    // Opens or closes the native quick-card group, which lives on its own STA
+    // thread inside this process. Opening cards never starts WinUI.
+    static void ToggleCards(POINT anchor);
+    static bool CardsVisible();
     static void Shutdown();
     static void OpenSettings(const wchar_t* page = nullptr);
 private:

@@ -61,7 +61,6 @@ internal sealed partial class VividMicaBackdrop : SystemBackdrop
         try { ApplyAppearance(controller); }
         catch (Exception exception) when (exception is COMException or ObjectDisposedException or InvalidOperationException or ArgumentException)
         {
-            CardLifecycleLog.Write($"mica-tuning-failed hr=0x{exception.HResult:X8}");
         }
         StatusChanged?.Invoke();
     }
@@ -94,7 +93,6 @@ internal sealed partial class VividMicaBackdrop : SystemBackdrop
         }
         catch (Exception exception) when (exception is COMException or NotSupportedException or InvalidOperationException or ArgumentException)
         {
-            CardLifecycleLog.Write($"mica-connect-failed hr=0x{exception.HResult:X8}");
             controller?.Dispose();
             ReleaseController();
             _connectionFailed = true;
@@ -139,7 +137,6 @@ internal sealed partial class VividMicaBackdrop : SystemBackdrop
             }
             catch (Exception exception) when (exception is COMException or ObjectDisposedException or InvalidOperationException or ArgumentException)
             {
-                CardLifecycleLog.Write($"mica-policy-update-failed hr=0x{exception.HResult:X8}");
                 return;
             }
             StatusChanged?.Invoke();
@@ -158,7 +155,6 @@ internal sealed partial class VividMicaBackdrop : SystemBackdrop
         }
         catch (Exception exception) when (exception is COMException or ObjectDisposedException or ArgumentException or InvalidOperationException)
         {
-            CardLifecycleLog.Write($"mica-theme-update-failed hr=0x{exception.HResult:X8}");
         }
     }
 

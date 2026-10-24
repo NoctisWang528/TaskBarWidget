@@ -148,7 +148,10 @@ internal sealed class UiHostBridge : IAsyncDisposable
         _server.Publish(new { version = 1, type = "command", action = "cardLyricsFrame", session, payload = frame });
     }
     private readonly string _name;
-    internal UiHostBridge(Func<JsonElement, long, CancellationToken, Task<object?>> request, bool startUiProcess = true, string? pipeName = null)
+    // Settings is started on demand: the constructor no longer launches WinUI,
+    // because a resident settings process is exactly the memory cost this
+    // architecture removes.
+    internal UiHostBridge(Func<JsonElement, long, CancellationToken, Task<object?>> request, bool startUiProcess = false, string? pipeName = null)
     {
         _name = pipeName ?? $"TaskBarWidgets.UI.{Environment.ProcessId}";
         _server = new MediaPipeServer(_name,

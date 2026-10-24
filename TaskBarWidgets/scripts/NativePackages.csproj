@@ -5,6 +5,9 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" Version="2.5.1" />
+    <!-- Native cards use the projection metadata for Microsoft.UI.Composition.SystemBackdrops
+         (Mica) from the same Windows App SDK release family as UI/ does. -->
+    <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="2.1.9" />
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net472" Version="1.0.3" />
   </ItemGroup>
 </Project>

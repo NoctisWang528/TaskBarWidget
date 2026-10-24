@@ -22,50 +22,13 @@ if (-not $result.success) { throw $result.error }
 $runtimePrefix = (Get-SystemDotnetRoot).TrimEnd('\') + '\'
 if (-not $result.runtimeDirectory.StartsWith($runtimePrefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'UI did not use the installed shared .NET runtime.' }
 if ($result.winUiModule -notmatch '\\WindowsApps\\Microsoft.WindowsAppRuntime\.2_[^\\]+_x64__8wekyb3d8bbwe\\') { throw 'UI did not load WinUI from the installed x64 Windows App Runtime package.' }
-if ($result.checks.Count -ne 5 -or @($result.checks | Where-Object { -not $_.loaded -or $_.width -le 0 }).Count) { throw 'Not all five UI surfaces realized their templates.' }
-if (-not $result.audioControls.muteButtonRoundTrip -or -not $result.audioControls.inputMuteButtonRoundTrip -or
-    -not $result.audioControls.volumePreserved -or -not $result.audioControls.staleReplyIgnored -or
-    -not $result.audioControls.iconsUnclipped -or $result.audioControls.scalerIcons -lt 6 -or
-    $result.audioControls.centeredIconHosts -lt 6 -or $result.audioControls.maximumCenterError -gt 0.5 -or
-    -not $result.cardLifecycle.externalClickPolicy) { throw 'Audio controls, icon centering or outside-click component checks did not complete.' }
-if (-not $result.micaControls.fixtureRoundTrip -or -not $result.micaControls.noPresets -or
-    -not $result.micaControls.noMockPreview -or -not $result.micaControls.themeKinds -or
-    -not $result.micaControls.fourSliders -or -not $result.micaControls.legacyCompatible -or
-    -not $result.micaControls.vividSwitch -or
-    ($result.micaControls.available -and (-not $result.micaControls.frameCoalesced -or
-        -not $result.micaControls.vividRoundTrip -or
-        -not $result.micaControls.actualControllers -or -not $result.micaControls.staleSwitchIgnored -or
-        -not $result.micaControls.stableBackdrop -or -not $result.micaControls.savedReadback -or
-        -not $result.micaControls.controllerLifecycle.disconnected -or
-        -not $result.micaControls.discardRestored -or -not $result.micaControls.previewRestoredOnLeave -or
-        -not $result.micaControls.independentThemes -or -not $result.micaControls.reopenRearmsPreview)) -or
-    -not $result.micaControls.limitsClamped -or -not $result.micaControls.defaultsFallback) { throw 'Card Mica settings checks did not complete.' }
-if ($null -eq $result.cardLyricsControls -or -not $result.cardLyricsControls.structuredFixtures -or
-    $result.cardLyricsControls.webView2Used -or $result.cardLyricsControls.htmlParsed -or
-    $result.cardLyricsControls.probeActivated) { throw 'Native lyric cards did not use structured fixtures exclusively.' }
-$lyricKinds = @($result.cardLyricsControls.checks | ForEach-Object kind)
-foreach ($required in @('ordinary','wordScan','pauseFrozen','resume','seek','lineRoll','trackSwitch',
-    'cardFontFallback','mediaHeight','translation','translationRoll','primaryFontResize','translationFontResize',
-    'narrow','longText','alignment','theme','highContrast','reducedMotion','revisionRestart',
-    'hideReopen','unavailable')) {
-    if ($lyricKinds -notcontains $required) { throw "Native lyric check missing: $required" }
-}
-if (-not ($result.cardLyricsControls.checks | Where-Object { $_.kind -eq 'wordScan' }).reusedVisualTree -or
-    ($result.cardLyricsControls.checks | Where-Object { $_.kind -eq 'wordScan' }).remeasured -ne $false -or
-    -not ($result.cardLyricsControls.checks | Where-Object { $_.kind -eq 'primaryFontResize' }).measuredOnFontChange -or
-    -not ($result.cardLyricsControls.checks | Where-Object { $_.kind -eq 'primaryFontResize' }).measuredOnHeightChange -or
-    -not ($result.cardLyricsControls.checks | Where-Object { $_.kind -eq 'primaryFontResize' }).reusedVisualTree -or
-    -not ($result.cardLyricsControls.checks | Where-Object { $_.kind -eq 'translationFontResize' }).measuredOnFontChange -or
-    -not ($result.cardLyricsControls.checks | Where-Object { $_.kind -eq 'translationFontResize' }).reusedVisualTree -or
-    -not ($result.cardLyricsControls.checks | Where-Object { $_.kind -eq 'longText' }).identicalWidth -or
-    @($result.cardLyricsControls.images | Where-Object { $_.path -and (Test-Path -LiteralPath $_.path) -and (Get-Item -LiteralPath $_.path).Length -gt 0 }).Count -lt 5) {
-    throw 'Native lyric visual-tree reuse or nonzero layout captures were not verified.'
-}
-if (-not $result.cardLifecycle.micaNewCardInherits) { throw 'A card created during Mica preview did not inherit it.' }
-if (-not $result.cardLifecycle.micaAlwaysInputActive) { throw 'Card Mica was not configured to remain input-active.' }
-if (-not $result.cardLifecycle.onDemandSkipsPrewarm -or -not $result.cardLifecycle.prewarmRendersHidden) {
-    throw 'Resource-mode prewarm behavior was not verified.'
-}
+if ($result.checks.Count -ne 1 -or @($result.checks | Where-Object { -not $_.loaded -or $_.width -le 0 }).Count) { throw 'The settings surface did not realize its templates.' }
+if (-not $result.weatherControls.typedCitySearch -or -not $result.weatherControls.explicitSelectionAndSave -or
+    -not $result.weatherControls.staleProviderResultsDiscarded -or -not $result.weatherControls.writeOnlyPassword -or
+    -not $result.weatherControls.blankKeyPreserved -or -not $result.weatherControls.explicitClear -or
+    -not $result.weatherControls.refreshErrorAndRecovery -or -not $result.weatherControls.initialUpdatingStatusPolled -or
+    -not $result.weatherControls.globalSaveMutualExclusion -or -not $result.weatherControls.pageCancellation -or
+    $result.weatherControls.realWeatherOrCredentialsTouched) { throw 'Weather settings component checks did not complete.' }
 if (-not $result.offsetSettings.bothPayloadsVisible -or
     $result.offsetSettings.initialActivations -ne 1 -or $result.offsetSettings.initialBatches -ne 1 -or
     $result.offsetSettings.initialFinalRenders -ne 1 -or $result.offsetSettings.redrawQueries -ne 0 -or
@@ -90,13 +53,7 @@ foreach ($layout in @($result.layoutChecks | Where-Object { $_.kind -eq 'setting
 foreach ($spectrum in @($result.layoutChecks | Where-Object { $_.kind -eq 'settingsSpectrumAdvancedFields' })) {
     if ($spectrum.fieldCount -lt 1) { throw 'Spectrum tuning fields were not directly realized.' }
 }
-if (-not $result.weatherCardControls.providerNeutralSnapshot -or -not $result.weatherCardControls.missingDataHidden -or
-    -not $result.weatherCardControls.allAlertsRetained -or -not $result.weatherCardControls.alertRotation -or
-    -not $result.weatherCardControls.singleAlertFixed -or
-    -not $result.weatherCardControls.zeroAlertsBlank -or -not $result.weatherCardControls.micaSurface -or
-    -not $result.weatherCardControls.staleRetained -or -not $result.weatherCardControls.disabledCardWindowReleased -or
-    -not $result.weatherCardControls.reenabledCardWindowRecreated) { throw 'Weather card component checks did not complete.' }
 foreach ($pointer in @($result.layoutChecks | Where-Object kind -eq 'modulePointerMessages')) {
     if (-not $pointer.available) { Write-Host "Actual pointer verification unavailable: $($pointer.reason). Desktop acceptance remains pending." }
 }
-Write-Host "Published settings and four card templates loaded successfully without activation. Report: $report"
+Write-Host "Published settings templates loaded successfully without activation. Report: $report"

@@ -10,7 +10,7 @@ public sealed partial class SettingsWindow
 {
     // Use the caller's already-offscreen window. No system-theme change, saved
     // settings, backend requests, activation or additional HWND is required.
-    internal static async Task<object> ProbeThemeControlsAsync(SettingsWindow window, CardGroup cards)
+    internal static async Task<object> ProbeThemeControlsAsync(SettingsWindow window)
     {
         var top = window._navigation.MenuItems.OfType<NavigationViewItem>().ToArray();
         var lyricsGroup = top.Single(item => Equals(item.Tag, "lyricsGroup"));
@@ -32,7 +32,6 @@ public sealed partial class SettingsWindow
         }
         window.NavigateTo("general");
         var theme = window._media.Get("toolWindowTheme");
-        window.ThemePreviewChanged += cards.SetThemePreview;
         window.ApplyTheme();
         var selector = WalkTheme(window._page).OfType<ComboBox>().Single(box => box.Items.OfType<ComboBoxItem>().Any(item => (item.Tag as JsonNode)?.ToString() == "Dark"));
         var checks = new List<object>();
@@ -70,16 +69,14 @@ public sealed partial class SettingsWindow
                     ? surface.A != 255 || navigationColor.A != 255
                     : surface.A != 0x0A || navigationColor.A != 0)
                     throw new InvalidOperationException("Settings Mica is covered by a duplicate content layer, or high-contrast fallback is transparent.");
-                var cardCheck = await CardGroup.ProbeThemeAsync(cards, expected);
-                checks.Add(new { cardCheck, requested, actual = window._root.ActualTheme.ToString(), surface = surface.ToString(), drawer = drawer.ToString(), unfinishedText = input.Text, retainedDrawer = true });
+                checks.Add(new { requested, actual = window._root.ActualTheme.ToString(), surface = surface.ToString(), drawer = drawer.ToString(), unfinishedText = input.Text, retainedDrawer = true });
             }
         }
         finally
         {
             window._media.SetNode("toolWindowTheme", theme);
             window.ApplyTheme();
-            window.ThemePreviewChanged -= cards.SetThemePreview;
-            window._page.Children.Remove(sectionCard);
+                window._page.Children.Remove(sectionCard);
             window._properties.Children.Remove(pane);
             window._split.IsPaneOpen = false;
         }

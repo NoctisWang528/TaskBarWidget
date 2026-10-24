@@ -11,18 +11,12 @@ public partial class App : Application
 {
     private readonly CancellationTokenSource _lifetime = new();
     private UiConnection? _connection;
-    private CardGroup? _cards;
     private SettingsWindow? _settings;
     private Window? _lifetimeWindow;
     private DispatcherQueue? _dispatcher;
     private bool _stopping;
     private UpdateUiState _updateState = new();
     private bool _installConfirmationOpen, _uiReadyReported, _installAfterDownload;
-    private JsonElement _quickCards;
-    private JsonElement _cardSettings;
-    private bool _cardSettingsApplied;
-    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _prewarmTimer;
-    private readonly PendingPanelToggle _pendingPanel = new();
 
     public App()
     {
@@ -51,14 +45,6 @@ public partial class App : Application
             _ = UiTemplateProbe.RunAsync(this, arguments);
             return;
         }
-        // Desktop-only Mica acceptance helper: shows real card windows briefly on
-        // the primary monitor. Never part of the offscreen validation pass.
-        if (arguments.Contains("--mica-visual-check"))
-        {
-            var dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
-            _ = CardMicaVisualProbe.RunAsync(arguments).ContinueWith(_ => dispatcher.TryEnqueue(Exit));
-            return;
-        }
         var hostIndex = Array.IndexOf(arguments, "--host-pid");
         var pipeIndex = Array.IndexOf(arguments, "--pipe-name");
         if (hostIndex < 0 || hostIndex + 1 >= arguments.Length ||
@@ -79,66 +65,6 @@ public partial class App : Application
         _connection.ConnectionChanged += OnBackendConnectionChanged;
         _connection.Start();
         _ = WatchHostAsync(hostPid);
-        // User-facing windows are created only when the backend requests them.
-        // Prewarm them once the UI has settled so the first click is warm.
-        _prewarmTimer = _dispatcher.CreateTimer();
-        _prewarmTimer.Interval = TimeSpan.FromMilliseconds(300);
-        _prewarmTimer.IsRepeating = false;
-        _prewarmTimer.Tick += (_, _) => _ = PrewarmCardsAsync();
-        _prewarmTimer.Start();
-    }
-
-    // Resident prewarm realizes cards while hidden. On-demand
-    // mode creates no card surface and still reports UI health.
-    private async Task PrewarmCardsAsync()
-    {
-        if (_stopping || _connection is null) return;
-        try
-        {
-            if (_quickCards.ValueKind != JsonValueKind.Object)
-            {
-                // Media owns the quick-card configuration; reading it once lets
-                // prewarm build exactly the cards this user has enabled. On-demand
-                // mode deliberately creates no card surface until the first click.
-                try
-                {
-                    var settings = await _connection.RequestAsync("getMediaSettings", cancellationToken: _lifetime.Token);
-                    _cardSettings = settings.Clone();
-                    if (IsOnDemand(settings))
-                    {
-                        if (_cards is not null && !_cardSettingsApplied)
-                        {
-                            _cards.ApplyQuickCardsFromSettings(settings);
-                            _cardSettingsApplied = true;
-                        }
-                        CardLifecycleLog.Write("prewarm-skipped resource-mode=on-demand");
-                        return;
-                    }
-                    _cards ??= new CardGroup(_connection, OpenSettings);
-                    _cards.ApplyQuickCardsFromSettings(settings);
-                    _cardSettingsApplied = true;
-                }
-                catch (Exception readError) when (readError is not OutOfMemoryException)
-                {
-                    // Keep the built-in defaults; the first toggle applies the
-                    // real configuration before showing anything.
-                    CardLifecycleLog.Write($"prewarm-settings-unavailable hr=0x{readError.HResult:X8}");
-                    _cards ??= new CardGroup(_connection, OpenSettings);
-                }
-            }
-            else
-            {
-                if (IsOnDemand(_quickCards))
-                {
-                    CardLifecycleLog.Write("prewarm-skipped resource-mode=on-demand");
-                    return;
-                }
-                _cards ??= new CardGroup(_connection, OpenSettings);
-            }
-            await _cards.PrewarmAsync();
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        { CardLifecycleLog.Write($"prewarm-start-failed hr=0x{exception.HResult:X8}"); }
     }
 
     private static bool IsOnDemand(JsonElement settings) =>
@@ -152,19 +78,6 @@ public partial class App : Application
         // Timestamped on the receiving thread so the timing log separates pipe
         // and dispatcher wait from UI-thread work.
         var receivedAt = DateTimeOffset.Now;
-        if (message.TryGetProperty("action", out var action) && action.GetString() == "togglePanel")
-        {
-            // Repeated clicks while the UI is busy are retries of the pending
-            // gesture. Do not replay an entire open/close storm after recovery.
-            if (_pendingPanel.Post(message, receivedAt))
-            {
-                if (_dispatcher?.TryEnqueue(() =>
-                {
-                    if (_pendingPanel.Take() is { } panel) HandleBackendEvent(panel.Message, panel.ReceivedAt);
-                }) != true) _pendingPanel.Take();
-            }
-            return;
-        }
         _dispatcher?.TryEnqueue(() => HandleBackendEvent(message, receivedAt));
     }
 
@@ -174,46 +87,9 @@ public partial class App : Application
         var payload = message.TryGetProperty("payload", out var value) && value.ValueKind == JsonValueKind.Object ? value : message;
         switch (action.GetString())
         {
-            case "togglePanel":
-                var prepareTiming = Stopwatch.StartNew();
-                CardLifecycleLog.Write($"toggle-received gesture={(message.TryGetProperty("gestureId", out var gesture) ? gesture.ToString() : "0")}");
-                if (payload.ValueKind == JsonValueKind.Object &&
-                    payload.TryGetProperty("x", out var x) && x.TryGetDouble(out var px) && double.IsFinite(px) &&
-                    payload.TryGetProperty("y", out var y) && y.TryGetDouble(out var py) && double.IsFinite(py))
-                {
-                    if (payload.TryGetProperty("quickCards", out var quickCards) && quickCards.ValueKind == JsonValueKind.Object)
-                        _quickCards = quickCards.Clone();
-                    _cards ??= new CardGroup(_connection, OpenSettings);
-                    if (!_cardSettingsApplied && _cardSettings.ValueKind == JsonValueKind.Object)
-                    {
-                        _cards.ApplyQuickCardsFromSettings(_cardSettings);
-                        _cardSettingsApplied = true;
-                    }
-                    // ToggleAtPhysicalPoint positions an opening group once;
-                    // a closing group needs no hidden layout rebuild.
-                    _cards.ApplyQuickCards(_quickCards, reposition: false);
-                    CardTimingLog.Write($"configured elapsedMs={prepareTiming.Elapsed.TotalMilliseconds:0.0}");
-                    if (_settings?.ActiveMicaPreview is { } micaPreview)
-                        _cards.SetMicaPreview(micaPreview.Preview, micaPreview.Committed);
-                    _cards.UpdateActionRequested -= OnUpdateActionRequested;
-                    _cards.UpdateActionRequested += OnUpdateActionRequested;
-                    _cards.SetUpdateState(_updateState);
-                    if (_settings?.ThemePreview is { } preview) _cards.SetThemePreview(preview);
-                    _cards.ApplyBackendTheme(payload);
-                    var entryWindow = payload.TryGetProperty("entryWindow", out var entry) && entry.ValueKind == JsonValueKind.Number &&
-                        entry.TryGetInt64(out var entryValue) && entryValue != 0 ? (nint)entryValue : 0;
-                    var gestureId = message.TryGetProperty("gestureId", out var gestureValue) && gestureValue.TryGetInt64(out var id) ? id : 0;
-                    _cards.BeginOpenTiming(gestureId, DateTimeOffset.Now - receivedAt);
-                    CardTimingLog.Write($"prepared gesture={gestureId} elapsedMs={prepareTiming.Elapsed.TotalMilliseconds:0.0}");
-                    _cards.ToggleAtPhysicalPoint(px, py, entryWindow);
-                }
-                break;
             case "openSettings":
                 OpenSettings(payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("page", out var page)
                     && page.ValueKind == JsonValueKind.String ? page.GetString() : null);
-                break;
-            case "cardLyricsFrame":
-                _cards?.ReceiveLyrics(message);
                 break;
             case "uiReady":
                 _ = RefreshUpdateStateAsync();
@@ -230,22 +106,66 @@ public partial class App : Application
     private void OpenSettings(string? page)
     {
         if (_connection is null) return;
-        _cards?.Hide();
+        // The cards live in the native process now; opening settings must still
+        // dismiss them so the two surfaces never overlap.
+        RequestCardHide();
         if (_settings is null)
         {
             _settings = new SettingsWindow(_connection);
-            _settings.ThemePreviewChanged += theme => _cards?.SetThemePreview(theme);
-            _settings.MicaPreviewChanged += state =>
-            {
-                _cards?.SetMicaPreview(state.Preview, state.Committed);
-            };
+            // Draft appearance travels over the pipe to the native cards and is
+            // never written to the committed configuration from here.
+            _settings.ThemePreviewChanged += PreviewCardTheme;
+            _settings.MicaPreviewChanged += state => PreviewCardMica(state.Preview);
             _settings.UpdateStateReceived += AcceptUpdateState;
             _settings.InstallUpdateRequested += OnInstallUpdateRequested;
             _settings.SetUpdateState(_updateState);
-            _settings.Closed += (_, args) => { if (!args.Handled) _settings = null; };
+            // The settings process exists only while settings is open. Save and
+            // discard both run inside the window before Closed fires, so a deferred
+            // save still finishes; only an unfinished save keeps the process alive.
+            _settings.Closed += (_, args) =>
+            {
+                if (args.Handled) return;
+                _settings = null;
+                if (!_stopping) _dispatcher?.TryEnqueue(Stop);
+            };
         }
         _settings.ShowPage(page);
         _settings.Activate();
+    }
+
+    private void PreviewCardTheme(ElementTheme theme)
+    {
+        if (_connection is null || _stopping) return;
+        Observe(_connection.RequestAsync("previewCardTheme",
+            new { dark = theme == ElementTheme.Dark, enabled = true }, _lifetime.Token));
+    }
+
+    private void PreviewCardMica(Cards.CardMicaAppearance? preview)
+    {
+        if (_connection is null || _stopping) return;
+        Observe(_connection.RequestAsync("previewCardMica", preview is { } value
+            ? new
+            {
+                enabled = true,
+                vivid = value.Vivid,
+                tintOpacity = value.Tuning.LightTintOpacity,
+                luminosityOpacity = value.Tuning.LightLuminosityOpacity,
+                darkTintOpacity = value.Tuning.DarkTintOpacity,
+                darkLuminosityOpacity = value.Tuning.DarkLuminosityOpacity,
+            }
+            : new { enabled = false }, _lifetime.Token));
+    }
+
+    // Fire-and-forget pipe work never surfaces as an unobserved exception.
+    private static void Observe(Task task) =>
+        _ = task.ContinueWith(static failed => _ = failed.Exception, CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+    private void RequestCardHide()
+    {
+        if (_connection is null || _stopping) return;
+        Observe(_connection.RequestAsync("hideCards", null, _lifetime.Token));
     }
 
     private void OnBackendConnectionChanged(bool connected)
@@ -274,7 +194,6 @@ public partial class App : Application
         var state = UpdateUiState.Parse(payload);
         if (_stopping || state is null || state.Revision <= _updateState.Revision) return;
         _updateState = state;
-        _cards?.SetUpdateState(state);
         _settings?.SetUpdateState(state);
         if (_installAfterDownload)
         {
@@ -306,7 +225,7 @@ public partial class App : Application
         var version = _updateState.LatestVersion;
         try
         {
-            _cards?.Hide();
+            RequestCardHide();
             // Check before navigation: changing the page disposes its weather editor.
             if (_settings?.HasPendingChanges == true)
             {
@@ -341,9 +260,6 @@ public partial class App : Application
         if (_stopping) return;
         _stopping = true;
         _lifetime.Cancel();
-        _prewarmTimer?.Stop();
-        _prewarmTimer = null;
-        _cards?.Dispose();
         _settings?.Shutdown();
         _lifetimeWindow?.Close();
         if (_connection is not null)
