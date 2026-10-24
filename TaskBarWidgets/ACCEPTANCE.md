@@ -2,6 +2,16 @@
 
 更新：2026-10-21。最近成功完整构建的路径由本机 `artifacts/latest-build.txt` 提供；构建产物、布局检查图、日志和用户配置不提交到仓库。
 
+## 卡片迁入原生进程（分支 dsh/CardDrawingRebuild，2026-10-24）
+
+四张快捷卡片与可选更新卡从 WinUI 迁入原生主进程（`Native/Cards/`），运行在独立 STA 线程上，使用系统 Composition、Direct2D/DirectWrite/WIC 绘制，材质由 Windows App SDK 的 `MicaController` 通过原生 Win32 目标承载。卡片属于 `TaskBarWidgets.exe`，打开卡片不再启动 WinUI；设置进程改为按需启动，并在最后一个窗口关闭后退出。Media 保留媒体、音频、天气、历史与设置业务，新增卡片专用管道 `TaskBarWidgets.Cards.<nativePid>`（`cardSnapshot`／`cardRequest`／`cardReply`），卡片请求与设置窗口共用同一套执行入口，设备切换、音量与静音的顺序语义不变。
+
+**结构。** `CardHost` 独占卡片组几何与生命周期，共用一套 D3D11/D2D/DirectWrite/WIC 设备、一个 Compositor 和图形设备；`CardWindow` 只持有自己的窗口、合成根、绘图表面与交互表；`CardLayout` 直接移植 `CardGroup` 的 384 DIP 普通卡、220 DIP 更新卡、12 DIP 间距、列内底对齐与整组缩放规则；`CardPopup` 以同一套绘图辅助函数绘制设备与来源列表；`CardAccessibility` 从同一份交互表生成 UI Automation 元素（按钮 Invoke、滑块 RangeValue、选择器 ExpandCollapse、热力图 SelectionItem）。热力图光晕改为一次离屏透明遮罩＋集中模糊；封面 200 ms 交叉淡出；歌词换行上下交替、超长行滚动；扫描高亮仍是一条裁剪覆盖层。
+
+**验证。** `scripts/build.ps1 -Configuration Release -Component All` 通过；发布产物设置模板探针通过；`Native/tests/run-native-tests.ps1` 全套通过（含管道传输与跨语言集成客户端）；Media 285 项测试通过。旧 WinUI 卡片路径（卡片窗口、歌词视图、外部点击监听、启动预热及相关探针）已删除。
+
+**待桌面验收。** 本轮没有启动产品：明暗 Mica 观感、四张卡与更新卡的实际排布、设备／来源菜单、歌词扫描与换行过渡、滑块拖动、外部点击收起、设置关闭退出进程，以及混合 DPI、真实音频与播放器、高对比度与减少动画，都仍需在真实桌面确认。UI Automation 已实现但未经屏幕阅读器验证；封面淡出与光晕模糊的像素观感同样待实屏确认。
+
 ## 当前结论：Mica 观感已获用户认可（2026-10-21）
 
 用户明确反馈“现在的 mica 我比较满意了”，当前环境下的 Mica 视觉效果据此记为已认可，本轮视觉调校收尾。保留 Mica 以及现有个人参数和出厂默认值；未提供的实际个人参数不作推断，实验候选不自动成为默认。
