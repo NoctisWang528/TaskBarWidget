@@ -85,6 +85,13 @@ namespace Cards
 
         // Cached rounded-rect geometry used for halo alpha masks.
         ID2D1PathGeometry* RoundedRect(float width, float height, float radius);
+        // A tinted mask rendered offscreen and blurred once, so a glow is one
+        // composite pass instead of one shadow object per element. The mask uses
+        // the caller's DIP coordinates and its own target-sized bitmap.
+        bool BeginMask(ID2D1DeviceContext* target);
+        void EndMask(ID2D1DeviceContext* target, float blurDip);
+        void ReleaseMask();
+
         // Cached solid brushes are not used: colours carry the theme, so painters
         // create brushes per layer with the current palette.
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> Brush(ID2D1DeviceContext* target, Color color);
@@ -102,6 +109,9 @@ namespace Cards
         std::map<std::wstring, Microsoft::WRL::ComPtr<ID2D1Bitmap1>> bitmaps;
         std::map<std::wstring, Microsoft::WRL::ComPtr<IDWriteTextFormat>> formats;
         std::map<std::wstring, Microsoft::WRL::ComPtr<ID2D1PathGeometry>> geometries;
+        Microsoft::WRL::ComPtr<ID2D1Bitmap1> mask;
+        ID2D1DeviceContext* maskTarget{ nullptr };
+        Microsoft::WRL::ComPtr<ID2D1Effect> maskBlur;
         std::wstring diagnostic;
         bool ready{ false };
     };

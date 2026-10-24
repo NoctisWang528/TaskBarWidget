@@ -14,6 +14,8 @@ namespace Cards
         constexpr int AnimationMilliseconds = 150;
         constexpr float AnimationOffsetDip = 6.0f;
         constexpr UINT_PTR AnimationTimer = 0xCD01;
+        constexpr ULONGLONG CoverFadeMilliseconds = 200;
+        constexpr ULONGLONG LyricWrapMilliseconds = 180;
 
         LRESULT CALLBACK CardProc(HWND window, UINT message, WPARAM keys, LPARAM position)
         {
@@ -46,6 +48,12 @@ namespace Cards
             case WM_MOUSELEAVE:
                 card->OnMouseLeave();
                 return 0;
+            case WM_GETOBJECT:
+            {
+                const LRESULT result = card->OnGetObject(keys, position);
+                if (result != 0) return result;
+                break;
+            }
             case WM_SETCURSOR:
                 SetCursor(LoadCursorW(nullptr, IDC_ARROW));
                 return TRUE;
@@ -138,6 +146,16 @@ namespace Cards
         double lyricsProgress{};
         double lyricsRate{};
         ULONGLONG lastLyricPaint{};
+        // Cover cross-fade: the outgoing bitmap is released as soon as the fade ends.
+        std::wstring coverKey;
+        std::wstring previousCoverKey;
+        ULONGLONG coverFadeStart{};
+        // Wrap transition state for the lyric rows.
+        std::wstring lyricPrevious;
+        std::wstring lyricPreviousSecondary;
+        ULONGLONG lyricWrapStart{};
+        int lyricLineIndex{ -1 };
+        ULONGLONG lyricLineStarted{};
         ULONGLONG lyricsTick{};
         std::wstring draggingFlow;
         std::wstring openMenu;         // "output" / "input" / "source"
@@ -172,8 +190,24 @@ namespace Cards
         SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
         SetTimer(window, AnimationTimer, 16, nullptr);
         BuildVisualTree(instance);
-        if (!impl->compositor) return false;
         ApplyEnvironment(cardEnvironment);
+        if (!impl->compositor) return false;
+        accessibility.Attach(window, AccessibleSummary(), [this] { return std::cref(regions); },
+            [this] { return scale; },
+            [this](int id)
+            {
+                // Slider ratios mirror what the painter shows.
+                if (snapshot.audio.outputs.size() + snapshot.audio.inputs.size() == 0) return 0.0;
+                double value = 0.0;
+                for (const auto& endpoint : snapshot.audio.outputs) value = (std::max)(value, endpoint.volume);
+                for (const auto& endpoint : snapshot.audio.inputs) value = (std::max)(value, endpoint.volume);
+                UNREFERENCED_PARAMETER(id);
+                return value;
+            },
+            [this](const Layout::Region& region, const std::wstring& payload)
+            {
+                if (auto* host = Host()) host->OnRequest(region.action, payload);
+            });
         return true;
     }
 
@@ -219,6 +253,7 @@ namespace Cards
 
     void CardWindow::Destroy()
     {
+        accessibility.Detach();
         if (window)
         {
             KillTimer(window, AnimationTimer);
@@ -350,6 +385,26 @@ namespace Cards
             impl->lyricsProgress = value.lyrics.progress;
             impl->lyricsTick = now;
         }
+        if (kind == Kind::Media && value.lyrics.revision != impl->lyricsRevision &&
+            value.lyrics.currentLineIndex != impl->lyricLineIndex &&
+            value.lyrics.animateTransition && !snapshot.lyrics.current.empty())
+        {
+            // The outgoing line stays only for the transition; it is released as
+            // soon as the animation ends.
+            impl->lyricPrevious = snapshot.lyrics.current;
+            impl->lyricPreviousSecondary = snapshot.lyrics.currentTranslation.empty()
+                ? snapshot.lyrics.next : snapshot.lyrics.currentTranslation;
+            impl->lyricWrapStart = GetTickCount64();
+        }
+        if (value.lyrics.currentLineIndex != impl->lyricLineIndex)
+            impl->lyricLineStarted = GetTickCount64();
+        impl->lyricLineIndex = value.lyrics.currentLineIndex;
+        if (kind == Kind::Media && value.media.coverKey != impl->coverKey)
+        {
+            impl->previousCoverKey = impl->coverKey;
+            impl->coverKey = value.media.coverKey;
+            impl->coverFadeStart = GetTickCount64();
+        }
         snapshot = value;
         impl->dirty = true;
         impl->damage = RECT{};
@@ -450,6 +505,48 @@ namespace Cards
 
     bool CardWindow::Tick()
     {
+        if (!impl->animating && visible && kind == Kind::Media && impl->lyricLineStarted != 0 &&
+            snapshot.lyrics.isPlaying)
+        {
+            const double age = static_cast<double>(GetTickCount64() - impl->lyricLineStarted) / 1000.0;
+            if (age > 0.8 && age < 7.0)
+            {
+                impl->dirty = true;
+                Paint();
+                return true;
+            }
+        }
+        if (!impl->animating && visible && impl->lyricWrapStart != 0)
+        {
+            if (GetTickCount64() - impl->lyricWrapStart < LyricWrapMilliseconds)
+            {
+                impl->dirty = true;
+                Paint();
+            }
+            else
+            {
+                impl->lyricPrevious.clear();
+                impl->lyricPreviousSecondary.clear();
+                impl->lyricWrapStart = 0;
+                Paint();
+            }
+            return true;
+        }
+        if (!impl->animating && visible && impl->coverFadeStart != 0)
+        {
+            if (GetTickCount64() - impl->coverFadeStart < CoverFadeMilliseconds)
+            {
+                impl->dirty = true;
+                Paint();
+            }
+            else
+            {
+                impl->previousCoverKey.clear();
+                impl->coverFadeStart = 0;
+                Paint();
+            }
+            return true;
+        }
         // Lyrics advance between snapshots, so the media card keeps a timer while
         // it is visible and playing even when no motion animation is running.
         if (!impl->animating && visible && kind == Kind::Media && snapshot.lyrics.isPlaying &&
@@ -534,10 +631,54 @@ namespace Cards
             {
                 painted.media.position = impl->sliderRatio * painted.media.duration;
             }
+            Paint::LyricTransition lyricTransition;
+            if (kind == Kind::Media && impl->lyricLineStarted != 0)
+            {
+                // A long line waits a moment, then scrolls over six seconds.
+                const double age = static_cast<double>(GetTickCount64() - impl->lyricLineStarted) / 1000.0;
+                lyricTransition.marquee = static_cast<float>(
+                    std::clamp((age - 0.8) / 6.0, 0.0, 1.0));
+            }
+            if (kind == Kind::Media && impl->lyricWrapStart != 0)
+            {
+                const ULONGLONG elapsed = GetTickCount64() - impl->lyricWrapStart;
+                if (elapsed < LyricWrapMilliseconds)
+                {
+                    lyricTransition.previous = impl->lyricPrevious;
+                    lyricTransition.previousSecondary = impl->lyricPreviousSecondary;
+                    lyricTransition.progress = static_cast<float>(elapsed) /
+                        static_cast<float>(LyricWrapMilliseconds);
+                }
+                else
+                {
+                    impl->lyricPrevious.clear();
+                    impl->lyricPreviousSecondary.clear();
+                    impl->lyricWrapStart = 0;
+                }
+            }
+            Paint::CoverTransition cover;
+            if (kind == Kind::Media && !impl->previousCoverKey.empty() && impl->coverFadeStart != 0)
+            {
+                const ULONGLONG elapsed = GetTickCount64() - impl->coverFadeStart;
+                if (elapsed < CoverFadeMilliseconds)
+                {
+                    cover.previous = environment.graphics->DecodeImage(impl->previousCoverKey,
+                        static_cast<int>(64 * scale * fit), static_cast<int>(64 * scale * fit));
+                    cover.previousOpacity = 1.0f - static_cast<float>(elapsed) /
+                        static_cast<float>(CoverFadeMilliseconds);
+                }
+                else
+                {
+                    // The old cover is dropped the moment the transition ends.
+                    impl->previousCoverKey.clear();
+                    impl->coverFadeStart = 0;
+                }
+            }
             switch (kind)
             {
             case Kind::Media:
-                Paint::Media(context, painted, environment, regions, widthDip, heightDip);
+                Paint::Media(context, painted, cover, lyricTransition, environment, regions, widthDip,
+                    heightDip);
                 break;
             case Kind::Device:
                 Paint::Device(context, painted, environment, regions, widthDip, heightDip);
@@ -769,6 +910,11 @@ namespace Cards
     void CardWindow::Activate(const Layout::Region& region)
     {
         host.OnRequest(region.action, L"");
+    }
+
+    LRESULT CardWindow::OnGetObject(WPARAM keys, LPARAM position)
+    {
+        return accessibility.OnGetObject(keys, position);
     }
 
     std::wstring CardWindow::AccessibleSummary() const

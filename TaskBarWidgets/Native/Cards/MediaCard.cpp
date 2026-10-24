@@ -1,5 +1,6 @@
 ﻿#include "CardPch.h"
 #include "CardDraw.h"
+#include "CardWindow.h"
 
 namespace Cards::Paint
 {
@@ -44,7 +45,8 @@ namespace Cards::Paint
         }
 
         void DrawLyrics(ID2D1DeviceContext* context, Graphics& graphics, const Draw::Palette& palette,
-            const CardEnvironment& environment, const Snapshot& snapshot, float left, float top, float width)
+            const CardEnvironment& environment, const Snapshot& snapshot,
+            const LyricTransition& transition, float left, float top, float width)
         {
             const auto& lyrics = snapshot.lyrics;
             const bool displayable = lyrics.available && !lyrics.isPureMusic &&
@@ -72,41 +74,98 @@ namespace Cards::Paint
             if (lyrics.textShadow == L"none" || environment.highContrast) shadowColor = WithAlpha(Color{}, 0.0f);
 
             const auto row = [&](const std::wstring& text, float size, Color color, float rowTop,
-                float scan)
+                float scan, float marquee)
             {
                 if (text.empty()) return;
-                const std::wstring trimmed = Draw::Ellipsize(context, graphics, text, family, size,
-                    lyrics.fontWeight, width);
                 const D2D1_RECT_F rect = Draw::Rect(left, rowTop, left + width, rowTop + size * 1.35f);
-                if (shadowColor.a > 0.0f)
+                // An overlong line scrolls instead of clipping; the measured overflow
+                // drives both the clip and the offset.
+                float overflow = 0.0f;
+                const auto format = graphics.TextFormat(family, size, lyrics.fontWeight,
+                    DWRITE_TEXT_ALIGNMENT_LEADING, false);
+                if (format && graphics.DWrite())
                 {
-                    Draw::Text(context, graphics, trimmed, family, size, lyrics.fontWeight,
-                        shadowColor, D2D1::RectF(rect.left, rect.top + 1.0f, rect.right, rect.bottom + 1.0f),
-                        DWRITE_TEXT_ALIGNMENT_CENTER);
+                    winrt::com_ptr<IDWriteTextLayout> layout;
+                    if (SUCCEEDED(graphics.DWrite()->CreateTextLayout(text.c_str(),
+                        static_cast<UINT32>(text.size()), format, width * 4.0f, size * 2.0f,
+                        layout.put())))
+                    {
+                        DWRITE_TEXT_METRICS metrics{};
+                        if (SUCCEEDED(layout->GetMetrics(&metrics)))
+                            overflow = (std::max)(0.0f, metrics.widthIncludingTrailingWhitespace - width);
+                    }
                 }
-                Draw::Text(context, graphics, trimmed, family, size, lyrics.fontWeight, color, rect,
-                    DWRITE_TEXT_ALIGNMENT_CENTER);
+                const bool scrolls = overflow > 1.0f;
+                const std::wstring shown = scrolls ? text
+                    : Draw::Ellipsize(context, graphics, text, family, size, lyrics.fontWeight, width);
+                const float shift = scrolls ? -overflow * std::clamp(marquee, 0.0f, 1.0f) : 0.0f;
+                const auto alignment = scrolls ? DWRITE_TEXT_ALIGNMENT_LEADING
+                    : DWRITE_TEXT_ALIGNMENT_CENTER;
+                const D2D1_RECT_F target = scrolls
+                    ? D2D1::RectF(rect.left + shift, rect.top, rect.left + shift + width * 4.0f, rect.bottom)
+                    : rect;
+                if (scrolls)
+                {
+                    context->PushAxisAlignedClip(rect, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+                    const D2D1_RECT_F wide = D2D1::RectF(rect.left + shift, rect.top,
+                        rect.left + shift + width * 4.0f, rect.bottom);
+                    if (shadowColor.a > 0.0f)
+                        Draw::Text(context, graphics, shown, family, size, lyrics.fontWeight,
+                            shadowColor, D2D1::RectF(wide.left, wide.top + 1.0f, wide.right, wide.bottom + 1.0f),
+                            alignment);
+                    Draw::Text(context, graphics, shown, family, size, lyrics.fontWeight, color, wide,
+                        alignment);
+                    context->PopAxisAlignedClip();
+                }
+                else
+                {
+                    if (shadowColor.a > 0.0f)
+                        Draw::Text(context, graphics, shown, family, size, lyrics.fontWeight,
+                            shadowColor, D2D1::RectF(target.left, target.top + 1.0f, target.right,
+                                target.bottom + 1.0f), alignment);
+                    Draw::Text(context, graphics, shown, family, size, lyrics.fontWeight, color, target,
+                        alignment);
+                }
                 if (scan > 0.01f && scan < 0.999f)
                 {
-                    // Scan highlight: a clipped overlay rather than per-glyph work.
-                    context->PushAxisAlignedClip(D2D1::RectF(rect.left, rect.top,
-                        rect.left + (rect.right - rect.left) * scan, rect.bottom),
-                        D2D1_ANTIALIAS_MODE_ALIASED);
+                    // Scan highlight: a clipped overlay rather than per-glyph work, so
+                    // the base text exists once and the highlight is only a clip.
+                    const D2D1_RECT_F scanRect = D2D1::RectF(rect.left, rect.top,
+                        rect.left + (rect.right - rect.left) * scan, rect.bottom);
+                    context->PushAxisAlignedClip(scanRect, D2D1_ANTIALIAS_MODE_ALIASED);
                     const auto scanColor = ParseColor(lyrics.scanColor.empty()
                         ? DefaultScanColor(environment.dark) : lyrics.scanColor, palette.accent);
-                    Draw::Text(context, graphics, trimmed, family, size, lyrics.fontWeight, scanColor,
-                        rect, DWRITE_TEXT_ALIGNMENT_CENTER);
+                    Draw::Text(context, graphics, shown, family, size, lyrics.fontWeight, scanColor,
+                        target, alignment);
                     context->PopAxisAlignedClip();
                 }
             };
 
-            row(main, mainSize, WithAlpha(palette.primary, 0.98f), top, lyrics.progress);
-            if (twoRows) row(secondary, secondarySize, WithAlpha(palette.primary, 0.62f),
-                top + mainSize * 1.3f, 0.0f);
+            // Wrap transition: the previous line leaves upward while the new one
+            // enters from below. Both exist only while the transition runs.
+            const float wrap = std::clamp(transition.progress, 0.0f, 1.0f);
+            if (wrap < 0.999f && !transition.previous.empty())
+            {
+                const float shift = (1.0f - wrap) * mainSize * 1.25f;
+                const float alpha = wrap;
+                row(transition.previous, mainSize, WithAlpha(palette.primary, 0.98f * alpha),
+                    top - shift, 0.0f, 0.0f);
+                if (twoRows && !transition.previousSecondary.empty())
+                    row(transition.previousSecondary, secondarySize,
+                        WithAlpha(palette.primary, 0.62f * alpha), top + mainSize * 1.3f - shift, 0.0f,
+                        0.0f);
+            }
+            const float enter = (1.0f - wrap) * mainSize * 0.55f;
+            row(main, mainSize, WithAlpha(palette.primary, 0.98f * (0.35f + 0.65f * wrap)), top + enter,
+                lyrics.progress, transition.marquee);
+            if (twoRows) row(secondary, secondarySize,
+                WithAlpha(palette.primary, 0.62f * (0.35f + 0.65f * wrap)),
+                top + mainSize * 1.3f + enter, 0.0f, 0.0f);
         }
     }
 
-    void Media(ID2D1DeviceContext* context, const Snapshot& snapshot, const CardEnvironment& environment,
+    void Media(ID2D1DeviceContext* context, const Snapshot& snapshot, const CoverTransition& transition,
+        const LyricTransition& lyricTransition, const CardEnvironment& environment,
         Layout::Table& regions, float widthDip, float heightDip)
     {
         if (!context || !environment.graphics) return;
@@ -119,6 +178,13 @@ namespace Cards::Paint
         // Cover art: current bitmap decoded at display size for this DPI.
         const D2D1_RECT_F cover = Draw::Rect(left, top + 5.0f, left + Cover, top + 5.0f + Cover);
         Draw::FillRound(context, cover, 8.0f, WithAlpha(palette.primary, 0.07f));
+        if (transition.previous && transition.previousOpacity > 0.01f)
+        {
+            context->PushAxisAlignedClip(cover, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            context->DrawBitmap(transition.previous, cover, transition.previousOpacity,
+                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+            context->PopAxisAlignedClip();
+        }
         if (auto* bitmap = graphics.DecodeImage(snapshot.media.coverDataUrl,
             static_cast<int>(Cover * 2.0f), static_cast<int>(Cover * 2.0f)))
         {
@@ -184,7 +250,8 @@ namespace Cards::Paint
 
         // Lyrics viewport.
         const float lyricTop = top + 90.0f;
-        DrawLyrics(context, graphics, palette, environment, snapshot, left, lyricTop, contentWidth);
+        DrawLyrics(context, graphics, palette, environment, snapshot, lyricTransition, left, lyricTop,
+            contentWidth);
 
         // Transport row centred above the progress bar.
         const float transportTop = heightDip - Layout::Padding - 84.0f;

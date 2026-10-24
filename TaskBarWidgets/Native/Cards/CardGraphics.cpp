@@ -1,4 +1,13 @@
 ﻿#include "CardPch.h"
+#include <d2d1effects.h>
+
+namespace
+{
+    // The Gaussian blur effect CLSID as documented by Direct2D; declared locally so
+    // the linker does not need a GUID definition out of d2d1.lib.
+    const CLSID GaussianBlurEffect = { 0x1feb6d69, 0x2fe6, 0x4ac9,
+        { 0x8c, 0x58, 0x1d, 0x7f, 0x93, 0xe7, 0xa6, 0xa5 } };
+}
 #include "CardGraphics.h"
 
 #include <cryptuiapi.h>
@@ -386,6 +395,60 @@ namespace Cards
         format->SetWordWrapping(wrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
         const auto entry = formats.emplace(key, format);
         return entry.first->second.Get();
+    }
+
+    // The glow is the plan's "one transparent mask + central blur": every glowing
+    // cell writes into an offscreen bitmap, the bitmap is blurred once, and the
+    // result is composited in a single pass.
+    bool Graphics::BeginMask(ID2D1DeviceContext* target)
+    {
+        if (!target || !context) return false;
+        D2D1_SIZE_F size = target->GetSize();
+        float dpiX = 96.0f, dpiY = 96.0f;
+        target->GetDpi(&dpiX, &dpiY);
+        const UINT width = (std::max)(1u, static_cast<UINT>(std::lround(size.width)));
+        const UINT height = (std::max)(1u, static_cast<UINT>(std::lround(size.height)));
+        if (!mask || mask->GetPixelSize().width != width || mask->GetPixelSize().height != height)
+        {
+            mask.Reset();
+            const D2D1_BITMAP_PROPERTIES1 properties = D2D1::BitmapProperties1(
+                D2D1_BITMAP_OPTIONS_TARGET,
+                D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
+                dpiX, dpiY);
+            if (FAILED(target->CreateBitmap(D2D1::SizeU(width, height), nullptr, 0, properties,
+                mask.GetAddressOf()))) return false;
+        }
+        maskTarget = target;
+        target->SetTarget(mask.Get());
+        target->SetTransform(D2D1::Matrix3x2F::Identity());
+        target->Clear(D2D1::ColorF(0, 0.0f));
+        return true;
+    }
+
+    void Graphics::EndMask(ID2D1DeviceContext* target, float blurDip)
+    {
+        if (!target || !mask) return;
+        target->SetTarget(nullptr);
+        float dpiX = 96.0f, dpiY = 96.0f;
+        target->GetDpi(&dpiX, &dpiY);
+        if (!maskBlur && FAILED(target->CreateEffect(GaussianBlurEffect, maskBlur.GetAddressOf())))
+        {
+            maskBlur.Reset();
+            return;
+        }
+        const float scale = dpiX / 96.0f;
+        maskBlur->SetInput(0, mask.Get());
+        maskBlur->SetValue(D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION, (std::max)(0.1f, blurDip * scale * 0.6f));
+        maskBlur->SetValue(D2D1_GAUSSIANBLUR_PROP_BORDER_MODE, D2D1_BORDER_MODE_SOFT);
+        target->SetTransform(D2D1::Matrix3x2F::Identity());
+        target->DrawImage(maskBlur.Get(), D2D1_INTERPOLATION_MODE_LINEAR);
+    }
+
+    void Graphics::ReleaseMask()
+    {
+        mask.Reset();
+        maskTarget = nullptr;
+        maskBlur.Reset();
     }
 
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> Graphics::Brush(ID2D1DeviceContext* target, Color color)

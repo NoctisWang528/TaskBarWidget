@@ -13,6 +13,7 @@
 //   - popup drawing surface (device / source menus)
 //   - motion container (opacity and DIP offset only; never moves the HWND)
 
+#include "CardAccessibility.h"
 #include "CardGraphics.h"
 #include "CardIcons.h"
 #include "CardLayout.h"
@@ -96,6 +97,9 @@ namespace Cards
         void UpdateSlider(const Layout::Region& region, float ratio);
         void FinishSlider();
 
+        // Window-procedure hook for the native UI Automation provider.
+        LRESULT OnGetObject(WPARAM keys, LPARAM position);
+
         std::wstring AccessibleSummary() const;
         std::wstring AccessibleName(const Layout::Region& region) const;
 
@@ -124,8 +128,14 @@ namespace Cards
         float ContentHeightDip() const;
 
         std::unique_ptr<Impl> impl;
+        CardAccessibility accessibility;
         Kind kind;
         CardHostServices& host;
+
+    public:
+        CardHostServices* Host() { return &host; }
+
+    private:
         CardEnvironment environment;
         Layout::Table regions;
         Layout::Table menuTable;
@@ -141,7 +151,28 @@ namespace Cards
     // the interaction table and paints a card from the current snapshot.
     namespace Paint
     {
+        // Cross-fade state for the media cover: the outgoing bitmap under the
+        // incoming one while a track change settles.
+        struct CoverTransition
+        {
+            ID2D1Bitmap1* previous{ nullptr };
+            float previousOpacity{ 0.0f };
+        };
+
+        // Wrap transition: the outgoing lyric line slides up and fades while the
+        // incoming one settles. Only two content sets exist, and the outgoing text
+        // is dropped when the transition ends.
+        struct LyricTransition
+        {
+            std::wstring previous;
+            std::wstring previousSecondary;
+            float progress{ 1.0f };
+            // 0..1 progress of the overlong main line scroll; 0 means no scroll.
+            float marquee{ 0.0f };
+        };
+
         void Media(ID2D1DeviceContext* context, const Snapshot& snapshot,
+            const CoverTransition& cover, const LyricTransition& lyrics,
             const CardEnvironment& environment, Layout::Table& regions, float widthDip, float heightDip);
         void Device(ID2D1DeviceContext* context, const Snapshot& snapshot,
             const CardEnvironment& environment, Layout::Table& regions, float widthDip, float heightDip);

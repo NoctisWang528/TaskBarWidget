@@ -106,25 +106,44 @@ namespace Cards::Paint
                 : RampColor(day.level, environment.dark);
             if (fill.a > 0.0f) Draw::FillRound(context, cell, 4.0f, fill);
 
-            // Glow: positive levels only, drawn as one translucent rounded halo
-            // instead of a per-cell shadow object.
-            if (day.level >= 2 && !environment.highContrast)
-            {
-                const Color halo = ParseColor(environment.dark ? L"#6969BDFA" : L"#345281D3",
-                    Color{});
-                const float spread = day.isToday ? 5.0f : 3.0f;
-                const D2D1_RECT_F outer = Draw::Rect(cell.left - spread, cell.top - spread,
-                    cell.right + spread, cell.bottom + spread);
-                Draw::FillRound(context, outer, 4.0f + spread,
-                    WithAlpha(halo, day.isToday ? 0.22f : 0.12f));
-            }
-
-            const bool emphasized = day.isToday || day.selected;
-            if (day.level >= 0 && (emphasized || day.level == 0))
-                Draw::StrokeRound(context, cell, 4.0f,
-                    emphasized ? palette.accent : palette.border, 1.0f);
             Draw::AddCell(regions, 300 + day.week * 7 + day.weekday, cell, L"selectDay",
                 day.date, !day.isFuture, day.selected);
+        }
+
+        // Glow: every positive cell writes into one transparent mask which is
+        // blurred once and composited in a single pass, instead of a shadow object
+        // per cell. Borders then sit on top of the halo.
+        if (!environment.highContrast && graphics.BeginMask(context))
+        {
+            const Color halo = ParseColor(environment.dark ? L"#6969BDFA" : L"#345281D3", Color{});
+            for (const auto& day : traffic.days)
+            {
+                if (day.level < 2 || day.week < 0 || day.week >= Weeks ||
+                    day.weekday < 0 || day.weekday >= 7) continue;
+                const float cellLeft = gridLeft + WeekdayGutter + day.week * SlotSize +
+                    (SlotSize - CellSize) / 2.0f;
+                const float cellTop = gridTop + day.weekday * SlotSize + (SlotSize - CellSize) / 2.0f;
+                const float spread = day.isToday ? 5.0f : 3.0f;
+                Draw::FillRound(context, Draw::Rect(cellLeft - spread, cellTop - spread,
+                    cellLeft + CellSize + spread, cellTop + CellSize + spread), 4.0f + spread,
+                    WithAlpha(halo, day.isToday ? 0.9f : 0.55f));
+            }
+            graphics.EndMask(context, 5.0f);
+        }
+
+        for (const auto& day : traffic.days)
+        {
+            if (day.week < 0 || day.week >= Weeks || day.weekday < 0 || day.weekday >= 7) continue;
+            if (day.level < 0) continue;
+            const bool emphasized = day.isToday || day.selected;
+            if (!emphasized && day.level != 0) continue;
+            const float cellLeft = gridLeft + WeekdayGutter + day.week * SlotSize +
+                (SlotSize - CellSize) / 2.0f;
+            const float cellTop = gridTop + day.weekday * SlotSize + (SlotSize - CellSize) / 2.0f;
+            const D2D1_RECT_F cell = Draw::Rect(cellLeft, cellTop, cellLeft + CellSize,
+                cellTop + CellSize);
+            Draw::StrokeRound(context, cell, 4.0f,
+                emphasized ? palette.accent : palette.border, 1.0f);
         }
 
         const float footerTop = gridTop + 7 * SlotSize + 4.0f;
