@@ -93,12 +93,17 @@ foreach ($spectrum in @($result.layoutChecks | Where-Object { $_.kind -eq 'setti
     if ($spectrum.fieldCount -lt 1) { throw 'Spectrum tuning fields were not directly realized.' }
 }
 if (-not $result.weatherCardControls.providerNeutralSnapshot -or -not $result.weatherCardControls.missingDataHidden -or
+    -not $result.weatherCardControls.airQualitySnapshot -or -not $result.weatherCardControls.airQualityErrorsAndRecovery -or
+    -not $result.weatherCardControls.airQualityAttribution -or
     -not $result.weatherCardControls.allAlertsRetained -or -not $result.weatherCardControls.alertRotation -or
     -not $result.weatherCardControls.singleAlertFixed -or
     -not $result.weatherCardControls.zeroAlertsBlank -or -not $result.weatherCardControls.micaSurface -or
     -not $result.weatherCardControls.staleRetained -or -not $result.weatherCardControls.emptyStateRefresh -or
     -not $result.weatherCardControls.disabledCardWindowReleased -or
     -not $result.weatherCardControls.reenabledCardWindowRecreated) { throw 'Weather card component checks did not complete.' }
+if (-not $result.weatherControls.airQualityWarning -or -not $result.weatherControls.exampleHostDraftPreserved) {
+    throw 'Weather settings did not verify partial air-quality errors and connection draft preservation.'
+}
 foreach ($pointer in @($result.layoutChecks | Where-Object kind -eq 'modulePointerMessages')) {
     if (-not $pointer.available) { Write-Host "Actual pointer verification unavailable: $($pointer.reason). Desktop acceptance remains pending." }
 }

@@ -31,7 +31,7 @@ public sealed partial class SettingsWindow
         internal readonly InfoBar Message = new() { IsClosable = false };
         internal readonly StackPanel Credentials = new() { Spacing = 10 };
         internal readonly PasswordBox ApiKey = new() { Header = "和风天气 API Key", PlaceholderText = "留空保留已有密钥", MaxLength = 512, PasswordRevealMode = PasswordRevealMode.Hidden };
-        internal readonly TextBox ApiHost = new() { Header = "API Host", PlaceholderText = "填写和风控制台分配的 API Host", MaxLength = 255 };
+        internal readonly TextBox ApiHost = new() { Header = "API Host", PlaceholderText = "从已登录账户控制台 → 设置 → APIHost 复制", MaxLength = 255 };
         internal readonly TextBlock KeyStatus = Copy("密钥状态：正在读取");
         internal readonly Button SaveCredentials = new() { Content = "保存并验证连接" };
         internal readonly Button ClearKey = new() { Content = "清除已保存密钥" };
@@ -47,6 +47,7 @@ public sealed partial class SettingsWindow
         internal bool HostEdited;
         internal string SavedHost = "";
         internal string AlertsError = "";
+        internal string AirQualityError = "";
         internal void CancelOperation() { Operation?.Cancel(); Operation?.Dispose(); Operation = null; }
         public void Dispose() { CancelOperation(); Lifetime.Cancel(); ApiKey.Password = string.Empty; Lifetime.Dispose(); }
     }
@@ -87,7 +88,7 @@ public sealed partial class SettingsWindow
         body.Children.Add(page.SwitchProvider);
         body.Children.Add(page.Status); body.Children.Add(page.LastAttempt); body.Children.Add(page.LastSuccess); body.Children.Add(page.Message);
         page.Credentials.Children.Add(new TextBlock { Text = "和风天气连接", FontSize = 16, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        page.Credentials.Children.Add(Copy("从和风天气控制台获取 API Host 和 API Key。保存前验证连接，失败不保存；留空保留已有值。验证成功不会切换当前来源或城市，请搜索选择城市后保存，或点击“切换来源并刷新”。"));
+        page.Credentials.Children.Add(Copy("登录自己的和风天气账户，从控制台 → 设置 → APIHost 复制完整主机名；不可使用文档示例，也不要自行修改后缀。API Key 使用同一账户的凭据。保存前验证连接，失败保留输入且不保存；留空保留已有值。验证成功不会切换当前来源或城市，请搜索选择城市后保存，或点击“切换来源并刷新”。"));
         page.Credentials.Children.Add(page.ApiHost); page.Credentials.Children.Add(page.ApiKey); page.Credentials.Children.Add(page.KeyStatus);
         var connectionActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         connectionActions.Children.Add(page.SaveCredentials); connectionActions.Children.Add(page.ClearKey); page.Credentials.Children.Add(connectionActions);
@@ -175,8 +176,9 @@ public sealed partial class SettingsWindow
     {
         var text = action + "：" + WeatherProviderLabel(page.SavedProvider) + " · " +
             (page.SavedCity is JsonObject city ? WeatherCityLabel(city) : "未知城市");
-        WeatherMessage(page, text + (page.AlertsError.Length > 0 ? "；" + page.AlertsError : "。"),
-            page.AlertsError.Length > 0 ? InfoBarSeverity.Warning : InfoBarSeverity.Success);
+        var errors = string.Join("；", new[] { page.AlertsError, page.AirQualityError }.Where(value => value.Length > 0));
+        WeatherMessage(page, text + (errors.Length > 0 ? "；" + errors : "。"),
+            errors.Length > 0 ? InfoBarSeverity.Warning : InfoBarSeverity.Success);
     }
 
     private void UpdateWeatherButtons(WeatherEditor page)
@@ -211,12 +213,17 @@ public sealed partial class SettingsWindow
         page.HasStatus = true; page.SavedProvider = (int)Number(status["provider"]);
         page.SavedHost = Text(status["apiHost"]);
         page.AlertsError = Text(status["details"]?["alertsError"]);
+        var airError = Text(status["details"]?["airQuality"]?["error"]);
+        page.AirQualityError = airError;
         page.SavedCity = status["city"] is JsonObject city ? (JsonObject)city.DeepClone() : null;
         page.Active.Text = "当前生效：" + WeatherProviderLabel(page.SavedProvider) + " · " +
             (page.SavedCity is JsonObject activeCity ? WeatherCityLabel(activeCity) : "尚未设置城市");
         if (page.Committing && page.SelectedCity is JsonObject selected && page.SavedProvider == page.Provider.SelectedIndex && Text(selected["id"]) == Text(page.SavedCity?["id"]))
             page.SelectedCity = null;
         page.Status.Text = string.Join(" · ", new[] { status["updating"]?.ToString() == "true" ? "正在更新" : "当前天气", Text(status["temperature"]), Text(status["message"]) }.Where(value => value.Length > 0));
+        var warnings = string.Join("；", new[] { page.AlertsError, page.AirQualityError }.Where(value => value.Length > 0));
+        if (warnings.Length > 0) { page.Status.Text += " · " + warnings; WeatherMessage(page, warnings, InfoBarSeverity.Warning); }
+        else if (page.Message.Severity == InfoBarSeverity.Warning) page.Message.IsOpen = false;
         page.LastAttempt.Text = "上次尝试：" + (Text(status["lastAttempt"]).Length > 0 ? Text(status["lastAttempt"]) : "尚无记录");
         page.LastSuccess.Text = "上次成功：" + (Text(status["lastSuccess"]).Length > 0 ? Text(status["lastSuccess"]) : "尚无记录");
         if (status["lastSuccessCity"] is JsonObject lastCity && Text(lastCity["name"]).Length > 0)

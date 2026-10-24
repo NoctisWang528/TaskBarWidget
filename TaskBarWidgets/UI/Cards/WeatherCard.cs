@@ -69,6 +69,13 @@ public sealed partial class CardGroup
         FontSize = 10,
         TextWrapping = TextWrapping.Wrap
     };
+    private readonly TextBlock _weatherAirQuality = new()
+    {
+        FontFamily = WeatherFontFamily,
+        FontSize = 11,
+        TextWrapping = TextWrapping.Wrap,
+        Visibility = Visibility.Collapsed
+    };
 
     private JsonElement _weatherLastStatus;
     private JsonElement _weatherLastDetails;
@@ -234,6 +241,8 @@ public sealed partial class CardGroup
         _weatherLeft.Children.Add(_weatherCurrentRow);
 
         _weatherSummary.Children.Add(_weatherCondition);
+        Secondary(_weatherAirQuality);
+        _weatherSummary.Children.Add(_weatherAirQuality);
         Grid.SetRow(_weatherSummary, 2);
         _weatherLeft.Children.Add(_weatherSummary);
 
@@ -349,13 +358,15 @@ public sealed partial class CardGroup
         SetWeatherIcon(String(current, "conditionKind", "unknown"), isNight);
         _weatherStatus.Text = WeatherStatus(status);
         _weatherStatus.Visibility = HasValue(_weatherStatus.Text) ? Visibility.Visible : Visibility.Collapsed;
-        _weatherAttribution.Text = String(details, "alertsAttribution");
+        RenderAirQuality(Object(details, "airQuality"));
+        _weatherAttribution.Text = string.Join("\n", new[] { String(details, "alertsAttribution"), String(Object(details, "airQuality"), "attribution") }
+            .SelectMany(value => value.Split('\n')).Select(value => value.Trim()).Where(HasValue).Distinct(StringComparer.Ordinal));
         _weatherAttribution.Visibility = HasValue(_weatherAttribution.Text) ? Visibility.Visible : Visibility.Collapsed;
 
         var forecast = Array(details, "forecast").ToArray();
         var alerts = Array(details, "alerts").ToArray();
         var available = details.ValueKind == JsonValueKind.Object &&
-            (HasValue(currentTemperature) || HasValue(String(current, "weather")) || forecast.Length > 0 || alerts.Length > 0);
+            (HasValue(currentTemperature) || HasValue(String(current, "weather")) || forecast.Length > 0 || alerts.Length > 0 || HasValue(_weatherAirQuality.Text));
         ShowWeatherEmpty(!hasCity || !available);
         if (!hasCity || !available)
         {
@@ -386,6 +397,29 @@ public sealed partial class CardGroup
         var alerts = Array(details, "alerts").ToArray();
         RenderForecast(forecast);
         RenderAlerts(alerts);
+    }
+
+    private void RenderAirQuality(JsonElement air)
+    {
+        var parts = new List<string>();
+        var pollutants = new List<string>();
+        var aqi = String(air, "aqi");
+        if (HasValue(aqi))
+        {
+            var standard = FirstNonEmpty(String(air, "indexName"), String(air, "indexCode"), "AQI（标准未提供）");
+            parts.Add(standard + " " + aqi);
+        }
+        if (HasValue(String(air, "category"))) parts.Add(String(air, "category"));
+        foreach (var (field, label, unit) in new[] { ("pm25", "PM2.5", "pm25Unit"), ("pm10", "PM10", "pm10Unit") })
+        {
+            var value = String(air, field);
+            if (HasValue(value)) pollutants.Add(label + " " + value + " " + FirstNonEmpty(String(air, unit), "（单位未提供）"));
+        }
+        if (!HasValue(aqi)) parts.AddRange(pollutants);
+        if (HasValue(String(air, "publishedAt"))) pollutants.Add(String(air, "publishedAt"));
+        ToolTipService.SetToolTip(_weatherAirQuality, pollutants.Count > 0 ? string.Join(" · ", pollutants) : null);
+        _weatherAirQuality.Text = parts.Count > 0 ? "空气质量 · " + string.Join(" · ", parts) : "";
+        _weatherAirQuality.Visibility = parts.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void RenderForecast(JsonElement[] forecast)
@@ -576,6 +610,8 @@ public sealed partial class CardGroup
         if (state == "error" && HasValue(message)) parts.Add(message);
         var alertsError = String(Object(status, "details"), "alertsError");
         if (HasValue(alertsError)) parts.Add(alertsError);
+        var airError = String(Object(Object(status, "details"), "airQuality"), "error");
+        if (HasValue(airError)) parts.Add(airError);
         return string.Join(" · ", parts.Distinct(StringComparer.Ordinal));
     }
 

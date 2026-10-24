@@ -34,7 +34,7 @@ public sealed partial class CardGroup
                     new { min = "17", max = "23", weatherDay = "多云", weatherNight = "多云", conditionDayKind = "partly-cloudy", conditionNightKind = "partly-cloudy" },
                     new { min = "16", max = "22", weatherDay = "阴", weatherNight = "阴", conditionDayKind = "overcast", conditionNightKind = "overcast" }
                 },
-                airQuality = new { aqi = "42", category = "优", pm25 = "18", pm10 = "30", publishedAt = "17:00" },
+                airQuality = new { aqi = "42", indexCode = "cn-mee", indexName = "AQI (CN)", category = "优", pm25 = "0", pm10 = "30", pm25Unit = "µg/m³", pm10Unit = "µg/m³", publishedAt = "", attribution = "合成归因：和风天气 https://www.qweather.com/\n合成空气来源" },
                 alertsAttribution = "合成归因：和风天气 https://www.qweather.com/",
                 alerts = new[]
                 {
@@ -63,9 +63,21 @@ public sealed partial class CardGroup
         if (cards._weatherTemperature.Text != "18.3°" || cards._weatherCity.Text != "南京")
             throw new InvalidOperationException("Weather card did not render the normalized current snapshot.");
         if (cards._weatherAttribution.Visibility != Visibility.Visible ||
-            cards._weatherAttribution.Text != "合成归因：和风天气 https://www.qweather.com/" ||
+            cards._weatherAttribution.Text != "合成归因：和风天气 https://www.qweather.com/\n合成空气来源" ||
             cards._weatherAttribution.TextWrapping != TextWrapping.Wrap || cards._weatherStatus.Text.Contains("和风天气"))
             throw new InvalidOperationException("Alert attribution was missing, unwrapped, or treated as an error.");
+        var airTooltip = ToolTipService.GetToolTip(cards._weatherAirQuality) as string ?? "";
+        if (cards._weatherAirQuality.Text != "空气质量 · AQI (CN) 42 · 优" ||
+            !airTooltip.Contains("PM2.5 0 µg/m³") || !airTooltip.Contains("PM10 30 µg/m³") || airTooltip.Contains("17:00") ||
+            cards._weatherAirQuality.TextWrapping != TextWrapping.Wrap)
+            throw new InvalidOperationException("Air quality lost its standard, zero, units or invented an observation time.");
+        cards.RenderAirQuality(JsonSerializer.SerializeToElement(new { aqi = "0", indexCode = "cn-mee" }));
+        if (cards._weatherAirQuality.Text != "空气质量 · cn-mee 0" || ToolTipService.GetToolTip(cards._weatherAirQuality) is not null)
+            throw new InvalidOperationException("AQI zero/code fallback or tooltip cleanup failed.");
+        cards.RenderAirQuality(Object(Object(status, "details"), "airQuality"));
+        var firstAirFailure = JsonSerializer.SerializeToElement(new { details = new { airQuality = new { error = "空气质量失败：尚无上次数据" } } });
+        if (WeatherStatus(firstAirFailure) != "空气质量失败：尚无上次数据")
+            throw new InvalidOperationException("First air failure invented retained data instead of preserving provider explanation.");
         if (cards._weatherForecast.Children.Count != 5 || cards._weatherForecast.RowDefinitions.Count != 5)
             throw new InvalidOperationException("Weather card did not reserve the five-row Apple-style forecast.");
         if (cards._weatherIcon is not Viewbox { Width: 42, Height: 42 })
@@ -98,7 +110,8 @@ public sealed partial class CardGroup
 
         if (cards._weatherTemperature.FontFamily.Source != "Microsoft YaHei UI")
             throw new InvalidOperationException("Weather text did not use the configured card font.");
-        if (cards._weatherAttribution.FontFamily.Source != cards._weatherTemperature.FontFamily.Source)
+        if (cards._weatherAttribution.FontFamily.Source != cards._weatherTemperature.FontFamily.Source ||
+            cards._weatherAirQuality.FontFamily.Source != cards._weatherTemperature.FontFamily.Source)
             throw new InvalidOperationException("Alert attribution did not follow the card font.");
         if (cards._weatherAlertsHost.MaxHeight != 54)
             throw new InvalidOperationException("Weather alert scroll limit changed.");
@@ -139,7 +152,7 @@ public sealed partial class CardGroup
             {
                 current = new { temperature = "22", weather = "多云", conditionKind = "partly-cloudy", observedAt = "2026-10-19 16:00" },
                 forecast = new object[0],
-                airQuality = new { pm25 = "20" },
+                airQuality = new { pm25 = "20", pm25Unit = "µg/m³", error = "空气质量获取失败：合成错误；上次数据可能过时" },
                 alertsError = "预警获取失败：合成错误",
                 alertsAttribution = "合成归因：和风天气 https://www.qweather.com/",
                 alerts = new object[0],
@@ -151,9 +164,13 @@ public sealed partial class CardGroup
         card.MeasureHeight();
         card.Root.UpdateLayout();
         if (!cards._weatherStatus.Text.Contains("预警获取失败：合成错误") ||
+            !cards._weatherStatus.Text.Contains("空气质量获取失败：合成错误") || !cards._weatherStatus.Text.Contains("可能过时") ||
             !cards._weatherStatus.Text.Contains("上次成功数据（南京）") ||
             cards._weatherStatus.Visibility != Visibility.Visible || cards._weatherAttribution.Visibility != Visibility.Visible)
             throw new InvalidOperationException("Zero alerts hid the alert failure, retained-data explanation, or attribution.");
+        if (cards._weatherAirQuality.Text != "空气质量 · PM2.5 20 µg/m³" || cards._weatherAirQuality.Visibility != Visibility.Visible ||
+            cards._weatherAttribution.Text != "合成归因：和风天气 https://www.qweather.com/")
+            throw new InvalidOperationException("Pollutant-only air quality was hidden or an AQI was invented.");
         if (cards._weatherForecast.Children.Count != 0 || cards._weatherAlerts.Children.Count != 0 ||
             cards._weatherAlertPanel.Visibility != Visibility.Collapsed)
             throw new InvalidOperationException("Missing forecast data was not hidden and zero alerts did not leave the lower-left area blank.");
@@ -165,6 +182,7 @@ public sealed partial class CardGroup
             details = new
             {
                 current = new { temperature = "20", weather = "多云", conditionKind = "partly-cloudy" },
+                airQuality = new { },
                 forecast = new[]
                 {
                     new { min = "19", max = "25", conditionDayKind = "clear" },
@@ -177,7 +195,8 @@ public sealed partial class CardGroup
             }
         });
         cards.RenderWeather(gradientStatus);
-        if (cards._weatherStatus.Visibility != Visibility.Collapsed || cards._weatherAttribution.Visibility != Visibility.Collapsed)
+        if (cards._weatherStatus.Visibility != Visibility.Collapsed || cards._weatherAttribution.Visibility != Visibility.Collapsed ||
+            cards._weatherAirQuality.Visibility != Visibility.Collapsed || cards._weatherAirQuality.Text.Length != 0 || cards._weatherAttribution.Text.Length != 0)
             throw new InvalidOperationException("Recovered weather retained an old alert error or attribution.");
         await Task.Delay(40);
         card.Root.UpdateLayout();
@@ -260,6 +279,9 @@ public sealed partial class CardGroup
         return new
         {
             providerNeutralSnapshot = true,
+            airQualitySnapshot = true,
+            airQualityErrorsAndRecovery = true,
+            airQualityAttribution = true,
             images,
             forecastRows = 5,
             alertRotation = true,

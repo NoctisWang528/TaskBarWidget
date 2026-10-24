@@ -47,6 +47,7 @@ public:
     JobResult StartRefresh();
     JobResult Result(uint64_t jobId) const;
     static std::optional<std::wstring> NormalizeApiHost(const std::wstring& value);
+    static std::wstring ApiHostError(const std::wstring& value);
 private:
     WeatherService();
     ~WeatherService();

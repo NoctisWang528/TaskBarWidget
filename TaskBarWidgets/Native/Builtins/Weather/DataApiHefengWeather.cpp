@@ -11,15 +11,11 @@
 #include <iomanip>
 #include <locale>
 #include <cmath>
+#include <algorithm>
 
 #include "DataManager.h"
 
-#define CHECK_KEY const auto normalized_host = WeatherService::NormalizeApiHost(config.ApiHost);\
-if (config.AppKey.empty() || !normalized_host || config.AppKey.find_first_of(L"\r\n \t") != std::wstring::npos) {\
-    _lastError = L"和风天气 API Host 或 API Key 配置无效。";\
-    return false;\
-}\
-config.ApiHost = *normalized_host
+#define CHECK_KEY if (!ValidateConfiguration()) return false
 
 namespace hf
 {
@@ -36,7 +32,7 @@ namespace hf
         else return WeatherCCommon::StrToUnicode(yyjson_get_str(obj), true);
     }
 
-    std::wstring query_func_frame(const CString &url, const std::wstring& key, std::function<void(yyjson_val*)> func, bool alert_schema = false)
+    std::wstring query_func_frame(const CString &url, const std::wstring& key, std::function<void(yyjson_val*)> func, bool alert_schema = false, bool* shared = nullptr)
     {
         const auto &dm = WeatherCDataManager::Instance();
 
@@ -45,7 +41,16 @@ namespace hf
         std::wstring content;
         auto succeed = call_internet(url, key, content);
 
-        if (succeed && !content.empty())
+        const auto http = WeatherCCommon::LastHttpStatus();
+        if (shared) *shared = !succeed && !http;
+        if (WeatherCCommon::LastTransportError() || (!succeed && (http == 200 || !http ||
+            WeatherCCommon::LastRequestStage() != WeatherCCommon::RequestStage::None))) {
+            if (shared) *shared = true;
+            auto reason = WeatherCCommon::LastTransportErrorMessage();
+            if (reason.empty()) reason = L"和风天气连接失败或响应读取不完整。";
+            return http && http != 200 ? L"和风天气返回 HTTP " + std::to_wstring(http) + L"；" + reason : reason;
+        }
+        if (!content.empty())
         {
             auto json_utf8 = WeatherCCommon::UnicodeToStr(content.c_str(), true);
             yyjson_doc *doc = yyjson_read(json_utf8.c_str(), json_utf8.size(), 0);
@@ -54,7 +59,27 @@ namespace hf
                 auto *root = yyjson_doc_get_root(doc);
 
                 auto code = get_json_str_value(root, "code");
-                if (yyjson_is_obj(root) && (alert_schema ? !yyjson_obj_get(root, "error") && !yyjson_obj_get(root, "code") : code == L"200"))
+                const auto type = get_json_str_value(yyjson_obj_get(root, "error"), "type");
+                static const std::unordered_map<std::wstring, std::wstring> reasons = {
+                    {L"unauthorized", L"鉴权失败 (401)，请检查 API Key。"},
+                    {L"invalid-host", L"API Host 无效，请检查控制台配置。"},
+                    {L"security-restriction", L"请求受到安全限制，请检查请求限制设置。"},
+                    {L"no-credit", L"账户可用额度不足。"}, {L"overdue", L"账户存在逾期账单。"},
+                    {L"account-suspension", L"账户已被冻结。"}, {L"deprecated", L"此接口已弃用。"},
+                    {L"forbidden", L"此接口无访问权限。"}, {L"too-many-requests", L"请求过于频繁 (429)。"},
+                    {L"over-monthly-limit", L"请求超过月度限额 (429)。"}
+                };
+                const std::wstring prefix = L"https://dev.qweather.com/docs/resource/error-code/#";
+                const auto kind = type.compare(0, prefix.size(), prefix) == 0 ? type.substr(prefix.size()) : L"";
+                const auto reason = reasons.find(kind);
+                if (shared && (http == 401 || http == 429 || code == L"401" || code == L"429" ||
+                    kind == L"unauthorized" || kind == L"invalid-host" || kind == L"security-restriction" ||
+                    kind == L"no-credit" || kind == L"overdue" || kind == L"account-suspension" ||
+                    kind == L"too-many-requests" || kind == L"over-monthly-limit")) *shared = true;
+                if (reason != reasons.end()) error = L"和风天气：" + reason->second;
+                else if (!succeed || yyjson_obj_get(root, "error"))
+                    error = http ? L"和风天气返回 HTTP " + std::to_wstring(http) + L"。" : L"和风天气服务返回错误。";
+                else if (yyjson_is_obj(root) && (alert_schema ? !yyjson_obj_get(root, "code") : code == L"200"))
                 {
                     func(root);
                 }
@@ -66,17 +91,96 @@ namespace hf
             }
             else
                 //error = L"Invalid json contents.";
-                error = dm.StringRes(IDS_HFW_INVALID_JSON);
+                error = http && !succeed ? L"和风天气返回 HTTP " + std::to_wstring(http) + L"。" : std::wstring(dm.StringRes(IDS_HFW_INVALID_JSON).GetString());
 
             yyjson_doc_free(doc);
         }
         else
             //error = L"Failed to access the Internet.";
-            error = WeatherCCommon::LastTransportError() == 12007 ? L"Host解析失败。" :
-                WeatherCCommon::LastHttpStatus() ? L"和风天气返回 HTTP " + std::to_wstring(WeatherCCommon::LastHttpStatus()) + L"。" : L"和风天气连接失败或超时。";
+            error = !succeed && http ? L"和风天气返回 HTTP " + std::to_wstring(http) + L"。" : L"和风天气响应为空。";
+
+        if (!succeed && http && error.empty()) error = L"和风天气返回 HTTP " + std::to_wstring(http) + L"。";
+        if (!succeed && !http) error = WeatherCCommon::LastTransportErrorMessage();
+        if (!succeed && error.empty()) error = L"和风天气连接失败或超时。";
+        if (shared && (http == 401 || http == 429)) *shared = true;
 
         return error;
     }
+}
+
+bool DataApiHefengWeather::ValidateConfiguration()
+{
+    _lastError = WeatherService::ApiHostError(config.ApiHost);
+    if (_lastError.empty() && (config.AppKey.empty() || std::any_of(config.AppKey.begin(), config.AppKey.end(),
+        [](wchar_t ch) { return ch <= 32 || ch > 126; })))
+        _lastError = L"和风天气 API Key 配置无效。";
+    if (!_lastError.empty()) { _sharedFailure = true; return false; }
+    config.ApiHost = *WeatherService::NormalizeApiHost(config.ApiHost);
+    return true;
+}
+
+bool DataApiHefengWeather::ResolveCoordinates(const std::wstring& query, std::wstring& coordinates)
+{
+    if (_updating && _coordinatesResolved) {
+        coordinates = _coordinates;
+        _lastError = _coordinateError;
+        return _lastError.empty();
+    }
+    const bool success = [&]() {
+        const auto &dm = WeatherCDataManager::Instance();
+
+        CString url;
+        url.Format(L"https://%s/geo/v2/city/lookup?location=%s&lang=%s",
+                   config.ApiHost.c_str(),
+                   WeatherCCommon::URLEncode(query).c_str(),
+                   dm.StringRes(IDS_HFW_LANG).GetString());
+
+        auto parse_coordinate = [](const std::wstring& text, double limit, double& value) {
+            std::wistringstream input(text);
+            input.imbue(std::locale::classic());
+            input >> std::noskipws >> value;
+            return !text.empty() && !input.fail() && input.eof() && std::isfinite(value) && value >= -limit && value <= limit;
+        };
+        const auto separator = query.find(L',');
+        double query_longitude = 0, query_latitude = 0;
+        const bool coordinate_query = separator != std::wstring::npos &&
+            parse_coordinate(query.substr(0, separator), 180, query_longitude) &&
+            parse_coordinate(query.substr(separator + 1), 90, query_latitude);
+        if (separator != std::wstring::npos && !coordinate_query) { _lastError = L"城市经纬度格式或范围无效。"; return false; }
+        auto coordinate_path = [](double latitude, double longitude) {
+            latitude = std::round(latitude * 100) / 100;
+            longitude = std::round(longitude * 100) / 100;
+            std::wostringstream path;
+            path.imbue(std::locale::classic());
+            path << std::fixed << std::setprecision(2) << (latitude == 0 ? 0 : latitude) << L"/" << (longitude == 0 ? 0 : longitude);
+            return path.str();
+        };
+        auto geo_func = [&coordinates, &query, &parse_coordinate, &coordinate_path](yyjson_val* root) {
+            auto* locations = yyjson_obj_get(root, "location");
+            if (!yyjson_is_arr(locations)) return;
+            for (size_t index = 0; index < yyjson_arr_size(locations); ++index) {
+                auto* location = yyjson_arr_get(locations, index);
+                if (hf::get_json_str_value(location, "id") != query) continue;
+                double latitude = 0, longitude = 0;
+                if (!parse_coordinate(hf::get_json_str_value(location, "lat"), 90, latitude) ||
+                    !parse_coordinate(hf::get_json_str_value(location, "lon"), 180, longitude)) return;
+                coordinates = coordinate_path(latitude, longitude);
+                return;
+            }
+        };
+        std::wstring err;
+        if (coordinate_query) coordinates = coordinate_path(query_latitude, query_longitude);
+        else err = hf::query_func_frame(url, config.AppKey, geo_func, false, &_sharedFailure);
+        if (!err.empty()) { _lastError = L"城市坐标解析失败：" + err; return false; }
+        if (coordinates.empty()) { _lastError = L"城市坐标缺失、无效或与当前城市不匹配。"; return false; }
+        return true;
+    }();
+    if (_updating) {
+        _coordinatesResolved = true;
+        _coordinates = coordinates;
+        _coordinateError = success ? L"" : _lastError;
+    }
+    return success;
 }
 
 bool DataApiHefengWeather::QueryCity(const std::wstring &query, CityInfoList &info)
@@ -113,7 +217,7 @@ bool DataApiHefengWeather::QueryCity(const std::wstring &query, CityInfoList &in
             cities.push_back(get_city_info(yyjson_arr_get(loc_arr, i)));
     };
 
-    auto err = hf::query_func_frame(url, config.AppKey, func);
+    auto err = hf::query_func_frame(url, config.AppKey, func, false, &_sharedFailure);
     if (err.empty())
         info = cities;
     _lastError = err;
@@ -302,12 +406,7 @@ std::optional<WeatherDetails> DataApiHefengWeather::GetWeatherDetails() const
     details.Current.WindSpeed = _realtimeWeather.WindSpeed;
     details.Current.ObservedAt = _realtimeWeather.UpdateTime;
 
-    details.AirQuality.AQI = _realtimeAirQuality.AQI;
-    details.AirQuality.Level = _realtimeAirQuality.Level;
-    details.AirQuality.Category = _realtimeAirQuality.Category;
-    details.AirQuality.PM2p5 = _realtimeAirQuality.PM2p5;
-    details.AirQuality.PM10 = _realtimeAirQuality.PM10;
-    details.AirQuality.PublishTime = _realtimeAirQuality.PublishTime;
+    if (config.ShowAirQuality) details.AirQuality = _realtimeAirQuality;
 
     const ForcastWeather* days[] = { &_forcastWeatherTD, &_forcastWeatherTM, &_forcastWeatherDATM };
     for (const auto* source : days) {
@@ -342,26 +441,36 @@ bool DataApiHefengWeather::UpdateWeather()
 
     if (_dataCity != currunt_city.CityNO) { _realtimeWeather = {}; _forcastWeatherTD = {}; _forcastWeatherTM = {}; _forcastWeatherDATM = {}; _realtimeAirQuality = {}; _weatherAlerts.clear(); _alertsError.clear(); _alertsAttribution.clear(); _dataCity = currunt_city.CityNO; }
     if (!config.ShowWeatherAlert) { _weatherAlerts.clear(); _alertsError.clear(); _alertsAttribution.clear(); }
-    const auto normalized_host = WeatherService::NormalizeApiHost(config.ApiHost);
-    if (config.AppKey.empty() || !normalized_host || config.AppKey.find_first_of(L"\r\n \t") != std::wstring::npos) {
-        _lastError = L"和风天气 API Host 或 API Key 配置无效。";
+    if (!config.ShowAirQuality) _realtimeAirQuality = {};
+    _sharedFailure = false;
+    _coordinatesResolved = false;
+    _coordinates.clear();
+    _coordinateError.clear();
+    _updating = true;
+    struct EndUpdate { bool& value; ~EndUpdate() { value = false; } } endUpdate{ _updating };
+    auto sharedFail = [this]() {
+        if (config.ShowAirQuality) _realtimeAirQuality.Error = L"空气质量获取失败：" + _lastError +
+            (_realtimeAirQuality.AQI.empty() && _realtimeAirQuality.PM2p5.empty() && _realtimeAirQuality.PM10.empty() ?
+                L"；无可用的上次信息。" : L"；上次数据可能过时。");
         if (config.ShowWeatherAlert) _alertsError = L"预警获取失败：" + _lastError +
             (_weatherAlerts.empty() ? L"；无可用的上次信息。" : L"；以下为上次信息，可能已过时。");
-        return false;
-    }
-    config.ApiHost = *normalized_host;
+    };
+    if (!ValidateConfiguration()) { sharedFail(); return false; }
     const bool realtime = QueryRealtimeWeather(currunt_city.CityNO);
     if (!realtime)
         oss << L"[RealtimeWeather]" << _lastError << std::endl;
+    if (_sharedFailure) { sharedFail(); return false; }
     const bool forecast = QueryForecastWeather(currunt_city.CityNO);
     if (!forecast)
         oss << L"[ForcastWeather]" << _lastError << std::endl;
+    if (_sharedFailure) { sharedFail(); return false; }
     if (config.ShowAirQuality && !QueryRealtimeAirQuality(currunt_city.CityNO))
         oss << L"[RealtimeAirQuality]" << _lastError << std::endl;
+    if (_sharedFailure) { sharedFail(); return WeatherCDataManager::Instance().GetConfig().m_wit == EWeatherInfoType::WEATHER_REALTIME ? realtime : forecast; }
     if (config.ShowWeatherAlert && !QueryWeatherAlerts(currunt_city.CityNO))
         oss << L"[WeatherAlerts]" << _lastError;
 
-    _lastError = oss.str();
+    if (!_sharedFailure) _lastError = oss.str();
 
     return WeatherCDataManager::Instance().GetConfig().m_wit == EWeatherInfoType::WEATHER_REALTIME ? realtime : forecast;
 }
@@ -398,7 +507,7 @@ bool DataApiHefengWeather::QueryRealtimeWeather(const std::wstring &query)
         data.Humidity = hf::get_json_str_value(now_obj, "humidity");
     };
 
-    auto err = hf::query_func_frame(url, config.AppKey, func);
+    auto err = hf::query_func_frame(url, config.AppKey, func, false, &_sharedFailure);
     if (err.empty() && (data.Temperature.empty() || data.WeatherCode.empty())) err = L"和风天气实时数据不完整。";
     if (err.empty())
         _realtimeWeather = data;
@@ -408,36 +517,78 @@ bool DataApiHefengWeather::QueryRealtimeWeather(const std::wstring &query)
 
 bool DataApiHefengWeather::QueryRealtimeAirQuality(const std::wstring &query)
 {
-    CHECK_KEY;
-
-    const auto &dm = WeatherCDataManager::Instance();
-
-    CString url;
-    url.Format(L"https://%s/v7/air/now?location=%s&lang=%s",
-               config.ApiHost.c_str(),
-               query.c_str(),
-               dm.StringRes(IDS_HFW_LANG).GetString());
-
-    RealtimeAirQuality data;
-    auto func = [&data](yyjson_val *j_val) {
-        auto *now_obj = yyjson_obj_get(j_val, "now");
-
-        data.PublishTime = hf::short_time(hf::get_json_str_value(now_obj, "pubTime"));
-        data.AQI = hf::get_json_str_value(now_obj, "aqi");
-        data.Level = hf::get_json_str_value(now_obj, "level");
-        data.Category = hf::get_json_str_value(now_obj, "category");
-        data.PM2p5 = hf::get_json_str_value(now_obj, "pm2p5");
-        data.PM10 = hf::get_json_str_value(now_obj, "pm10");
+    if (_airCity != query || !config.ShowAirQuality) { _realtimeAirQuality = {}; _airCity = query; }
+    if (!config.ShowAirQuality) { _lastError.clear(); return true; }
+    auto fail = [this](std::wstring reason) {
+        _airQualityDataOutdated = true;
+        _realtimeAirQuality.Error = L"空气质量获取失败：" + reason +
+            (_realtimeAirQuality.AQI.empty() && _realtimeAirQuality.PM2p5.empty() && _realtimeAirQuality.PM10.empty() ?
+                L"；无可用的上次信息。" : L"；上次数据可能过时。");
+        _lastError = std::move(reason);
+        return false;
     };
-
-    auto err = hf::query_func_frame(url, config.AppKey, func);
-    if (err.empty())
-    {
-        _realtimeAirQuality = data;
-        _airQualityDataOutdated = false;
-    }
-    _lastError = err;
-    return err.empty();
+    if (!ValidateConfiguration()) return fail(_lastError);
+    std::wstring coordinates;
+    if (!ResolveCoordinates(query, coordinates)) return fail(_lastError);
+    CString url;
+    url.Format(L"https://%s/airquality/v1/current/%s?lang=%s", config.ApiHost.c_str(),
+        coordinates.c_str(), WeatherCDataManager::Instance().StringRes(IDS_HFW_LANG).GetString());
+    RealtimeAirQuality data;
+    bool valid = false;
+    auto func = [&data, &valid](yyjson_val* root) {
+        auto* metadata = yyjson_obj_get(root, "metadata");
+        if (!yyjson_is_obj(metadata)) return;
+        auto* attributions = yyjson_obj_get(metadata, "attributions");
+        if (attributions && !yyjson_is_arr(attributions)) return;
+        for (size_t index = 0; index < yyjson_arr_size(attributions); ++index) {
+            auto* item = yyjson_arr_get(attributions, index);
+            if (!yyjson_is_str(item)) return;
+            if (!data.Attribution.empty()) data.Attribution += L"\n";
+            data.Attribution += WeatherCCommon::StrToUnicode(yyjson_get_str(item), true);
+        }
+        if (yyjson_is_true(yyjson_obj_get(metadata, "zeroResult"))) { valid = true; return; }
+        auto* indexes = yyjson_obj_get(root, "indexes");
+        auto* pollutants = yyjson_obj_get(root, "pollutants");
+        if (!yyjson_is_arr(indexes) || !yyjson_arr_size(indexes) || !yyjson_is_arr(pollutants)) return;
+        yyjson_val* selected = nullptr;
+        for (size_t index = 0; index < yyjson_arr_size(indexes); ++index) {
+            auto* item = yyjson_arr_get(indexes, index);
+            const auto code = hf::get_json_str_value(item, "code");
+            if (code.empty()) return;
+            if (!selected || (hf::get_json_str_value(selected, "code") == L"qaqi" && code != L"qaqi")) selected = item;
+            if (code == L"cn-mee") { selected = item; break; }
+        }
+        data.IndexCode = hf::get_json_str_value(selected, "code");
+        data.IndexName = hf::get_json_str_value(selected, "name");
+        data.AQI = hf::get_json_str_value(selected, "aqiDisplay");
+        data.Level = hf::get_json_str_value(selected, "level");
+        data.Category = hf::get_json_str_value(selected, "category");
+        if (data.AQI.empty() || data.IndexName.empty() || data.Level.empty() || data.Category.empty()) return;
+        for (size_t index = 0; index < yyjson_arr_size(pollutants); ++index) {
+            auto* item = yyjson_arr_get(pollutants, index);
+            const auto code = hf::get_json_str_value(item, "code");
+            if (code != L"pm2p5" && code != L"pm10") continue;
+            auto* concentration = yyjson_obj_get(item, "concentration");
+            auto* value = yyjson_obj_get(concentration, "value");
+            if (!yyjson_is_num(value)) continue;
+            const double concentration_value = yyjson_is_real(value) ? yyjson_get_real(value) :
+                yyjson_is_sint(value) ? static_cast<double>(yyjson_get_sint(value)) : static_cast<double>(yyjson_get_uint(value));
+            if (!std::isfinite(concentration_value) || concentration_value < 0) continue;
+            std::wostringstream number;
+            number.imbue(std::locale::classic());
+            number << std::setprecision(15) << concentration_value;
+            (code == L"pm2p5" ? data.PM2p5 : data.PM10) = number.str();
+            (code == L"pm2p5" ? data.PM2p5Unit : data.PM10Unit) = hf::get_json_str_value(concentration, "unit");
+        }
+        valid = true;
+    };
+    const auto err = hf::query_func_frame(url, config.AppKey, func, true, &_sharedFailure);
+    if (!err.empty()) return fail(err);
+    if (!valid) return fail(L"和风天气空气质量响应格式无效或数据不完整。");
+    _realtimeAirQuality = std::move(data);
+    _airQualityDataOutdated = false;
+    _lastError.clear();
+    return true;
 }
 
 bool DataApiHefengWeather::QueryForecastWeather(const std::wstring &query)
@@ -472,7 +623,7 @@ bool DataApiHefengWeather::QueryForecastWeather(const std::wstring &query)
         get_daily_info(yyjson_arr_get(daily_arr, 2), datm);
     };
 
-    auto err = hf::query_func_frame(url, config.AppKey, func);
+    auto err = hf::query_func_frame(url, config.AppKey, func, false, &_sharedFailure);
     if (err.empty() && (td.TemperatureMin.empty() || td.TemperatureMax.empty() || tm.TemperatureMin.empty() || tm.TemperatureMax.empty() || datm.TemperatureMin.empty() || datm.TemperatureMax.empty())) err = L"和风天气三日预报不完整。";
     if (err.empty())
     {
@@ -486,11 +637,11 @@ bool DataApiHefengWeather::QueryForecastWeather(const std::wstring &query)
 
 bool DataApiHefengWeather::QueryWeatherAlerts(const std::wstring &query)
 {
-    auto fail = [this](const std::wstring& reason) {
+    auto fail = [this](std::wstring reason) {
         _alertsDataOutdated = true;
         _alertsError = L"预警获取失败：" + reason +
             (_weatherAlerts.empty() ? L"；无可用的上次信息。" : L"；以下为上次信息，可能已过时。");
-        _lastError = _alertsError;
+        _lastError = std::move(reason);
         return false;
     };
     if (!config.ShowWeatherAlert) {
@@ -507,58 +658,11 @@ bool DataApiHefengWeather::QueryWeatherAlerts(const std::wstring &query)
         _alertsAttribution.clear();
         _alertsCity = query;
     }
-    const auto normalized_host = WeatherService::NormalizeApiHost(config.ApiHost);
-    if (config.AppKey.empty() || !normalized_host || config.AppKey.find_first_of(L"\r\n \t") != std::wstring::npos)
-        return fail(L"和风天气 API Host 或 API Key 配置无效。");
-    config.ApiHost = *normalized_host;
-
+    if (!ValidateConfiguration()) return fail(_lastError);
     const auto &dm = WeatherCDataManager::Instance();
-
     CString url;
-    url.Format(L"https://%s/geo/v2/city/lookup?location=%s&lang=%s",
-               config.ApiHost.c_str(),
-               WeatherCCommon::URLEncode(query).c_str(),
-               dm.StringRes(IDS_HFW_LANG).GetString());
-
-    auto parse_coordinate = [](const std::wstring& text, double limit, double& value) {
-        std::wistringstream input(text);
-        input.imbue(std::locale::classic());
-        input >> std::noskipws >> value;
-        return !text.empty() && !input.fail() && input.eof() && std::isfinite(value) && value >= -limit && value <= limit;
-    };
-    const auto separator = query.find(L',');
-    double query_longitude = 0, query_latitude = 0;
-    const bool coordinate_query = separator != std::wstring::npos &&
-        parse_coordinate(query.substr(0, separator), 180, query_longitude) &&
-        parse_coordinate(query.substr(separator + 1), 90, query_latitude);
-    if (separator != std::wstring::npos && !coordinate_query) return fail(L"城市经纬度格式或范围无效。");
-    auto coordinate_path = [](double latitude, double longitude) {
-        latitude = std::round(latitude * 100) / 100;
-        longitude = std::round(longitude * 100) / 100;
-        std::wostringstream path;
-        path.imbue(std::locale::classic());
-        path << std::fixed << std::setprecision(2) << (latitude == 0 ? 0 : latitude) << L"/" << (longitude == 0 ? 0 : longitude);
-        return path.str();
-    };
     std::wstring coordinates;
-    auto geo_func = [&coordinates, &query, &parse_coordinate, &coordinate_path](yyjson_val* root) {
-        auto* locations = yyjson_obj_get(root, "location");
-        if (!yyjson_is_arr(locations)) return;
-        for (size_t index = 0; index < yyjson_arr_size(locations); ++index) {
-            auto* location = yyjson_arr_get(locations, index);
-            if (hf::get_json_str_value(location, "id") != query) continue;
-            double latitude = 0, longitude = 0;
-            if (!parse_coordinate(hf::get_json_str_value(location, "lat"), 90, latitude) ||
-                !parse_coordinate(hf::get_json_str_value(location, "lon"), 180, longitude)) return;
-            coordinates = coordinate_path(latitude, longitude);
-            return;
-        }
-    };
-    std::wstring err;
-    if (coordinate_query) coordinates = coordinate_path(query_latitude, query_longitude);
-    else err = hf::query_func_frame(url, config.AppKey, geo_func);
-    if (!err.empty()) return fail(L"城市坐标解析失败：" + err);
-    if (coordinates.empty()) return fail(L"城市坐标缺失、无效或与当前城市不匹配。");
+    if (!ResolveCoordinates(query, coordinates)) return fail(_lastError);
     url.Format(L"https://%s/weatheralert/v1/current/%s?localTime=true&lang=%s",
                config.ApiHost.c_str(), coordinates.c_str(), dm.StringRes(IDS_HFW_LANG).GetString());
 
@@ -617,7 +721,7 @@ bool DataApiHefengWeather::QueryWeatherAlerts(const std::wstring &query)
         valid = true;
     };
 
-    err = hf::query_func_frame(url, config.AppKey, func, true);
+    auto err = hf::query_func_frame(url, config.AppKey, func, true, &_sharedFailure);
     if (!err.empty()) return fail(err);
     if (!valid) return fail(L"和风天气预警响应格式无效或数据不完整。");
     _weatherAlerts = std::move(data);
