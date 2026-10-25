@@ -68,7 +68,9 @@ namespace Cards::Paint
             const float layoutScale = std::clamp(static_cast<float>(lyrics.layoutScalePercent) / 100.0f,
                 0.25f, 4.0f);
             const float requestedSize = std::clamp(static_cast<float>(lyrics.fontSize), 5.0f, 72.0f);
-            const bool twoRows = displayable && !secondary.empty() && LyricHeight >= requestedSize * 2.4f;
+            // Keep the playing-line baseline fixed while next/translated text
+            // arrives or disappears. Empty-state messages still use one row.
+            const bool twoRows = displayable && LyricHeight >= requestedSize * 2.4f;
             const float rowHeight = LyricHeight / (twoRows ? 2.0f : 1.0f);
             const float mainSize = std::min(requestedSize, std::max(11.2f * layoutScale, rowHeight * 0.92f));
             const float secondarySize = std::max(9.0f * layoutScale, mainSize * 0.92f);

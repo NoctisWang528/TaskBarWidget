@@ -116,6 +116,7 @@ namespace Cards
         const CardEnvironment& Environment() const { return environment; }
         HWND Handle() const { return window; }
         bool HasRenderedContent() const;
+        winrt::Windows::UI::Composition::CompositionBrush ContentBrush() const;
         bool HasActiveBackdropConfiguration() const;
         void RefreshBackdropConfiguration();
         uint64_t ContentPaintCount() const { return contentPaintCount; }

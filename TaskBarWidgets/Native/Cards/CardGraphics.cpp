@@ -245,6 +245,8 @@ namespace Cards
             if (FAILED(lastResult))
                 return nullptr;
             context = device;
+            context->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            context->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
             drawing = true;
             offset = D2D1_POINT_2F{ static_cast<float>(updateOffset.x), static_cast<float>(updateOffset.y) };
             return context.Get();

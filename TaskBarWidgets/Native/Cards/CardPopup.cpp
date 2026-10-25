@@ -197,7 +197,7 @@ namespace Cards
             left = GetSystemMetrics(SM_XVIRTUALSCREEN) - width - 1000;
             top = GetSystemMetrics(SM_YVIRTUALSCREEN) - height - 1000;
         }
-        SetWindowPos(window, HWND_TOPMOST, left, top, width, height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        SetWindowPos(window, HWND_TOPMOST, left, top, width, height, SWP_NOACTIVATE);
     }
 
     CardPopup::CardPopup() : impl(std::make_unique<Impl>()) { }

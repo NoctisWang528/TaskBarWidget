@@ -144,6 +144,8 @@ namespace Cards
         SpriteVisual wash{ nullptr };
         SpriteVisual content{ nullptr };
         DrawingSurface surface;
+        SurfaceHandle boundSurface{ nullptr };
+        UINT timerInterval{};
         muxc::MicaController mica{ nullptr };
         muxc::SystemBackdropConfiguration micaConfiguration{ nullptr };
         bool micaReady{ false };
@@ -173,6 +175,7 @@ namespace Cards
         double lyricsRate{};
         double scanProgress{ -1 };
         double scanRate{};
+        ULONGLONG scanTick{};
         ULONGLONG lastLyricPaint{};
         // Cover cross-fade: the outgoing bitmap is released as soon as the fade ends.
         std::wstring coverKey;
@@ -295,6 +298,7 @@ namespace Cards
         if (window)
         {
             KillTimer(window, AnimationTimer);
+            impl->timerInterval = 0;
             SetWindowLongPtrW(window, GWLP_USERDATA, 0);
         }
         if (impl->mica)
@@ -306,6 +310,7 @@ namespace Cards
         impl->micaConfiguration = nullptr;
         impl->micaReady = false;
         impl->surface.Release();
+        impl->boundSurface = nullptr;
         if (impl->content) impl->content.Brush(nullptr);
         impl->content = nullptr;
         impl->wash = nullptr;
@@ -410,9 +415,19 @@ namespace Cards
     void CardWindow::SetSnapshot(const Snapshot& value)
     {
         const auto now = GetTickCount64();
+        // Snapshots also carry lyrics, audio and icons. Repeated positions must
+        // not rewind the local clock between real timeline updates.
+        const bool newPosition = !impl->mediaPositionTick || value.media.position != impl->mediaPosition ||
+            value.media.isPlaying != snapshot.media.isPlaying || value.media.duration != snapshot.media.duration ||
+            value.media.title != snapshot.media.title || value.media.artist != snapshot.media.artist ||
+            value.media.selectedSourceId != snapshot.media.selectedSourceId;
         const bool sameLine = value.lyrics.trackId == snapshot.lyrics.trackId &&
             value.lyrics.currentLineIndex == snapshot.lyrics.currentLineIndex && value.lyrics.current == snapshot.lyrics.current;
-        const bool newLyrics = value.lyrics.revision != impl->lyricsRevision || !sameLine;
+        const bool samePlayback = value.lyrics.isPlaying == snapshot.lyrics.isPlaying;
+        const bool forwardScan = sameLine && samePlayback && value.lyrics.isPlaying &&
+            value.lyrics.wordScan >= 0 && value.lyrics.wordScan >= impl->scanProgress;
+        const double previousPaintedScan = snapshot.lyrics.wordScan;
+        const bool newLyrics = value.lyrics.revision != impl->lyricsRevision || !sameLine || !samePlayback;
         if (kind == Kind::Media && !sameLine && value.lyrics.animateTransition && !environment.reducedMotion &&
             !snapshot.lyrics.current.empty())
         {
@@ -422,12 +437,16 @@ namespace Cards
         }
         if (newLyrics)
         {
-            const double scanElapsed = impl->lyricsTick ? (now - impl->lyricsTick) / 1000.0 : 0.0;
-            const double scanAdvance = value.lyrics.wordScan - impl->scanProgress;
-            impl->scanRate = sameLine && value.lyrics.isPlaying && value.lyrics.wordScan >= 0 &&
-                impl->scanProgress >= 0 && scanElapsed > 0.05 && scanAdvance >= 0 && scanAdvance < 0.9
-                ? scanAdvance / scanElapsed : 0.0;
-            impl->scanProgress = value.lyrics.wordScan;
+            if (!sameLine || !samePlayback || value.lyrics.wordScan != impl->scanProgress)
+            {
+                const double elapsed = impl->scanTick ? (now - impl->scanTick) / 1000.0 : 0.0;
+                const double advance = value.lyrics.wordScan - impl->scanProgress;
+                impl->scanRate = sameLine && samePlayback && value.lyrics.isPlaying &&
+                    impl->scanProgress >= 0 && elapsed > 0.05 && advance > 0 && advance < 0.9
+                    ? advance / elapsed : 0.0;
+                impl->scanProgress = value.lyrics.wordScan;
+                impl->scanTick = now;
+            }
             if (sameLine && impl->lyricsRevision >= 0 && impl->lyricsTick != 0 && value.lyrics.isPlaying)
             {
                 const double delta = static_cast<double>(now - impl->lyricsTick) / 1000.0;
@@ -456,8 +475,12 @@ namespace Cards
             impl->coverFadeStart = GetTickCount64();
         }
         snapshot = value;
-        impl->mediaPosition = value.media.position;
-        impl->mediaPositionTick = now;
+        if (forwardScan) snapshot.lyrics.wordScan = std::max(snapshot.lyrics.wordScan, previousPaintedScan);
+        if (newPosition)
+        {
+            impl->mediaPosition = value.media.position;
+            impl->mediaPositionTick = now;
+        }
         UpdateTimer();
         impl->dirty = true;
         impl->damage = RECT{};
@@ -580,9 +603,13 @@ namespace Cards
         const bool dynamic = visible && (impl->coverFadeStart || impl->lyricWrapStart ||
             impl->sliderPendingUntil || (kind == Kind::Media && snapshot.media.isPlaying) ||
             (kind == Kind::Weather && snapshot.weather.alerts.size() > 1));
-        if (impl->animating || dynamic) SetTimer(window, AnimationTimer,
-            impl->animating ? 16 : kind == Kind::Weather ? 1000 : 33, nullptr);
-        else KillTimer(window, AnimationTimer);
+        const UINT interval = impl->animating ? 16 : dynamic ? (kind == Kind::Weather ? 1000 : 33) : 0;
+        if (interval == impl->timerInterval) return;
+        if (interval)
+        {
+            if (SetTimer(window, AnimationTimer, interval, nullptr)) impl->timerInterval = interval;
+        }
+        else { KillTimer(window, AnimationTimer); impl->timerInterval = 0; }
     }
 
     bool CardWindow::Tick()
@@ -677,8 +704,9 @@ namespace Cards
                     impl->lyricsProgress + impl->lyricsRate * elapsed, 0.0, 1.0);
             }
             if (painted.lyrics.isPlaying && impl->scanProgress >= 0 && impl->scanRate > 0)
-                painted.lyrics.wordScan = std::clamp(impl->scanProgress + impl->scanRate *
-                    std::min(0.15, (GetTickCount64() - impl->lyricsTick) / 1000.0), 0.0, 1.0);
+                painted.lyrics.wordScan = std::max(painted.lyrics.wordScan,
+                    std::clamp(impl->scanProgress + impl->scanRate *
+                        std::min(0.5, (GetTickCount64() - impl->scanTick) / 1000.0), 0.0, 1.0));
             if (impl->sliderId != 0 && !impl->sliderSeeking)
             {
                 auto& endpoints = impl->sliderAction == L"setVolume:input" ? painted.audio.inputs : painted.audio.outputs;
@@ -771,11 +799,12 @@ namespace Cards
             }
         }
         if (!impl->surface.Ready()) { impl->dirty = true; host.OnGraphicsFailure(impl->surface.LastResult()); return; }
-        if (impl->surface.Handle())
+        if (impl->surface.Handle() && impl->boundSurface != impl->surface.Handle())
         {
             auto brush = impl->compositor.CreateSurfaceBrush(impl->surface.Handle());
             brush.Stretch(CompositionStretch::Fill);
             impl->content.Brush(brush);
+            impl->boundSurface = impl->surface.Handle();
         }
         impl->dirty = false;
         impl->damage = RECT{};
@@ -798,6 +827,11 @@ namespace Cards
     bool CardWindow::HasRenderedContent() const
     {
         return impl->surface.Ready() && impl->content && impl->content.Brush() && !impl->dirty;
+    }
+
+    CompositionBrush CardWindow::ContentBrush() const
+    {
+        return impl->content ? impl->content.Brush() : nullptr;
     }
 
     bool CardWindow::HasActiveBackdropConfiguration() const

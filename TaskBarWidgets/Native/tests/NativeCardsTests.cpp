@@ -241,6 +241,51 @@ int wmain(int argc, wchar_t** argv)
                 }
                 if (kind == Cards::Kind::Media)
                 {
+                    auto moving = snapshot;
+                    moving.media.isPlaying = true;
+                    moving.media.position = 10;
+                    moving.lyrics.isPlaying = true;
+                    moving.lyrics.wordScan = 0.2;
+                    ++moving.lyrics.revision;
+                    card.SetSnapshot(moving);
+                    card.Show(false);
+                    const auto brush = card.ContentBrush();
+                    Sleep(80);
+                    moving.lyrics.wordScan = 0.3;
+                    ++moving.lyrics.revision;
+                    card.SetSnapshot(moving);
+                    Sleep(80);
+                    card.Tick();
+                    const auto position = card.CurrentSnapshot().media.position;
+                    const auto scan = card.CurrentSnapshot().lyrics.wordScan;
+                    Require(position > 10.1 && scan > 0.3, "timeline and scan interpolate between host samples");
+                    ++moving.media.revision;
+                    ++moving.lyrics.revision;
+                    card.SetSnapshot(moving);
+                    Require(card.CurrentSnapshot().media.position >= position &&
+                        card.CurrentSnapshot().lyrics.wordScan >= scan,
+                        "duplicate host positions must not rewind the displayed timeline or text scan");
+
+                    const auto paints = card.ContentPaintCount();
+                    int updates = 0;
+                    const auto deadline = GetTickCount64() + 180;
+                    while (GetTickCount64() < deadline)
+                    {
+                        card.SetSnapshot(moving); ++updates;
+                        MSG message{};
+                        while (GetTickCount64() < deadline && PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE))
+                        { TranslateMessage(&message); DispatchMessageW(&message); }
+                        Sleep(3);
+                    }
+                    Require(card.ContentPaintCount() > paints + updates, "fast snapshots must not starve the animation timer");
+                    Require(card.ContentBrush() == brush, "repainting reuses the same surface brush");
+                    moving.media.position = 4;
+                    moving.lyrics.wordScan = 0.1;
+                    ++moving.lyrics.revision;
+                    card.SetSnapshot(moving);
+                    Require(card.CurrentSnapshot().media.position < 4.1 && card.CurrentSnapshot().lyrics.wordScan == 0.1,
+                        "a real backward seek still resets the timeline and scan");
+                    card.Hide(false);
                     auto regions = card.Regions().All();
                     for (const auto& region : regions) if (region.action == L"playPause")
                     {
