@@ -101,6 +101,8 @@ namespace {
         }
         if (chinaAlertMode == 1) return false;
         if (chinaAlertMode == 2) content = LR"(var alarmDZ={"unexpected":[]};)";
+        else if (chinaAlertMode == 4) content = LR"(var alarmDZ={"w":[null]};)";
+        else if (chinaAlertMode == 5) content = LR"(var alarmDZ={"w":[{"w5":"大风","w7":"黄色"}]};)";
         else if (chinaAlertMode == 3) content = LR"(var alarmDZ={"w":[{"w5":"大风","w7":"黄色","w13":"大风黄色预警","w9":"注意防范大风。","w8":"2026-10-23 10:00"}]};)";
         else content = LR"(var alarmDZ={"w":[]};var ignored={};)";
         return true;
@@ -179,7 +181,27 @@ int wmain(int argc, wchar_t** argv)
         Require(result.state == L"error" && result.status.temperature == L"22.6℃" && result.status.lastSuccessCityId == L"101190101" && result.message.find(L"南京") != std::wstring::npos && result.message.find(L"城市设置已保存") != std::wstring::npos, "failed city switch mislabeled retained cache"); badRealtime = false;
         blockRealtime = true; auto pending = service.StartRefresh(); Require(WaitForSingleObject(requestEntered, 2000) == WAIT_OBJECT_0, "request did not enter transport");
         const auto start = GetTickCount64(); const auto snapshot = service.Status(); Require(GetTickCount64() - start < 100 && snapshot.updating, "status blocked on network");
-        const auto same = service.StartRefresh(); Require(same.jobId == pending.jobId, "refresh not coalesced"); SetEvent(releaseRequest); Require(Wait(pending).state == L"success", "blocked refresh failed"); blockRealtime = false;
+        const auto same = service.StartRefresh(); Require(same.jobId == pending.jobId, "refresh not coalesced");
+        {
+            // The blocked request has already loaded the old, disabled setting.
+            std::lock_guard<std::mutex> lock(WeatherService::ConfigurationMutex());
+            auto enabled = Read(ini);
+            Require(PluginIniOptions::SetBoolean(enabled, "config", "show_weather_alerts", true), "saved alert fixture missing");
+            std::ofstream file(ini, std::ios::binary); file << enabled;
+        }
+        chinaAlertMode = 3;
+        const auto afterSave = service.StartRefresh(true);
+        Require(afterSave.jobId != 0 && afterSave.jobId != pending.jobId && afterSave.state == L"queued", "save reused running refresh with old configuration");
+        std::vector<WeatherService::JobResult> queuedSearches;
+        for (int index = 0; index < 7; ++index) queuedSearches.push_back(service.StartSearch(0, L"南京"));
+        Require(service.StartRefresh(true).jobId == afterSave.jobId && service.StartRefresh().jobId == afterSave.jobId,
+            "repeated save failed to coalesce into the queued refresh");
+        Require(service.StartSearch(0, L"南京").jobId == 0, "weather queue exceeded its bound");
+        blockRealtime = false; SetEvent(releaseRequest);
+        Require(Wait(pending).state == L"success", "blocked refresh failed");
+        result = Wait(afterSave);
+        Require(result.state == L"success" && result.status.details.Alerts.size() == 1, "post-save refresh did not reload the enabled alert setting");
+        for (const auto& queued : queuedSearches) Require(Wait(queued).state == L"success", "bounded queued search failed");
         const auto qCities = Wait(service.StartSearch(1, L"南京")); Require(qCities.state == L"success" && qCities.cities.size() == 1 && !invalidAuthorization, "QWeather header/host contract");
         qweatherCode = 401; result = Wait(service.StartSearch(1, L"南京")); Require(result.state == L"error" && result.message.find(L"401") != std::wstring::npos && result.message.find(L"fixture-key") == std::wstring::npos, "QWeather JSON auth error missing"); qweatherCode = 0;
         {
@@ -189,10 +211,45 @@ int wmain(int argc, wchar_t** argv)
         }
         chinaAlertMode = 3; result = Wait(service.StartRefresh());
         Require(result.state == L"success" && result.status.details.Alerts.size() == 1 && result.status.details.AlertsError.empty(), "China warning snapshot missing");
+        badRealtime = true; city.cityId = L"101190101"; city.cityName = L"南京";
+        result = Wait(service.StartConfigure(city));
+        Require(result.state == L"error" && result.status.stale && !result.status.temperature.empty() &&
+            result.status.lastSuccessCityId == L"101010100" && result.status.details.Alerts.empty() &&
+            result.status.details.AlertsError.empty() && result.status.details.AlertsAttribution.empty(),
+            "failed city switch restored alerts from the previous city");
+        result = Wait(service.StartSearch(0, L"南京"));
+        Require(result.status.details.Alerts.empty(), "subsequent status restored old-city alerts");
+        badRealtime = false; result = Wait(service.StartRefresh());
+        Require(result.state == L"success" && !result.status.stale && result.status.lastSuccessCityId == city.cityId.value() &&
+            result.status.details.Alerts.size() == 1, "successful new-city alerts were filtered before committing identity");
+        const auto beforeProviderSwitch = result.status;
+        qweatherCode = 401; city.provider = 1; result = Wait(service.StartConfigure(city));
+        Require(result.state == L"error" && result.status.stale && result.status.temperature == beforeProviderSwitch.temperature &&
+            result.status.details.Alerts.empty() && result.status.details.AlertsError.empty() && result.status.details.AlertsAttribution.empty(),
+            "failed same-city provider switch restored alerts from the previous provider");
+        Require(result.status.details.Current.Temperature == beforeProviderSwitch.details.Current.Temperature &&
+            result.status.details.Current.WeatherText == beforeProviderSwitch.details.Current.WeatherText &&
+            !result.status.details.Forecast.empty() && result.status.details.Forecast.size() == beforeProviderSwitch.details.Forecast.size() &&
+            result.status.details.Forecast[0].TemperatureMin == beforeProviderSwitch.details.Forecast[0].TemperatureMin &&
+            result.status.details.AirQuality.PM2p5 == beforeProviderSwitch.details.AirQuality.PM2p5,
+            "failed provider switch discarded non-alert weather cache");
+        qweatherCode = 0; result = Wait(service.StartRefresh());
+        Require(result.state == L"success" && result.status.provider == 1 && !result.status.stale &&
+            result.status.lastSuccessCityId == beforeProviderSwitch.lastSuccessCityId && result.status.details.Alerts.size() == 1 &&
+            result.status.details.Alerts[0].Severity == L"moderate" && !result.status.details.AlertsAttribution.empty(),
+            "successful same-city new-provider refresh filtered fresh provider alerts");
+        city.provider = 0; result = Wait(service.StartConfigure(city));
+        Require(result.state == L"success" && !result.status.stale && result.status.details.Alerts.size() == 1,
+            "successful provider recovery lost fresh alerts");
         chinaAlertMode = 1; result = Wait(service.StartRefresh());
         Require(result.state == L"success" && result.status.details.Alerts.size() == 1 && !result.status.details.AlertsError.empty(), "China warning transport failure hidden or cache discarded");
         chinaAlertMode = 2; result = Wait(service.StartRefresh());
         Require(!result.status.details.AlertsError.empty(), "China malformed warning treated as no warning");
+        for (int mode : {4, 5}) {
+            chinaAlertMode = mode; result = Wait(service.StartRefresh());
+            Require(result.status.details.Alerts.size() == 1 && result.status.details.Alerts[0].Title == L"大风黄色预警" &&
+                !result.status.details.AlertsError.empty(), "China malformed alert item replaced valid cached warning");
+        }
         chinaAlertMode = 0; result = Wait(service.StartRefresh());
         Require(result.status.details.Alerts.empty() && result.status.details.AlertsError.empty(), "China empty warning response did not clear warning/error");
         city.provider = 1; city.cityId = L"101190101"; city.cityName = L"南京";
@@ -299,6 +356,23 @@ int wmain(int argc, wchar_t** argv)
         Require(result.status.details.Alerts.empty() && !result.status.details.AlertsError.empty(), "first warning failure silently treated as empty success");
         alertMode = 0; result = Wait(service.StartRefresh());
         Require(result.status.details.Alerts.size() == 1 && result.status.details.AlertsError.empty(), "QWeather warning failure did not recover");
+        {
+            auto disabledIni = Read(ini);
+            Require(PluginIniOptions::SetBoolean(disabledIni, "config", "show_weather_alerts", false), "global alert setting missing");
+            { std::ofstream file(ini, std::ios::binary); file << disabledIni; }
+            // The weather cache survives a network failure; disabled alerts must not.
+            qweatherCode = 401; result = Wait(service.StartRefresh()); qweatherCode = 0;
+            Require(result.state == L"error" && result.status.details.Alerts.empty() && result.status.details.AlertsError.empty() &&
+                result.status.details.AlertsAttribution.empty(), "failed refresh revived disabled global alerts");
+            lastAlertUrl.clear(); result = Wait(service.StartRefresh());
+            Require(result.state == L"success" && result.status.details.Alerts.empty() && lastAlertUrl.empty(),
+                "QWeather ignored global alert switch or queried disabled alerts");
+            Require(data.m_api_hfw->QueryWeatherAlerts(city.cityId.value()) && lastAlertUrl.empty(), "direct alert query ignored global switch");
+            Require(PluginIniOptions::SetBoolean(disabledIni, "config", "show_weather_alerts", true), "global alert restore missing");
+            { std::ofstream file(ini, std::ios::binary); file << disabledIni; }
+            result = Wait(service.StartRefresh());
+            Require(result.status.details.Alerts.size() == 1 && result.status.details.AlertsError.empty(), "alerts did not return after reenabling");
+        }
         data.m_api_hfw->config.ShowWeatherAlert = false;
         Require(data.m_api_hfw->QueryWeatherAlerts(city.cityId.value()), "disabled warning query failed");
         const auto disabled = data.m_api_hfw->GetWeatherDetails();

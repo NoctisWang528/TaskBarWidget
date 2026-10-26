@@ -117,12 +117,24 @@ public sealed partial class SettingsWindow
                 ["groups"] = new JsonArray(new JsonObject { ["id"] = "builtins.weather", ["page"] = "quickCardsWeather", ["label"] = "天气" }),
                 ["fields"] = new JsonArray(
                     new JsonObject { ["key"] = "builtins.weatherpro.dll.config.city_no", ["group"] = "builtins.weather", ["type"] = "string", ["label"] = "城市", ["value"] = "101010100" },
+                    new JsonObject { ["key"] = "builtins.weatherpro.dll.config.show_weather_alerts", ["group"] = "builtins.weather", ["type"] = "boolean", ["value"] = true },
+                    new JsonObject { ["key"] = "builtins.weatherpro.dll.hfw.show_weather_alert", ["group"] = "builtins.weather", ["type"] = "boolean", ["value"] = true },
                     new JsonObject { ["key"] = "items.native_0.label", ["itemId"] = "native_0", ["itemName"] = "CPU", ["value"] = "CPU" },
                     new JsonObject { ["key"] = "items.native_0.show", ["value"] = true }) }, new JsonObject());
             window.AppWindow.IsShownInSwitchers = false;
             window.AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(-30000, -30000, 900, 1000)); window.AppWindow.Show(false);
             while (window._weatherPage?.HasStatus != true || window._weatherPage.LoadingStatus || statusReads < 2 || window._weatherPage.Status.Text.Contains("正在更新")) await Task.Delay(10, timeout.Token);
             var page = window._weatherPage ?? throw new InvalidOperationException("Weather settings were not created.");
+            var alertsToggle = WalkWeather(window._page).OfType<CheckBox>().Single(box => AutomationProperties.GetAutomationId(box) == "weather-show-alerts");
+            var hefengAlertsToggle = WalkWeather(window._page).OfType<CheckBox>().Single(box => AutomationProperties.GetAutomationId(box) == "weather-hefeng-alerts");
+            alertsToggle.IsChecked = false;
+            if (window._native.Bool("builtins.weatherpro.dll.config.show_weather_alerts", true) || hefengAlertsToggle.IsEnabled || !window._apply.IsEnabled)
+                throw new InvalidOperationException("Weather alert switch did not draft the native setting or gate the provider option.");
+            alertsToggle.IsChecked = true;
+            hefengAlertsToggle.IsChecked = false;
+            if (window._native.Bool("builtins.weatherpro.dll.hfw.show_weather_alert", true) || !hefengAlertsToggle.IsEnabled)
+                throw new InvalidOperationException("QWeather alert option did not preserve its independent draft.");
+            hefengAlertsToggle.IsChecked = true;
             var updateFrequency = WalkWeather(window._page).OfType<ComboBox>().FirstOrDefault(box => AutomationProperties.GetAutomationId(box) == "weather-update-frequency")
                 ?? throw new InvalidOperationException("Weather update frequency control is missing.");
             updateFrequency.SelectedItem = updateFrequency.Items.OfType<ComboBoxItem>().First(item => item.Tag is int value && value == 3);

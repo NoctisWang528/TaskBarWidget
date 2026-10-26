@@ -423,24 +423,23 @@ std::optional<WeatherDetails> DataApiHefengWeather::GetWeatherDetails() const
             !day.WeatherDay.empty() || !day.WeatherNight.empty()) details.Forecast.push_back(std::move(day));
     }
 
-    details.AlertsError = config.ShowWeatherAlert ? _alertsError : L"";
-    details.AlertsAttribution = config.ShowWeatherAlert ? _alertsAttribution : L"";
-    if (config.ShowWeatherAlert) for (const auto& source : _weatherAlerts) details.Alerts.push_back({
+    const bool showAlerts = config.ShowWeatherAlert && WeatherCDataManager::Instance().GetConfig().m_show_weather_alerts;
+    details.AlertsError = showAlerts ? _alertsError : L"";
+    details.AlertsAttribution = showAlerts ? _alertsAttribution : L"";
+    if (showAlerts) for (const auto& source : _weatherAlerts) details.Alerts.push_back({
         source.Type, source.TypeName, source.Level, source.Title, source.Text, source.Severity, source.PublishTime });
     return details;
 }
 
 bool DataApiHefengWeather::UpdateWeather()
 {
-    _airQualityDataOutdated = true;
-    _alertsDataOutdated = true;
-
     std::wostringstream oss;
 
     const auto &currunt_city = WeatherCDataManager::Instance().GetCurrentCityInfo();
 
     if (_dataCity != currunt_city.CityNO) { _realtimeWeather = {}; _forcastWeatherTD = {}; _forcastWeatherTM = {}; _forcastWeatherDATM = {}; _realtimeAirQuality = {}; _weatherAlerts.clear(); _alertsError.clear(); _alertsAttribution.clear(); _dataCity = currunt_city.CityNO; }
-    if (!config.ShowWeatherAlert) { _weatherAlerts.clear(); _alertsError.clear(); _alertsAttribution.clear(); }
+    const bool showAlerts = config.ShowWeatherAlert && WeatherCDataManager::Instance().GetConfig().m_show_weather_alerts;
+    if (!showAlerts) { _weatherAlerts.clear(); _alertsError.clear(); _alertsAttribution.clear(); }
     if (!config.ShowAirQuality) _realtimeAirQuality = {};
     _sharedFailure = false;
     _coordinatesResolved = false;
@@ -448,11 +447,11 @@ bool DataApiHefengWeather::UpdateWeather()
     _coordinateError.clear();
     _updating = true;
     struct EndUpdate { bool& value; ~EndUpdate() { value = false; } } endUpdate{ _updating };
-    auto sharedFail = [this]() {
+    auto sharedFail = [this, showAlerts]() {
         if (config.ShowAirQuality) _realtimeAirQuality.Error = L"空气质量获取失败：" + _lastError +
             (_realtimeAirQuality.AQI.empty() && _realtimeAirQuality.PM2p5.empty() && _realtimeAirQuality.PM10.empty() ?
                 L"；无可用的上次信息。" : L"；上次数据可能过时。");
-        if (config.ShowWeatherAlert) _alertsError = L"预警获取失败：" + _lastError +
+        if (showAlerts) _alertsError = L"预警获取失败：" + _lastError +
             (_weatherAlerts.empty() ? L"；无可用的上次信息。" : L"；以下为上次信息，可能已过时。");
     };
     if (!ValidateConfiguration()) { sharedFail(); return false; }
@@ -467,7 +466,7 @@ bool DataApiHefengWeather::UpdateWeather()
     if (config.ShowAirQuality && !QueryRealtimeAirQuality(currunt_city.CityNO))
         oss << L"[RealtimeAirQuality]" << _lastError << std::endl;
     if (_sharedFailure) { sharedFail(); return WeatherCDataManager::Instance().GetConfig().m_wit == EWeatherInfoType::WEATHER_REALTIME ? realtime : forecast; }
-    if (config.ShowWeatherAlert && !QueryWeatherAlerts(currunt_city.CityNO))
+    if (showAlerts && !QueryWeatherAlerts(currunt_city.CityNO))
         oss << L"[WeatherAlerts]" << _lastError;
 
     if (!_sharedFailure) _lastError = oss.str();
@@ -520,7 +519,6 @@ bool DataApiHefengWeather::QueryRealtimeAirQuality(const std::wstring &query)
     if (_airCity != query || !config.ShowAirQuality) { _realtimeAirQuality = {}; _airCity = query; }
     if (!config.ShowAirQuality) { _lastError.clear(); return true; }
     auto fail = [this](std::wstring reason) {
-        _airQualityDataOutdated = true;
         _realtimeAirQuality.Error = L"空气质量获取失败：" + reason +
             (_realtimeAirQuality.AQI.empty() && _realtimeAirQuality.PM2p5.empty() && _realtimeAirQuality.PM10.empty() ?
                 L"；无可用的上次信息。" : L"；上次数据可能过时。");
@@ -586,7 +584,6 @@ bool DataApiHefengWeather::QueryRealtimeAirQuality(const std::wstring &query)
     if (!err.empty()) return fail(err);
     if (!valid) return fail(L"和风天气空气质量响应格式无效或数据不完整。");
     _realtimeAirQuality = std::move(data);
-    _airQualityDataOutdated = false;
     _lastError.clear();
     return true;
 }
@@ -638,17 +635,15 @@ bool DataApiHefengWeather::QueryForecastWeather(const std::wstring &query)
 bool DataApiHefengWeather::QueryWeatherAlerts(const std::wstring &query)
 {
     auto fail = [this](std::wstring reason) {
-        _alertsDataOutdated = true;
         _alertsError = L"预警获取失败：" + reason +
             (_weatherAlerts.empty() ? L"；无可用的上次信息。" : L"；以下为上次信息，可能已过时。");
         _lastError = std::move(reason);
         return false;
     };
-    if (!config.ShowWeatherAlert) {
+    if (!config.ShowWeatherAlert || !WeatherCDataManager::Instance().GetConfig().m_show_weather_alerts) {
         _weatherAlerts.clear();
         _alertsError.clear();
         _alertsAttribution.clear();
-        _alertsDataOutdated = false;
         _lastError.clear();
         return true;
     }
@@ -726,7 +721,6 @@ bool DataApiHefengWeather::QueryWeatherAlerts(const std::wstring &query)
     if (!valid) return fail(L"和风天气预警响应格式无效或数据不完整。");
     _weatherAlerts = std::move(data);
     _alertsAttribution = std::move(attribution);
-    _alertsDataOutdated = false;
     _alertsError.clear();
     _lastError.clear();
     return true;

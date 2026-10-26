@@ -69,21 +69,12 @@ public partial class App : Application
         _ = WatchHostAsync(hostPid);
     }
 
-    private static bool IsOnDemand(JsonElement settings) =>
-        settings.ValueKind == JsonValueKind.Object &&
-        settings.TryGetProperty("quickCardResourceMode", out var mode) &&
-        mode.ValueKind == JsonValueKind.String &&
-        string.Equals(mode.GetString(), "OnDemand", StringComparison.OrdinalIgnoreCase);
-
     private void OnBackendEvent(JsonElement message)
     {
-        // Timestamped on the receiving thread so the timing log separates pipe
-        // and dispatcher wait from UI-thread work.
-        var receivedAt = DateTimeOffset.Now;
-        _dispatcher?.TryEnqueue(() => HandleBackendEvent(message, receivedAt));
+        _dispatcher?.TryEnqueue(() => HandleBackendEvent(message));
     }
 
-    private void HandleBackendEvent(JsonElement message, DateTimeOffset receivedAt)
+    private void HandleBackendEvent(JsonElement message)
     {
         if (_stopping || _connection is null || !message.TryGetProperty("action", out var action)) return;
         var payload = message.TryGetProperty("payload", out var value) && value.ValueKind == JsonValueKind.Object ? value : message;

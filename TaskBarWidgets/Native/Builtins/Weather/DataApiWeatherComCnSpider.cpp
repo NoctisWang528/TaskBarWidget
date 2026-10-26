@@ -406,8 +406,15 @@ namespace wccs  // WeatherComCnSpider
                         return alert;
                     };
 
-                    for (decltype(num_alerts) i = 0; i < num_alerts; ++i)
-                        alerts.push_back(get_alert(yyjson_arr_get(jalert_arr, i)));
+                    for (decltype(num_alerts) i = 0; i < num_alerts; ++i) {
+                        const auto item = yyjson_arr_get(jalert_arr, i);
+                        auto alert = get_alert(item);
+                        if (!yyjson_is_obj(item) || (alert.BriefMessage.empty() && alert.DetailedMessage.empty())) {
+                            succeed = false;
+                            break;
+                        }
+                        alerts.push_back(std::move(alert));
+                    }
                 }
             }
             else

@@ -41,6 +41,17 @@ static LONG WINAPI ReportCrash(EXCEPTION_POINTERS* exception)
 }
 
 static void Require(bool ok, const char* message) { if (!ok) throw std::runtime_error(message); }
+static void PumpFor(ULONGLONG milliseconds)
+{
+    const auto deadline = GetTickCount64() + milliseconds;
+    while (GetTickCount64() < deadline)
+    {
+        MSG message{};
+        while (GetTickCount64() < deadline && PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE))
+        { TranslateMessage(&message); DispatchMessageW(&message); }
+        Sleep(5);
+    }
+}
 static int VisibleProbeCards()
 {
     int count = 0;
@@ -77,7 +88,6 @@ struct Services : Cards::CardHostServices
     void OnRequest(const std::wstring& value, const std::wstring&) override { action = value; }
     void OnHideCards(const std::wstring&) override {}
     void OnOpenSettings() override {}
-    void OnMenuOpened(bool) override {}
     void OnLayoutInvalidated() override {}
 };
 
@@ -200,6 +210,33 @@ int wmain(int argc, wchar_t** argv)
                 popup.MoveSelection(1);
                 Require(popup.Selected() == 2, "menu keyboard navigation skips disabled rows");
                 popup.Hide();
+                Require(!IsWindowVisible(popupWindow), "reduced motion closes the popup immediately");
+                auto animated = environment;
+                animated.reducedMotion = false;
+                popup.ApplyEnvironment(animated);
+                popup.Show(L"output", items, RECT{0, 0, 100, 30}, true);
+                const auto popupBounds = popup.Bounds();
+                // At the start, the third row is six DIPs above its resting
+                // position; selecting that visible edge must not hit row two.
+                const POINT enteringRow{popupBounds.left + static_cast<LONG>(15 * dpi),
+                    popupBounds.top + static_cast<LONG>(61 * dpi)};
+                Require(popup.HitTest(enteringRow) == 2, "popup hit testing follows its entrance offset");
+                PumpFor(200);
+                const auto settledBounds = popup.Bounds();
+                Require(EqualRect(&popupBounds, &settledBounds), "popup entrance never moves its HWND");
+                popup.Hide();
+                Require(!popup.Visible() && IsWindowVisible(popupWindow), "popup exit animates after input is dismissed");
+                popup.Show(L"output", items, RECT{0, 0, 100, 30}, true);
+                PumpFor(200);
+                Require(popup.Visible() && IsWindowVisible(popupWindow), "reopen cancels pending popup hide");
+                popup.Hide();
+                PumpFor(200);
+                Require(!IsWindowVisible(popupWindow), "animated popup eventually hides");
+                popup.Show(L"output", items, RECT{0, 0, 100, 30}, true);
+                PumpFor(200);
+                popup.Hide();
+                popup.Hide(false);
+                Require(!IsWindowVisible(popupWindow), "immediate hide cancels an in-progress popup exit");
             }
             for (const float scale : {1.0f, 1.5f, 2.0f})
             for (const auto kind : {Cards::Kind::Weather, Cards::Kind::Traffic, Cards::Kind::Device, Cards::Kind::Media, Cards::Kind::Update})
@@ -229,7 +266,18 @@ int wmain(int argc, wchar_t** argv)
                 Require(!IsWindowVisible(card.Handle()), "probe must not show or activate a card");
                 if (kind == Cards::Kind::Traffic)
                 {
+                    // Cold first open: no history yet, then the asynchronous reply
+                    // arrives while the same card stays open.
+                    auto loading = snapshot;
+                    loading.traffic = {};
+                    card.SetSnapshot(loading);
                     card.Show(false); // remains entirely outside the virtual desktop
+                    Require(card.HasRenderedContent() && card.Regions().Empty(), "loading grid commits without fabricated records");
+                    const auto firstPaints = card.ContentPaintCount();
+                    card.SetSnapshot(snapshot);
+                    Require(card.Visible() && card.Regions().All().size() == 84 &&
+                        card.ContentPaintCount() > firstPaints && card.HasRenderedContent(),
+                        "first history reply paints all 84 days without reopening");
                     const auto paints = card.ContentPaintCount();
                     for (int refresh = 0; refresh < 20; ++refresh)
                     {
@@ -237,6 +285,48 @@ int wmain(int argc, wchar_t** argv)
                         card.Show(false);
                     }
                     Require(card.ContentPaintCount() == paints, "unchanged layout must not repaint traffic");
+                    auto animated = environment;
+                    animated.reducedMotion = false;
+                    card.ApplyEnvironment(animated);
+                    const auto firstCell = card.Regions().All().front();
+                    const auto bounds = card.Bounds();
+                    const POINT hover{bounds.left + static_cast<LONG>((firstCell.bounds.left + firstCell.bounds.right) * scale / 2),
+                        bounds.top + static_cast<LONG>((firstCell.bounds.top + firstCell.bounds.bottom) * scale / 2)};
+                    card.OnPointer(WM_MOUSEMOVE, hover, false);
+                    const auto hoverPaints = card.ContentPaintCount();
+                    PumpFor(200);
+                    Require(card.ContentPaintCount() > hoverPaints, "heatmap hover glow advances between pointer messages");
+                    const auto settledPaints = card.ContentPaintCount();
+                    PumpFor(100);
+                    Require(card.ContentPaintCount() == settledPaints, "settled heatmap stops its animation timer");
+                    card.OnMouseLeave();
+                    PumpFor(200);
+                    card.Hide(true);
+                    PumpFor(200);
+                    const auto hiddenBounds = card.Bounds();
+                    Require(!IsWindowVisible(card.Handle()) && EqualRect(&bounds, &hiddenBounds),
+                        "card exit animation hides without moving window geometry");
+                    card.ApplyEnvironment(environment);
+                    card.Hide(false);
+                }
+                if (kind == Cards::Kind::Weather && scale == 1.0f)
+                {
+                    auto warnings = snapshot;
+                    Cards::Protocol::Changes changes;
+                    Require(Cards::Protocol::ApplySnapshot(warnings,
+                        LR"({"weather":{"revision":8,"city":"Test city","hasData":true,"temperature":"23","details":{"alerts":[{"title":"Wind warning","text":"","typeName":"Wind","level":"Yellow"},{"title":"Rain warning","text":"Heavy rain","typeName":"Rain"}]}}})",
+                        changes) && changes.weather && warnings.weather.alerts.size() == 2 &&
+                        warnings.weather.alerts.front().title == L"Wind warning", "warning payload reaches the card intact");
+                    card.SetSnapshot(warnings);
+                    card.Show(false);
+                    const auto paints = card.ContentPaintCount();
+                    PumpFor(1100);
+                    Require(card.ContentPaintCount() > paints, "multiple warnings schedule carousel redraws");
+                    warnings.weather.alerts.resize(1);
+                    card.SetSnapshot(warnings);
+                    const auto singlePaints = card.ContentPaintCount();
+                    PumpFor(1100);
+                    Require(card.ContentPaintCount() == singlePaints, "single warning does not keep a carousel timer alive");
                     card.Hide(false);
                 }
                 if (kind == Cards::Kind::Media)

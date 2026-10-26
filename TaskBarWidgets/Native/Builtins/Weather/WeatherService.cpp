@@ -107,14 +107,16 @@ WeatherService::JobResult WeatherService::Result(uint64_t id) const
     if (found == m_results.end()) return {id, L"notFound", L"该天气任务已失效，请重新操作。", {}, m_status};
     auto result = found->second; result.status = m_status; return result;
 }
-WeatherService::JobResult WeatherService::Submit(Job job)
+WeatherService::JobResult WeatherService::Submit(Job job, bool afterCurrent)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    if (m_stopping || m_jobs.size() >= 8) return {0, L"error", L"天气任务繁忙，请稍后重试。", {}, m_status};
+    if (m_stopping) return {0, L"error", L"天气任务繁忙，请稍后重试。", {}, m_status};
     if (job.action == Action::Refresh && m_refreshJob) {
         const auto found = m_results.find(m_refreshJob);
-        if (found != m_results.end() && (found->second.state == L"queued" || found->second.state == L"running")) { auto result = found->second; result.status = m_status; return result; }
+        if (found != m_results.end() && (found->second.state == L"queued" ||
+            (!afterCurrent && found->second.state == L"running"))) { auto result = found->second; result.status = m_status; return result; }
     }
+    if (m_jobs.size() >= 8) return {0, L"error", L"天气任务繁忙，请稍后重试。", {}, m_status};
     job.id = ++m_next;
     if (job.action == Action::Refresh) m_refreshJob = job.id;
     m_results[job.id] = {job.id, L"queued", L"天气任务已排队。", {}, m_status};
@@ -131,19 +133,34 @@ WeatherService::JobResult WeatherService::StartConfigure(const ConfigPatch& patc
     try { Validate(patch); } catch (const Failure& failure) { return {0, L"error", failure.message, {}, Status()}; }
     Job job; job.action = Action::Configure; job.patch = patch; return Submit(std::move(job));
 }
-WeatherService::JobResult WeatherService::StartRefresh() { Job job; job.action = Action::Refresh; return Submit(std::move(job)); }
-void WeatherService::UpdateStatus()
+WeatherService::JobResult WeatherService::StartRefresh(bool afterCurrent) { Job job; job.action = Action::Refresh; return Submit(std::move(job), afterCurrent); }
+void WeatherService::UpdateStatus(bool refreshed)
 {
     auto& data = WeatherCDataManager::InstanceRef(); const auto config = data.GetConfig(); const auto city = data.GetCurrentCityInfo();
     const auto host = NormalizeApiHost(data.m_api_hfw->config.ApiHost);
     std::lock_guard<std::mutex> lock(m_mutex);
     m_status.provider = static_cast<int>(config.m_api_type); m_status.cityId = city.CityNO; m_status.cityName = city.CityName;
+    // Commit the cache identity before filtering the newly refreshed alerts.
+    if (refreshed) {
+        m_status.lastSuccessUnix = std::time(nullptr);
+        m_status.lastSuccessCityId = m_status.cityId;
+        m_status.lastSuccessCityName = m_status.cityName;
+        m_lastSuccessProvider = m_status.provider;
+        m_status.stale = false; ++m_status.revision;
+    }
     m_status.cityRegion = city.CityAdministrativeOwnership; m_status.apiHost = host.value_or(L""); m_status.hasApiKey = !data.m_api_hfw->config.AppKey.empty();
     m_status.temperature = data.GetWeatherTemperature();
     WeatherDetails details;
     if (data.GetWeatherDetails(details)) m_status.details = std::move(details);
-    m_status.stale = m_status.stale ||
-        !m_status.lastSuccessCityId.empty() && m_status.lastSuccessCityId != m_status.cityId;
+    const bool sameSource = m_status.lastSuccessCityId == m_status.cityId && m_lastSuccessProvider == m_status.provider;
+    // General weather may remain visibly stale; alerts must belong to this city/provider.
+    if (!sameSource || !config.m_show_weather_alerts ||
+        (config.m_api_type == DataApiType::API_HefengWeather && !data.m_api_hfw->config.ShowWeatherAlert)) {
+        m_status.details.Alerts.clear();
+        m_status.details.AlertsError.clear();
+        m_status.details.AlertsAttribution.clear();
+    }
+    m_status.stale = m_status.stale || (!m_status.lastSuccessCityId.empty() && !sameSource);
 }
 void WeatherService::Configure(const ConfigPatch& patch)
 {
@@ -210,9 +227,7 @@ void WeatherService::Refresh()
           if (!m_status.lastSuccessCityId.empty() && m_status.lastSuccessCityId != city.CityNO) message += L" 当前保留的是上次成功城市（" + m_status.lastSuccessCityName + L"）的数据。"; }
         throw Failure{message};
     }
-    UpdateStatus();
-    { std::lock_guard<std::mutex> lock(m_mutex); m_status.lastSuccessUnix = std::time(nullptr); m_status.lastSuccessCityId = m_status.cityId; m_status.lastSuccessCityName = m_status.cityName;
-      m_status.stale = false; ++m_status.revision; }
+    UpdateStatus(true);
 }
 void WeatherService::Work()
 {

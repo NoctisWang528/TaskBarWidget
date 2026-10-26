@@ -18,6 +18,7 @@ namespace Cards
         constexpr UINT BackdropChanged = WM_APP + 0x215;
         constexpr ULONGLONG CoverFadeMilliseconds = 200;
         constexpr ULONGLONG LyricWrapMilliseconds = 180;
+        constexpr ULONGLONG HoverMilliseconds = 140;
 
         LRESULT CALLBACK CardProc(HWND window, UINT message, WPARAM keys, LPARAM position)
         {
@@ -150,8 +151,9 @@ namespace Cards
         muxc::SystemBackdropConfiguration micaConfiguration{ nullptr };
         bool micaReady{ false };
         bool dirty{ true };
-        RECT damage{};                 // DIP; empty means the whole card
         int hotRegion{ 0 };
+        int previousHotRegion{ 0 };
+        ULONGLONG hoverStart{};
         int focusedRegion{ 0 };
         int capturedRegion{ 0 };
         bool trackingLeave{ false };
@@ -189,10 +191,6 @@ namespace Cards
         int lyricLineIndex{ -1 };
         ULONGLONG lyricLineStarted{};
         ULONGLONG lyricsTick{};
-        std::wstring draggingFlow;
-        std::wstring openMenu;         // "output" / "input" / "source"
-        int openMenuSelected{ 0 };
-        std::vector<Layout::Region> menuItems;
         float opacity{ 1.0f };
         float offset{ 0.0f };
         float fromOpacity{ 1.0f };
@@ -328,8 +326,19 @@ namespace Cards
 
     void CardWindow::ApplyEnvironment(const CardEnvironment& cardEnvironment)
     {
-        const bool themeChanged = environment.dark != cardEnvironment.dark;
         environment = cardEnvironment;
+        if (environment.reducedMotion || environment.highContrast)
+        {
+            impl->hoverStart = 0;
+            if (impl->animating)
+            {
+                impl->animating = false;
+                impl->opacity = visible ? 1.0f : 0.0f;
+                impl->offset = 0.0f;
+                ApplyMotion();
+                if (!visible) ShowWindow(window, SW_HIDE);
+            }
+        }
 
         // One controller per window: a theme or tuning change only reconfigures it.
         if (!impl->mica && window && impl->target)
@@ -407,7 +416,7 @@ namespace Cards
                 : impl->micaReady ? winrt::Windows::UI::Color{10, 255, 255, 255} : FallbackColor(environment.dark);
             impl->wash.Brush(impl->compositor.CreateColorBrush(color));
         }
-        impl->dirty = true; impl->damage = RECT{};
+        impl->dirty = true;
         UpdateTimer();
         if (visible) Paint();
     }
@@ -483,7 +492,6 @@ namespace Cards
         }
         UpdateTimer();
         impl->dirty = true;
-        impl->damage = RECT{};
         if (visible) Paint();
     }
 
@@ -495,7 +503,8 @@ namespace Cards
 
     POINT CardWindow::ToDip(POINT pixels) const
     {
-        return Layout::ToDip(POINT{pixels.x - bounds.left, pixels.y - bounds.top}, scale);
+        const auto point = Layout::ToDip(POINT{pixels.x - bounds.left, pixels.y - bounds.top}, scale);
+        return POINT{point.x, static_cast<LONG>(std::lround(point.y + impl->offset))};
     }
 
     float CardWindow::ContentWidthDip() const { return Layout::WidthDip(kind); }
@@ -528,7 +537,6 @@ namespace Cards
                 SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER);
         }
         impl->dirty = true;
-        impl->damage = RECT{};
         // Resident prewarm must produce actual pixels before the first show.
         Paint();
     }
@@ -547,18 +555,15 @@ namespace Cards
         // Snapshot/layout refreshes must not restart an entrance or cover a menu.
         if (visible) { Paint(); return; }
         visible = true;
-        ShowWindow(window, SW_SHOWNOACTIVATE);
-        SetWindowPos(window, HWND_TOPMOST, bounds.left, bounds.top,
-            bounds.right - bounds.left, bounds.bottom - bounds.top,
-            SWP_NOACTIVATE | SWP_SHOWWINDOW);
-        if (animate && !environment.reducedMotion)
+        if (animate && !environment.reducedMotion && !environment.highContrast)
         {
-            impl->fromOpacity = 0.0f;
-            impl->fromOffset = AnimationOffsetDip;
+            const bool reversing = impl->animating && IsWindowVisible(window);
+            impl->fromOpacity = reversing ? impl->opacity : 0.0f;
+            impl->fromOffset = reversing ? impl->offset : AnimationOffsetDip;
             impl->started = std::chrono::steady_clock::now();
             impl->animating = true;
-            impl->opacity = 0.0f;
-            impl->offset = AnimationOffsetDip;
+            impl->opacity = impl->fromOpacity;
+            impl->offset = impl->fromOffset;
         }
         else
         {
@@ -568,8 +573,11 @@ namespace Cards
         }
         ApplyMotion();
         impl->dirty = true;
-        impl->damage = RECT{};
         Paint();
+        ShowWindow(window, SW_SHOWNOACTIVATE);
+        SetWindowPos(window, HWND_TOPMOST, bounds.left, bounds.top,
+            bounds.right - bounds.left, bounds.bottom - bounds.top,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW);
         UpdateTimer();
     }
 
@@ -578,8 +586,10 @@ namespace Cards
         visible = false;
         if (!window) return;
         CancelPointer();
-        ClosePopup();
-        if (animate && !environment.reducedMotion && impl->opacity > 0.01f)
+        impl->hotRegion = impl->previousHotRegion = 0;
+        impl->hoverStart = 0;
+        impl->trackingLeave = false;
+        if (animate && !environment.reducedMotion && !environment.highContrast && impl->opacity > 0.01f)
         {
             impl->fromOpacity = impl->opacity;
             impl->fromOffset = impl->offset;
@@ -603,7 +613,8 @@ namespace Cards
         const bool dynamic = visible && (impl->coverFadeStart || impl->lyricWrapStart ||
             impl->sliderPendingUntil || (kind == Kind::Media && snapshot.media.isPlaying) ||
             (kind == Kind::Weather && snapshot.weather.alerts.size() > 1));
-        const UINT interval = impl->animating ? 16 : dynamic ? (kind == Kind::Weather ? 1000 : 33) : 0;
+        const UINT interval = impl->animating || (visible && impl->hoverStart) ? 16 :
+            dynamic ? (kind == Kind::Weather ? 1000 : 33) : 0;
         if (interval == impl->timerInterval) return;
         if (interval)
         {
@@ -624,10 +635,12 @@ namespace Cards
         {
             const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - impl->started).count();
-            const float progress = std::clamp(static_cast<float>(elapsed) / AnimationMilliseconds, 0.0f, 1.0f);
+            const float linear = std::clamp(static_cast<float>(elapsed) / AnimationMilliseconds, 0.0f, 1.0f);
+            const float progress = 1.0f - std::pow(1.0f - linear, 3.0f);
             const float target = visible ? 1.0f : 0.0f;
             impl->opacity = impl->fromOpacity + (target - impl->fromOpacity) * progress;
-            impl->offset = impl->fromOffset * (1.0f - progress);
+            const float targetOffset = visible ? 0.0f : AnimationOffsetDip;
+            impl->offset = impl->fromOffset + (targetOffset - impl->fromOffset) * progress;
             ApplyMotion();
             if (progress >= 1.0f)
             {
@@ -637,6 +650,11 @@ namespace Cards
         }
         if (visible)
         {
+            if (impl->hoverStart)
+            {
+                repaint = true;
+                if (now - impl->hoverStart >= HoverMilliseconds) impl->hoverStart = 0;
+            }
             if (kind == Kind::Weather && snapshot.weather.alerts.size() > 1 && now / 4000 != impl->lastWeatherAlert)
             { impl->lastWeatherAlert = now / 4000; repaint = true; }
             if (impl->coverFadeStart)
@@ -764,6 +782,16 @@ namespace Cards
                     impl->coverFadeStart = 0;
                 }
             }
+            Paint::Interaction interaction;
+            interaction.hot = impl->hotRegion;
+            interaction.previousHot = impl->previousHotRegion;
+            interaction.focused = impl->focusedRegion;
+            if (impl->hoverStart)
+            {
+                const float progress = std::clamp(static_cast<float>(GetTickCount64() - impl->hoverStart) /
+                    HoverMilliseconds, 0.0f, 1.0f);
+                interaction.progress = 1.0f - std::pow(1.0f - progress, 3.0f);
+            }
             switch (kind)
             {
             case Kind::Media:
@@ -774,7 +802,7 @@ namespace Cards
                 Paint::Device(context, painted, environment, regions, widthDip, heightDip);
                 break;
             case Kind::Traffic:
-                Paint::Traffic(context, painted, environment, regions, widthDip, heightDip);
+                Paint::Traffic(context, painted, environment, regions, widthDip, heightDip, interaction);
                 break;
             case Kind::Weather:
                 Paint::Weather(context, painted, environment, regions, widthDip, heightDip);
@@ -782,6 +810,20 @@ namespace Cards
             case Kind::Update:
                 Paint::Update(context, painted, environment, regions, widthDip, heightDip);
                 break;
+            }
+            // Shared hover/press feedback for the controls painted by every card.
+            // Heatmap cells draw their own same-colour glow below their fill.
+            for (const auto& region : regions.All())
+            {
+                if (!region.enabled || region.type == Layout::RegionType::Cell ||
+                    region.type == Layout::RegionType::Text) continue;
+                const float hover = interaction.Hover(region.id);
+                const bool pressed = impl->capturedRegion == region.id;
+                if (hover <= 0 && !pressed) continue;
+                const auto& r = region.bounds;
+                Draw::FillRound(context, Draw::Rect(static_cast<float>(r.left), static_cast<float>(r.top),
+                    static_cast<float>(r.right), static_cast<float>(r.bottom)), 5.0f,
+                    WithAlpha(Draw::Colors(environment).accent, pressed ? 0.18f : 0.10f * hover));
             }
             if (const auto* focused = regions.Find(impl->focusedRegion))
             {
@@ -807,14 +849,7 @@ namespace Cards
             impl->boundSurface = impl->surface.Handle();
         }
         impl->dirty = false;
-        impl->damage = RECT{};
         ++contentPaintCount;
-    }
-
-    void CardWindow::PaintPopup()
-    {
-        // The menus are drawn into the same surface as the card content so they
-        // follow it during the open/close animation and never steal focus.
     }
 
     void CardWindow::Paint()
@@ -851,30 +886,14 @@ namespace Cards
         catch (const winrt::hresult_error&) { impl->micaReady = false; }
     }
 
-    void CardWindow::ClosePopup()
+    void CardWindow::SetHotRegion(int id)
     {
-        if (impl->openMenu.empty()) return;
-        impl->openMenu.clear();
-        impl->menuItems.clear();
-        impl->openMenuSelected = 0;
-        host.OnMenuOpened(false);
+        if (id == impl->hotRegion) return;
+        impl->previousHotRegion = impl->hotRegion;
+        impl->hotRegion = id;
+        impl->hoverStart = visible && !environment.reducedMotion && !environment.highContrast ? GetTickCount64() : 0;
         impl->dirty = true;
-        if (visible) Paint();
-    }
-
-    void CardWindow::OpenMenu(const std::wstring& menu, const std::vector<Layout::Region>& items)
-    {
-        impl->openMenu = menu;
-        impl->menuItems = items;
-        impl->openMenuSelected = 0;
-        host.OnMenuOpened(true);
-    }
-
-    const Layout::Region* CardWindow::HitRegion(POINT dip, bool includePopup) const
-    {
-        UNREFERENCED_PARAMETER(includePopup);
-        if (const auto* region = regions.Hit(dip)) return region;
-        return nullptr;
+        UpdateTimer();
     }
 
     bool CardWindow::OnPointer(UINT message, POINT pixels, bool leftDown)
@@ -886,9 +905,9 @@ namespace Cards
             TRACKMOUSEEVENT event{ sizeof(event), TME_LEAVE, window, 0 };
             TrackMouseEvent(&event); impl->trackingLeave = true;
         }
-        const auto* hit = HitRegion(dip, true);
+        const auto* hit = regions.Hit(dip);
         const int id = hit ? hit->id : 0;
-        if (id != impl->hotRegion) { impl->hotRegion = id; impl->dirty = true; }
+        SetHotRegion(hit && hit->enabled ? id : 0);
         if (message == WM_LBUTTONDOWN || message == WM_LBUTTONDBLCLK)
         {
             if (!hit || !hit->enabled) return false;
@@ -904,6 +923,8 @@ namespace Cards
                     std::max(1.0f, static_cast<float>(region.bounds.right - region.bounds.left)), 0.0f, 1.0f);
                 UpdateSlider(region, ratio);
             }
+            impl->dirty = true;
+            if (visible) Paint();
             return true;
         }
         if (message == WM_MOUSEMOVE && impl->dragging)
@@ -926,6 +947,8 @@ namespace Cards
             if (dragged) FinishSlider();
             if (GetCapture() == window) ReleaseCapture();
             if (!dragged && region && region->enabled && region->id == id) Activate(*region);
+            impl->dirty = true;
+            if (visible) Paint();
             return true;
         }
         if (impl->dirty && visible) Paint();
@@ -938,6 +961,8 @@ namespace Cards
         impl->dragging = false; impl->capturedRegion = 0;
         if (dragged) FinishSlider();
         if (GetCapture() == window) ReleaseCapture();
+        impl->dirty = true;
+        if (visible) Paint();
     }
 
     void CardWindow::AcknowledgeSlider(const std::wstring& action)
@@ -976,22 +1001,8 @@ namespace Cards
     void CardWindow::OnMouseLeave()
     {
         impl->trackingLeave = false;
-        if (impl->hotRegion)
-        {
-            impl->hotRegion = 0;
-            impl->dirty = true;
-            if (visible) Paint();
-        }
-    }
-
-    bool CardWindow::OnEscape()
-    {
-        if (!impl->openMenu.empty())
-        {
-            ClosePopup();
-            return true;
-        }
-        return false;
+        SetHotRegion(0);
+        if (visible) Paint();
     }
 
     bool CardWindow::OnKey(UINT virtualKey, bool control, bool shift)

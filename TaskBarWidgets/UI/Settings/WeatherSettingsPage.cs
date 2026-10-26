@@ -146,6 +146,32 @@ public sealed partial class SettingsWindow
             if (updateFrequency.SelectedItem is ComboBoxItem { Tag: int value }) { _native.Set(UpdateFrequencyKey, value); Changed(); }
         };
         update.Children.Add(updateFrequency);
+
+        var alerts = Section("天气预警", "显示当前城市的官方预警；多条预警每 4 秒轮换。修改后点击“应用更改”，保存后自动刷新。获取失败时会显示错误并标明保留的旧信息。");
+        const string AlertsKey = "builtins.weatherpro.dll.config.show_weather_alerts";
+        const string HefengAlertsKey = "builtins.weatherpro.dll.hfw.show_weather_alert";
+        var showAlerts = new CheckBox {
+            Content = "显示天气预警", MinHeight = 32,
+            IsChecked = _native.Bool(AlertsKey, true)
+        };
+        AutomationProperties.SetAutomationId(showAlerts, "weather-show-alerts");
+        alerts.Children.Add(showAlerts);
+        var hefengAlerts = new CheckBox {
+            Content = "和风天气来源启用预警查询", MinHeight = 32,
+            IsChecked = _native.Bool(HefengAlertsKey, true), IsEnabled = showAlerts.IsChecked == true
+        };
+        AutomationProperties.SetAutomationId(hefengAlerts, "weather-hefeng-alerts");
+        RoutedEventHandler changeAlerts = (_, _) => {
+            _native.Set(AlertsKey, showAlerts.IsChecked == true);
+            hefengAlerts.IsEnabled = showAlerts.IsChecked == true;
+            Changed();
+        };
+        showAlerts.Checked += changeAlerts;
+        showAlerts.Unchecked += changeAlerts;
+        RoutedEventHandler changeHefengAlerts = (_, _) => { _native.Set(HefengAlertsKey, hefengAlerts.IsChecked == true); Changed(); };
+        hefengAlerts.Checked += changeHefengAlerts;
+        hefengAlerts.Unchecked += changeHefengAlerts;
+        alerts.Children.Add(hefengAlerts);
     }
 
     private static void WeatherMessage(WeatherEditor page, string text, InfoBarSeverity severity)

@@ -731,20 +731,20 @@ HICON CTrafficMonitorApp::GetMenuIcon(UINT id)
 
 void CTrafficMonitorApp::AutoSelectNotifyIcon()
 {
+    // Slot 0 is the product icon in both themes. Slot 4 was its old light-theme
+    // default; migrate only auto-adapt users, retaining manual icon choices.
+    if (m_cfg_data.m_notify_icon_selected == 4)
+        m_cfg_data.m_notify_icon_selected = 0;
     if (m_win_version.GetMajorVersion() >= 10)
     {
         bool light_mode = CWindowsSettingHelper::IsWindows10LightTheme();
         if (light_mode)     //浅色模式下，如果图标是白色，则改成黑色
         {
-            if (m_cfg_data.m_notify_icon_selected == 0)
-                m_cfg_data.m_notify_icon_selected = 4;
             if (m_cfg_data.m_notify_icon_selected == 1)
                 m_cfg_data.m_notify_icon_selected = 5;
         }
         else     //深色模式下，如果图标是黑色，则改成白色
         {
-            if (m_cfg_data.m_notify_icon_selected == 4)
-                m_cfg_data.m_notify_icon_selected = 0;
             if (m_cfg_data.m_notify_icon_selected == 5)
                 m_cfg_data.m_notify_icon_selected = 1;
         }

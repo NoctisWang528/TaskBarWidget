@@ -44,7 +44,9 @@ public:
     StatusData Status() const;
     JobResult StartSearch(int provider, const std::wstring& query);
     JobResult StartConfigure(const ConfigPatch& patch);
-    JobResult StartRefresh();
+    // Config saves use afterCurrent: coalesce queued refreshes, but follow a running
+    // refresh with one fresh job that reloads the newly saved configuration.
+    JobResult StartRefresh(bool afterCurrent = false);
     JobResult Result(uint64_t jobId) const;
     static std::optional<std::wstring> NormalizeApiHost(const std::wstring& value);
     static std::wstring ApiHostError(const std::wstring& value);
@@ -53,17 +55,18 @@ private:
     ~WeatherService();
     enum class Action { Search, Configure, Refresh };
     struct Job { uint64_t id{}; Action action{}; int provider{}; std::wstring query; ConfigPatch patch; };
-    JobResult Submit(Job job);
+    JobResult Submit(Job job, bool afterCurrent = false);
     void Work();
     void Refresh();
     void Configure(const ConfigPatch& patch);
-    void UpdateStatus();
+    void UpdateStatus(bool refreshed = false);
     static void Validate(const ConfigPatch& patch);
     mutable std::mutex m_mutex;
     std::condition_variable m_ready;
     std::deque<Job> m_jobs;
     std::map<uint64_t, JobResult> m_results;
     StatusData m_status;
+    int m_lastSuccessProvider{ -1 };
     std::thread m_worker;
     uint64_t m_next{}, m_refreshJob{};
     bool m_stopping{};

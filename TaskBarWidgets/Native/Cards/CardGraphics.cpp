@@ -82,7 +82,6 @@ namespace Cards
         ReleaseMask();
         bitmaps.clear();
         formats.clear();
-        geometries.clear();
         context.Reset();
         d2dDevice.Reset();
         factory.Reset();
@@ -373,42 +372,6 @@ namespace Cards
         for (auto iter = bitmaps.begin(); iter != bitmaps.end();)
             if (iter->first.starts_with(prefix)) iter = bitmaps.erase(iter);
             else ++iter;
-    }
-
-    ID2D1PathGeometry* Graphics::RoundedRect(float rectWidth, float rectHeight, float radius)
-    {
-        if (!factory || rectWidth <= 0.0f || rectHeight <= 0.0f) return nullptr;
-        wchar_t buffer[64]{};
-        swprintf_s(buffer, L"%.2f|%.2f|%.2f", rectWidth, rectHeight, radius);
-        const std::wstring key = buffer;
-        const auto cached = geometries.find(key);
-        if (cached != geometries.end()) return cached->second.Get();
-
-        ComPtr<ID2D1PathGeometry> geometry;
-        ComPtr<ID2D1GeometrySink> sink;
-        if (FAILED(factory->CreatePathGeometry(geometry.GetAddressOf()))) return nullptr;
-        if (FAILED(geometry->Open(sink.GetAddressOf()))) return nullptr;
-        const float r = (std::min)(radius, (std::min)(rectWidth, rectHeight) / 2.0f);
-        const float right = rectWidth;
-        const float bottom = rectHeight;
-        sink->BeginFigure(D2D1::Point2F(0.0f, r), D2D1_FIGURE_BEGIN_FILLED);
-        sink->AddArc(D2D1::ArcSegment(D2D1::Point2F(r, 0.0f), D2D1::SizeF(r, r), 0.0f,
-            D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
-        sink->AddLine(D2D1::Point2F(right - r, 0.0f));
-        sink->AddArc(D2D1::ArcSegment(D2D1::Point2F(right, r), D2D1::SizeF(r, r), 0.0f,
-            D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
-        sink->AddLine(D2D1::Point2F(right, bottom - r));
-        sink->AddArc(D2D1::ArcSegment(D2D1::Point2F(right - r, bottom), D2D1::SizeF(r, r), 0.0f,
-            D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
-        sink->AddLine(D2D1::Point2F(r, bottom));
-        sink->AddArc(D2D1::ArcSegment(D2D1::Point2F(0.0f, bottom - r), D2D1::SizeF(r, r), 0.0f,
-            D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
-        sink->AddLine(D2D1::Point2F(0.0f, r));
-        sink->EndFigure(D2D1_FIGURE_END_CLOSED);
-        if (FAILED(sink->Close())) return nullptr;
-        sink.Reset();
-        const auto entry = geometries.emplace(key, geometry);
-        return entry.first->second.Get();
     }
 
     IDWriteTextFormat* Graphics::TextFormat(const std::wstring& family, float sizeDip, int weight,

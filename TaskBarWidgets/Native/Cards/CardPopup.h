@@ -40,7 +40,7 @@ namespace Cards
         // monitor and DPI; \`menu\` only names the owner for later correlation.
         void Show(const std::wstring& menu, const std::vector<Layout::Region>& items, RECT anchor,
             bool diagnosticOffscreen = false);
-        void Hide();
+        void Hide(bool animate = true);
         bool Visible() const;
         const std::wstring& Menu() const;
         RECT Bounds() const;

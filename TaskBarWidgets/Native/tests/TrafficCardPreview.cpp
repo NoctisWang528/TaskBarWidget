@@ -37,10 +37,15 @@ void WriteTrafficPreviews(Cards::Graphics& graphics, const wchar_t* directory)
     ComPtr<IWICImageEncoder> imageEncoder;
     winrt::check_hresult(graphics.Wic()->CreateImageEncoder(device.Get(), imageEncoder.GetAddressOf()));
     for (bool dark : {true, false})
-    for (bool media : {false, true})
+    for (int visual = 0; visual < 3; ++visual)
+    for (int variant = 0; variant < (visual == 0 ? 3 : 1); ++variant)
     {
+        const bool media = visual == 1;
+        const bool weather = visual == 2;
+        auto painted = snapshot;
+        if (variant == 2) painted.traffic = {};
         constexpr UINT width = 480;
-        const float heightDip = media ? Cards::Layout::HeightMedia : Cards::Layout::HeightTraffic;
+        const float heightDip = media ? Cards::Layout::HeightMedia : weather ? Cards::Layout::HeightWeather : Cards::Layout::HeightTraffic;
         const UINT height = static_cast<UINT>(heightDip * 1.25f);
         constexpr float dpi = 120.0f;
         const auto format = D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED);
@@ -59,16 +64,36 @@ void WriteTrafficPreviews(Cards::Graphics& graphics, const wchar_t* directory)
         Cards::Layout::Table regions;
         if (media)
         {
-            snapshot.media.title = L"没有媒体";
-            Cards::Paint::Media(context, snapshot, {}, {}, environment, regions, 384, heightDip);
+            painted.media.title = L"没有媒体";
+            Cards::Paint::Media(context, painted, {}, {}, environment, regions, 384, heightDip);
         }
-        else Cards::Paint::Traffic(context, snapshot, environment, regions, 384, heightDip);
+        else if (weather)
+        {
+            painted.weather.city = L"示例城市";
+            painted.weather.hasData = true;
+            painted.weather.temperature = L"23";
+            painted.weather.weather = L"多云";
+            painted.weather.conditionKind = L"cloudy";
+            Cards::WeatherAlert alert;
+            alert.typeName = L"大风"; alert.level = L"黄色";
+            alert.title = L"大风黄色预警：请注意防范。";
+            painted.weather.alerts.push_back(alert);
+            Cards::Paint::Weather(context, painted, environment, regions, 384, heightDip);
+        }
+        else
+        {
+            Cards::Paint::Interaction interaction;
+            if (variant == 1) interaction.hot = 340;
+            Cards::Paint::Traffic(context, painted, environment, regions, 384, heightDip, interaction);
+        }
         Cards::Draw::StrokeRound(context, rect, Cards::Layout::CornerRadius,
             Cards::Draw::Colors(environment).border, 0.5f);
         winrt::check_hresult(context->EndDraw());
         context->SetTarget(nullptr);
 
-        const auto path = folder / (std::wstring(media ? L"media-empty" : L"traffic") + (dark ? L"-dark.png" : L"-light.png"));
+        const auto path = folder / (std::wstring(media ? L"media-empty" : weather ? L"weather-title-alert" :
+            variant == 1 ? L"traffic-hover" : variant == 2 ? L"traffic-loading" : L"traffic") +
+            (dark ? L"-dark.png" : L"-light.png"));
         ComPtr<IWICStream> stream;
         winrt::check_hresult(graphics.Wic()->CreateStream(stream.GetAddressOf()));
         winrt::check_hresult(stream->InitializeFromFilename(path.c_str(), GENERIC_WRITE));

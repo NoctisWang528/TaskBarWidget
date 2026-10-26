@@ -890,7 +890,6 @@ void WeatherCDataManager::SaveConfigs() const
     ini.SetLongValue(L"config", L"update_freq", static_cast<int>(m_config.m_update_frequency));
     ini.SetLongValue(L"config", L"icon_type", static_cast<int>(m_config.m_icon_type));
     ini.SetBoolValue(L"config", L"show_weather_icon", m_config.m_show_weather_icon);
-    ini.SetBoolValue(L"config", L"show_weather_icon", m_config.m_show_weather_icon);
     ini.SetBoolValue(L"config", L"show_brief_rt_weather_info", m_config.m_show_brief_rt_weather_info);
     ini.SetBoolValue(L"config", L"show_weather_alerts", m_config.m_show_weather_alerts);
     ini.SetBoolValue(L"config", L"show_brief_weather_alert_info", m_config.m_show_brief_weather_alert_info);

@@ -22,6 +22,8 @@ namespace Cards
         constexpr float MaximumHeight = 300.0f;
         constexpr float MinimumWidth = 180.0f;
         constexpr float MaximumWidth = 320.0f;
+        constexpr UINT_PTR MotionTimer = 0xCD04;
+        constexpr ULONGLONG MotionMilliseconds = 160;
     }
 
     struct CardPopup::Impl
@@ -49,7 +51,12 @@ namespace Cards
         int firstVisible{};
         float scale{ 1.0f };
         bool visible{};
-        bool dark{ true };
+        bool animating{};
+        ULONGLONG motionStarted{};
+        float opacity{};
+        float fromOpacity{};
+        float offset{};
+        float fromOffset{};
 
         int VisibleRows() const
         {
@@ -85,6 +92,7 @@ namespace Cards
 
         int ItemAt(float y) const
         {
+            y -= offset; // Hit the moving content, not its final resting row.
             if (y < Padding || y >= Padding + VisibleRows() * RowHeight) return -1;
             const int index = firstVisible + static_cast<int>((y - Padding) / RowHeight);
             return index >= 0 && index < static_cast<int>(items.size()) ? index : -1;
@@ -92,7 +100,39 @@ namespace Cards
 
         void Paint();
         void Place(POINT anchorPoint, RECT anchor, bool diagnosticOffscreen);
+        void Animate();
+        void Tick();
     };
+
+    void CardPopup::Impl::Animate()
+    {
+        if (!motion || !window) return;
+        KillTimer(window, MotionTimer);
+        const bool animate = !environment.reducedMotion && !environment.highContrast;
+        if (visible && !IsWindowVisible(window)) { opacity = 0; offset = -6.0f; }
+        fromOpacity = opacity;
+        fromOffset = offset;
+        motionStarted = GetTickCount64();
+        animating = animate && SetTimer(window, MotionTimer, 16, nullptr) != 0;
+        Tick();
+    }
+
+    void CardPopup::Impl::Tick()
+    {
+        const float linear = animating ? std::clamp(static_cast<float>(GetTickCount64() - motionStarted) /
+            MotionMilliseconds, 0.0f, 1.0f) : 1.0f;
+        const float progress = 1.0f - std::pow(1.0f - linear, 3.0f);
+        opacity = fromOpacity + ((visible ? 1.0f : 0.0f) - fromOpacity) * progress;
+        offset = fromOffset + ((visible ? 0.0f : -6.0f) - fromOffset) * progress;
+        motion.Opacity(opacity);
+        motion.Offset({ 0.0f, offset * scale, 0.0f });
+        if (linear >= 1.0f)
+        {
+            animating = false;
+            KillTimer(window, MotionTimer);
+            if (!visible) ShowWindow(window, SW_HIDE);
+        }
+    }
 
     void CardPopup::Impl::Paint()
     {
@@ -208,7 +248,6 @@ namespace Cards
         impl->instance = instance;
         impl->environment = environment;
         impl->graphics = environment.graphics;
-        impl->dark = environment.dark;
         if (impl->window) { ApplyEnvironment(environment); return true; }
 
         WNDCLASSEXW definition{ sizeof(definition) };
@@ -218,6 +257,12 @@ namespace Cards
             if (!self) return DefWindowProcW(window, message, keys, position);
             switch (message)
             {
+            case WM_TIMER:
+                if (keys == MotionTimer) self->Tick();
+                return 0;
+            case WM_NCHITTEST:
+                if (!self->visible) return HTTRANSPARENT;
+                break;
             case WM_ERASEBKGND: return 1;
             case WM_PAINT:
             {
@@ -291,8 +336,9 @@ namespace Cards
                 self->Paint();
                 return 0;
             default:
-                return DefWindowProcW(window, message, keys, position);
+                break;
             }
+            return DefWindowProcW(window, message, keys, position);
         };
         definition.hInstance = instance;
         definition.lpszClassName = ClassName;
@@ -308,6 +354,8 @@ namespace Cards
     void CardPopup::Destroy()
     {
         if (!impl) return;
+        if (impl->window) KillTimer(impl->window, MotionTimer);
+        impl->animating = false;
         impl->accessibility.Detach();
         impl->visible = false;
         if (impl->target)
@@ -334,7 +382,6 @@ namespace Cards
     {
         impl->environment = environment;
         impl->graphics = environment.graphics;
-        impl->dark = environment.dark;
         if (!impl->window || !environment.compositor || !environment.device) return;
         if (impl->device != environment.device || impl->compositor != environment.compositor)
         {
@@ -347,6 +394,7 @@ namespace Cards
             impl->compositor = environment.compositor;
             impl->device = environment.device;
             impl->root = impl->compositor.CreateSpriteVisual();
+            impl->root.Clip(impl->compositor.CreateInsetClip());
             impl->motion = impl->compositor.CreateContainerVisual();
             impl->motion.RelativeSizeAdjustment({ 1.0f, 1.0f });
             impl->content = impl->compositor.CreateSpriteVisual();
@@ -368,6 +416,12 @@ namespace Cards
             impl->target.Root(impl->root);
         }
         impl->device = environment.device;
+        if (impl->animating && (environment.reducedMotion || environment.highContrast))
+        {
+            impl->animating = false;
+            impl->Tick();
+        }
+        if (impl->visible) impl->Paint();
     }
 
     void CardPopup::Show(const std::wstring& menu, const std::vector<Layout::Region>& items, RECT anchor,
@@ -385,6 +439,7 @@ namespace Cards
             if (items[index].selected) break;
         }
         impl->hot = -1;
+        impl->pressed = -1;
         impl->firstVisible = (std::max)(0, impl->selected - impl->VisibleRows() + 1);
         impl->visible = true;
         const POINT anchorPoint{ anchor.left, anchor.top };
@@ -409,12 +464,22 @@ namespace Cards
                 self->firstVisible = (std::max)(0, index - self->VisibleRows() + 1);
                 self->Paint();
             });
+        EnableWindow(impl->window, TRUE);
+        impl->Animate();
         ShowWindow(impl->window, SW_SHOWNOACTIVATE);
     }
 
-    void CardPopup::Hide()
+    void CardPopup::Hide(bool animate)
     {
-        if (!impl->visible) return;
+        if (!impl->visible)
+        {
+            if (!animate && impl->animating)
+            {
+                impl->animating = false;
+                impl->Tick();
+            }
+            return;
+        }
         impl->visible = false;
         impl->pressed = -1;
         if (GetCapture() == impl->window) ReleaseCapture();
@@ -423,7 +488,13 @@ namespace Cards
         impl->items.clear();
         impl->selected = -1;
         impl->menu.clear();
-        if (impl->window) ShowWindow(impl->window, SW_HIDE);
+        EnableWindow(impl->window, FALSE);
+        if (animate) impl->Animate();
+        else
+        {
+            impl->animating = false;
+            impl->Tick();
+        }
     }
 
     bool CardPopup::Visible() const { return impl->visible; }

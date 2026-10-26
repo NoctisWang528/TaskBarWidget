@@ -232,6 +232,8 @@ public:
                     else
                     {
                         Number(optionFields, file, id, "config", "update_freq", L"更新频率：0 每小时三次 / 1 两次 / 2 一次 / 3 每两小时 / 4 每三小时", 0, 4);
+                        Boolean(optionFields, file, id, "config", "show_weather_alerts", L"显示天气预警");
+                        Boolean(optionFields, file, id, "hfw", "show_weather_alert", L"和风天气预警");
                     }
                     note = optionFields.Size() ? (id == L"weatherpro.dll" ? L"保存后自动刷新。城市与和风连接在天气专用设置中配置，已有密钥不会返回界面。" : L"保存后重启应用生效。") : L"当前配置没有已知选项。";
                 }

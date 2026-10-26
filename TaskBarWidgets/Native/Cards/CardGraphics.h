@@ -2,7 +2,7 @@
 // Shared graphics device for the native cards.
 //
 // One D3D11/D2D device, one DirectWrite factory and one WIC factory belong to the
-// card STA thread. Each card owns only its own compositor, visuals and surfaces;
+// card STA thread. Each card owns only its own visuals and surfaces;
 // bitmaps and text formats come from this shared stack so four cards never build
 // four device stacks.
 
@@ -86,8 +86,6 @@ namespace Cards
         IDWriteTextFormat* TextFormat(const std::wstring& family, float sizeDip, int weight,
             DWRITE_TEXT_ALIGNMENT alignment, bool wrap);
 
-        // Cached rounded-rect geometry used for halo alpha masks.
-        ID2D1PathGeometry* RoundedRect(float width, float height, float radius);
         // A tinted mask rendered offscreen and blurred once, so a glow is one
         // composite pass instead of one shadow object per element. The mask uses
         // the caller's DIP coordinates and its own target-sized bitmap.
@@ -111,7 +109,6 @@ namespace Cards
         Microsoft::WRL::ComPtr<IWICImagingFactory2> wic;
         std::map<std::wstring, Microsoft::WRL::ComPtr<ID2D1Bitmap1>> bitmaps;
         std::map<std::wstring, Microsoft::WRL::ComPtr<IDWriteTextFormat>> formats;
-        std::map<std::wstring, Microsoft::WRL::ComPtr<ID2D1PathGeometry>> geometries;
         Microsoft::WRL::ComPtr<ID2D1Bitmap1> mask;
         Microsoft::WRL::ComPtr<ID2D1Image> maskTarget;
         D2D1_MATRIX_3X2_F maskTransform{};

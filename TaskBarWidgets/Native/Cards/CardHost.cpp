@@ -15,7 +15,6 @@ namespace Cards
     namespace
     {
         constexpr UINT WM_CARD_TASK = WM_APP + 0x211;
-        constexpr UINT_PTR AnimationTimer = 0xCD02;
         constexpr UINT_PTR IdleTimer = 0xCD03;
         constexpr UINT IdleMilliseconds = 10 * 60 * 1000;
 
@@ -87,14 +86,11 @@ namespace Cards
         POINT anchor{};
         std::wstring lastError;
         ULONGLONG errorUntil{};
-        int menuDepth{ 0 };
         std::chrono::steady_clock::time_point lastInteraction{};
         bool resident{ true };
         std::unique_ptr<CardPopup> popup;
-        // The popup list remembers what an accepted index means.
         std::wstring popupMenu;
         RECT popupAnchor{};
-        std::vector<std::wstring> popupIds;
         std::map<std::wstring, std::wstring> pendingSliders;
         // The settings process previews draft Mica and theme on the real cards.
         // A preview never replaces the committed configuration.
@@ -137,7 +133,6 @@ namespace Cards
         void OnRequest(const std::wstring& action, const std::wstring& jsonPayload) override;
         void OnHideCards(const std::wstring& reason) override;
         void OnOpenSettings() override;
-        void OnMenuOpened(bool open) override;
         void OnLayoutInvalidated() override;
         void OnGraphicsFailure(HRESULT result) override
         {
@@ -208,7 +203,6 @@ namespace Cards
         void OnPipeMessages();
         void OnIdle();
         CardWindow* Card(Kind kind) const;
-        bool AnyMenuOpen() const { return menuDepth > 0; }
         void HideAll(const std::wstring& reason, bool animate);
         void ShowCards();
         void DestroyIdleCards();
@@ -222,7 +216,7 @@ namespace Cards
         void ShowSourceMenu();
         void OnCardAction(const std::wstring& action, const std::wstring& name);
         void ActivateMenu();
-        void CloseMenu();
+        void CloseMenu(bool animate = true);
         bool MenuContains(POINT point) const;
         void InstallHooks();
         void UninstallHooks();
@@ -324,6 +318,7 @@ namespace Cards
             card->ApplyEnvironment(environment);
             if (force) card->SetSnapshot(snapshot);
         }
+        if (popup) popup->ApplyEnvironment(environment);
     }
 
     void CardHost::Impl::PlaceGroup(bool animate, bool showAll)
@@ -384,7 +379,7 @@ namespace Cards
     void CardHost::Impl::HideAll(const std::wstring& reason, bool animate)
     {
         UNREFERENCED_PARAMETER(reason);
-        CloseMenu();
+        CloseMenu(animate);
         visible = false;
         UninstallHooks();
         for (auto& [kind, card] : cards)
@@ -604,6 +599,10 @@ namespace Cards
                 Protocol::ResetRevisions(snapshot);
                 pendingSliders.clear();
                 if (visible) RequestInitialState();
+                // History belongs to the native host and needs no player or
+                // device discovery. Warm its cache once per connection so the
+                // first click can use it instead of starting from an empty grid.
+                else client.Request(L"getTrafficHistory", {}, L"traffic");
             }
             else if (message.kind == Protocol::Kind::Event && message.action == L"shutdown")
             {
@@ -1035,9 +1034,9 @@ namespace Cards
         OnCardAction(action, items[static_cast<size_t>(index)].name);
     }
 
-    void CardHost::Impl::CloseMenu()
+    void CardHost::Impl::CloseMenu(bool animate)
     {
-        if (popup) popup->Hide();
+        if (popup) popup->Hide(animate);
         popupMenu.clear();
     }
 
@@ -1055,13 +1054,7 @@ namespace Cards
             CloseMenu();
             return true;
         }
-        bool handled = false;
-        for (auto& [kind, card] : cards)
-        {
-            UNREFERENCED_PARAMETER(kind);
-            if (card->Visible() && card->OnEscape()) handled = true;
-        }
-        return handled;
+        return false;
     }
 
     void CardHost::Impl::OnOpenSettings()
@@ -1069,11 +1062,6 @@ namespace Cards
         HideAll(L"settings", false);
         // Media owns the settings window; the card asks it to start WinUI on demand.
         client.Request(L"openSettings");
-    }
-
-    void CardHost::Impl::OnMenuOpened(bool open)
-    {
-        menuDepth = std::max(0, menuDepth + (open ? 1 : -1));
     }
 
     void CardHost::Impl::OnLayoutInvalidated()
@@ -1121,17 +1109,7 @@ namespace Cards
                 if (self->visible) self->PlaceGroup(false, false);
                 return 0;
             case WM_TIMER:
-                if (keys == AnimationTimer)
-                {
-                    bool animating = false;
-                    for (auto& [kind, card] : self->cards)
-                    {
-                        UNREFERENCED_PARAMETER(kind);
-                        animating |= card->Tick();
-                    }
-                    if (!animating) KillTimer(window, AnimationTimer);
-                }
-                else if (keys == IdleTimer)
+                if (keys == IdleTimer)
                 {
                     self->OnIdle();
                 }

@@ -289,7 +289,7 @@ public:
         if(startupRequested) SetStartup(startupEnabled);
         for (const auto& pair : values) {
             if (std::wstring_view(pair.Key()).starts_with(L"builtins.weatherpro.dll.")) {
-                WeatherService::Instance().StartRefresh();
+                WeatherService::Instance().StartRefresh(true);
                 break;
             }
         }

@@ -342,7 +342,8 @@ namespace Cards::Paint
                 Draw::Rect(left, alertTop, left + leftWidth, alertTop + 18.0f));
             context->PushAxisAlignedClip(Draw::Rect(left, alertTop + 18.0f, left + leftWidth,
                 alertTop + 54.0f), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-            TextBlock(context, environment, alert.text, left, alertTop + 18.0f, leftWidth, 10.0f, 400,
+            const auto description = HasValue(alert.text) ? alert.text : HasValue(alert.title) ? alert.title : title;
+            TextBlock(context, environment, description, left, alertTop + 18.0f, leftWidth, 10.0f, 400,
                 palette.secondary);
             context->PopAxisAlignedClip();
         }

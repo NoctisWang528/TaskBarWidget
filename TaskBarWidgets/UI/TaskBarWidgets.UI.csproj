@@ -18,11 +18,12 @@
     <AssemblyName>TaskBarWidgets.UI</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Retained design references; native cards draw their own weather vectors. -->
+    <Content Remove="Assets\WeatherIcons\**" />
     <Content Include="..\assets\app-icon.ico" Link="Assets\TaskBarWidgets.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" Version="2.5.1" />
     <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.3.9" />
     <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="2.1.9" />
-    <Compile Include="..\Media\Integration\TrafficHeatmap.cs" Link="Models\TrafficHeatmap.cs" />
   </ItemGroup>
   <Target Name="IncludeWinUiResourcesInPublish" AfterTargets="ComputeFilesToPublish" DependsOnTargets="AddProcessedXamlFilesToCopyLocal">
     <!-- WinUI's output-copy targets expose these resources to project references but .NET publish omits them for the entry project. -->

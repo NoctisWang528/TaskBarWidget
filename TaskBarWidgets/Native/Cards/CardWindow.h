@@ -1,7 +1,7 @@
 #pragma once
 // One native card window.
 //
-// A card owns its HWND, its compositor, its visual tree, its drawing surfaces,
+// A card owns its HWND, its visual tree, its drawing surfaces,
 // its layout table and its interaction state. It never owns a D2D or DWrite
 // factory: those come from the shared Graphics of the card STA thread.
 //
@@ -10,8 +10,7 @@
 //   - system Mica background (CardHost supplies it through MicaController)
 //   - background wash and border visual
 //   - content drawing surface (static + dynamic layers painted together)
-//   - popup drawing surface (device / source menus)
-//   - motion container (opacity and DIP offset only; never moves the HWND)
+// The wash and content live in a motion container; menus have their own HWND.
 
 #include "CardAccessibility.h"
 #include "CardGraphics.h"
@@ -37,7 +36,6 @@ namespace Cards
         virtual void OnRequest(const std::wstring& action, const std::wstring& jsonPayload) = 0;
         virtual void OnHideCards(const std::wstring& reason) = 0;
         virtual void OnOpenSettings() = 0;
-        virtual void OnMenuOpened(bool open) = 0;
         virtual void OnLayoutInvalidated() = 0;
         virtual void OnGraphicsFailure(HRESULT) {}
         virtual bool IsMenuExpanded(const std::wstring&) const { return false; }
@@ -94,7 +92,6 @@ namespace Cards
         // Input. Returning true consumes the message.
         bool OnPointer(UINT message, POINT pixels, bool leftDown);
         bool OnKey(UINT virtualKey, bool control, bool shift);
-        bool OnEscape();
         void OnMouseLeave();
         // Slider gestures: immediate local paint, coalesced commit, final value on
         // release.
@@ -129,12 +126,8 @@ namespace Cards
         void ApplyMotion();
         void UpdateTimer();
         void PaintContent(bool rebuildRegions);
-        void PaintPopup();
-        void ClosePopup();
-        void OpenMenu(const std::wstring& menu, const std::vector<Layout::Region>& items);
-        const Layout::Region* HitRegion(POINT dip, bool includePopup) const;
+        void SetHotRegion(int id);
         POINT ToDip(POINT pixels) const;
-        void PaintAll();
         void Activate(const Layout::Region& region);
         float ContentWidthDip() const;
         float ContentHeightDip() const;
@@ -150,7 +143,6 @@ namespace Cards
     private:
         CardEnvironment environment;
         Layout::Table regions;
-        Layout::Table menuTable;
         Snapshot snapshot;
         RECT bounds{};
         uint64_t contentPaintCount{};
@@ -164,6 +156,18 @@ namespace Cards
     // the interaction table and paints a card from the current snapshot.
     namespace Paint
     {
+        struct Interaction
+        {
+            int hot{};
+            int previousHot{};
+            int focused{};
+            float progress{ 1.0f };
+
+            float Hover(int id) const
+            {
+                return id == hot ? progress : id == previousHot ? 1.0f - progress : 0.0f;
+            }
+        };
         // Cross-fade state for the media cover: the outgoing bitmap under the
         // incoming one while a track change settles.
         struct CoverTransition
@@ -190,7 +194,8 @@ namespace Cards
         void Device(ID2D1DeviceContext* context, const Snapshot& snapshot,
             const CardEnvironment& environment, Layout::Table& regions, float widthDip, float heightDip);
         void Traffic(ID2D1DeviceContext* context, const Snapshot& snapshot,
-            const CardEnvironment& environment, Layout::Table& regions, float widthDip, float heightDip);
+            const CardEnvironment& environment, Layout::Table& regions, float widthDip, float heightDip,
+            const Interaction& interaction = {});
         void Weather(ID2D1DeviceContext* context, const Snapshot& snapshot,
             const CardEnvironment& environment, Layout::Table& regions, float widthDip, float heightDip);
         void Update(ID2D1DeviceContext* context, const Snapshot& snapshot,

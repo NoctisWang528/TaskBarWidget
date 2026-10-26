@@ -91,8 +91,5 @@ protected:
     WeatherAlertList _weatherAlerts;
     std::wstring _alertsError, _alertsCity, _alertsAttribution;
 
-    bool _airQualityDataOutdated{ true };
-    bool _alertsDataOutdated{ true };
-
     std::wstring _lastError, _dataCity;
 };
