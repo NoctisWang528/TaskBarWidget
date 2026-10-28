@@ -22,6 +22,7 @@
 #include "StrTable.h"
 #include "PluginUpdateHelper.h"
 #include "PluginInterface.h"
+#include "WinUiDependencyCheck.h"
 
 // CTrafficMonitorApp:
 // 有关此类的实现，请参阅 TrafficMonitor.cpp
@@ -183,6 +184,7 @@ private:
 
     ULONG_PTR m_gdiplusToken{};
     bool m_runtime_initialized{};
+    WinUiRuntime m_winui_runtime;
 
     bool m_is_windows11_taskbar{ false };  //是否为Windows11的任务栏
     COLORREF m_theme_color{};

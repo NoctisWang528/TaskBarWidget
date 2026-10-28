@@ -6,6 +6,7 @@
 #include <tchar.h>
 #include "MessageDlg.h"
 #include "Common.h"
+#include "IniHelper.h"
 #include "TrafficMonitor.h"
 #include <sstream>
 
@@ -142,7 +143,16 @@ public:
 
 	void ShowCrashInfo(EXCEPTION_POINTERS* pEP)
 	{
-		CString info = CCommon::LoadTextFormat(IDS_CRASH_INFO, { m_dumpFile });
+		CString info = CCommon::LoadText(IDS_CRASH_INFO);
+        // Old external language files must not redirect product crash reports upstream.
+        if (info.Find(_T("https://github.com/NoctisWang528/TaskBarWidget/issues")) < 0)
+        {
+            CIniHelper fallback(IDR_LANGUAGE_DEFAULT);
+            std::map<std::wstring, std::wstring> messages;
+            fallback.GetAllKeyValues(L"text", messages);
+            info = messages[IDS_CRASH_INFO].c_str();
+        }
+        info = CCommon::StringFormat(info, { m_dumpFile });
 		info += _T("\r\n");
         //在崩溃信息中调用堆栈
         std::wstring stack_trace = GetStackTrace(pEP);

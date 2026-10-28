@@ -598,3 +598,23 @@ VSTest 仍在 testhost 访问父进程时返回错误 5，断言前中止；改�
 最终完整硬件构建为 261026-1440（artifacts/builds/20261026-144022）。最终目录的原生卡片、设置模板与共享运行库探针全部通过；新产品图标的九种尺寸资源与 assets/app-icon.ico 图像数据逐字节一致，包括托盘使用的 16px。产物中没有旧天气 SVG。代码和验收记录保留在工作区，日用安装与个人配置未改动。
 
 用户随后授权提交、推送及发布本轮 Release。提交前核对当前 1116 个来源文件与本地候选包的源码哈希完全一致，候选目录的 157 个对应运行文件也与已验证包一致；仅追加此发布记录。正式发行复用完整构建 261026-1440，从干净提交生成至 artifacts/releases/261026-1440-publish；以当前版本和上一稳定版本的更新器验证，草稿上传后下载复核全部附件，再发布为稳定 Release。本次不覆盖日用安装或更改启动注册。
+
+## 2026-10-28 卡片启动崩溃与反馈入口修复
+
+用户提供的 261026-1440 崩溃转储在本地只读取异常、模块及 delay-load 信息，没有上传转储。异常是 0xC06D007E；DelayLoadInfo 指向 Microsoft.Internal.FrameworkUdk.dll 的 Containment_GetChangeEnabled，Win32 错误 126。该 DLL 实际存在于 Windows App Runtime 2.6.4 的框架包中。
+
+隔离控制台复现了原调用顺序：主线程 CheckWinUiRuntime 返回成功并立即 Shutdown，WindowsAppRuntime.dll 仍在进程内；随后新 STA 再次 bootstrap 抛出相同的 delay-load 异常。根因是启动预检查撤销了包搜索依赖，之后仍在同进程使用运行库。进一步的嵌套初始化／关闭检查还发现后续初始化返回 0x80040014，因此最终方案是原生主进程只保留一份 bootstrap，卡片 STA 仅管理 DispatcherQueue，不再各自初始化／关闭 bootstrap。
+
+WinUiRuntime 在启动检查时取得引用，保留到 ExitInstance。退出先显式停止并释放卡片宿主，再清理 WinRT 工厂缓存、释放 bootstrap，最后 RoUninitialize；NativeMediaHost 的其他 shared_ptr 持有者不会延后卡片 STA 的停止。加载保护只将 0xC06D007E／0xC06D007F 转成 HRESULT，缺失模块／入口使用正常依赖错误路径，其他 SEH 不吞掉。没有复制系统 DLL、更改全局搜索路径或修复／安装系统运行库。生命周期约束参考 [微软 bootstrap 文档](https://learn.microsoft.com/windows/apps/windows-app-sdk/use-windows-app-sdk-run-time)。
+
+崩溃对话框沿用的中英文上游文案已替换为本项目 Issues 地址、本地转储位置和手动反馈说明，移除原作者邮箱及不存在的“选项／插件管理”指引；不自动发送任何内容。外置旧语言文案缺少本项目入口时改用内嵌英文。最终 EXE 的中英文 TEXT 资源与源语言文件及包内语言文件逐字节一致，崩溃条目中没有原作者邮箱或旧菜单指引。许可和上游归属保持不变。
+
+完整硬件构建 261028-1417（artifacts/builds/20261028-141733）通过。最终包的依赖检查通过真实已安装运行库、缺失引导文件、不支持的版本、模拟缺失 DLL／入口、其他异常不被误吞，以及跨 STA 保持包依赖；原生卡片探针通过两次独立卡片宿主 STA 的创建／销毁、现有绘制和 Mica 检查。第一次卡片探针曾在既有的 200ms 弹窗隐藏断言超时，后续两次通过；未将它作为 bootstrap 故障证据。共享 .NET／无界面设置检查及最终设置模板探针通过，离屏窗口未产生真实鼠标拖动事件，未记为实际拖动通过。
+
+原生更新器测试已编译，但 Windows 在启动隔离的模拟 Media 宿主时返回“操作已被用户取消”，事务测试未完成、未记为通过。未尝试绕过该启动取消；测试的 finally 已发送退出信号，未停止任何日用进程。日志：artifacts/logs/runtime-lifecycle-final-20261028.log、cards-runtime-final-20261028.log、shared-runtime-20261028.log、ui-runtime-20261028.log；隔离复现源码位于 artifacts/tests/runtime-crash-20261028/。
+
+本轮仅本地修复和打包；未启动／替换日用安装，未改个人配置，未提交、推送或发布。真实 Explorer／硬件／播放器和安装后的完整启动仍待用户实机验收。
+
+补充：现有托管更新器测试在默认临时目录创建夹具时被拒绝；仅为测试子进程指定产品 artifacts 下的 TEMP/TMP 后，39 个原有 Fact/InlineData 用例以进程内方式全部通过。未改全局环境，未启动产品或模拟宿主 EXE；这不替代前述未完成的原生事务测试。日志为 artifacts/logs/update-contracts-workspace-20261028.log。
+
+用户随后授权提交、推送及发布此修复。提交前核对 1116 个来源文件与本地候选包记录完全一致，157 个对应运行文件也与已验证包一致；仅追加此发布记录。正式发行复用完整构建 261028-1417，从干净提交生成至 artifacts/releases/261028-1417-publish，经当前及上一稳定版本的包校验器检查后创建草稿，下载核对全部附件再发布稳定版。保留上述验收限制；不覆盖日用安装，不上传崩溃转储或个人数据。

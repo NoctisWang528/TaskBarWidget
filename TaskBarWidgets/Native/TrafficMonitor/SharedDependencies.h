@@ -5,13 +5,13 @@
 #include <shellapi.h>
 #include <string>
 
-inline bool EnsureSharedDependencies(const std::filesystem::path& root)
+inline bool EnsureSharedDependencies(const std::filesystem::path& root, WinUiRuntime& winuiRuntime)
 {
     const auto runtime = SystemDotnetRoot();
     auto dotnet = CheckDotnetRuntime(runtime, root / L"Media/TaskBarWidgets.Media.runtimeconfig.json");
     if (dotnet.success) dotnet = CheckDotnetRuntime(runtime, root / L"UI/TaskBarWidgets.UI.runtimeconfig.json");
     const auto bootstrap = root / L"UI/Microsoft.WindowsAppRuntime.Bootstrap.dll";
-    const HRESULT winui = CheckWinUiRuntime(bootstrap);
+    const HRESULT winui = winuiRuntime.Initialize(bootstrap);
     if (dotnet.success && SUCCEEDED(winui)) return true;
 
     const bool chinese = PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_CHINESE;

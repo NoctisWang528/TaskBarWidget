@@ -9,6 +9,7 @@
 #include "TrafficMonitor.h"
 #include "../Builtins/BuiltinFeatures.h"
 #include "TrafficMonitorDlg.h"
+#include "NativeMediaHost.h"
 #include "crashtool.h"
 
 #include "Test.h"
@@ -774,7 +775,7 @@ BOOL CTrafficMonitorApp::InitInstance()
     m_runtime_initialized = true;
     if (!UpdateHealth::Initialize(CCommon::GetModuleDir(), VERSION)) return FALSE;
     // Validate before loading user settings, hardware or spawning managed helpers.
-    if (!EnsureSharedDependencies(CCommon::GetModuleDir())) return FALSE;
+    if (!EnsureSharedDependencies(CCommon::GetModuleDir(), m_winui_runtime)) return FALSE;
     //替换掉对话框程序的默认类名
     WNDCLASS wc;
     ::GetClassInfo(AfxGetInstanceHandle(), _T("#32770"), &wc);       //MFC默认的所有对话框的类名为#32770
@@ -1269,6 +1270,11 @@ void CTrafficMonitorApp::OnUpdateLog()
 
 int CTrafficMonitorApp::ExitInstance()
 {
+    // Stop/join the card STA before removing its Windows App SDK dependencies.
+    // OnDestroy normally does this first; Shutdown is also safe after early exit.
+    NativeMediaHost::Shutdown();
+    winrt::clear_factory_cache();
+    m_winui_runtime.Reset();
     if (m_startup_mutex)
     {
         ::CloseHandle(m_startup_mutex);

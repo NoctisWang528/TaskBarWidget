@@ -1,5 +1,7 @@
 #include "CardPch.h"
 #include "CardRuntime.h"
+#include "../TrafficMonitor/WinUiDependencyCheck.h"
+#include <filesystem>
 #include "CardHost.h"
 #include "CardWindow.h"
 #include "CardDraw.h"
@@ -111,6 +113,12 @@ int wmain(int argc, wchar_t** argv)
             std::cout << "Traffic previews exported using the product painter.\n";
             return 0;
         }
+        // Match the native root: retain preflight across all card STA lifetimes.
+        wchar_t executable[32768]{};
+        Require(GetModuleFileNameW(nullptr, executable, ARRAYSIZE(executable)) != 0, "probe executable path");
+        WinUiRuntime appRuntime;
+        winrt::check_hresult(appRuntime.Initialize(std::filesystem::path(executable).parent_path() /
+            L"UI/Microsoft.WindowsAppRuntime.Bootstrap.dll"));
         {
             Cards::Runtime runtime;
             winrt::check_hresult(runtime.Initialize());
@@ -388,7 +396,6 @@ int wmain(int argc, wchar_t** argv)
                 }
             }
         }
-        winrt::uninit_apartment();
         {
             Cards::CardHost host;
             std::cout << "Checking the card host toggle path...\n";
@@ -406,7 +413,15 @@ int wmain(int argc, wchar_t** argv)
             WaitForCards(host, 4);
             host.Stop();
             Require(VisibleProbeCards() == 0, "host shutdown must destroy the card windows");
+            Cards::CardHost reopenedHost;
+            Require(reopenedHost.Start(nullptr, GetModuleHandleW(nullptr), true), "second card STA after full teardown");
+            reopenedHost.ApplyConfig(config);
+            reopenedHost.Toggle(anchor);
+            WaitForCards(reopenedHost, 4);
+            reopenedHost.Stop();
         }
+        appRuntime.Reset();
+        winrt::uninit_apartment();
         std::cout << "Native card rendering, mask restore, scaled hit-testing, host toggle/reopen and STA shutdown passed.\n";
         return 0;
     }

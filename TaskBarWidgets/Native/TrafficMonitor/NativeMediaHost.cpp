@@ -1594,6 +1594,9 @@ void NativeMediaHost::Shutdown()
     {
         instance->stop = true;
         if (instance->workerWake) SetEvent(instance->workerWake);
+        // A taskbar window may still hold m_impl. Join the card STA explicitly
+        // before the root releases its process-wide Windows App SDK reference.
+        if (instance->cards) { instance->cards->Stop(); instance->cards.reset(); }
     }
     instance.reset();
 }
