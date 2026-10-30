@@ -132,7 +132,8 @@ namespace Cards::Paint
             return height;
         }
         float Attribution(ID2D1DeviceContext* context, const Snapshot& snapshot,
-            const CardEnvironment& environment, float left, float top, float width, Layout::Table* regions = nullptr)
+            const CardEnvironment& environment, float left, float top, float width,
+            Layout::Table* regions = nullptr, const Interaction& interaction = {})
         {
             std::vector<std::wstring> lines;
             bool qweatherLinks = false;
@@ -164,6 +165,12 @@ namespace Cards::Paint
                 {
                     auto& graphics = *environment.graphics;
                     const auto ink = environment.highContrast ? palette.primary : palette.accent;
+                    Draw::ControlBackground(context,
+                        Draw::Rect(left, rowTop, left + 48.0f, rowTop + 20.0f), 3.0f,
+                        WithAlpha(palette.accent, 0.0f), palette.accent, interaction, 402);
+                    Draw::ControlBackground(context,
+                        Draw::Rect(left + 60.0f, rowTop, left + 108.0f, rowTop + 20.0f), 3.0f,
+                        WithAlpha(palette.accent, 0.0f), palette.accent, interaction, 403);
                     Draw::Text(context, graphics, L"和风天气", environment.fontFamily, 10.0f, 400,
                         ink, Draw::Rect(left, rowTop, left + 48.0f, rowTop + 20.0f),
                         DWRITE_TEXT_ALIGNMENT_LEADING, false, true);
@@ -187,13 +194,14 @@ namespace Cards::Paint
             return height;
         }
         float Footer(ID2D1DeviceContext* context, const Snapshot& snapshot, const CardEnvironment& environment,
-            float left, float top, float width, Layout::Table* regions = nullptr)
+            float left, float top, float width, Layout::Table* regions = nullptr,
+            const Interaction& interaction = {})
         {
             const auto palette = Draw::Colors(environment);
             float height = TextBlock(context, environment, Status(snapshot.weather), left, top,
                 width, 11.0f, 400, palette.secondary);
             const float attribution = Attribution(context, snapshot, environment, left, top + height + 4.0f,
-                width, regions);
+                width, regions, interaction);
             if (attribution > 0.0f) height += attribution + 4.0f;
             return height;
         }
@@ -212,7 +220,7 @@ namespace Cards::Paint
     }
 
     void Weather(ID2D1DeviceContext* context, const Snapshot& snapshot, const CardEnvironment& environment,
-        Layout::Table& regions, float widthDip, float heightDip)
+        Layout::Table& regions, float widthDip, float heightDip, const Interaction& interaction)
     {
         UNREFERENCED_PARAMETER(heightDip);
         if (!context || !environment.graphics) return;
@@ -225,7 +233,8 @@ namespace Cards::Paint
         const auto refresh = [&](float x, float y)
         {
             const auto rect = Draw::Rect(x, y, x + 28.0f, y + 28.0f);
-            Draw::FillRound(context, rect, 8.0f, palette.fill);
+            Draw::ControlBackground(context, rect, 8.0f, palette.fill, palette.accent,
+                interaction, 400, !weather.updating);
             DrawGlyph(context, Glyph::Refresh, WithAlpha(palette.primary, weather.updating ? 0.4f : 0.9f),
                 x + 6.0f, y + 6.0f, 16.0f);
             Draw::AddButton(regions, 400, rect, L"refreshWeather", L"刷新天气", !weather.updating);
@@ -239,13 +248,15 @@ namespace Cards::Paint
             {
                 const auto button = Draw::Rect(left + 36.0f, top + textHeight + 8.0f,
                     left + 168.0f, top + textHeight + 36.0f);
-                Draw::FillRound(context, button, 8.0f, palette.fill);
+                Draw::ControlBackground(context, button, 8.0f, palette.fill, palette.accent,
+                    interaction, 401);
                 Draw::Text(context, graphics, L"打开天气设置", environment.fontFamily, 12.0f, 400,
                     palette.primary, Draw::Rect(button.left + 8.0f, button.top + 5.0f, button.right - 8.0f,
                         button.bottom), DWRITE_TEXT_ALIGNMENT_CENTER);
                 Draw::AddButton(regions, 401, button, L"openWeatherSettings", L"打开天气设置");
             }
-            Attribution(context, snapshot, environment, left, top + textHeight + 44.0f, width, &regions);
+            Attribution(context, snapshot, environment, left, top + textHeight + 44.0f, width,
+                &regions, interaction);
             return;
         }
 
@@ -347,6 +358,6 @@ namespace Cards::Paint
                 palette.secondary);
             context->PopAxisAlignedClip();
         }
-        Footer(context, snapshot, environment, left, top + body, width, &regions);
+        Footer(context, snapshot, environment, left, top + body, width, &regions, interaction);
     }
 }

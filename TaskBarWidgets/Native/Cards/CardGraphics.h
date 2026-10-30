@@ -120,10 +120,19 @@ namespace Cards
     // RAII pairing so a painter can never leak an open BeginDraw.
     struct DrawScope
     {
-        explicit DrawScope(DrawingSurface& target) : surface(target)
+        explicit DrawScope(DrawingSurface& target, float scale = 1.0f) : surface(target)
         {
             context = surface.Begin(offset);
-            if (context) context->SetTransform(D2D1::Matrix3x2F::Translation(offset.x, offset.y));
+            if (context) Configure(context, scale, offset);
+        }
+        // Layout stays in DIPs; Composition's atlas offset is always physical
+        // pixels. Apply it after scaling, without dividing and rounding it.
+        static void Configure(ID2D1DeviceContext* context, float scale, D2D1_POINT_2F offset)
+        {
+            context->SetDpi(96.0f, 96.0f);
+            context->SetUnitMode(D2D1_UNIT_MODE_DIPS);
+            context->SetTransform(D2D1::Matrix3x2F::Scale(scale, scale) *
+                D2D1::Matrix3x2F::Translation(offset.x, offset.y));
         }
         ~DrawScope() { if (context) surface.End(); }
         DrawScope(const DrawScope&) = delete;

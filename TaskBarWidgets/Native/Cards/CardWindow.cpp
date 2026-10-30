@@ -152,8 +152,20 @@ namespace Cards
         bool micaReady{ false };
         bool dirty{ true };
         int hotRegion{ 0 };
-        int previousHotRegion{ 0 };
-        ULONGLONG hoverStart{};
+        struct HoverFade
+        {
+            float from{}, to{};
+            ULONGLONG started{};
+
+            float Value(ULONGLONG now) const
+            {
+                if (!started) return to;
+                const float t = std::clamp(static_cast<float>(now - started) / HoverMilliseconds, 0.0f, 1.0f);
+                const float remaining = 1.0f - t;
+                return from + (to - from) * (1.0f - remaining * remaining * remaining);
+            }
+        };
+        std::map<int, HoverFade> hover;
         int focusedRegion{ 0 };
         int capturedRegion{ 0 };
         bool trackingLeave{ false };
@@ -329,7 +341,8 @@ namespace Cards
         environment = cardEnvironment;
         if (environment.reducedMotion || environment.highContrast)
         {
-            impl->hoverStart = 0;
+            impl->hover.clear();
+            if (visible && impl->hotRegion) impl->hover[impl->hotRegion] = { 1.0f, 1.0f, 0 };
             if (impl->animating)
             {
                 impl->animating = false;
@@ -586,8 +599,8 @@ namespace Cards
         visible = false;
         if (!window) return;
         CancelPointer();
-        impl->hotRegion = impl->previousHotRegion = 0;
-        impl->hoverStart = 0;
+        impl->hotRegion = 0;
+        impl->hover.clear();
         impl->trackingLeave = false;
         if (animate && !environment.reducedMotion && !environment.highContrast && impl->opacity > 0.01f)
         {
@@ -613,7 +626,9 @@ namespace Cards
         const bool dynamic = visible && (impl->coverFadeStart || impl->lyricWrapStart ||
             impl->sliderPendingUntil || (kind == Kind::Media && snapshot.media.isPlaying) ||
             (kind == Kind::Weather && snapshot.weather.alerts.size() > 1));
-        const UINT interval = impl->animating || (visible && impl->hoverStart) ? 16 :
+        const bool hoverAnimating = visible && std::any_of(impl->hover.begin(), impl->hover.end(),
+            [](const auto& item) { return item.second.started != 0; });
+        const UINT interval = impl->animating || hoverAnimating ? 16 :
             dynamic ? (kind == Kind::Weather ? 1000 : 33) : 0;
         if (interval == impl->timerInterval) return;
         if (interval)
@@ -650,10 +665,16 @@ namespace Cards
         }
         if (visible)
         {
-            if (impl->hoverStart)
+            for (auto item = impl->hover.begin(); item != impl->hover.end();)
             {
-                repaint = true;
-                if (now - impl->hoverStart >= HoverMilliseconds) impl->hoverStart = 0;
+                auto& fade = item->second;
+                if (fade.started)
+                {
+                    repaint = true;
+                    if (now - fade.started >= HoverMilliseconds) fade.started = 0;
+                }
+                if (!fade.started && fade.to == 0.0f) item = impl->hover.erase(item);
+                else ++item;
             }
             if (kind == Kind::Weather && snapshot.weather.alerts.size() > 1 && now / 4000 != impl->lastWeatherAlert)
             { impl->lastWeatherAlert = now / 4000; repaint = true; }
@@ -691,20 +712,15 @@ namespace Cards
 
         if (rebuildRegions) regions.Clear();
         {
-            DrawScope scope(impl->surface);
+            DrawScope scope(impl->surface, scale);
             if (!scope) { impl->dirty = true; host.OnGraphicsFailure(impl->surface.LastResult()); return; }
             ID2D1DeviceContext* context = scope.Get();
-            context->SetDpi(96.0f * scale, 96.0f * scale);
-            context->SetTransform(D2D1::Matrix3x2F::Translation(scope.offset.x / scale, scope.offset.y / scale));
             context->Clear(D2D1::ColorF(0, 0.0f));
 
             const float widthDip = ContentWidthDip();
             const float heightDip = ContentHeightDip();
-            // The surface is painted at physical size; scaling by the fit factor
-            // keeps the DIP layout above identical to the WinUI card.
+            // Decode covers at the actual content resolution.
             const float fit = (bounds.right - bounds.left) / std::max(1.0f, widthDip * scale);
-            // DPI already scales DIP coordinates; apply only the atlas offset.
-            context->SetTransform(D2D1::Matrix3x2F::Translation(scope.offset.x / scale, scope.offset.y / scale));
 
             // A dragged slider is painted from the pointer until the gesture ends,
             // so an older snapshot can never drag the knob back mid-drag.
@@ -728,9 +744,10 @@ namespace Cards
             if (impl->sliderId != 0 && !impl->sliderSeeking)
             {
                 auto& endpoints = impl->sliderAction == L"setVolume:input" ? painted.audio.inputs : painted.audio.outputs;
-                for (auto& endpoint : endpoints) if (endpoint.isDefault) endpoint.volume = impl->sliderRatio;
+                for (auto& endpoint : endpoints)
+                    if (endpoint.isDefault && endpoint.canControl) endpoint.volume = impl->sliderRatio;
             }
-            else if (impl->sliderId != 0 && impl->sliderSeeking)
+            else if (impl->sliderId != 0 && impl->sliderSeeking && painted.media.canSeek)
             {
                 painted.media.position = impl->sliderRatio * painted.media.duration;
             }
@@ -782,55 +799,25 @@ namespace Cards
                     impl->coverFadeStart = 0;
                 }
             }
-            Paint::Interaction interaction;
-            interaction.hot = impl->hotRegion;
-            interaction.previousHot = impl->previousHotRegion;
-            interaction.focused = impl->focusedRegion;
-            if (impl->hoverStart)
-            {
-                const float progress = std::clamp(static_cast<float>(GetTickCount64() - impl->hoverStart) /
-                    HoverMilliseconds, 0.0f, 1.0f);
-                interaction.progress = 1.0f - std::pow(1.0f - progress, 3.0f);
-            }
+            const auto interaction = CurrentInteraction();
             switch (kind)
             {
             case Kind::Media:
                 Paint::Media(context, painted, cover, lyricTransition, environment, regions, widthDip,
-                    heightDip);
+                    heightDip, interaction);
                 break;
             case Kind::Device:
-                Paint::Device(context, painted, environment, regions, widthDip, heightDip);
+                Paint::Device(context, painted, environment, regions, widthDip, heightDip, interaction);
                 break;
             case Kind::Traffic:
                 Paint::Traffic(context, painted, environment, regions, widthDip, heightDip, interaction);
                 break;
             case Kind::Weather:
-                Paint::Weather(context, painted, environment, regions, widthDip, heightDip);
+                Paint::Weather(context, painted, environment, regions, widthDip, heightDip, interaction);
                 break;
             case Kind::Update:
-                Paint::Update(context, painted, environment, regions, widthDip, heightDip);
+                Paint::Update(context, painted, environment, regions, widthDip, heightDip, interaction);
                 break;
-            }
-            // Shared hover/press feedback for the controls painted by every card.
-            // Heatmap cells draw their own same-colour glow below their fill.
-            for (const auto& region : regions.All())
-            {
-                if (!region.enabled || region.type == Layout::RegionType::Cell ||
-                    region.type == Layout::RegionType::Text) continue;
-                const float hover = interaction.Hover(region.id);
-                const bool pressed = impl->capturedRegion == region.id;
-                if (hover <= 0 && !pressed) continue;
-                const auto& r = region.bounds;
-                Draw::FillRound(context, Draw::Rect(static_cast<float>(r.left), static_cast<float>(r.top),
-                    static_cast<float>(r.right), static_cast<float>(r.bottom)), 5.0f,
-                    WithAlpha(Draw::Colors(environment).accent, pressed ? 0.18f : 0.10f * hover));
-            }
-            if (const auto* focused = regions.Find(impl->focusedRegion))
-            {
-                const auto& r = focused->bounds;
-                Draw::StrokeRound(context, Draw::Rect(static_cast<float>(r.left), static_cast<float>(r.top),
-                    static_cast<float>(r.right), static_cast<float>(r.bottom)), 4,
-                    Draw::Colors(environment).accent, 1.5f);
             }
             if (!snapshot.statusText.empty())
             {
@@ -841,6 +828,7 @@ namespace Cards
             }
         }
         if (!impl->surface.Ready()) { impl->dirty = true; host.OnGraphicsFailure(impl->surface.LastResult()); return; }
+        PruneInteraction();
         if (impl->surface.Handle() && impl->boundSurface != impl->surface.Handle())
         {
             auto brush = impl->compositor.CreateSurfaceBrush(impl->surface.Handle());
@@ -889,10 +877,64 @@ namespace Cards
     void CardWindow::SetHotRegion(int id)
     {
         if (id == impl->hotRegion) return;
-        impl->previousHotRegion = impl->hotRegion;
+        const int previous = impl->hotRegion;
         impl->hotRegion = id;
-        impl->hoverStart = visible && !environment.reducedMotion && !environment.highContrast ? GetTickCount64() : 0;
+        if (!visible || environment.reducedMotion || environment.highContrast)
+        {
+            impl->hover.clear();
+            if (visible && id) impl->hover[id] = { 1.0f, 1.0f, 0 };
+        }
+        else
+        {
+            const auto now = GetTickCount64();
+            for (const int changed : { previous, id })
+            {
+                if (!changed) continue;
+                auto& fade = impl->hover[changed];
+                const float current = fade.Value(now);
+                const float target = changed == id ? 1.0f : 0.0f;
+                fade = { current, target, current == target ? 0 : now };
+            }
+        }
         impl->dirty = true;
+        UpdateTimer();
+    }
+
+    Paint::Interaction CardWindow::CurrentInteraction() const
+    {
+        Paint::Interaction interaction;
+        interaction.pressed = impl->dragging || impl->hotRegion == impl->capturedRegion ? impl->capturedRegion : 0;
+        interaction.focused = impl->focusedRegion;
+        const auto now = GetTickCount64();
+        for (const auto& [id, fade] : impl->hover) interaction.hover.emplace(id, fade.Value(now));
+        return interaction;
+    }
+
+    void CardWindow::PruneInteraction()
+    {
+        for (auto item = impl->hover.begin(); item != impl->hover.end();)
+        {
+            const auto* region = regions.Find(item->first);
+            if (!region || !region->enabled || (!item->second.started && item->second.to == 0.0f))
+            {
+                if (impl->hotRegion == item->first) impl->hotRegion = 0;
+                item = impl->hover.erase(item);
+            }
+            else ++item;
+        }
+        const auto* captured = regions.Find(impl->capturedRegion);
+        if (impl->capturedRegion && (!captured || !captured->enabled))
+        {
+            // A disconnected/disabled control cancels the gesture without
+            // committing its last slider value to a different source/device.
+            impl->dragging = false;
+            impl->capturedRegion = 0;
+            impl->sliderId = 0;
+            impl->sliderAction.clear();
+            impl->sliderPendingUntil = 0;
+            impl->lastSliderSent = 0;
+            if (GetCapture() == window) ReleaseCapture();
+        }
         UpdateTimer();
     }
 
@@ -957,6 +999,7 @@ namespace Cards
 
     void CardWindow::CancelPointer()
     {
+        if (!impl->dragging && !impl->capturedRegion) return;
         const bool dragged = impl->dragging;
         impl->dragging = false; impl->capturedRegion = 0;
         if (dragged) FinishSlider();

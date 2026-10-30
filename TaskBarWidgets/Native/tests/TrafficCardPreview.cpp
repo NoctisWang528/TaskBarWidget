@@ -38,7 +38,7 @@ void WriteTrafficPreviews(Cards::Graphics& graphics, const wchar_t* directory)
     winrt::check_hresult(graphics.Wic()->CreateImageEncoder(device.Get(), imageEncoder.GetAddressOf()));
     for (bool dark : {true, false})
     for (int visual = 0; visual < 3; ++visual)
-    for (int variant = 0; variant < (visual == 0 ? 3 : 1); ++variant)
+    for (int variant = 0; variant < (visual == 2 ? 2 : 3); ++variant)
     {
         const bool media = visual == 1;
         const bool weather = visual == 2;
@@ -47,13 +47,13 @@ void WriteTrafficPreviews(Cards::Graphics& graphics, const wchar_t* directory)
         constexpr UINT width = 480;
         const float heightDip = media ? Cards::Layout::HeightMedia : weather ? Cards::Layout::HeightWeather : Cards::Layout::HeightTraffic;
         const UINT height = static_cast<UINT>(heightDip * 1.25f);
-        constexpr float dpi = 120.0f;
+        constexpr float dpi = 96.0f;
         const auto format = D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED);
         ComPtr<ID2D1Bitmap1> bitmap;
         winrt::check_hresult(context->CreateBitmap(D2D1::SizeU(width, height), nullptr, 0,
             D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET, format, dpi, dpi), bitmap.GetAddressOf()));
         context->SetTarget(bitmap.Get());
-        context->SetDpi(dpi, dpi);
+        Cards::DrawScope::Configure(context, 1.25f, D2D1::Point2F());
         context->BeginDraw();
         context->Clear(D2D1::ColorF(0, 0.0f));
         const auto rect = D2D1::RectF(0.5f, 0.5f, 383.5f, heightDip - 0.5f);
@@ -64,8 +64,15 @@ void WriteTrafficPreviews(Cards::Graphics& graphics, const wchar_t* directory)
         Cards::Layout::Table regions;
         if (media)
         {
-            painted.media.title = L"没有媒体";
-            Cards::Paint::Media(context, painted, {}, {}, environment, regions, 384, heightDip);
+            painted.media.title = variant ? L"示例歌曲" : L"没有媒体";
+            painted.media.artist = variant ? L"示例艺术家" : L"";
+            painted.media.canPlayPause = painted.media.canPrevious = painted.media.canNext = variant != 0;
+            painted.media.canSeek = variant != 0;
+            painted.media.duration = variant ? 240 : 0;
+            painted.media.position = variant ? 75 : 0;
+            Cards::Paint::Interaction interaction;
+            if (variant == 2) interaction.hover[100] = 1.0f;
+            Cards::Paint::Media(context, painted, {}, {}, environment, regions, 384, heightDip, interaction);
         }
         else if (weather)
         {
@@ -77,13 +84,16 @@ void WriteTrafficPreviews(Cards::Graphics& graphics, const wchar_t* directory)
             Cards::WeatherAlert alert;
             alert.typeName = L"大风"; alert.level = L"黄色";
             alert.title = L"大风黄色预警：请注意防范。";
+            if (variant == 1)
+                alert.text = L"气象台发布大风黄色预警：预计今天下午至夜间，本市部分地区将出现阵风七至八级，"
+                    L"请注意防范高空坠物，妥善安置室外物品，避免在广告牌、临时搭建物及大树附近停留。";
             painted.weather.alerts.push_back(alert);
             Cards::Paint::Weather(context, painted, environment, regions, 384, heightDip);
         }
         else
         {
             Cards::Paint::Interaction interaction;
-            if (variant == 1) interaction.hot = 340;
+            if (variant == 1) interaction.hover[340] = 1.0f;
             Cards::Paint::Traffic(context, painted, environment, regions, 384, heightDip, interaction);
         }
         Cards::Draw::StrokeRound(context, rect, Cards::Layout::CornerRadius,
@@ -91,7 +101,8 @@ void WriteTrafficPreviews(Cards::Graphics& graphics, const wchar_t* directory)
         winrt::check_hresult(context->EndDraw());
         context->SetTarget(nullptr);
 
-        const auto path = folder / (std::wstring(media ? L"media-empty" : weather ? L"weather-title-alert" :
+        const auto path = folder / (std::wstring(media ? (variant == 2 ? L"media-hover" : variant == 1 ? L"media" : L"media-empty") :
+            weather ? (variant == 1 ? L"weather-long-alert" : L"weather-title-alert") :
             variant == 1 ? L"traffic-hover" : variant == 2 ? L"traffic-loading" : L"traffic") +
             (dark ? L"-dark.png" : L"-light.png"));
         ComPtr<IWICStream> stream;

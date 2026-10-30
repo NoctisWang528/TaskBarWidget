@@ -129,10 +129,13 @@ namespace Cards::Paint
                 const float cellTop = gridTop + day.weekday * SlotSize + (SlotSize - CellSize) / 2.0f;
                 const bool selected = day.date == (traffic.selectedDate.empty() ? traffic.today : traffic.selectedDate);
                 const bool emphasized = day.isToday || selected || interaction.focused == id;
-                const float inset = emphasized ? 0.0f : 1.0f - hover;
+                constexpr float inset = 1.0f;
+                const float base = emphasized ? 0.75f : 0.45f;
+                const float intensity = day.level >= 2 || interaction.focused == id
+                    ? base + hover * 0.65f : (base + 0.65f) * hover;
                 Draw::FillRound(context, Draw::Rect(cellLeft + inset, cellTop + inset,
                     cellLeft + CellSize - inset, cellTop + CellSize - inset), 4.0f - inset,
-                    WithAlpha(halo, halo.a * ((emphasized ? 0.75f : 0.45f) + hover * 0.65f)));
+                    WithAlpha(halo, halo.a * intensity));
             }
             graphics.EndMask(context, 4.0f);
         }
@@ -148,9 +151,10 @@ namespace Cards::Paint
             const Color fill = day.isFuture ? Color{ 0, 0, 0, 0 }
                 : environment.highContrast ? HighContrastLevel(day.level) : RampColor(day.level, environment.dark);
             if (fill.a > 0.0f) Draw::FillRound(context, cell, 4.0f, fill);
-            const float hover = interaction.Hover(300 + day.week * 7 + day.weekday);
-            if (!day.isFuture && hover > 0)
-                Draw::FillRound(context, cell, 4.0f, WithAlpha(palette.accent, 0.16f * hover));
+            const int id = 300 + day.week * 7 + day.weekday;
+            const float opacity = interaction.pressed == id ? 0.22f : 0.16f * interaction.Hover(id);
+            if (!day.isFuture && opacity > 0)
+                Draw::FillRound(context, cell, 4.0f, WithAlpha(palette.accent, opacity));
 
             const bool selected = day.date == (traffic.selectedDate.empty() ? traffic.today : traffic.selectedDate);
             Draw::AddCell(regions, 300 + day.week * 7 + day.weekday, cell, L"selectDay:" + day.date,
@@ -172,7 +176,8 @@ namespace Cards::Paint
             const D2D1_RECT_F cell = Draw::Rect(cellLeft, cellTop, cellLeft + CellSize,
                 cellTop + CellSize);
             Draw::StrokeRound(context, cell, 4.0f,
-                emphasized ? palette.accent : hover > 0 ? WithAlpha(palette.accent, hover) : palette.border, 1.0f);
+                emphasized ? palette.accent : day.level == 0 ? Mix(palette.border, palette.accent, hover)
+                : WithAlpha(palette.accent, hover), 1.0f);
         }
 
         const float footerTop = gridTop + 7 * SlotSize + 4.0f;

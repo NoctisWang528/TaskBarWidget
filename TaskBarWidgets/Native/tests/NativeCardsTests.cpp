@@ -94,6 +94,88 @@ struct Services : Cards::CardHostServices
 };
 
 void WriteTrafficPreviews(Cards::Graphics& graphics, const wchar_t* directory);
+void TestCardRenderingStability(Cards::Graphics& graphics);
+
+static void CheckHoverTransitions(Cards::CardWindow& card, const Cards::Snapshot& snapshot)
+{
+    const auto scale = card.DpiScale();
+    const auto bounds = card.Bounds();
+    const auto regions = card.Regions().All();
+    const auto point = [&](int index) {
+        const auto& r = regions[index].bounds;
+        return POINT{ bounds.left + static_cast<LONG>((r.left + r.right) * scale / 2),
+            bounds.top + static_cast<LONG>((r.top + r.bottom) * scale / 2) };
+    };
+    const auto move = [&](int index) {
+        card.OnPointer(WM_MOUSEMOVE, point(index), false);
+        // The real cursor stays on the user's desktop. This fixture supplies
+        // leave events explicitly instead of receiving offscreen tracking leave.
+        TRACKMOUSEEVENT cancel{ sizeof(cancel), TME_CANCEL | TME_LEAVE, card.Handle(), 0 };
+        TrackMouseEvent(&cancel);
+        MSG leave{};
+        while (PeekMessageW(&leave, card.Handle(), WM_MOUSELEAVE, WM_MOUSELEAVE, PM_REMOVE)) {}
+    };
+    const auto continuous = [&](auto event) {
+        const auto started = GetTickCount64();
+        const auto before = card.CurrentInteraction();
+        event();
+        const auto after = card.CurrentInteraction();
+        // Account for real time spent painting: the greatest easing slope is
+        // 3/140 per millisecond. Switching targets itself must not add a jump.
+        const float tolerance = 0.01f + 3.0f * (GetTickCount64() - started) / 140.0f;
+        for (const auto& region : regions)
+            Require(std::abs(after.Hover(region.id) - before.Hover(region.id)) <= tolerance,
+                "interrupted hover continues from the current opacity for every region");
+    };
+    move(0);
+    Sleep(20);
+    continuous([&] { move(1); });
+    Sleep(20);
+    continuous([&] { move(2); });
+    Require(card.CurrentInteraction().hover.size() == 3, "multiple outgoing hover fades coexist");
+    Sleep(20);
+    continuous([&] { move(0); });
+    continuous([&] { card.OnMouseLeave(); });
+    PumpFor(200);
+    Require(card.CurrentInteraction().hover.empty(), "finished hover fade-outs release all state");
+    const auto settled = card.ContentPaintCount();
+    PumpFor(100);
+    Require(card.ContentPaintCount() == settled, "finished fade-outs stop repainting");
+
+    move(0);
+    auto disabled = snapshot;
+    disabled.traffic.days.front().isFuture = true;
+    card.SetSnapshot(disabled);
+    Require(card.CurrentInteraction().hover.empty(), "disabled controls immediately lose hover state");
+    card.SetSnapshot(snapshot);
+    const auto animated = card.Environment();
+    for (const bool highContrast : {false, true})
+    {
+        move(0);
+        Sleep(20);
+        move(1);
+        auto instant = animated;
+        instant.highContrast = highContrast;
+        instant.reducedMotion = !highContrast;
+        card.ApplyEnvironment(instant);
+        Require(card.CurrentInteraction().hover.size() == 1 &&
+            card.CurrentInteraction().Hover(regions[1].id) == 1.0f,
+            "high contrast and reduced motion settle active feedback immediately");
+        const auto stopped = card.ContentPaintCount();
+        PumpFor(100);
+        if (card.ContentPaintCount() != stopped)
+            std::cerr << "Hover accessibility check highContrast=" << highContrast << " paints="
+                << stopped << "->" << card.ContentPaintCount() << " active-regions="
+                << card.CurrentInteraction().hover.size() << '\n';
+        Require(card.ContentPaintCount() == stopped, "accessibility modes stop the hover timer");
+        card.OnMouseLeave();
+        card.ApplyEnvironment(animated);
+    }
+    move(0);
+    card.Hide(true);
+    Require(card.CurrentInteraction().hover.empty(), "hiding discards unfinished hover transitions");
+    card.Show(false);
+}
 
 int wmain(int argc, wchar_t** argv)
 {
@@ -124,6 +206,7 @@ int wmain(int argc, wchar_t** argv)
             winrt::check_hresult(runtime.Initialize());
             Cards::Graphics graphics;
             Require(graphics.Initialize(), "graphics initialization");
+            TestCardRenderingStability(graphics);
             auto compositor = winrt::Windows::UI::Composition::Compositor();
             std::wstring error;
             auto device = graphics.CreateGraphicsDevice(compositor, error);
@@ -217,6 +300,24 @@ int wmain(int argc, wchar_t** argv)
                 Require(activated == 1, "menu commits once on release");
                 popup.MoveSelection(1);
                 Require(popup.Selected() == 2, "menu keyboard navigation skips disabled rows");
+                for (const UINT testDpi : {96u, 120u, 144u, 192u})
+                {
+                    auto suggested = popup.Bounds();
+                    SendMessageW(popupWindow, WM_DPICHANGED, MAKELONG(testDpi, testDpi),
+                        reinterpret_cast<LPARAM>(&suggested));
+                    const float testScale = testDpi / 96.0f;
+                    const auto fixed = popup.Bounds();
+                    for (const int row : {0, 2, 0, 2})
+                    {
+                        const int x = static_cast<int>(15 * testScale);
+                        const int y = static_cast<int>((21 + row * 30) * testScale);
+                        SendMessageW(popupWindow, WM_MOUSEMOVE, 0, MAKELPARAM(x, y));
+                        Require(popup.HitTest(POINT{fixed.left + x, fixed.top + y}) == row,
+                            "popup pointer and drawing coordinates agree at every DPI");
+                        const auto current = popup.Bounds();
+                        Require(EqualRect(&fixed, &current), "popup hover never changes window bounds");
+                    }
+                }
                 popup.Hide();
                 Require(!IsWindowVisible(popupWindow), "reduced motion closes the popup immediately");
                 auto animated = environment;
@@ -246,7 +347,7 @@ int wmain(int argc, wchar_t** argv)
                 popup.Hide(false);
                 Require(!IsWindowVisible(popupWindow), "immediate hide cancels an in-progress popup exit");
             }
-            for (const float scale : {1.0f, 1.5f, 2.0f})
+            for (const float scale : {1.0f, 1.25f, 1.5f, 2.0f, 0.93f})
             for (const auto kind : {Cards::Kind::Weather, Cards::Kind::Traffic, Cards::Kind::Device, Cards::Kind::Media, Cards::Kind::Update})
             {
                 Cards::CardWindow card(kind, services);
@@ -296,6 +397,7 @@ int wmain(int argc, wchar_t** argv)
                     auto animated = environment;
                     animated.reducedMotion = false;
                     card.ApplyEnvironment(animated);
+                    if (scale == 1.25f) CheckHoverTransitions(card, snapshot);
                     const auto firstCell = card.Regions().All().front();
                     const auto bounds = card.Bounds();
                     const POINT hover{bounds.left + static_cast<LONG>((firstCell.bounds.left + firstCell.bounds.right) * scale / 2),
@@ -383,6 +485,22 @@ int wmain(int argc, wchar_t** argv)
                     card.SetSnapshot(moving);
                     Require(card.CurrentSnapshot().media.position < 4.1 && card.CurrentSnapshot().lyrics.wordScan == 0.1,
                         "a real backward seek still resets the timeline and scan");
+                    const auto slider = *card.Regions().Find(4);
+                    const auto bounds = card.Bounds();
+                    const POINT seek{bounds.left + static_cast<LONG>((slider.bounds.left + slider.bounds.right) * scale / 2),
+                        bounds.top + static_cast<LONG>((slider.bounds.top + slider.bounds.bottom) * scale / 2)};
+                    services.action.clear();
+                    card.OnPointer(WM_LBUTTONDOWN, seek, true);
+                    moving.media.canSeek = false;
+                    moving.media.isPlaying = false;
+                    moving.media.position = 4;
+                    card.SetSnapshot(moving);
+                    Require(card.CurrentInteraction().pressed == 0 && GetCapture() != card.Handle(),
+                        "disabling a dragged control cancels its capture");
+                    Require(card.CurrentSnapshot().media.position == 4,
+                        "disabled paused seek preserves the authoritative position on its first frame");
+                    card.OnPointer(WM_LBUTTONUP, seek, false);
+                    Require(services.action.empty(), "disabled seek does not commit the canceled gesture");
                     card.Hide(false);
                     auto regions = card.Regions().All();
                     for (const auto& region : regions) if (region.action == L"playPause")

@@ -421,7 +421,11 @@ namespace Cards
         target->GetTarget(maskTarget.ReleaseAndGetAddressOf());
         target->GetTransform(&maskTransform);
         target->SetTarget(mask.Get());
-        // Use the same coordinates as the card's drawing surface.
+        // Blur in surface-local pixels. Including the atlas translation here
+        // changes the effect's sampling phase when Composition relocates a frame.
+        auto local = maskTransform;
+        local.dx = local.dy = 0.0f;
+        target->SetTransform(local);
         target->Clear(D2D1::ColorF(0, 0.0f));
         return true;
     }
@@ -431,17 +435,18 @@ namespace Cards
         if (!target || !mask) return;
         target->SetTarget(maskTarget.Get());
         maskTarget.Reset();
-        float dpiX = 96.0f, dpiY = 96.0f;
-        target->GetDpi(&dpiX, &dpiY);
         if (!maskBlur && FAILED(target->CreateEffect(GaussianBlurEffect, maskBlur.GetAddressOf())))
         {
             maskBlur.Reset();
             return;
         }
         maskBlur->SetInput(0, mask.Get());
-        maskBlur->SetValue(D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION, (std::max)(0.1f, blurDip * 0.6f));
+        // The mask already contains the scaled content. Apply only the original
+        // translation when compositing, with the blur radius in target coordinates.
+        maskBlur->SetValue(D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION,
+            (std::max)(0.1f, blurDip * 0.6f * std::abs(maskTransform._11)));
         maskBlur->SetValue(D2D1_GAUSSIANBLUR_PROP_BORDER_MODE, D2D1_BORDER_MODE_SOFT);
-        target->SetTransform(D2D1::Matrix3x2F::Identity());
+        target->SetTransform(D2D1::Matrix3x2F::Translation(maskTransform.dx, maskTransform.dy));
         target->DrawImage(maskBlur.Get(), D2D1_INTERPOLATION_MODE_LINEAR);
         target->SetTransform(maskTransform);
     }

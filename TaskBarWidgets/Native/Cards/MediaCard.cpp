@@ -19,7 +19,7 @@ namespace Cards::Paint
 
         void DrawTransport(ID2D1DeviceContext* context, Graphics& graphics, const Draw::Palette& palette,
             const CardEnvironment& environment, const Snapshot& snapshot, Layout::Table& regions,
-            float centerX, float top)
+            float centerX, float top, const Interaction& interaction)
         {
             const float radius = 21.0f;
             const float smallSize = 16.0f;
@@ -34,12 +34,14 @@ namespace Cards::Paint
                 const float size = primary ? radius * 2.0f : 32.0f;
                 const float left = centerX + button.offset - size / 2.0f;
                 const D2D1_RECT_F rect = Draw::Rect(left, top, left + size, top + size);
-                Draw::FillRound(context, rect, size / 2.0f,
-                    primary ? WithAlpha(palette.primary, 0.14f) : WithAlpha(palette.primary, 0.06f));
+                const int id = 100 + static_cast<int>(button.offset);
+                Draw::ControlBackground(context, rect, size / 2.0f,
+                    WithAlpha(palette.primary, primary ? 0.14f : 0.06f), palette.accent,
+                    interaction, id, button.enabled);
                 const float glyphSize = primary ? 20.0f : smallSize;
                 DrawGlyph(context, button.glyph, WithAlpha(palette.primary, button.enabled ? 1.0f : 0.4f),
                     left + (size - glyphSize) / 2.0f, top + (size - glyphSize) / 2.0f, glyphSize);
-                Draw::AddButton(regions, 100 + static_cast<int>(button.offset), rect, button.action,
+                Draw::AddButton(regions, id, rect, button.action,
                     button.name, button.enabled);
             }
         }
@@ -173,7 +175,7 @@ namespace Cards::Paint
 
     void Media(ID2D1DeviceContext* context, const Snapshot& snapshot, const CoverTransition& transition,
         const LyricTransition& lyricTransition, const CardEnvironment& environment,
-        Layout::Table& regions, float widthDip, float heightDip)
+        Layout::Table& regions, float widthDip, float heightDip, const Interaction& interaction)
     {
         if (!context || !environment.graphics) return;
         Graphics& graphics = *environment.graphics;
@@ -223,7 +225,8 @@ namespace Cards::Paint
         const float sourceTop = top + 46.0f;
         const D2D1_RECT_F sourceRect = Draw::Rect(metadataLeft, sourceTop,
             metadataLeft + metadataWidth, sourceTop + 34.0f);
-        Draw::FillRound(context, sourceRect, 8.0f, WithAlpha(palette.primary, 0.06f));
+        Draw::ControlBackground(context, sourceRect, 8.0f, WithAlpha(palette.primary, 0.06f),
+            palette.accent, interaction, 2, !snapshot.media.sources.empty());
         Draw::AddButton(regions, 2, sourceRect, L"showSources", L"选择播放来源",
             !snapshot.media.sources.empty());
         float iconLeft = metadataLeft + 8.0f;
@@ -245,7 +248,8 @@ namespace Cards::Paint
         // Settings gear pinned top-right.
         const D2D1_RECT_F gear = Draw::Rect(left + contentWidth - 32.0f, top,
             left + contentWidth, top + 32.0f);
-        Draw::FillRound(context, gear, 16.0f, WithAlpha(palette.primary, 0.06f));
+        Draw::ControlBackground(context, gear, 16.0f, WithAlpha(palette.primary, 0.06f),
+            palette.accent, interaction, 3);
         DrawGlyph(context, Glyph::Settings, WithAlpha(palette.primary, 0.85f), gear.left + 8.0f,
             gear.top + 8.0f, 16.0f);
         Draw::AddButton(regions, 3, gear, L"openSettings", L"设置");
@@ -258,7 +262,7 @@ namespace Cards::Paint
         // Transport row centred above the progress bar.
         const float transportTop = heightDip - Layout::Padding - 84.0f;
         DrawTransport(context, graphics, palette, environment, snapshot, regions,
-            widthDip / 2.0f, transportTop);
+            widthDip / 2.0f, transportTop, interaction);
 
         // Progress + times.
         const float progressTop = heightDip - Layout::Padding - 24.0f;
@@ -272,8 +276,11 @@ namespace Cards::Paint
         const float railTop = progressTop + 7.0f;
         const float ratio = snapshot.media.duration > 0.0
             ? static_cast<float>(snapshot.media.position / snapshot.media.duration) : 0.0f;
+        const float feedback = !snapshot.media.canSeek ? 0.0f
+            : interaction.pressed == 4 ? 0.18f : 0.10f * interaction.Hover(4);
         Draw::Progress(context, Draw::Rect(railLeft, railTop, railRight, railTop + 3.0f), ratio,
-            palette.track, palette.accent, true);
+            Mix(palette.track, palette.accent, feedback), Mix(palette.accent, palette.primary, feedback),
+            true, snapshot.media.canSeek && interaction.focused == 4, palette.accent);
         Draw::Text(context, graphics, duration, environment.fontFamily, 10.0f, 400, palette.secondary,
             Draw::Rect(railRight + 4.0f, progressTop, left + contentWidth, progressTop + 16.0f),
             DWRITE_TEXT_ALIGNMENT_TRAILING);

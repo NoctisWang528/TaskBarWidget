@@ -21,12 +21,14 @@
 #include <Windows.h>
 
 #include <chrono>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
 namespace Cards
 {
+    namespace Paint { struct Interaction; }
     // Host services a card reports to. The host owns the pipe, the group and
     // the lifetime; a card only says what the user did.
     class CardHostServices
@@ -117,6 +119,7 @@ namespace Cards
         bool HasActiveBackdropConfiguration() const;
         void RefreshBackdropConfiguration();
         uint64_t ContentPaintCount() const { return contentPaintCount; }
+        Paint::Interaction CurrentInteraction() const;
 
     private:
         friend class CardHost;
@@ -127,6 +130,7 @@ namespace Cards
         void UpdateTimer();
         void PaintContent(bool rebuildRegions);
         void SetHotRegion(int id);
+        void PruneInteraction();
         POINT ToDip(POINT pixels) const;
         void Activate(const Layout::Region& region);
         float ContentWidthDip() const;
@@ -158,14 +162,14 @@ namespace Cards
     {
         struct Interaction
         {
-            int hot{};
-            int previousHot{};
+            std::map<int, float> hover;
+            int pressed{};
             int focused{};
-            float progress{ 1.0f };
 
             float Hover(int id) const
             {
-                return id == hot ? progress : id == previousHot ? 1.0f - progress : 0.0f;
+                const auto found = hover.find(id);
+                return found == hover.end() ? 0.0f : found->second;
             }
         };
         // Cross-fade state for the media cover: the outgoing bitmap under the
@@ -190,16 +194,20 @@ namespace Cards
 
         void Media(ID2D1DeviceContext* context, const Snapshot& snapshot,
             const CoverTransition& cover, const LyricTransition& lyrics,
-            const CardEnvironment& environment, Layout::Table& regions, float widthDip, float heightDip);
+            const CardEnvironment& environment, Layout::Table& regions, float widthDip, float heightDip,
+            const Interaction& interaction = {});
         void Device(ID2D1DeviceContext* context, const Snapshot& snapshot,
-            const CardEnvironment& environment, Layout::Table& regions, float widthDip, float heightDip);
+            const CardEnvironment& environment, Layout::Table& regions, float widthDip, float heightDip,
+            const Interaction& interaction = {});
         void Traffic(ID2D1DeviceContext* context, const Snapshot& snapshot,
             const CardEnvironment& environment, Layout::Table& regions, float widthDip, float heightDip,
             const Interaction& interaction = {});
         void Weather(ID2D1DeviceContext* context, const Snapshot& snapshot,
-            const CardEnvironment& environment, Layout::Table& regions, float widthDip, float heightDip);
+            const CardEnvironment& environment, Layout::Table& regions, float widthDip, float heightDip,
+            const Interaction& interaction = {});
         void Update(ID2D1DeviceContext* context, const Snapshot& snapshot,
-            const CardEnvironment& environment, Layout::Table& regions, float widthDip, float heightDip);
+            const CardEnvironment& environment, Layout::Table& regions, float widthDip, float heightDip,
+            const Interaction& interaction = {});
 
         // Auto-height measurement for the weather and device cards.
         float MeasureHeight(Kind kind, const Snapshot& snapshot, const CardEnvironment& environment,

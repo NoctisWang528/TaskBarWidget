@@ -149,14 +149,10 @@ namespace Cards
             content.Brush(brush);
             boundSurface = surface.Handle();
         }
-        DrawScope scope(surface);
+        DrawScope scope(surface, scale);
         if (!scope) return;
         ID2D1DeviceContext* context = scope.Get();
-        D2D1_MATRIX_3X2_F surfaceTransform{};
-        context->GetTransform(&surfaceTransform);
-        context->SetDpi(96.0f, 96.0f);
         context->Clear(D2D1::ColorF(0, 0.0f));
-        context->SetTransform(D2D1::Matrix3x2F::Scale(scale, scale) * surfaceTransform);
 
         const Draw::Palette palette = Draw::Colors(environment);
         const float width = WidthDip();

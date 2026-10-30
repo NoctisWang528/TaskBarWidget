@@ -66,6 +66,16 @@ namespace Cards::Draw
         brush->Release();
     }
 
+    void ControlBackground(ID2D1DeviceContext* context, D2D1_RECT_F rect, float radius,
+        Color base, Color accent, const Paint::Interaction& interaction, int id, bool enabled)
+    {
+        if (base.a > 0.0f) FillRound(context, rect, radius, base);
+        if (!enabled) return;
+        const float opacity = interaction.pressed == id ? 0.18f : 0.10f * interaction.Hover(id);
+        if (opacity > 0.0f) FillRound(context, rect, radius, WithAlpha(accent, opacity));
+        if (interaction.focused == id) StrokeRound(context, rect, radius, accent, 1.5f);
+    }
+
     void StrokeRound(ID2D1DeviceContext* context, D2D1_RECT_F rect, float radius, Color color, float width)
     {
         const auto brush = Brush(context, color);
@@ -150,7 +160,7 @@ namespace Cards::Draw
     }
 
     void Progress(ID2D1DeviceContext* context, D2D1_RECT_F rect, float ratio, Color track,
-        Color fill, bool knob)
+        Color fill, bool knob, bool focused, Color focusColor)
     {
         ratio = std::clamp(ratio, 0.0f, 1.0f);
         FillRound(context, rect, (rect.bottom - rect.top) / 2.0f, track);
@@ -160,6 +170,8 @@ namespace Cards::Draw
             FillRound(context, D2D1::RectF(rect.left, rect.top, rect.left + width, rect.bottom),
                 (rect.bottom - rect.top) / 2.0f, fill);
         }
+        if (focused)
+            StrokeRound(context, rect, (rect.bottom - rect.top) / 2.0f, focusColor, 1.5f);
         if (knob)
         {
             const float centerX = rect.left + width;
@@ -169,6 +181,16 @@ namespace Cards::Draw
             {
                 context->FillEllipse(D2D1::Ellipse(D2D1::Point2F(centerX, centerY), 5.0f, 5.0f), brush);
                 brush->Release();
+            }
+            if (focused)
+            {
+                const auto focusBrush = Brush(context, focusColor);
+                if (focusBrush)
+                {
+                    context->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(centerX, centerY), 7.0f, 7.0f),
+                        focusBrush, 1.5f);
+                    focusBrush->Release();
+                }
             }
         }
     }

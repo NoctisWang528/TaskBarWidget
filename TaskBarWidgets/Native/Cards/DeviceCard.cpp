@@ -25,7 +25,7 @@ namespace Cards::Paint
         float Section(float top, const std::wstring& title, const std::vector<AudioEndpoint>& endpoints,
             const std::wstring& flow, int baseId, ID2D1DeviceContext* context,
             const CardEnvironment& environment, Layout::Table& regions, float left, float width,
-            const Draw::Palette& palette, bool busy)
+            const Draw::Palette& palette, bool busy, const Interaction& interaction)
         {
             Graphics& graphics = *environment.graphics;
             Draw::Text(context, graphics, title, environment.fontFamily, 10.0f, 400, palette.secondary,
@@ -34,7 +34,8 @@ namespace Cards::Paint
 
             const auto* current = Default(endpoints);
             const D2D1_RECT_F selector = Draw::Rect(left, top, left + width, top + SelectorHeight);
-            Draw::FillRound(context, selector, 8.0f, WithAlpha(palette.primary, 0.06f));
+            Draw::ControlBackground(context, selector, 8.0f, WithAlpha(palette.primary, 0.06f),
+                palette.accent, interaction, baseId, !endpoints.empty() && !busy);
             const std::wstring name = current ? current->name : L"没有可用设备";
             Draw::Text(context, graphics, Draw::Ellipsize(context, graphics, name, environment.fontFamily,
                 12.0f, 400, width - 44.0f), environment.fontFamily, 12.0f, 400, palette.primary,
@@ -51,8 +52,9 @@ namespace Cards::Paint
             const D2D1_RECT_F mute = Draw::Rect(left, top, left + muteSize, top + muteSize);
             const bool muted = current && current->isMuted;
             const bool controllable = current && current->canControl;
-            Draw::FillRound(context, mute, muteSize / 2.0f,
-                WithAlpha(palette.primary, muted ? 0.18f : 0.06f));
+            Draw::ControlBackground(context, mute, muteSize / 2.0f,
+                WithAlpha(palette.primary, muted ? 0.18f : 0.06f), palette.accent,
+                interaction, baseId + 1, controllable && !busy);
             const bool input = flow == L"input";
             DrawGlyph(context, input ? (muted ? Glyph::MicrophoneMuted : Glyph::Microphone)
                 : (muted ? Glyph::SpeakerMuted : Glyph::Speaker),
@@ -65,8 +67,11 @@ namespace Cards::Paint
             const float sliderRight = left + width - 34.0f;
             const float railTop = top + muteSize / 2.0f - 1.5f;
             const float ratio = controllable ? static_cast<float>(current->volume) : 0.0f;
+            const float feedback = !controllable || busy ? 0.0f
+                : interaction.pressed == baseId + 2 ? 0.18f : 0.10f * interaction.Hover(baseId + 2);
             Draw::Progress(context, Draw::Rect(sliderLeft, railTop, sliderRight, railTop + 3.0f), ratio,
-                palette.track, palette.accent, true);
+                Mix(palette.track, palette.accent, feedback), Mix(palette.accent, palette.primary, feedback),
+                true, controllable && !busy && interaction.focused == baseId + 2, palette.accent);
             Draw::AddSlider(regions, baseId + 2,
                 Draw::Rect(sliderLeft, railTop - 9.0f, sliderRight, railTop + 12.0f),
                 L"setVolume:" + flow, title + L"音量", controllable && !busy);
@@ -79,7 +84,7 @@ namespace Cards::Paint
     }
 
     void Device(ID2D1DeviceContext* context, const Snapshot& snapshot, const CardEnvironment& environment,
-        Layout::Table& regions, float widthDip, float heightDip)
+        Layout::Table& regions, float widthDip, float heightDip, const Interaction& interaction)
     {
         UNREFERENCED_PARAMETER(heightDip);
         if (!context || !environment.graphics) return;
@@ -93,9 +98,9 @@ namespace Cards::Paint
 
         float top = Layout::Padding;
         top = Section(top, L"输出设备", snapshot.audio.outputs, L"output", 200, context, environment,
-            regions, left, width, palette, busy);
+            regions, left, width, palette, busy, interaction);
         top = Section(top, L"输入设备", snapshot.audio.inputs, L"input", 210, context, environment,
-            regions, left, width, palette, busy);
+            regions, left, width, palette, busy, interaction);
 
         if (!snapshot.audio.message.empty())
         {

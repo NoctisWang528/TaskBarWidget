@@ -31,6 +31,10 @@ namespace Cards::Draw
     ID2D1SolidColorBrush* Brush(ID2D1DeviceContext* context, Color color);
     void FillRect(ID2D1DeviceContext* context, D2D1_RECT_F rect, Color color);
     void FillRound(ID2D1DeviceContext* context, D2D1_RECT_F rect, float radius, Color color);
+    // Draw hover, press and focus before the foreground, using the original shape. The host
+    // supplies only an eligible pressed id after resolving pointer capture.
+    void ControlBackground(ID2D1DeviceContext* context, D2D1_RECT_F rect, float radius,
+        Color base, Color accent, const Paint::Interaction& interaction, int id, bool enabled = true);
     void StrokeRound(ID2D1DeviceContext* context, D2D1_RECT_F rect, float radius, Color color, float width);
     void Line(ID2D1DeviceContext* context, D2D1_POINT_2F from, D2D1_POINT_2F to, Color color, float width);
 
@@ -49,7 +53,7 @@ namespace Cards::Draw
 
     // Progress rail: track plus filled portion plus optional knob.
     void Progress(ID2D1DeviceContext* context, D2D1_RECT_F rect, float ratio, Color track,
-        Color fill, bool knob);
+        Color fill, bool knob, bool focused = false, Color focusColor = {});
 
     // Interaction-table helper so painters never hand-roll ids.
     int AddButton(Layout::Table& regions, int id, D2D1_RECT_F rect, const std::wstring& action,

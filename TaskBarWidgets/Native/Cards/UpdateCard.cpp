@@ -4,7 +4,7 @@
 namespace Cards::Paint
 {
     void Update(ID2D1DeviceContext* context, const Snapshot& snapshot, const CardEnvironment& environment,
-        Layout::Table& regions, float widthDip, float heightDip)
+        Layout::Table& regions, float widthDip, float heightDip, const Interaction& interaction)
     {
         if (!context || !environment.graphics) return;
         Graphics& graphics = *environment.graphics;
@@ -45,7 +45,9 @@ namespace Cards::Paint
             : update.phase == L"verifying" ? L"正在校验…" : L"下载更新";
         const float buttonTop = heightDip - Layout::Padding - 32.0f;
         const D2D1_RECT_F button = Draw::Rect(left, buttonTop, left + width, buttonTop + 32.0f);
-        Draw::FillRound(context, button, 8.0f, WithAlpha(palette.accent, ready || downloadable ? 0.18f : 0.06f));
+        Draw::ControlBackground(context, button, 8.0f,
+            WithAlpha(palette.accent, ready || downloadable ? 0.18f : 0.06f), palette.accent,
+            interaction, 500, ready || downloadable);
         Draw::Text(context, graphics, label, environment.fontFamily, 12.0f, 600,
             ready || downloadable ? palette.primary : palette.secondary,
             Draw::Rect(button.left, button.top + 7.0f, button.right, button.bottom - 5.0f),
