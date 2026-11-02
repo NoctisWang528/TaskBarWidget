@@ -187,13 +187,6 @@ namespace Cards::Paint
         // Cover art: current bitmap decoded at display size for this DPI.
         const D2D1_RECT_F cover = Draw::Rect(left, top + 5.0f, left + Cover, top + 5.0f + Cover);
         Draw::FillRound(context, cover, 8.0f, WithAlpha(palette.primary, 0.07f));
-        if (transition.previous && transition.previousOpacity > 0.01f)
-        {
-            context->PushAxisAlignedClip(cover, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-            context->DrawBitmap(transition.previous, cover, transition.previousOpacity,
-                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
-            context->PopAxisAlignedClip();
-        }
         if (auto* bitmap = graphics.DecodeImage(snapshot.media.coverDataUrl,
             static_cast<int>(Cover * 2.0f), static_cast<int>(Cover * 2.0f)))
         {
@@ -206,6 +199,14 @@ namespace Cards::Paint
             Draw::Text(context, graphics, L"\u266B", environment.fontFamily, 27.0f, 400,
                 WithAlpha(palette.primary, 0.45f), cover, DWRITE_TEXT_ALIGNMENT_CENTER,
                 false, false, false, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        }
+        // Keep the incoming cover/placeholder underneath the fading outgoing cover.
+        if (transition.previous && transition.previousOpacity > 0.01f)
+        {
+            context->PushAxisAlignedClip(cover, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            context->DrawBitmap(transition.previous, cover, transition.previousOpacity,
+                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+            context->PopAxisAlignedClip();
         }
         Draw::AddButton(regions, 1, cover, L"cover", L"封面", false, false);
 

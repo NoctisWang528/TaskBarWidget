@@ -397,9 +397,11 @@ namespace Cards
     // The glow is the plan's "one transparent mask + central blur": every glowing
     // cell writes into an offscreen bitmap, the bitmap is blurred once, and the
     // result is composited in a single pass.
-    bool Graphics::BeginMask(ID2D1DeviceContext* target)
+    ID2D1DeviceContext* Graphics::BeginMask(ID2D1DeviceContext* target)
     {
-        if (!target || !context) return false;
+        if (!target || !d2dDevice) return nullptr;
+        if (!maskContext && FAILED(d2dDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE,
+            maskContext.GetAddressOf()))) return nullptr;
         const auto size = target->GetPixelSize();
         float dpiX = 96.0f, dpiY = 96.0f;
         target->GetDpi(&dpiX, &dpiY);
@@ -416,25 +418,32 @@ namespace Cards
                 D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
                 dpiX, dpiY);
             if (FAILED(target->CreateBitmap(D2D1::SizeU(width, height), nullptr, 0, properties,
-                mask.GetAddressOf()))) return false;
+                mask.GetAddressOf()))) return nullptr;
         }
-        target->GetTarget(maskTarget.ReleaseAndGetAddressOf());
         target->GetTransform(&maskTransform);
-        target->SetTarget(mask.Get());
+        // BeginDraw lends us Composition's atlas context for this update only.
+        // Keep its target and update clipping intact. A shared mask
+        // context renders the offscreen glow without touching that context.
+        maskContext->SetTarget(mask.Get());
+        maskContext->SetDpi(dpiX, dpiY);
+        maskContext->SetUnitMode(target->GetUnitMode());
+        maskContext->SetAntialiasMode(target->GetAntialiasMode());
+        maskContext->BeginDraw();
         // Blur in surface-local pixels. Including the atlas translation here
         // changes the effect's sampling phase when Composition relocates a frame.
         auto local = maskTransform;
         local.dx = local.dy = 0.0f;
-        target->SetTransform(local);
-        target->Clear(D2D1::ColorF(0, 0.0f));
-        return true;
+        maskContext->SetTransform(local);
+        maskContext->Clear(D2D1::ColorF(0, 0.0f));
+        return maskContext.Get();
     }
 
     void Graphics::EndMask(ID2D1DeviceContext* target, float blurDip)
     {
-        if (!target || !mask) return;
-        target->SetTarget(maskTarget.Get());
-        maskTarget.Reset();
+        if (!target || !mask || !maskContext) return;
+        const HRESULT result = maskContext->EndDraw();
+        maskContext->SetTarget(nullptr);
+        if (FAILED(result)) return;
         if (!maskBlur && FAILED(target->CreateEffect(GaussianBlurEffect, maskBlur.GetAddressOf())))
         {
             maskBlur.Reset();
@@ -454,7 +463,7 @@ namespace Cards
     void Graphics::ReleaseMask()
     {
         mask.Reset();
-        maskTarget.Reset();
+        maskContext.Reset();
         maskBlur.Reset();
     }
 

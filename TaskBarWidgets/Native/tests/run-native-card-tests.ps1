@@ -1,4 +1,7 @@
-param([Parameter(Mandatory)][string]$BuildDirectory)
+param(
+    [Parameter(Mandatory)][string]$BuildDirectory,
+    [ValidateSet('Regression', 'Measure', 'SurfaceIsolation')][string]$Mode = 'Regression'
+)
 $ErrorActionPreference = 'Stop'
 $source = [IO.Path]::GetFullPath($BuildDirectory)
 if (-not (Test-Path -LiteralPath (Join-Path $source 'build-info.json'))) { throw 'A complete product build is required.' }
@@ -19,10 +22,27 @@ $msbuild = Join-Path $installation 'MSBuild/Current/Bin/MSBuild.exe'
 if ($LASTEXITCODE) { throw 'Native card probe build failed.' }
 $probe = Join-Path $source 'NativeCardsProbe.exe'
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot '../Bin/Tests/Cards/NativeCardsProbe.exe') -Destination $probe -Force
-$process = Start-Process -FilePath $probe -WorkingDirectory $source -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $source 'native-card-check.log') -RedirectStandardError (Join-Path $source 'native-card-error.log')
+$launch = @{
+    FilePath = $probe
+    WorkingDirectory = $source
+    WindowStyle = 'Hidden'
+    PassThru = $true
+    RedirectStandardOutput = Join-Path $source "native-card-$Mode.log"
+    RedirectStandardError = Join-Path $source "native-card-$Mode-error.log"
+}
+if ($Mode -eq 'Measure') {
+    $measurements = Join-Path $productRoot 'artifacts/measurements'
+    New-Item -ItemType Directory -Path $measurements -Force | Out-Null
+    $measurement = Join-Path $measurements ("cards-" + [DateTimeOffset]::UtcNow.ToString('yyyyMMdd-HHmmss-fff') + '.json')
+    $launch.ArgumentList = @('--measure-cards', ('"{0}"' -f $measurement))
+    Write-Host "Isolated synthetic card measurements: $measurement"
+} elseif ($Mode -eq 'SurfaceIsolation') {
+    $launch.ArgumentList = @('--surface-isolation')
+}
+$process = Start-Process @launch
 if (-not $process.WaitForExit(45000)) { Stop-Process -Id $process.Id; throw 'Isolated card probe did not exit in 45 seconds.' }
 $process.Refresh()
-Get-Content -LiteralPath (Join-Path $source 'native-card-check.log')
-Get-Content -LiteralPath (Join-Path $source 'native-card-error.log')
+Get-Content -LiteralPath $launch.RedirectStandardOutput
+Get-Content -LiteralPath $launch.RedirectStandardError
 if ($process.ExitCode) { throw "Native card probe failed ($($process.ExitCode))." }
 Remove-Item -LiteralPath $probe

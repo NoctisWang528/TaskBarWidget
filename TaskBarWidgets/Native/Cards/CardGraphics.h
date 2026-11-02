@@ -89,7 +89,7 @@ namespace Cards
         // A tinted mask rendered offscreen and blurred once, so a glow is one
         // composite pass instead of one shadow object per element. The mask uses
         // the caller's DIP coordinates and its own target-sized bitmap.
-        bool BeginMask(ID2D1DeviceContext* target);
+        ID2D1DeviceContext* BeginMask(ID2D1DeviceContext* target);
         void EndMask(ID2D1DeviceContext* target, float blurDip);
         void ReleaseMask();
 
@@ -110,7 +110,7 @@ namespace Cards
         std::map<std::wstring, Microsoft::WRL::ComPtr<ID2D1Bitmap1>> bitmaps;
         std::map<std::wstring, Microsoft::WRL::ComPtr<IDWriteTextFormat>> formats;
         Microsoft::WRL::ComPtr<ID2D1Bitmap1> mask;
-        Microsoft::WRL::ComPtr<ID2D1Image> maskTarget;
+        Microsoft::WRL::ComPtr<ID2D1DeviceContext> maskContext;
         D2D1_MATRIX_3X2_F maskTransform{};
         Microsoft::WRL::ComPtr<ID2D1Effect> maskBlur;
         std::wstring diagnostic;

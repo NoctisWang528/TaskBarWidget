@@ -43,16 +43,21 @@ static LONG WINAPI ReportCrash(EXCEPTION_POINTERS* exception)
 }
 
 static void Require(bool ok, const char* message) { if (!ok) throw std::runtime_error(message); }
-static void PumpFor(ULONGLONG milliseconds)
+static int PumpFor(ULONGLONG milliseconds, HWND watched = nullptr)
 {
+    int timers = 0;
     const auto deadline = GetTickCount64() + milliseconds;
     while (GetTickCount64() < deadline)
     {
         MSG message{};
         while (GetTickCount64() < deadline && PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE))
-        { TranslateMessage(&message); DispatchMessageW(&message); }
+        {
+            if (watched && message.hwnd == watched && message.message == WM_TIMER) ++timers;
+            TranslateMessage(&message); DispatchMessageW(&message);
+        }
         Sleep(5);
     }
+    return timers;
 }
 static int VisibleProbeCards()
 {
@@ -95,6 +100,62 @@ struct Services : Cards::CardHostServices
 
 void WriteTrafficPreviews(Cards::Graphics& graphics, const wchar_t* directory);
 void TestCardRenderingStability(Cards::Graphics& graphics);
+void MeasureCardPerformance(const wchar_t* outputPath);
+void TestCardSurfaceIsolation(Cards::Graphics& graphics,
+    winrt::Windows::UI::Composition::Compositor const& compositor,
+    winrt::Windows::UI::Composition::CompositionGraphicsDevice const& device);
+
+static void CheckCardMotion(Cards::CardEnvironment environment, const Cards::Snapshot& snapshot)
+{
+    Services services;
+    environment.reducedMotion = false;
+    Cards::CardWindow card(Cards::Kind::Traffic, services);
+    Require(card.Create(environment, GetModuleHandleW(nullptr)), "motion card creation");
+    card.SetSnapshot(snapshot);
+    const LONG x = GetSystemMetrics(SM_XVIRTUALSCREEN) - 1000;
+    const LONG y = GetSystemMetrics(SM_YVIRTUALSCREEN) - 1000;
+    const RECT bounds{x, y, x + 384, y + 284};
+    card.Place(bounds, 1);
+    card.Show(true);
+    int timers = PumpFor(40, card.Handle());
+    card.Hide(true);
+    timers += PumpFor(20, card.Handle());
+    card.Show(true);
+    timers += PumpFor(300, card.Handle());
+    Require(card.Visible() && IsWindowVisible(card.Handle()) && !card.Tick(),
+        "interrupted entrance/exit settles to the latest show request");
+    const auto settled = card.Bounds();
+    Require(EqualRect(&bounds, &settled), "composition animation keeps card HWND bounds fixed");
+    const auto paints = card.ContentPaintCount();
+    timers += PumpFor(100, card.Handle());
+    Require(card.ContentPaintCount() == paints, "settled static card does not repaint");
+    card.Hide(true);
+    timers += PumpFor(300, card.Handle());
+    Require(!IsWindowVisible(card.Handle()) && !card.Tick(), "batch completion hides card");
+    Require(timers == 0, "card open/close animations must not use window frame timers");
+    card.Show(true);
+    PumpFor(20);
+    environment.reducedMotion = true;
+    card.ApplyEnvironment(environment);
+    Require(card.Visible() && !card.Tick(), "reduced motion finishes an active entrance immediately");
+    card.Hide(true);
+    Require(!IsWindowVisible(card.Handle()), "reduced motion hides immediately");
+    environment.reducedMotion = false;
+    card.ApplyEnvironment(environment);
+    card.Show(true);
+    card.Destroy();
+    Cards::CardWindow replacement(Cards::Kind::Traffic, services);
+    Require(replacement.Create(environment, GetModuleHandleW(nullptr)), "recreate during pending animation completion");
+    replacement.SetSnapshot(snapshot);
+    replacement.Place(bounds, 1);
+    replacement.Show(false);
+    PumpFor(300);
+    Require(replacement.Visible() && IsWindowVisible(replacement.Handle()), "old completion cannot hide a recreated card");
+    replacement.Hide(true);
+    environment.highContrast = true;
+    replacement.ApplyEnvironment(environment);
+    Require(!IsWindowVisible(replacement.Handle()) && !replacement.Tick(), "high contrast finishes an active exit");
+}
 
 static void CheckHoverTransitions(Cards::CardWindow& card, const Cards::Snapshot& snapshot)
 {
@@ -201,6 +262,31 @@ int wmain(int argc, wchar_t** argv)
         WinUiRuntime appRuntime;
         winrt::check_hresult(appRuntime.Initialize(std::filesystem::path(executable).parent_path() /
             L"UI/Microsoft.WindowsAppRuntime.Bootstrap.dll"));
+        if (argc == 3 && wcscmp(argv[1], L"--measure-cards") == 0)
+        {
+            MeasureCardPerformance(argv[2]);
+            std::cout << "Isolated card resource measurement written.\n";
+            appRuntime.Reset();
+            winrt::uninit_apartment();
+            return 0;
+        }
+        if (argc == 2 && wcscmp(argv[1], L"--surface-isolation") == 0)
+        {
+            {
+                Cards::Runtime runtime;
+                winrt::check_hresult(runtime.Initialize());
+                Cards::Graphics graphics;
+                Require(graphics.Initialize(), "surface isolation graphics");
+                auto compositor = winrt::Windows::UI::Composition::Compositor();
+                std::wstring error;
+                auto device = graphics.CreateGraphicsDevice(compositor, error);
+                Require(device != nullptr, "surface isolation composition device");
+                TestCardSurfaceIsolation(graphics, compositor, device);
+            }
+            appRuntime.Reset();
+            winrt::uninit_apartment();
+            return 0;
+        }
         {
             Cards::Runtime runtime;
             winrt::check_hresult(runtime.Initialize());
@@ -232,8 +318,12 @@ int wmain(int argc, wchar_t** argv)
                 scope->GetTarget(before.GetAddressOf());
                 const auto transform = D2D1::Matrix3x2F::Translation(3, 7);
                 scope->SetTransform(transform);
-                Require(graphics.BeginMask(scope.Get()), "mask creation");
-                Cards::Draw::FillRound(scope.Get(), D2D1::RectF(10, 10, 30, 30), 4, Cards::Color{1, 0, 0, 1});
+                auto* maskContext = graphics.BeginMask(scope.Get());
+                Require(maskContext != nullptr, "mask creation");
+                scope->GetTarget(after.GetAddressOf());
+                Require(before.Get() == after.Get(), "glow must leave the borrowed composition target untouched");
+                after.Reset();
+                Cards::Draw::FillRound(maskContext, D2D1::RectF(10, 10, 30, 30), 4, Cards::Color{1, 0, 0, 1});
                 graphics.EndMask(scope.Get(), 4);
                 scope->GetTarget(after.GetAddressOf());
                 Require(before.Get() == after.Get(), "mask must restore the composition target");
@@ -265,6 +355,7 @@ int wmain(int argc, wchar_t** argv)
             Cards::CardEnvironment environment;
             environment.graphics = &graphics; environment.compositor = compositor; environment.device = device;
             environment.reducedMotion = true;
+            CheckCardMotion(environment, snapshot);
             {
                 Cards::CardPopup popup;
                 Require(popup.Create(GetModuleHandleW(nullptr), environment), "popup creation");
@@ -330,7 +421,7 @@ int wmain(int argc, wchar_t** argv)
                 const POINT enteringRow{popupBounds.left + static_cast<LONG>(15 * dpi),
                     popupBounds.top + static_cast<LONG>(61 * dpi)};
                 Require(popup.HitTest(enteringRow) == 2, "popup hit testing follows its entrance offset");
-                PumpFor(200);
+                Require(PumpFor(250, popupWindow) == 0, "popup entrance has no window frame timer");
                 const auto settledBounds = popup.Bounds();
                 Require(EqualRect(&popupBounds, &settledBounds), "popup entrance never moves its HWND");
                 popup.Hide();

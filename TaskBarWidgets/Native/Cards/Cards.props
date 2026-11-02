@@ -53,6 +53,7 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)CardLayout.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)CardDraw.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)CardGraphics.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)CardMotion.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)CardIcons.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)CardProtocol.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)CardClient.h" />

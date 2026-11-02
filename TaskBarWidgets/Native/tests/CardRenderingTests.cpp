@@ -49,7 +49,8 @@ namespace
     // A dedicated context avoids disturbing the caller's target/state. It shares
     // the real Graphics device, text formats and mask resources with the painters.
     Frame Render(Graphics& graphics, Kind kind, const Snapshot& snapshot, bool dark,
-        float scale, D2D1_POINT_2F offset, const Paint::Interaction& interaction = {})
+        float scale, D2D1_POINT_2F offset, const Paint::Interaction& interaction = {},
+        const Paint::CoverTransition& coverTransition = {}, bool transparent = false)
     {
         const auto label = Label(kind, scale, dark, offset);
         CardEnvironment environment;
@@ -90,13 +91,14 @@ namespace
             transform._11 == scale && transform._22 == scale && transform._12 == 0 && transform._21 == 0 &&
             transform.dx == offset.x && transform.dy == offset.y, label + ": Configure left stale DPI/transform");
         context->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
-        context->Clear(dark ? D2D1::ColorF(0.12f, 0.13f, 0.14f) : D2D1::ColorF(0.94f, 0.95f, 0.96f));
+        context->Clear(transparent ? D2D1::ColorF(0, 0, 0, 0) :
+            dark ? D2D1::ColorF(0.12f, 0.13f, 0.14f) : D2D1::ColorF(0.94f, 0.95f, 0.96f));
         switch (kind)
         {
         case Kind::Weather: Paint::Weather(context.Get(), snapshot, environment, frame.regions, width, height, interaction); break;
         case Kind::Traffic: Paint::Traffic(context.Get(), snapshot, environment, frame.regions, width, height, interaction); break;
         case Kind::Device: Paint::Device(context.Get(), snapshot, environment, frame.regions, width, height, interaction); break;
-        case Kind::Media: Paint::Media(context.Get(), snapshot, {}, {}, environment, frame.regions, width, height, interaction); break;
+        case Kind::Media: Paint::Media(context.Get(), snapshot, coverTransition, {}, environment, frame.regions, width, height, interaction); break;
         case Kind::Update: Paint::Update(context.Get(), snapshot, environment, frame.regions, width, height, interaction); break;
         }
         Check(context->EndDraw(), "EndDraw", label);
@@ -400,6 +402,80 @@ namespace
         Require(corners > 0 && ink > 4, label + ": circle/glyph check sampled no useful pixels");
     }
 
+    // One opaque BGR pixel encoded as an in-memory BMP: exercises the product decoder without files.
+    std::wstring SolidCover(BYTE red, BYTE green, BYTE blue)
+    {
+        const BITMAPFILEHEADER header{0x4d42, 58, 0, 0, 54};
+        const BITMAPINFOHEADER info{sizeof(BITMAPINFOHEADER), 1, 1, 1, 24, BI_RGB, 4, 0, 0, 0, 0};
+        BYTE bytes[58]{};
+        std::memcpy(bytes, &header, sizeof(header));
+        std::memcpy(bytes + sizeof(header), &info, sizeof(info));
+        bytes[54] = blue; bytes[55] = green; bytes[56] = red;
+        constexpr wchar_t alphabet[] = L"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        std::wstring uri = L"data:image/bmp;base64,";
+        for (size_t i = 0; i < sizeof(bytes); i += 3)
+        {
+            const unsigned value = (unsigned(bytes[i]) << 16) |
+                (i + 1 < sizeof(bytes) ? unsigned(bytes[i + 1]) << 8 : 0) |
+                (i + 2 < sizeof(bytes) ? bytes[i + 2] : 0);
+            uri += alphabet[(value >> 18) & 63]; uri += alphabet[(value >> 12) & 63];
+            uri += i + 1 < sizeof(bytes) ? alphabet[(value >> 6) & 63] : L'=';
+            uri += i + 2 < sizeof(bytes) ? alphabet[value & 63] : L'=';
+        }
+        return uri;
+    }
+
+    void CheckCoverCrossfade(Graphics& graphics)
+    {
+        const std::wstring covers[] = {SolidCover(255, 0, 0), SolidCover(0, 255, 0), SolidCover(0, 0, 255)};
+        ComPtr<ID2D1Bitmap1> bitmaps[3];
+        for (int i = 0; i < 3; ++i)
+        {
+            bitmaps[i] = graphics.DecodeImage(covers[i], 128, 128);
+            Require(bitmaps[i] != nullptr, "solid cover fixture must decode");
+        }
+        for (bool dark : {false, true})
+        for (float scale : {1.0f, 1.5f})
+        {
+            const auto check = [&](const Frame& frame, int red, int green, int blue, const std::string& label) {
+                // Sample an interior patch, away from the clip and any placeholder glyph edges.
+                for (int y = 24; y < 40; ++y)
+                for (int x = 24; x < 40; ++x)
+                {
+                    const auto pixel = frame.Pixel(static_cast<UINT>((Layout::Padding + x) * scale),
+                        static_cast<UINT>((Layout::Padding + 5 + y) * scale));
+                    Require(std::abs(int(pixel[0]) - blue) <= 1 && std::abs(int(pixel[1]) - green) <= 1 &&
+                        std::abs(int(pixel[2]) - red) <= 1 && pixel[3] == 255, label + ": unexpected BGRA cover pixel");
+                }
+            };
+            for (int current : {1, 2})
+            {
+                Snapshot snapshot;
+                snapshot.media.coverDataUrl = covers[current];
+                const auto render = [&](const Paint::CoverTransition& transition) {
+                    return Render(graphics, Kind::Media, snapshot, dark, scale, D2D1::Point2F(17, 29),
+                        {}, transition, true); // Transparent clear exposes accidental alpha holes.
+                };
+                const auto label = std::string(current == 1 ? "cover A->B" : "cover B->C (no stale A)") +
+                    " scale=" + std::to_string(scale) + (dark ? " dark" : " light");
+                for (float opacity : {1.0f, 0.5f, 0.0f})
+                {
+                    const int old = static_cast<int>(std::lround(255 * opacity));
+                    const int incoming = static_cast<int>(std::lround(255 * (1 - opacity)));
+                    check(render({bitmaps[current - 1].Get(), opacity}), current == 1 ? old : 0,
+                        current == 1 ? incoming : old, current == 2 ? incoming : 0,
+                        label + " outgoing=" + std::to_string(opacity));
+                }
+                check(render({}), 0, current == 1 ? 255 : 0, current == 2 ? 255 : 0,
+                    label + " no transition");
+                snapshot.media.coverDataUrl.clear();
+                check(render({bitmaps[current - 1].Get(), 1.0f}), current == 1 ? 255 : 0,
+                    current == 2 ? 255 : 0, 0, label + " outgoing covers placeholder");
+            }
+        }
+        for (const auto& cover : covers) graphics.ForgetImage(cover);
+    }
+
     void CheckHalo(const Frame& zero, const Frame& half, const Frame& full,
         const Layout::Region& region, float scale, const std::string& label)
     {
@@ -426,6 +502,7 @@ namespace
 void TestCardRenderingStability(Cards::Graphics& graphics)
 {
     Require(graphics.Ready(), "Graphics must already be initialized in the caller's apartment");
+    CheckCoverCrossfade(graphics);
     const Snapshot snapshot = Fixture();
     auto revised = snapshot;
     // Automatic snapshot delivery with unchanged visible data must be pixel-stable.

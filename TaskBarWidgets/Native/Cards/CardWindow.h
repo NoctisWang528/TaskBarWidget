@@ -108,8 +108,9 @@ namespace Cards
         std::wstring AccessibleSummary() const;
         std::wstring AccessibleName(const Layout::Region& region) const;
 
-        // Advances the show/hide animation. Returns true while it is running.
+        // Advances dynamic content/hover; show/hide runs on the compositor.
         bool Tick();
+        void OnMotionCompleted(UINT_PTR generation);
 
         const Snapshot& CurrentSnapshot() const { return snapshot; }
         const CardEnvironment& Environment() const { return environment; }
@@ -126,7 +127,6 @@ namespace Cards
         struct Impl;
 
         void BuildVisualTree(HINSTANCE instance);
-        void ApplyMotion();
         void UpdateTimer();
         void PaintContent(bool rebuildRegions);
         void SetHotRegion(int id);
@@ -172,8 +172,7 @@ namespace Cards
                 return found == hover.end() ? 0.0f : found->second;
             }
         };
-        // Cross-fade state for the media cover: the outgoing bitmap under the
-        // incoming one while a track change settles.
+        // Cross-fade state: the outgoing bitmap fades over the incoming cover.
         struct CoverTransition
         {
             ID2D1Bitmap1* previous{ nullptr };

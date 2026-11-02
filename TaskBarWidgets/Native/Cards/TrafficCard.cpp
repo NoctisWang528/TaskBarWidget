@@ -114,7 +114,7 @@ namespace Cards::Paint
         // Draw the restrained halo under the opaque cells so it cannot wash out
         // the heatmap levels. Keep one shared mask and blur pass; never expand
         // a cell into its four-DIP gutter before blurring.
-        if (!environment.highContrast && graphics.BeginMask(context))
+        if (auto* mask = environment.highContrast ? nullptr : graphics.BeginMask(context))
         {
             const Color halo = ParseColor(environment.dark ? L"#6969BDFA" : L"#345281D3", Color{});
             for (const auto& day : traffic.days)
@@ -133,7 +133,7 @@ namespace Cards::Paint
                 const float base = emphasized ? 0.75f : 0.45f;
                 const float intensity = day.level >= 2 || interaction.focused == id
                     ? base + hover * 0.65f : (base + 0.65f) * hover;
-                Draw::FillRound(context, Draw::Rect(cellLeft + inset, cellTop + inset,
+                Draw::FillRound(mask, Draw::Rect(cellLeft + inset, cellTop + inset,
                     cellLeft + CellSize - inset, cellTop + CellSize - inset), 4.0f - inset,
                     WithAlpha(halo, halo.a * intensity));
             }

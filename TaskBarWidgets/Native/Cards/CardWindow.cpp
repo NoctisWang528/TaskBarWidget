@@ -2,6 +2,7 @@
 #include "CardWindow.h"
 #include "CardDraw.h"
 #include "CardText.h"
+#include "CardMotion.h"
 #include <dwmapi.h>
 
 using Microsoft::WRL::ComPtr;
@@ -13,7 +14,6 @@ namespace Cards
     {
         constexpr wchar_t ClassName[] = L"TaskBarWidgetsCardWindow";
         constexpr int AnimationMilliseconds = 150;
-        constexpr float AnimationOffsetDip = 6.0f;
         constexpr UINT_PTR AnimationTimer = 0xCD01;
         constexpr UINT BackdropChanged = WM_APP + 0x215;
         constexpr ULONGLONG CoverFadeMilliseconds = 200;
@@ -26,6 +26,9 @@ namespace Cards
             if (!card) return DefWindowProcW(window, message, keys, position);
             switch (message)
             {
+            case MotionCompleted:
+                card->OnMotionCompleted(keys);
+                return 0;
             case BackdropChanged:
                 card->RefreshBackdropConfiguration();
                 return 0;
@@ -142,6 +145,7 @@ namespace Cards
         ContainerVisual root{ nullptr };
         CompositionRoundedRectangleGeometry corner{ nullptr };
         ContainerVisual motion{ nullptr };
+        CardMotion transition;
         SpriteVisual wash{ nullptr };
         SpriteVisual content{ nullptr };
         DrawingSurface surface;
@@ -203,12 +207,6 @@ namespace Cards
         int lyricLineIndex{ -1 };
         ULONGLONG lyricLineStarted{};
         ULONGLONG lyricsTick{};
-        float opacity{ 1.0f };
-        float offset{ 0.0f };
-        float fromOpacity{ 1.0f };
-        float fromOffset{ 0.0f };
-        bool animating{ false };
-        std::chrono::steady_clock::time_point started{};
     };
 
     CardWindow::CardWindow(Kind cardKind, CardHostServices& services)
@@ -293,6 +291,7 @@ namespace Cards
             impl->content = MakeLayer(impl->compositor);
             impl->motion.Children().InsertAtTop(impl->wash);
             impl->motion.Children().InsertAtTop(impl->content);
+            impl->transition.Bind(impl->motion, visible, scale);
         }
         catch (const winrt::hresult_error&)
         {
@@ -304,6 +303,7 @@ namespace Cards
 
     void CardWindow::Destroy()
     {
+        impl->transition.Detach();
         accessibility.Detach();
         if (window)
         {
@@ -343,14 +343,13 @@ namespace Cards
         {
             impl->hover.clear();
             if (visible && impl->hotRegion) impl->hover[impl->hotRegion] = { 1.0f, 1.0f, 0 };
-            if (impl->animating)
-            {
-                impl->animating = false;
-                impl->opacity = visible ? 1.0f : 0.0f;
-                impl->offset = 0.0f;
-                ApplyMotion();
-                if (!visible) ShowWindow(window, SW_HIDE);
-            }
+            impl->transition.Set(visible, scale);
+            if (!visible && window) ShowWindow(window, SW_HIDE);
+            if (environment.graphics && impl->previousCoverData != snapshot.media.coverDataUrl)
+                environment.graphics->ForgetImage(impl->previousCoverData);
+            impl->coverFadeStart = 0;
+            impl->previousCoverKey.clear();
+            impl->previousCoverData.clear();
         }
 
         // One controller per window: a theme or tuning change only reconfigures it.
@@ -491,10 +490,14 @@ namespace Cards
         {
             if (environment.graphics && impl->previousCoverData != value.media.coverDataUrl)
                 environment.graphics->ForgetImage(impl->previousCoverData);
-            impl->previousCoverKey = impl->coverKey;
-            impl->previousCoverData = snapshot.media.coverDataUrl;
+            const bool fade = visible && !environment.reducedMotion && !environment.highContrast &&
+                !snapshot.media.coverDataUrl.empty() && snapshot.media.coverDataUrl != value.media.coverDataUrl;
+            if (!fade && environment.graphics && snapshot.media.coverDataUrl != value.media.coverDataUrl)
+                environment.graphics->ForgetImage(snapshot.media.coverDataUrl);
+            impl->previousCoverKey = fade ? impl->coverKey : L"";
+            impl->previousCoverData = fade ? snapshot.media.coverDataUrl : L"";
             impl->coverKey = value.media.coverKey;
-            impl->coverFadeStart = GetTickCount64();
+            impl->coverFadeStart = fade ? now : 0;
         }
         snapshot = value;
         if (forwardScan) snapshot.lyrics.wordScan = std::max(snapshot.lyrics.wordScan, previousPaintedScan);
@@ -517,7 +520,7 @@ namespace Cards
     POINT CardWindow::ToDip(POINT pixels) const
     {
         const auto point = Layout::ToDip(POINT{pixels.x - bounds.left, pixels.y - bounds.top}, scale);
-        return POINT{point.x, static_cast<LONG>(std::lround(point.y + impl->offset))};
+        return POINT{point.x, static_cast<LONG>(std::lround(point.y - impl->transition.OffsetDip()))};
     }
 
     float CardWindow::ContentWidthDip() const { return Layout::WidthDip(kind); }
@@ -534,6 +537,11 @@ namespace Cards
         {
             Paint();
             return;
+        }
+        if (scale != targetScale)
+        {
+            impl->transition.Set(visible, targetScale);
+            if (!visible && window) ShowWindow(window, SW_HIDE);
         }
         bounds = targetBounds;
         scale = targetScale > 0.0f ? targetScale : 1.0f;
@@ -554,12 +562,10 @@ namespace Cards
         Paint();
     }
 
-    void CardWindow::ApplyMotion()
+    void CardWindow::OnMotionCompleted(UINT_PTR generation)
     {
-        if (!impl->motion) return;
-        impl->motion.Opacity(impl->opacity);
-        impl->motion.Offset(winrt::Windows::Foundation::Numerics::float3{ 0.0f,
-            -impl->offset * scale, 0.0f });
+        if (impl->transition.Complete(generation) && !visible && window)
+            ShowWindow(window, SW_HIDE);
     }
 
     void CardWindow::Show(bool animate)
@@ -568,25 +574,10 @@ namespace Cards
         // Snapshot/layout refreshes must not restart an entrance or cover a menu.
         if (visible) { Paint(); return; }
         visible = true;
-        if (animate && !environment.reducedMotion && !environment.highContrast)
-        {
-            const bool reversing = impl->animating && IsWindowVisible(window);
-            impl->fromOpacity = reversing ? impl->opacity : 0.0f;
-            impl->fromOffset = reversing ? impl->offset : AnimationOffsetDip;
-            impl->started = std::chrono::steady_clock::now();
-            impl->animating = true;
-            impl->opacity = impl->fromOpacity;
-            impl->offset = impl->fromOffset;
-        }
-        else
-        {
-            impl->animating = false;
-            impl->opacity = 1.0f;
-            impl->offset = 0.0f;
-        }
-        ApplyMotion();
         impl->dirty = true;
         Paint();
+        impl->transition.Start(true, scale, animate && !environment.reducedMotion && !environment.highContrast,
+            window, AnimationMilliseconds);
         ShowWindow(window, SW_SHOWNOACTIVATE);
         SetWindowPos(window, HWND_TOPMOST, bounds.left, bounds.top,
             bounds.right - bounds.left, bounds.bottom - bounds.top,
@@ -602,21 +593,9 @@ namespace Cards
         impl->hotRegion = 0;
         impl->hover.clear();
         impl->trackingLeave = false;
-        if (animate && !environment.reducedMotion && !environment.highContrast && impl->opacity > 0.01f)
-        {
-            impl->fromOpacity = impl->opacity;
-            impl->fromOffset = impl->offset;
-            impl->started = std::chrono::steady_clock::now();
-            impl->animating = true;
-        }
-        else
-        {
-            impl->animating = false;
-            impl->opacity = 0.0f;
-            impl->offset = 0.0f;
-            ApplyMotion();
-            ShowWindow(window, SW_HIDE);
-        }
+        impl->transition.Start(false, scale, animate && !environment.reducedMotion && !environment.highContrast,
+            window, AnimationMilliseconds);
+        if (!impl->transition.Running()) ShowWindow(window, SW_HIDE);
         UpdateTimer();
     }
 
@@ -628,7 +607,7 @@ namespace Cards
             (kind == Kind::Weather && snapshot.weather.alerts.size() > 1));
         const bool hoverAnimating = visible && std::any_of(impl->hover.begin(), impl->hover.end(),
             [](const auto& item) { return item.second.started != 0; });
-        const UINT interval = impl->animating || hoverAnimating ? 16 :
+        const UINT interval = hoverAnimating ? 16 :
             dynamic ? (kind == Kind::Weather ? 1000 : 33) : 0;
         if (interval == impl->timerInterval) return;
         if (interval)
@@ -645,23 +624,6 @@ namespace Cards
         if (impl->sliderPendingUntil && now >= impl->sliderPendingUntil)
         {
             impl->sliderPendingUntil = 0; impl->sliderId = 0; impl->sliderAction.clear(); repaint = true;
-        }
-        if (impl->animating)
-        {
-            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - impl->started).count();
-            const float linear = std::clamp(static_cast<float>(elapsed) / AnimationMilliseconds, 0.0f, 1.0f);
-            const float progress = 1.0f - std::pow(1.0f - linear, 3.0f);
-            const float target = visible ? 1.0f : 0.0f;
-            impl->opacity = impl->fromOpacity + (target - impl->fromOpacity) * progress;
-            const float targetOffset = visible ? 0.0f : AnimationOffsetDip;
-            impl->offset = impl->fromOffset + (targetOffset - impl->fromOffset) * progress;
-            ApplyMotion();
-            if (progress >= 1.0f)
-            {
-                impl->animating = false;
-                if (!visible) ShowWindow(window, SW_HIDE);
-            }
         }
         if (visible)
         {
@@ -699,7 +661,7 @@ namespace Cards
             if (repaint) { impl->dirty = true; Paint(); }
         }
         UpdateTimer();
-        return impl->animating;
+        return impl->transition.Running();
     }
 
     void CardWindow::PaintContent(bool rebuildRegions)

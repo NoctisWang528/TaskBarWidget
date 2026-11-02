@@ -1,6 +1,30 @@
 # 验收状态
 
-更新：2026-10-24。最近成功完整构建的路径由本机 `artifacts/latest-build.txt` 提供；构建产物、布局检查图、日志和用户配置不提交到仓库。
+更新：2026-11-02。最近成功完整构建的路径由本机 `artifacts/latest-build.txt` 提供；构建产物、布局检查图、日志和用户配置不提交到仓库。
+
+## 流量绘制隔离、封面淡化与合成器开合（2026-11-02）
+
+用户报告播放媒体时点击流量图会使流量卡出现媒体画面。日期选择分支只更新流量状态，不切换卡片种类。针对光晕绘制中途替换 Composition 借出的 D2D context 目标这一风险，改为在同一共享 D2D 设备上保留一个专用遮罩 context：光晕在它自己的位图上完成绘制后，再合成到卡片；不再改动借出 context 的 target，模糊初始化失败也不会遗留错误的 transform。独立审查未发现点击路径修改卡片种类的证据。这个改动隔离了可疑的共享绘制路径，但不把静态定位当作真实桌面问题已复现。
+
+卡片 150 ms／菜单 160 ms 的透明度和 6 DIP 位移改为 Composition keyframe animation，移除开合所需的 16 ms 窗口 timer。内容先绘制，再开始入场；反向动画以 `this.StartingValue` 从合成器当前值接续，剩余时长按距离估算。完成事件只投递 HWND＋进程内唯一代次，不捕获窗口对象，旧动画完成不能收起后来重开的窗口。销毁时撤销事件和动画；DPI、减少动画与高对比度变化收敛到最终状态。命中坐标的 6 DIP 补偿采用同曲线的 CPU 时间估算，不声称它是合成器呈现进度读回，严重提交延迟时的边界命中仍属桌面验收。悬停／播放内容的按需 timer 保留。
+
+封面先绘制完整新图／占位符，再叠加逐渐消失的旧图，修复新图完全遮挡淡出图的问题。隐藏、高对比度、减少动画时直接切换，重复同一图不开始过渡；清理不再需要的旧封面缓存。
+
+验证通过：真实 Composition 借出目标在光晕绘制期间保持不变；既有多 DPI、明暗主题、atlas 偏移、中文换行、低等级光晕像素回归；封面 A→B、B→C 起点／中点／终点的 BGRA 和不透明度；卡片／菜单开合没有逐帧 WM_TIMER；快速开关反向、旧回调、销毁重建、固定 HWND 几何、减少动画和高对比度中途收敛。完整硬件 Release `261102-1603`（`artifacts/builds/20261102-160341`）与该包内的原生卡片回归通过，共享运行库包布局检查通过。没有启动普通产品。
+
+可复用命令（工作目录为产品根目录，`<完整构建目录>` 指含 build-info.json 的隔离构建）：
+
+```powershell
+.\Native\tests\run-native-card-tests.ps1 -BuildDirectory <完整构建目录>
+.\Native\tests\run-native-card-tests.ps1 -BuildDirectory <完整构建目录> -Mode Measure
+.\Native\tests\run-native-card-tests.ps1 -BuildDirectory <完整构建目录> -Mode SurfaceIsolation
+```
+
+`Measure` 使用独立进程、合成数据和屏幕外窗口，按隐藏、静态显示、模拟媒体播放、20 次快速开关、最后隐藏的相同顺序，每阶段停留约 2 秒，记录 Working Set、Private Bytes、CPU 时间、内容绘制次数及 HWND 可见状态延迟。输出到忽略的 `artifacts/measurements/`；它不启动主程序、媒体服务、音频或真实播放器，不读取个人数据。基线源版本为 `4ed1c63`，前后探针及 JSON 保留在 `artifacts/diagnostics/20261102-card-motion-before` 和 `20261102-card-motion-after`。短时进程测量不覆盖 GPU／DWM 内存、真正的呈现帧率、十分钟按需回收和真实首次点击；不能据此宣称明显节省资源。
+
+最终构建的测量输出为 `artifacts/measurements/cards-20261102-080628-959.json`（文件名使用 UTC）。静态显示阶段 Working Set 60.25 MiB、Private Bytes 70.26 MiB；模拟播放为 60.59／70.68 MiB；最后隐藏阶段内容绘制增量和 CPU 时间增量均为 0。旧实现两次空闲对照的静态显示为 Working Set 59.73／60.31 MiB、Private Bytes 70.52／69.59 MiB，内存处于相近范围。CPU 的 15.625 ms 计量粒度和短采样波动不足以证明降低占用；明确确认的变化是开合不再依赖窗口逐帧 timer。HWND 可见延迟不是首帧呈现延迟。
+
+`SurfaceIsolation` 仅捕获本进程创建的屏幕外诊断窗口，交替更新媒体与流量并比较提交后的像素。本机 Windows Graphics Capture 返回“没有权限捕获该窗口”；已明确记录为未通过／不可用，没有以黑图或未运行当作成功。真实播放时点击热力图是否彻底消除串画、高刷屏观感、窗口动画期间边界点击、混合 DPI、Explorer 与用户实际音频环境仍待桌面复测。该开发阶段没有启动、停止或替换日常安装；用户随后于 2026-11-02 授权提交、推送和正式发布此批改动。
 
 ## 卡片迁入原生进程（分支 dsh/CardDrawingRebuild，2026-10-24）
 
