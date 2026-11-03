@@ -4,6 +4,7 @@
 #include "CardText.h"
 #include "CardMotion.h"
 #include <dwmapi.h>
+#include <tuple>
 
 using Microsoft::WRL::ComPtr;
 using namespace winrt::Windows::UI::Composition;
@@ -19,6 +20,34 @@ namespace Cards
         constexpr ULONGLONG CoverFadeMilliseconds = 200;
         constexpr ULONGLONG LyricWrapMilliseconds = 180;
         constexpr ULONGLONG HoverMilliseconds = 140;
+
+        bool SameSources(const MediaState& a, const MediaState& b)
+        {
+            if (a.sources.size() != b.sources.size()) return false;
+            for (size_t i = 0; i < a.sources.size(); ++i)
+            {
+                const auto& x = a.sources[i]; const auto& y = b.sources[i];
+                if (std::tie(x.id, x.label, x.iconDataUrl) != std::tie(y.id, y.label, y.iconDataUrl)) return false;
+            }
+            return true;
+        }
+
+        auto StableMedia(const MediaState& media)
+        {
+            return std::tie(media.title, media.artist, media.source, media.selectedSourceId,
+                media.isPlaying, media.canPrevious, media.canNext, media.canPlayPause);
+        }
+
+        auto VisibleLyrics(const LyricsState& lyrics)
+        {
+            return std::tie(lyrics.trackId, lyrics.available, lyrics.isPlaying, lyrics.isPureMusic,
+                lyrics.translationMode, lyrics.animateTransition, lyrics.currentLineIndex,
+                lyrics.scene, lyrics.current, lyrics.next, lyrics.currentTranslation,
+                lyrics.fontFamily, lyrics.fontSize, lyrics.fontWeight, lyrics.fontItalic,
+                lyrics.fontUnderline, lyrics.fontStrikeOut, lyrics.primaryColor, lyrics.secondaryColor,
+                lyrics.translationColor, lyrics.scanColor, lyrics.textShadow, lyrics.textAlignment,
+                lyrics.layoutScalePercent);
+        }
 
         LRESULT CALLBACK CardProc(HWND window, UINT message, WPARAM keys, LPARAM position)
         {
@@ -149,6 +178,11 @@ namespace Cards
         SpriteVisual wash{ nullptr };
         SpriteVisual content{ nullptr };
         DrawingSurface surface;
+        SpriteVisual dynamicContent{ nullptr };
+        DrawingSurface dynamicSurface;
+        SurfaceHandle boundDynamicSurface{ nullptr };
+        bool mediaStaticDirty{ true };
+        bool mediaRegionsDirty{ true };
         SurfaceHandle boundSurface{ nullptr };
         UINT timerInterval{};
         muxc::MicaController mica{ nullptr };
@@ -253,6 +287,7 @@ namespace Cards
                 impl->focusedRegion = id;
                 SetFocus(window);
                 impl->dirty = true;
+                impl->mediaStaticDirty = true;
                 if (visible) Paint();
             });
         return true;
@@ -282,7 +317,7 @@ namespace Cards
             impl->root.Clip(impl->compositor.CreateGeometricClip(impl->corner));
 
             // Motion container: the show/hide animation changes only its opacity
-            // and offset. The HWND geometry never moves with the animation.
+            // and offset for the individual API. CardHost moves the whole group.
             impl->motion = impl->compositor.CreateContainerVisual();
             impl->motion.RelativeSizeAdjustment(winrt::Windows::Foundation::Numerics::float2{ 1.0f, 1.0f });
             impl->root.Children().InsertAtTop(impl->motion);
@@ -290,6 +325,12 @@ namespace Cards
             impl->wash = MakeLayer(impl->compositor);
             impl->content = MakeLayer(impl->compositor);
             impl->motion.Children().InsertAtTop(impl->wash);
+            if (kind == Kind::Media)
+            {
+                impl->dynamicContent = MakeLayer(impl->compositor);
+                impl->motion.Children().InsertAtTop(impl->dynamicContent);
+            }
+            // Transport stays above rolling lyrics where their viewports meet.
             impl->motion.Children().InsertAtTop(impl->content);
             impl->transition.Bind(impl->motion, visible, scale);
         }
@@ -319,6 +360,10 @@ namespace Cards
         }
         impl->micaConfiguration = nullptr;
         impl->micaReady = false;
+        impl->dynamicSurface.Release();
+        impl->boundDynamicSurface = nullptr;
+        if (impl->dynamicContent) impl->dynamicContent.Brush(nullptr);
+        impl->dynamicContent = nullptr;
         impl->surface.Release();
         impl->boundSurface = nullptr;
         if (impl->content) impl->content.Brush(nullptr);
@@ -429,6 +474,8 @@ namespace Cards
             impl->wash.Brush(impl->compositor.CreateColorBrush(color));
         }
         impl->dirty = true;
+        impl->mediaStaticDirty = true;
+        impl->mediaRegionsDirty = true;
         UpdateTimer();
         if (visible) Paint();
     }
@@ -436,6 +483,19 @@ namespace Cards
     void CardWindow::SetSnapshot(const Snapshot& value)
     {
         const auto now = GetTickCount64();
+        const bool stableChanged = kind == Kind::Media &&
+            (StableMedia(value.media) != StableMedia(snapshot.media) || !SameSources(value.media, snapshot.media));
+        const bool regionsChanged = kind == Kind::Media &&
+            (value.media.canSeek != snapshot.media.canSeek || value.media.canPrevious != snapshot.media.canPrevious ||
+                value.media.canNext != snapshot.media.canNext || value.media.canPlayPause != snapshot.media.canPlayPause ||
+                value.media.sources.empty() != snapshot.media.sources.empty());
+        const bool lyricsChanged = kind == Kind::Media && VisibleLyrics(value.lyrics) != VisibleLyrics(snapshot.lyrics);
+        const bool mediaChanged = stableChanged || (kind == Kind::Media &&
+            (lyricsChanged ||
+                value.lyrics.wordScan != impl->scanProgress ||
+                value.media.coverDataUrl != snapshot.media.coverDataUrl || value.media.coverKey != snapshot.media.coverKey ||
+                value.media.position != impl->mediaPosition || value.media.duration != snapshot.media.duration ||
+                value.media.canSeek != snapshot.media.canSeek || value.statusText != snapshot.statusText));
         // Snapshots also carry lyrics, audio and icons. Repeated positions must
         // not rewind the local clock between real timeline updates.
         const bool newPosition = !impl->mediaPositionTick || value.media.position != impl->mediaPosition ||
@@ -447,8 +507,10 @@ namespace Cards
         const bool samePlayback = value.lyrics.isPlaying == snapshot.lyrics.isPlaying;
         const bool forwardScan = sameLine && samePlayback && value.lyrics.isPlaying &&
             value.lyrics.wordScan >= 0 && value.lyrics.wordScan >= impl->scanProgress;
+        const double previousPaintedPosition = snapshot.media.position;
         const double previousPaintedScan = snapshot.lyrics.wordScan;
-        const bool newLyrics = value.lyrics.revision != impl->lyricsRevision || !sameLine || !samePlayback;
+        const bool newLyrics = value.lyrics.revision != impl->lyricsRevision || !sameLine || !samePlayback ||
+            value.lyrics.wordScan != impl->scanProgress;
         if (kind == Kind::Media && !sameLine && value.lyrics.animateTransition && !environment.reducedMotion &&
             !snapshot.lyrics.current.empty())
         {
@@ -499,21 +561,64 @@ namespace Cards
             impl->coverKey = value.media.coverKey;
             impl->coverFadeStart = fade ? now : 0;
         }
-        snapshot = value;
+        if (kind == Kind::Media)
+        {
+            // Other cards' history, weather and audio lists never enter the media display copy.
+            if (stableChanged)
+            {
+                snapshot.media.title = value.media.title;
+                snapshot.media.artist = value.media.artist;
+                snapshot.media.source = value.media.source;
+                snapshot.media.selectedSourceId = value.media.selectedSourceId;
+                if (!SameSources(value.media, snapshot.media)) snapshot.media.sources = value.media.sources;
+                snapshot.media.isPlaying = value.media.isPlaying;
+                snapshot.media.canPrevious = value.media.canPrevious;
+                snapshot.media.canNext = value.media.canNext;
+                snapshot.media.canPlayPause = value.media.canPlayPause;
+            }
+            if (snapshot.media.coverDataUrl != value.media.coverDataUrl) snapshot.media.coverDataUrl = value.media.coverDataUrl;
+            if (snapshot.media.coverKey != value.media.coverKey) snapshot.media.coverKey = value.media.coverKey;
+            snapshot.media.position = value.media.position;
+            snapshot.media.duration = value.media.duration;
+            snapshot.media.canSeek = value.media.canSeek;
+            snapshot.media.revision = value.media.revision;
+            if (lyricsChanged) snapshot.lyrics = value.lyrics;
+            snapshot.lyrics.revision = value.lyrics.revision;
+            snapshot.lyrics.progress = value.lyrics.progress;
+            snapshot.lyrics.wordScan = value.lyrics.wordScan;
+            if (snapshot.statusText != value.statusText) snapshot.statusText = value.statusText;
+            impl->mediaStaticDirty |= stableChanged || regionsChanged;
+            impl->mediaRegionsDirty |= regionsChanged;
+        }
+        else if (kind == Kind::Weather)
+        {
+            const bool forecast = snapshot.weather.forecastView;
+            const int offset = snapshot.weather.forecastOffset;
+            snapshot = value;
+            snapshot.weather.forecastView = forecast;
+            snapshot.weather.forecastOffset = offset;
+        }
+        else snapshot = value;
         if (forwardScan) snapshot.lyrics.wordScan = std::max(snapshot.lyrics.wordScan, previousPaintedScan);
         if (newPosition)
         {
             impl->mediaPosition = value.media.position;
             impl->mediaPositionTick = now;
         }
+        else if (kind == Kind::Media && snapshot.media.isPlaying)
+            snapshot.media.position = previousPaintedPosition;
+        if (kind == Kind::Media && impl->sliderId && impl->sliderSeeking && snapshot.media.canSeek)
+            snapshot.media.position = impl->sliderRatio * snapshot.media.duration;
         UpdateTimer();
-        impl->dirty = true;
+        impl->dirty |= kind != Kind::Media || mediaChanged;
         if (visible) Paint();
     }
 
     void CardWindow::Invalidate()
     {
         impl->dirty = true;
+        impl->mediaStaticDirty = true;
+        impl->mediaRegionsDirty = true;
         if (window) InvalidateRect(window, nullptr, FALSE);
     }
 
@@ -543,6 +648,9 @@ namespace Cards
             impl->transition.Set(visible, targetScale);
             if (!visible && window) ShowWindow(window, SW_HIDE);
         }
+        const bool contentChanged = scale != targetScale ||
+            bounds.right - bounds.left != targetBounds.right - targetBounds.left ||
+            bounds.bottom - bounds.top != targetBounds.bottom - targetBounds.top;
         bounds = targetBounds;
         scale = targetScale > 0.0f ? targetScale : 1.0f;
         measuredHeightDip = static_cast<float>(targetBounds.bottom - targetBounds.top) / scale;
@@ -557,9 +665,27 @@ namespace Cards
                 bounds.right - bounds.left, bounds.bottom - bounds.top,
                 SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER);
         }
-        impl->dirty = true;
+        impl->dirty |= contentChanged;
+        impl->mediaStaticDirty |= contentChanged;
+        impl->mediaRegionsDirty |= contentChanged;
         // Resident prewarm must produce actual pixels before the first show.
         Paint();
+    }
+
+    void CardWindow::CommitGroupBounds(const RECT& targetBounds) noexcept
+    {
+        bounds = targetBounds;
+    }
+
+    void CardWindow::SetWeatherView(bool forecast, int offset)
+    {
+        if (kind != Kind::Weather) return;
+        offset = std::max(0, offset);
+        if (snapshot.weather.forecastView == forecast && snapshot.weather.forecastOffset == offset) return;
+        snapshot.weather.forecastView = forecast;
+        snapshot.weather.forecastOffset = offset;
+        impl->dirty = true;
+        if (visible) Paint();
     }
 
     void CardWindow::OnMotionCompleted(UINT_PTR generation)
@@ -575,6 +701,7 @@ namespace Cards
         if (visible) { Paint(); return; }
         visible = true;
         impl->dirty = true;
+        impl->mediaStaticDirty = true;
         Paint();
         impl->transition.Start(true, scale, animate && !environment.reducedMotion && !environment.highContrast,
             window, AnimationMilliseconds);
@@ -602,13 +729,19 @@ namespace Cards
     void CardWindow::UpdateTimer()
     {
         if (!window) return;
+        const bool smoothLyrics = kind == Kind::Media && snapshot.media.isPlaying && snapshot.lyrics.isPlaying &&
+            impl->scanRate > 0 && impl->scanProgress >= 0 && snapshot.lyrics.wordScan < 1 &&
+            GetTickCount64() - impl->scanTick < 500;
+        const bool playback = kind == Kind::Media && snapshot.media.isPlaying && snapshot.media.duration > 0 &&
+            snapshot.media.position < snapshot.media.duration && !impl->dragging;
         const bool dynamic = visible && (impl->coverFadeStart || impl->lyricWrapStart ||
-            impl->sliderPendingUntil || (kind == Kind::Media && snapshot.media.isPlaying) ||
+            impl->sliderPendingUntil || playback || smoothLyrics ||
             (kind == Kind::Weather && snapshot.weather.alerts.size() > 1));
         const bool hoverAnimating = visible && std::any_of(impl->hover.begin(), impl->hover.end(),
             [](const auto& item) { return item.second.started != 0; });
         const UINT interval = hoverAnimating ? 16 :
-            dynamic ? (kind == Kind::Weather ? 1000 : 33) : 0;
+            dynamic ? (kind == Kind::Weather ? 1000 :
+                impl->coverFadeStart || impl->lyricWrapStart || smoothLyrics ? 33 : 250) : 0;
         if (interval == impl->timerInterval) return;
         if (interval)
         {
@@ -633,6 +766,7 @@ namespace Cards
                 if (fade.started)
                 {
                     repaint = true;
+                    if (item->first != 4) impl->mediaStaticDirty = true;
                     if (now - fade.started >= HoverMilliseconds) fade.started = 0;
                 }
                 if (!fade.started && fade.to == 0.0f) item = impl->hover.erase(item);
@@ -656,7 +790,12 @@ namespace Cards
                 if (environment.reducedMotion || now - impl->lyricWrapStart >= LyricWrapMilliseconds)
                 { impl->lyricPrevious.clear(); impl->lyricPreviousSecondary.clear(); impl->lyricWrapStart = 0; }
             }
-            if (kind == Kind::Media && snapshot.media.isPlaying && now - impl->lastLyricPaint >= 33)
+            const bool scanAdvancing = snapshot.lyrics.isPlaying && impl->scanRate > 0 &&
+                impl->scanProgress >= 0 && now - impl->scanTick <= 533 && snapshot.lyrics.wordScan < 1;
+            const bool timelineAdvancing = snapshot.media.duration > 0 && !impl->dragging &&
+                snapshot.media.position < snapshot.media.duration;
+            if (kind == Kind::Media && snapshot.media.isPlaying && (scanAdvancing || timelineAdvancing) &&
+                now - impl->lastLyricPaint >= (scanAdvancing ? 33 : 250))
             { impl->lastLyricPaint = now; repaint = true; }
             if (repaint) { impl->dirty = true; Paint(); }
         }
@@ -672,125 +811,136 @@ namespace Cards
         impl->surface.Ensure(environment.device, widthPixels, heightPixels);
         if (!impl->surface.Ready()) return;
 
-        if (rebuildRegions) regions.Clear();
+        if (kind == Kind::Media) impl->dynamicSurface.Ensure(environment.device, widthPixels, heightPixels);
+        if (rebuildRegions) { regions.Clear(); ++regionBuildCount; }
+        const bool paintStable = kind != Kind::Media || impl->mediaStaticDirty || !impl->content.Brush();
+        for (int layer = 0; layer < (kind == Kind::Media ? 2 : 1); ++layer)
         {
-            DrawScope scope(impl->surface, scale);
-            if (!scope) { impl->dirty = true; host.OnGraphicsFailure(impl->surface.LastResult()); return; }
-            ID2D1DeviceContext* context = scope.Get();
-            context->Clear(D2D1::ColorF(0, 0.0f));
+            if (layer == 0 && !paintStable) continue;
+            auto& surface = layer == 0 ? impl->surface : impl->dynamicSurface;
+            {
+                DrawScope scope(surface, scale);
+                if (!scope) { impl->dirty = true; host.OnGraphicsFailure(surface.LastResult()); return; }
+                ID2D1DeviceContext* context = scope.Get();
+                context->Clear(D2D1::ColorF(0, 0.0f));
 
-            const float widthDip = ContentWidthDip();
-            const float heightDip = ContentHeightDip();
-            // Decode covers at the actual content resolution.
-            const float fit = (bounds.right - bounds.left) / std::max(1.0f, widthDip * scale);
+                const float widthDip = ContentWidthDip();
+                const float heightDip = ContentHeightDip();
+                // Decode covers at the actual content resolution.
+                const float fit = (bounds.right - bounds.left) / std::max(1.0f, widthDip * scale);
 
-            // A dragged slider is painted from the pointer until the gesture ends,
-            // so an older snapshot can never drag the knob back mid-drag.
-            // This is the window's display copy. The host keeps authoritative
-            // snapshots; updating scalar presentation values avoids copying image
-            // strings and all four cards' models on every animation tick.
-            auto& painted = snapshot;
-            if (painted.media.isPlaying && impl->mediaPositionTick)
-                painted.media.position = std::clamp(impl->mediaPosition +
-                    (GetTickCount64() - impl->mediaPositionTick) / 1000.0, 0.0, std::max(0.0, painted.media.duration));
-            if (painted.lyrics.isPlaying && impl->lyricsRate > 0.0 && impl->lyricsTick != 0)
-            {
-                const double elapsed = static_cast<double>(GetTickCount64() - impl->lyricsTick) / 1000.0;
-                painted.lyrics.progress = std::clamp(
-                    impl->lyricsProgress + impl->lyricsRate * elapsed, 0.0, 1.0);
-            }
-            if (painted.lyrics.isPlaying && impl->scanProgress >= 0 && impl->scanRate > 0)
-                painted.lyrics.wordScan = std::max(painted.lyrics.wordScan,
-                    std::clamp(impl->scanProgress + impl->scanRate *
-                        std::min(0.5, (GetTickCount64() - impl->scanTick) / 1000.0), 0.0, 1.0));
-            if (impl->sliderId != 0 && !impl->sliderSeeking)
-            {
-                auto& endpoints = impl->sliderAction == L"setVolume:input" ? painted.audio.inputs : painted.audio.outputs;
-                for (auto& endpoint : endpoints)
-                    if (endpoint.isDefault && endpoint.canControl) endpoint.volume = impl->sliderRatio;
-            }
-            else if (impl->sliderId != 0 && impl->sliderSeeking && painted.media.canSeek)
-            {
-                painted.media.position = impl->sliderRatio * painted.media.duration;
-            }
-            Paint::LyricTransition lyricTransition;
-            if (kind == Kind::Media && impl->lyricLineStarted != 0)
-            {
-                // A long line waits a moment, then scrolls over six seconds.
-                const double age = static_cast<double>(GetTickCount64() - impl->lyricLineStarted) / 1000.0;
-                lyricTransition.marquee = static_cast<float>(
-                    std::clamp((age - 0.8) / 6.0, 0.0, 1.0));
-            }
-            if (kind == Kind::Media && impl->lyricWrapStart != 0)
-            {
-                const ULONGLONG elapsed = GetTickCount64() - impl->lyricWrapStart;
-                if (elapsed < LyricWrapMilliseconds)
+                // A dragged slider is painted from the pointer until the gesture ends,
+                // so an older snapshot can never drag the knob back mid-drag.
+                // This is the window's display copy. The host keeps authoritative
+                // snapshots; updating scalar presentation values avoids copying image
+                // strings and all four cards' models on every animation tick.
+                auto& painted = snapshot;
+                if (painted.media.isPlaying && impl->mediaPositionTick)
+                    painted.media.position = std::clamp(impl->mediaPosition +
+                        (GetTickCount64() - impl->mediaPositionTick) / 1000.0, 0.0, std::max(0.0, painted.media.duration));
+                if (painted.lyrics.isPlaying && impl->lyricsRate > 0.0 && impl->lyricsTick != 0)
                 {
-                    lyricTransition.previous = impl->lyricPrevious;
-                    lyricTransition.previousSecondary = impl->lyricPreviousSecondary;
-                    lyricTransition.progress = static_cast<float>(elapsed) /
-                        static_cast<float>(LyricWrapMilliseconds);
+                    const double elapsed = static_cast<double>(GetTickCount64() - impl->lyricsTick) / 1000.0;
+                    painted.lyrics.progress = std::clamp(
+                        impl->lyricsProgress + impl->lyricsRate * elapsed, 0.0, 1.0);
                 }
-                else
+                if (painted.lyrics.isPlaying && impl->scanProgress >= 0 && impl->scanRate > 0)
+                    painted.lyrics.wordScan = std::max(painted.lyrics.wordScan,
+                        std::clamp(impl->scanProgress + impl->scanRate *
+                            std::min(0.5, (GetTickCount64() - impl->scanTick) / 1000.0), 0.0, 1.0));
+                if (impl->sliderId != 0 && !impl->sliderSeeking)
                 {
-                    impl->lyricPrevious.clear();
-                    impl->lyricPreviousSecondary.clear();
-                    impl->lyricWrapStart = 0;
+                    auto& endpoints = impl->sliderAction == L"setVolume:input" ? painted.audio.inputs : painted.audio.outputs;
+                    for (auto& endpoint : endpoints)
+                        if (endpoint.isDefault && endpoint.canControl) endpoint.volume = impl->sliderRatio;
                 }
-            }
-            Paint::CoverTransition cover;
-            ComPtr<ID2D1Bitmap1> previousCover;
-            if (kind == Kind::Media && !impl->previousCoverKey.empty() && impl->coverFadeStart != 0)
-            {
-                const ULONGLONG elapsed = GetTickCount64() - impl->coverFadeStart;
-                if (elapsed < CoverFadeMilliseconds)
+                else if (impl->sliderId != 0 && impl->sliderSeeking && painted.media.canSeek)
                 {
-                    previousCover = environment.graphics->DecodeImage(impl->previousCoverData,
-                        static_cast<int>(64 * scale * fit), static_cast<int>(64 * scale * fit));
-                    cover.previous = previousCover.Get();
-                    cover.previousOpacity = 1.0f - static_cast<float>(elapsed) /
-                        static_cast<float>(CoverFadeMilliseconds);
+                    painted.media.position = impl->sliderRatio * painted.media.duration;
                 }
-                else
+                Paint::LyricTransition lyricTransition;
+                if (kind == Kind::Media && impl->lyricLineStarted != 0)
                 {
-                    // The old cover is dropped the moment the transition ends.
-                    if (impl->previousCoverData != snapshot.media.coverDataUrl)
-                        environment.graphics->ForgetImage(impl->previousCoverData);
-                    impl->previousCoverData.clear();
-                    impl->previousCoverKey.clear();
-                    impl->coverFadeStart = 0;
+                    // A long line waits a moment, then scrolls over six seconds.
+                    const double age = static_cast<double>(GetTickCount64() - impl->lyricLineStarted) / 1000.0;
+                    lyricTransition.marquee = static_cast<float>(
+                        std::clamp((age - 0.8) / 6.0, 0.0, 1.0));
+                }
+                if (kind == Kind::Media && impl->lyricWrapStart != 0)
+                {
+                    const ULONGLONG elapsed = GetTickCount64() - impl->lyricWrapStart;
+                    if (elapsed < LyricWrapMilliseconds)
+                    {
+                        lyricTransition.previous = impl->lyricPrevious;
+                        lyricTransition.previousSecondary = impl->lyricPreviousSecondary;
+                        lyricTransition.progress = static_cast<float>(elapsed) /
+                            static_cast<float>(LyricWrapMilliseconds);
+                    }
+                    else
+                    {
+                        impl->lyricPrevious.clear();
+                        impl->lyricPreviousSecondary.clear();
+                        impl->lyricWrapStart = 0;
+                    }
+                }
+                Paint::CoverTransition cover;
+                ComPtr<ID2D1Bitmap1> previousCover;
+                if (kind == Kind::Media && !impl->previousCoverKey.empty() && impl->coverFadeStart != 0)
+                {
+                    const ULONGLONG elapsed = GetTickCount64() - impl->coverFadeStart;
+                    if (elapsed < CoverFadeMilliseconds)
+                    {
+                        previousCover = environment.graphics->DecodeImage(impl->previousCoverData,
+                            static_cast<int>(64 * scale * fit), static_cast<int>(64 * scale * fit));
+                        cover.previous = previousCover.Get();
+                        cover.previousOpacity = 1.0f - static_cast<float>(elapsed) /
+                            static_cast<float>(CoverFadeMilliseconds);
+                    }
+                    else
+                    {
+                        // The old cover is dropped the moment the transition ends.
+                        if (impl->previousCoverData != snapshot.media.coverDataUrl)
+                            environment.graphics->ForgetImage(impl->previousCoverData);
+                        impl->previousCoverData.clear();
+                        impl->previousCoverKey.clear();
+                        impl->coverFadeStart = 0;
+                    }
+                }
+                const auto interaction = CurrentInteraction();
+                switch (kind)
+                {
+                case Kind::Media:
+                    Paint::Media(context, painted, cover, lyricTransition, environment, regions, widthDip,
+                        heightDip, interaction, layer == 0 ? Paint::MediaLayer::Stable : Paint::MediaLayer::Dynamic,
+                        rebuildRegions);
+                    break;
+                case Kind::Device:
+                    Paint::Device(context, painted, environment, regions, widthDip, heightDip, interaction);
+                    break;
+                case Kind::Traffic:
+                    Paint::Traffic(context, painted, environment, regions, widthDip, heightDip, interaction);
+                    break;
+                case Kind::Weather:
+                    Paint::Weather(context, painted, environment, regions, widthDip, heightDip, interaction);
+                    break;
+                case Kind::Update:
+                    Paint::Update(context, painted, environment, regions, widthDip, heightDip, interaction);
+                    break;
+                }
+                if (!snapshot.statusText.empty() && (kind != Kind::Media || layer == 1))
+                {
+                    const auto area = Draw::Rect(8, heightDip - 25, widthDip - 8, heightDip - 3);
+                    Draw::FillRound(context, area, 4, environment.dark ? Color{0.15f, 0.1f, 0.1f, 1} : Color{1, 0.94f, 0.92f, 1});
+                    Draw::Text(context, *environment.graphics, snapshot.statusText, environment.fontFamily, 10, 400,
+                        Draw::Colors(environment).primary, area);
                 }
             }
-            const auto interaction = CurrentInteraction();
-            switch (kind)
-            {
-            case Kind::Media:
-                Paint::Media(context, painted, cover, lyricTransition, environment, regions, widthDip,
-                    heightDip, interaction);
-                break;
-            case Kind::Device:
-                Paint::Device(context, painted, environment, regions, widthDip, heightDip, interaction);
-                break;
-            case Kind::Traffic:
-                Paint::Traffic(context, painted, environment, regions, widthDip, heightDip, interaction);
-                break;
-            case Kind::Weather:
-                Paint::Weather(context, painted, environment, regions, widthDip, heightDip, interaction);
-                break;
-            case Kind::Update:
-                Paint::Update(context, painted, environment, regions, widthDip, heightDip, interaction);
-                break;
-            }
-            if (!snapshot.statusText.empty())
-            {
-                const auto area = Draw::Rect(8, heightDip - 25, widthDip - 8, heightDip - 3);
-                Draw::FillRound(context, area, 4, environment.dark ? Color{0.15f, 0.1f, 0.1f, 1} : Color{1, 0.94f, 0.92f, 1});
-                Draw::Text(context, *environment.graphics, snapshot.statusText, environment.fontFamily, 10, 400,
-                    Draw::Colors(environment).primary, area);
-            }
+            if (!surface.Ready()) { impl->dirty = true; host.OnGraphicsFailure(surface.LastResult()); return; }
+            if (layer == 0) ++staticPaintCount; else ++dynamicPaintCount;
         }
-        if (!impl->surface.Ready()) { impl->dirty = true; host.OnGraphicsFailure(impl->surface.LastResult()); return; }
-        PruneInteraction();
+        if (!impl->surface.Ready() || (kind == Kind::Media && !impl->dynamicSurface.Ready()))
+        { impl->dirty = true; host.OnGraphicsFailure(kind == Kind::Media ? impl->dynamicSurface.LastResult() : impl->surface.LastResult()); return; }
+        if (rebuildRegions) PruneInteraction();
         if (impl->surface.Handle() && impl->boundSurface != impl->surface.Handle())
         {
             auto brush = impl->compositor.CreateSurfaceBrush(impl->surface.Handle());
@@ -798,7 +948,16 @@ namespace Cards
             impl->content.Brush(brush);
             impl->boundSurface = impl->surface.Handle();
         }
+        if (kind == Kind::Media && impl->boundDynamicSurface != impl->dynamicSurface.Handle())
+        {
+            auto brush = impl->compositor.CreateSurfaceBrush(impl->dynamicSurface.Handle());
+            brush.Stretch(CompositionStretch::Fill);
+            impl->dynamicContent.Brush(brush);
+            impl->boundDynamicSurface = impl->dynamicSurface.Handle();
+        }
         impl->dirty = false;
+        impl->mediaStaticDirty = false;
+        impl->mediaRegionsDirty = false;
         ++contentPaintCount;
     }
 
@@ -806,12 +965,13 @@ namespace Cards
     {
         if (!impl->compositor) return;
         const bool rebuild = impl->dirty || !impl->surface.Ready();
-        if (rebuild) PaintContent(true);
+        if (rebuild) PaintContent(kind != Kind::Media || impl->mediaRegionsDirty);
     }
 
     bool CardWindow::HasRenderedContent() const
     {
-        return impl->surface.Ready() && impl->content && impl->content.Brush() && !impl->dirty;
+        return impl->surface.Ready() && impl->content && impl->content.Brush() && !impl->dirty &&
+            (kind != Kind::Media || (impl->dynamicSurface.Ready() && impl->dynamicContent && impl->dynamicContent.Brush()));
     }
 
     CompositionBrush CardWindow::ContentBrush() const
@@ -841,6 +1001,7 @@ namespace Cards
         if (id == impl->hotRegion) return;
         const int previous = impl->hotRegion;
         impl->hotRegion = id;
+        if ((previous && previous != 4) || (id && id != 4)) impl->mediaStaticDirty = true;
         if (!visible || environment.reducedMotion || environment.highContrast)
         {
             impl->hover.clear();
@@ -928,6 +1089,7 @@ namespace Cards
                 UpdateSlider(region, ratio);
             }
             impl->dirty = true;
+            impl->mediaStaticDirty = true;
             if (visible) Paint();
             return true;
         }
@@ -952,6 +1114,7 @@ namespace Cards
             if (GetCapture() == window) ReleaseCapture();
             if (!dragged && region && region->enabled && region->id == id) Activate(*region);
             impl->dirty = true;
+            impl->mediaStaticDirty = true;
             if (visible) Paint();
             return true;
         }
@@ -967,6 +1130,7 @@ namespace Cards
         if (dragged) FinishSlider();
         if (GetCapture() == window) ReleaseCapture();
         impl->dirty = true;
+        impl->mediaStaticDirty = true;
         if (visible) Paint();
     }
 
@@ -1027,6 +1191,7 @@ namespace Cards
             impl->focusedRegion = next ? next->id : 0;
             accessibility.NotifyFocus(next);
             impl->dirty = true;
+            impl->mediaStaticDirty = true;
             if (visible) Paint();
             return true;
         }

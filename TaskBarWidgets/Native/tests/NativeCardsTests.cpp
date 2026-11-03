@@ -89,6 +89,97 @@ static void WaitForCards(Cards::CardHost& host, int count)
     }
     throw std::runtime_error("host toggle did not show/hide the expected offscreen windows");
 }
+
+using GroupBounds = std::map<HWND, RECT>;
+static GroupBounds ReadGroupBounds()
+{
+    GroupBounds result;
+    EnumWindows([](HWND window, LPARAM data) -> BOOL
+    {
+        DWORD process{};
+        GetWindowThreadProcessId(window, &process);
+        wchar_t name[80]{};
+        GetClassNameW(window, name, ARRAYSIZE(name));
+        if (process == GetCurrentProcessId() && wcscmp(name, L"TaskBarWidgetsCardWindow") == 0 && IsWindowVisible(window))
+        {
+            RECT bounds{};
+            GetWindowRect(window, &bounds);
+            reinterpret_cast<GroupBounds*>(data)->emplace(window, bounds);
+        }
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&result));
+    return result;
+}
+static bool SameBounds(const GroupBounds& a, const GroupBounds& b)
+{
+    if (a.size() != b.size()) return false;
+    for (const auto& [window, bounds] : a)
+    {
+        const auto item = b.find(window);
+        if (item == b.end() || !EqualRect(&bounds, &item->second)) return false;
+    }
+    return true;
+}
+static void CheckGroupMotion(Cards::CardHost& host, POINT anchor)
+{
+    // Warm/rest geometry, then exercise the actual host entry path. All HWNDs
+    // stay outside the virtual desktop and this host has no global input hook.
+    PumpFor(350);
+    const auto rest = ReadGroupBounds();
+    Require(rest.size() == 4, "group has four distinct windows");
+    for (auto a = rest.begin(); a != rest.end(); ++a)
+    for (auto b = std::next(a); b != rest.end(); ++b)
+    {
+        RECT overlap{};
+        Require(!IntersectRect(&overlap, &a->second, &b->second), "offscreen diagnostic preserves nonoverlapping group layout");
+    }
+    host.Toggle(anchor);
+    WaitForCards(host, 0);
+    host.Toggle(anchor);
+    WaitForCards(host, 4);
+    bool moved = false;
+    int samples = 0;
+    const auto until = GetTickCount64() + 330;
+    while (GetTickCount64() < until)
+    {
+        const auto frame = ReadGroupBounds();
+        // Avoid sampling halfway across a window-position transaction.
+        if (frame.size() == rest.size() && SameBounds(frame, ReadGroupBounds()))
+        {
+            const LONG dy = frame.begin()->second.top - rest.at(frame.begin()->first).top;
+            for (const auto& [window, bounds] : frame)
+            {
+                auto expected = rest.at(window);
+                OffsetRect(&expected, 0, dy);
+                Require(EqualRect(&expected, &bounds), "all four full windows move by one common Y offset");
+            }
+            Require(dy >= 0, "entrance comes from below the final group position");
+            moved |= dy > 0;
+            ++samples;
+        }
+        Sleep(2);
+    }
+    BOOL animations = FALSE;
+    HIGHCONTRASTW contrast{sizeof(contrast)};
+    SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0);
+    if (SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0) && animations &&
+        !(contrast.dwFlags & HCF_HIGHCONTRASTON)) Require(moved, "host entrance actually moves window bounds");
+    Require(samples > 1 && SameBounds(rest, ReadGroupBounds()), "group settles at its original bounds");
+    host.Toggle(anchor);
+    PumpFor(30);
+    host.Toggle(anchor); // Reverse an in-flight exit.
+    WaitForCards(host, 4);
+    PumpFor(350);
+    Require(SameBounds(rest, ReadGroupBounds()), "reversing exit retains all four windows and final geometry");
+    host.Toggle(anchor);
+    WaitForCards(host, 0);
+    host.Toggle(anchor);
+    WaitForCards(host, 4);
+    host.Toggle(anchor); // Close during entrance.
+    WaitForCards(host, 0);
+    host.Toggle(anchor);
+    WaitForCards(host, 4);
+}
 struct Services : Cards::CardHostServices
 {
     std::wstring action;
@@ -100,6 +191,7 @@ struct Services : Cards::CardHostServices
 
 void WriteTrafficPreviews(Cards::Graphics& graphics, const wchar_t* directory);
 void TestCardRenderingStability(Cards::Graphics& graphics);
+void TestMediaRedraw(Cards::CardEnvironment environment);
 void MeasureCardPerformance(const wchar_t* outputPath);
 void TestCardSurfaceIsolation(Cards::Graphics& graphics,
     winrt::Windows::UI::Composition::Compositor const& compositor,
@@ -292,7 +384,6 @@ int wmain(int argc, wchar_t** argv)
             winrt::check_hresult(runtime.Initialize());
             Cards::Graphics graphics;
             Require(graphics.Initialize(), "graphics initialization");
-            TestCardRenderingStability(graphics);
             auto compositor = winrt::Windows::UI::Composition::Compositor();
             std::wstring error;
             auto device = graphics.CreateGraphicsDevice(compositor, error);
@@ -303,6 +394,21 @@ int wmain(int argc, wchar_t** argv)
             Require(Cards::Protocol::ApplySnapshot(duplicate, weather, initial) && initial.weather, "first weather frame");
             Require(Cards::Protocol::ApplySnapshot(duplicate, weather, repeated) && !repeated.Any(),
                 "unchanged weather must not invalidate the whole group");
+            duplicate.weather.forecastView = true;
+            duplicate.weather.forecastOffset = 5;
+            Cards::Protocol::Changes enhanced;
+            Require(Cards::Protocol::ApplySnapshot(duplicate,
+                LR"({"weather":{"revision":8,"details":{"current":{"precipitation":"0","uvIndex":"3","sunrise":"06:22","sunset":"17:15","observedAt":"2026-11-03T14:00+08:00"},"hourly":[{"time":"2026-11-04T00:00+08:00","temperature":"-2","conditionKind":"rain","precipProbability":"0"}],"forecast":[{"date":"2026-11-03","min":"-2","max":"23","precipitation":"1.2"}],"hourlyError":"cached hours"}}})", enhanced) && enhanced.weather &&
+                duplicate.weather.hourly.size() == 1 && duplicate.weather.hourly[0].precipProbability == L"0" &&
+                duplicate.weather.precipitation == L"0" && duplicate.weather.uvIndex == L"3" &&
+                duplicate.weather.sunrise == L"06:22" && duplicate.weather.sunset == L"17:15" &&
+                duplicate.weather.forecast[0].date == L"2026-11-03" && duplicate.weather.hourlyError == L"cached hours" &&
+                duplicate.weather.forecastView && duplicate.weather.forecastOffset == 5,
+                "enhanced weather protocol preserves units, date and local view state");
+            Cards::Protocol::Changes clearedWeather;
+            Require(Cards::Protocol::ApplySnapshot(duplicate, LR"({"weather":{"revision":9}})", clearedWeather) &&
+                duplicate.weather.hourly.empty() && duplicate.weather.forecast.empty() && duplicate.weather.uvIndex.empty(),
+                "complete weather blocks clear fields unsupported by a new provider");
             Cards::AudioState audio;
             Require(Cards::Protocol::ApplyAudioReply(audio, LR"({"revision":3,"outputs":[],"inputs":[]})"), "initial audio state");
             Require(Cards::Protocol::ApplyAudioReply(audio, LR"({"revision":3,"message":"selection failed"})") &&
@@ -356,6 +462,8 @@ int wmain(int argc, wchar_t** argv)
             environment.graphics = &graphics; environment.compositor = compositor; environment.device = device;
             environment.reducedMotion = true;
             CheckCardMotion(environment, snapshot);
+            TestMediaRedraw(environment);
+            TestCardRenderingStability(graphics);
             {
                 Cards::CardPopup popup;
                 Require(popup.Create(GetModuleHandleW(nullptr), environment), "popup creation");
@@ -558,6 +666,8 @@ int wmain(int argc, wchar_t** argv)
                         "duplicate host positions must not rewind the displayed timeline or text scan");
 
                     const auto paints = card.ContentPaintCount();
+                    const auto stablePaints = card.StaticPaintCount();
+                    const auto regionBuilds = card.RegionBuildCount();
                     int updates = 0;
                     const auto deadline = GetTickCount64() + 180;
                     while (GetTickCount64() < deadline)
@@ -568,7 +678,9 @@ int wmain(int argc, wchar_t** argv)
                         { TranslateMessage(&message); DispatchMessageW(&message); }
                         Sleep(3);
                     }
-                    Require(card.ContentPaintCount() > paints + updates, "fast snapshots must not starve the animation timer");
+                    Require(card.ContentPaintCount() > paints, "fast snapshots must not starve the animation timer");
+                    Require(card.StaticPaintCount() == stablePaints && card.RegionBuildCount() == regionBuilds,
+                        "duplicate playing snapshots retain stable content and hit regions");
                     Require(card.ContentBrush() == brush, "repainting reuses the same surface brush");
                     moving.media.position = 4;
                     moving.lyrics.wordScan = 0.1;
@@ -616,6 +728,7 @@ int wmain(int argc, wchar_t** argv)
             const POINT anchor{ GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN) };
             host.Toggle(anchor);
             WaitForCards(host, 4);
+            CheckGroupMotion(host, anchor);
             host.Toggle(anchor);
             WaitForCards(host, 0);
             host.Toggle(anchor);

@@ -69,7 +69,7 @@ namespace Cards
     // Cloud exactly like the WinUI implementation.
     Symbol SymbolFromKind(const std::wstring& kind);
 
-    // Draws the symbol into `size` DIP at (left, top).
+    // Visually centers the symbol in the `size` DIP square at (left, top).
     void DrawWeatherSymbol(ID2D1DeviceContext* context, Symbol symbol, bool night,
         const WeatherPalette& palette, float left, float top, float size);
 

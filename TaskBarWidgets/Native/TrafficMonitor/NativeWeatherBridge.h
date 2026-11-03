@@ -36,6 +36,11 @@ namespace NativeWeatherBridge
         current.SetNamedValue(L"windScale", text(details.Current.WindScale));
         current.SetNamedValue(L"windSpeed", text(details.Current.WindSpeed));
         current.SetNamedValue(L"observedAt", text(details.Current.ObservedAt));
+        current.SetNamedValue(L"precipitation", text(details.Current.Precipitation));
+        current.SetNamedValue(L"precipProbability", text(details.Current.PrecipProbability));
+        current.SetNamedValue(L"uvIndex", text(details.Current.UVIndex));
+        current.SetNamedValue(L"sunrise", text(details.Current.Sunrise));
+        current.SetNamedValue(L"sunset", text(details.Current.Sunset));
 
         JsonArray forecast;
         for (const auto& day : details.Forecast) {
@@ -46,7 +51,24 @@ namespace NativeWeatherBridge
             item.SetNamedValue(L"weatherNight", text(day.WeatherNight));
             item.SetNamedValue(L"conditionDayKind", text(day.ConditionDayKind));
             item.SetNamedValue(L"conditionNightKind", text(day.ConditionNightKind));
+            item.SetNamedValue(L"date", text(day.Date));
+            item.SetNamedValue(L"sunrise", text(day.Sunrise));
+            item.SetNamedValue(L"sunset", text(day.Sunset));
+            item.SetNamedValue(L"uvIndex", text(day.UVIndex));
+            item.SetNamedValue(L"precipitation", text(day.Precipitation));
+            item.SetNamedValue(L"precipProbability", text(day.PrecipProbability));
             forecast.Append(item);
+        }
+
+        JsonArray hourly;
+        for (const auto& hour : details.Hourly) {
+            JsonObject item;
+            item.SetNamedValue(L"time", text(hour.Time));
+            item.SetNamedValue(L"temperature", text(hour.Temperature));
+            item.SetNamedValue(L"conditionKind", text(hour.ConditionKind));
+            item.SetNamedValue(L"precipitation", text(hour.Precipitation));
+            item.SetNamedValue(L"precipProbability", text(hour.PrecipProbability));
+            hourly.Append(item);
         }
 
         JsonObject air;
@@ -80,6 +102,8 @@ namespace NativeWeatherBridge
         JsonObject result;
         result.SetNamedValue(L"current", current);
         result.SetNamedValue(L"forecast", forecast);
+        result.SetNamedValue(L"hourly", hourly);
+        result.SetNamedValue(L"hourlyError", text(details.HourlyError));
         result.SetNamedValue(L"airQuality", air);
         result.SetNamedValue(L"alerts", alerts);
         result.SetNamedValue(L"alertsError", text(details.AlertsError));
@@ -89,7 +113,10 @@ namespace NativeWeatherBridge
         capabilities.SetNamedValue(L"humidity", JsonValue::CreateBooleanValue(!details.Current.Humidity.empty()));
         capabilities.SetNamedValue(L"wind", JsonValue::CreateBooleanValue(!details.Current.WindDirection.empty() || !details.Current.WindScale.empty()));
         capabilities.SetNamedValue(L"airQuality", JsonValue::CreateBooleanValue(!details.AirQuality.AQI.empty() || !details.AirQuality.PM2p5.empty() || !details.AirQuality.PM10.empty()));
-        capabilities.SetNamedValue(L"precipitation", JsonValue::CreateBooleanValue(false));
+        capabilities.SetNamedValue(L"hourly", JsonValue::CreateBooleanValue(!details.Hourly.empty()));
+        capabilities.SetNamedValue(L"precipitation", JsonValue::CreateBooleanValue(!details.Current.Precipitation.empty()));
+        capabilities.SetNamedValue(L"uvIndex", JsonValue::CreateBooleanValue(!details.Current.UVIndex.empty()));
+        capabilities.SetNamedValue(L"sunriseSunset", JsonValue::CreateBooleanValue(!details.Current.Sunrise.empty() || !details.Current.Sunset.empty()));
         capabilities.SetNamedValue(L"alerts", JsonValue::CreateBooleanValue(!details.Alerts.empty()));
         capabilities.SetNamedValue(L"updatedAt", JsonValue::CreateBooleanValue(!details.Current.ObservedAt.empty()));
         result.SetNamedValue(L"capabilities", capabilities);

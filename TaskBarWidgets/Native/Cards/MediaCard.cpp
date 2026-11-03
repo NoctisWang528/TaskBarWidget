@@ -10,6 +10,23 @@ namespace Cards::Paint
         constexpr float Gap{ 12.0f };
         constexpr float LyricHeight{ 46.0f };
 
+        void Text(ID2D1DeviceContext* context, Graphics& graphics, const std::wstring& value,
+            const std::wstring& family, float size, int weight, Color color, D2D1_RECT_F rect,
+            DWRITE_TEXT_ALIGNMENT alignment = DWRITE_TEXT_ALIGNMENT_LEADING,
+            bool italic = false, bool underline = false, bool strikeout = false,
+            DWRITE_PARAGRAPH_ALIGNMENT vertical = DWRITE_PARAGRAPH_ALIGNMENT_NEAR)
+        {
+            if (!context || value.empty()) return;
+            D2D1_MATRIX_3X2_F transform{};
+            context->GetTransform(&transform);
+            const auto layout = graphics.TextLayout(value, family, size, weight,
+                rect.right - rect.left, rect.bottom - rect.top, italic, underline, strikeout,
+                true, transform._11, alignment, vertical);
+            const auto brush = graphics.Brush(context, color);
+            if (layout && brush) context->DrawTextLayout(D2D1::Point2F(rect.left, rect.top),
+                layout.Get(), brush.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        }
+
         std::wstring SourceLabel(const Snapshot& snapshot)
         {
             for (const auto& source : snapshot.media.sources)
@@ -19,7 +36,7 @@ namespace Cards::Paint
 
         void DrawTransport(ID2D1DeviceContext* context, Graphics& graphics, const Draw::Palette& palette,
             const CardEnvironment& environment, const Snapshot& snapshot, Layout::Table& regions,
-            float centerX, float top, const Interaction& interaction)
+            float centerX, float top, const Interaction& interaction, bool rebuildRegions)
         {
             const float radius = 21.0f;
             const float smallSize = 16.0f;
@@ -41,7 +58,7 @@ namespace Cards::Paint
                 const float glyphSize = primary ? 20.0f : smallSize;
                 DrawGlyph(context, button.glyph, WithAlpha(palette.primary, button.enabled ? 1.0f : 0.4f),
                     left + (size - glyphSize) / 2.0f, top + (size - glyphSize) / 2.0f, glyphSize);
-                Draw::AddButton(regions, id, rect, button.action,
+                if (rebuildRegions) Draw::AddButton(regions, id, rect, button.action,
                     button.name, button.enabled);
             }
         }
@@ -92,23 +109,16 @@ namespace Cards::Paint
                 float scan)
             {
                 if (text.empty() || width <= 0.0f || !graphics.DWrite()) return;
-                const auto format = graphics.TextFormat(family, size, lyrics.fontWeight,
-                    DWRITE_TEXT_ALIGNMENT_LEADING, false);
-                if (!format) return;
-                winrt::com_ptr<IDWriteTextLayout> layout;
-                if (FAILED(graphics.DWrite()->CreateTextLayout(text.c_str(),
-                    static_cast<UINT32>(text.size()), format, width, rowHeight, layout.put()))) return;
-                layout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-                // Apply before measuring: italic glyph widths must drive both
-                // alignment/scrolling and the scan clip, without changing cached formats.
-                const DWRITE_TEXT_RANGE range{ 0, static_cast<UINT32>(text.size()) };
-                layout->SetFontStyle(lyrics.fontItalic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL, range);
-                layout->SetUnderline(lyrics.fontUnderline, range);
-                layout->SetStrikethrough(lyrics.fontStrikeOut, range);
+                const bool scanning = std::isfinite(scan) && scan >= 0.0f;
+                D2D1_MATRIX_3X2_F transform{};
+                context->GetTransform(&transform);
+                const auto layout = graphics.TextLayout(text, family, size, lyrics.fontWeight,
+                    width, rowHeight, lyrics.fontItalic, lyrics.fontUnderline, lyrics.fontStrikeOut,
+                    !scanning, transform._11);
+                if (!layout) return;
                 DWRITE_TEXT_METRICS metrics{};
                 if (FAILED(layout->GetMetrics(&metrics))) return;
                 const float textWidth = metrics.widthIncludingTrailingWhitespace;
-                const bool scanning = std::isfinite(scan) && scan >= 0.0f;
                 const float progress = scanning ? std::clamp(scan, 0.0f, 1.0f) : 0.0f;
                 const float overflow = std::max(0.0f, textWidth - width);
                 const float shift = scanning ? -std::clamp(progress * textWidth - width * 0.65f,
@@ -118,19 +128,10 @@ namespace Cards::Paint
                 const float textLeft = left + (overflow > 0.5f ? shift : alignedLeft);
                 // Keep one measured layout for the base, shadow and scan. Scan width
                 // belongs to the full line, not to the viewport or an ellipsized copy.
-                if (!scanning)
-                {
-                    winrt::com_ptr<IDWriteInlineObject> ellipsis;
-                    if (SUCCEEDED(graphics.DWrite()->CreateEllipsisTrimmingSign(format, ellipsis.put())))
-                    {
-                        const DWRITE_TRIMMING trimming{ DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0 };
-                        layout->SetTrimming(&trimming, ellipsis.get());
-                    }
-                }
                 const auto draw = [&](Color ink, float y)
                 {
                     const auto brush = graphics.Brush(context, ink);
-                    if (brush) context->DrawTextLayout(D2D1::Point2F(textLeft, y), layout.get(), brush.Get());
+                    if (brush) context->DrawTextLayout(D2D1::Point2F(textLeft, y), layout.Get(), brush.Get());
                 };
                 const auto rect = Draw::Rect(left, rowTop, left + width, rowTop + rowHeight);
                 context->PushAxisAlignedClip(rect, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
@@ -175,7 +176,8 @@ namespace Cards::Paint
 
     void Media(ID2D1DeviceContext* context, const Snapshot& snapshot, const CoverTransition& transition,
         const LyricTransition& lyricTransition, const CardEnvironment& environment,
-        Layout::Table& regions, float widthDip, float heightDip, const Interaction& interaction)
+        Layout::Table& regions, float widthDip, float heightDip, const Interaction& interaction,
+        MediaLayer layer, bool rebuildRegions)
     {
         if (!context || !environment.graphics) return;
         Graphics& graphics = *environment.graphics;
@@ -184,108 +186,119 @@ namespace Cards::Paint
         const float top = Layout::Padding;
         const float contentWidth = widthDip - Layout::Padding * 2.0f;
 
-        // Cover art: current bitmap decoded at display size for this DPI.
-        const D2D1_RECT_F cover = Draw::Rect(left, top + 5.0f, left + Cover, top + 5.0f + Cover);
-        Draw::FillRound(context, cover, 8.0f, WithAlpha(palette.primary, 0.07f));
-        if (auto* bitmap = graphics.DecodeImage(snapshot.media.coverDataUrl,
-            static_cast<int>(Cover * 2.0f), static_cast<int>(Cover * 2.0f)))
+        const bool stable = layer != MediaLayer::Dynamic;
+        const bool dynamic = layer != MediaLayer::Stable;
+
+        if (dynamic)
         {
-            context->PushAxisAlignedClip(cover, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-            context->DrawBitmap(bitmap, cover, 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
-            context->PopAxisAlignedClip();
+            // Cover art: current bitmap decoded at display size for this DPI.
+            const D2D1_RECT_F cover = Draw::Rect(left, top + 5.0f, left + Cover, top + 5.0f + Cover);
+            Draw::FillRound(context, cover, 8.0f, WithAlpha(palette.primary, 0.07f));
+            if (auto* bitmap = graphics.DecodeImage(snapshot.media.coverDataUrl,
+                static_cast<int>(Cover * 2.0f), static_cast<int>(Cover * 2.0f)))
+            {
+                context->PushAxisAlignedClip(cover, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+                context->DrawBitmap(bitmap, cover, 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+                context->PopAxisAlignedClip();
+            }
+            else
+            {
+                Text(context, graphics, L"\u266B", environment.fontFamily, 27.0f, 400,
+                    WithAlpha(palette.primary, 0.45f), cover, DWRITE_TEXT_ALIGNMENT_CENTER,
+                    false, false, false, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+            }
+            // Keep the incoming cover/placeholder underneath the fading outgoing cover.
+            if (transition.previous && transition.previousOpacity > 0.01f)
+            {
+                context->PushAxisAlignedClip(cover, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+                context->DrawBitmap(transition.previous, cover, transition.previousOpacity,
+                    D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+                context->PopAxisAlignedClip();
+            }
+            if (rebuildRegions) Draw::AddButton(regions, 1, cover, L"cover", L"封面", false, false);
         }
-        else
+
+        if (stable)
         {
-            Draw::Text(context, graphics, L"\u266B", environment.fontFamily, 27.0f, 400,
-                WithAlpha(palette.primary, 0.45f), cover, DWRITE_TEXT_ALIGNMENT_CENTER,
+            // Metadata column.
+            const float metadataLeft = left + Cover + Gap;
+            const float metadataWidth = contentWidth - Cover - Gap - 44.0f;
+            Text(context, graphics, snapshot.media.title.empty() ? L"未在播放" : snapshot.media.title,
+                environment.fontFamily, 15.0f, 600, palette.primary,
+                Draw::Rect(metadataLeft, top, metadataLeft + metadataWidth,
+                    top + (snapshot.media.artist.empty() ? 40.0f : 22.0f)),
+                DWRITE_TEXT_ALIGNMENT_LEADING, false, false, false, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+            Text(context, graphics, snapshot.media.artist, environment.fontFamily, 12.0f, 400,
+                palette.secondary, Draw::Rect(metadataLeft, top + 22.0f, metadataLeft + metadataWidth, top + 40.0f),
+                DWRITE_TEXT_ALIGNMENT_LEADING, false, false, false, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+            // Source selector with its icon and chevron.
+            const float sourceTop = top + 46.0f;
+            const D2D1_RECT_F sourceRect = Draw::Rect(metadataLeft, sourceTop,
+                metadataLeft + metadataWidth, sourceTop + 34.0f);
+            Draw::ControlBackground(context, sourceRect, 8.0f, WithAlpha(palette.primary, 0.06f),
+                palette.accent, interaction, 2, !snapshot.media.sources.empty());
+            if (rebuildRegions) Draw::AddButton(regions, 2, sourceRect, L"showSources", L"选择播放来源",
+                !snapshot.media.sources.empty());
+            float iconLeft = metadataLeft + 8.0f;
+            for (const auto& source : snapshot.media.sources)
+            {
+                if (source.id != snapshot.media.selectedSourceId || source.iconDataUrl.empty()) continue;
+                if (auto* icon = graphics.DecodeImage(source.iconDataUrl, 20, 20))
+                    context->DrawBitmap(icon, Draw::Rect(iconLeft, sourceTop + 7.0f, iconLeft + 20.0f, sourceTop + 27.0f),
+                        1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+            }
+            Text(context, graphics, SourceLabel(snapshot), environment.fontFamily, 12.0f,
+                400, palette.secondary, Draw::Rect(iconLeft + 28.0f, sourceTop,
+                    sourceRect.right - 20.0f, sourceRect.bottom), DWRITE_TEXT_ALIGNMENT_LEADING,
                 false, false, false, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-        }
-        // Keep the incoming cover/placeholder underneath the fading outgoing cover.
-        if (transition.previous && transition.previousOpacity > 0.01f)
-        {
-            context->PushAxisAlignedClip(cover, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-            context->DrawBitmap(transition.previous, cover, transition.previousOpacity,
-                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
-            context->PopAxisAlignedClip();
-        }
-        Draw::AddButton(regions, 1, cover, L"cover", L"封面", false, false);
+            DrawGlyph(context, Glyph::Chevron, WithAlpha(palette.secondary, 0.9f),
+                sourceRect.right - 22.0f, sourceTop + 11.0f, 12.0f);
 
-        // Metadata column.
-        const float metadataLeft = left + Cover + Gap;
-        const float metadataWidth = contentWidth - Cover - Gap - 44.0f;
-        Draw::Text(context, graphics, snapshot.media.title.empty() ? L"未在播放" : snapshot.media.title,
-            environment.fontFamily, 15.0f, 600, palette.primary,
-            Draw::Rect(metadataLeft, top, metadataLeft + metadataWidth,
-                top + (snapshot.media.artist.empty() ? 40.0f : 22.0f)),
-            DWRITE_TEXT_ALIGNMENT_LEADING, false, false, false, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-        Draw::Text(context, graphics, snapshot.media.artist, environment.fontFamily, 12.0f, 400,
-            palette.secondary, Draw::Rect(metadataLeft, top + 22.0f, metadataLeft + metadataWidth, top + 40.0f),
-            DWRITE_TEXT_ALIGNMENT_LEADING, false, false, false, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-
-        // Source selector with its icon and chevron.
-        const float sourceTop = top + 46.0f;
-        const D2D1_RECT_F sourceRect = Draw::Rect(metadataLeft, sourceTop,
-            metadataLeft + metadataWidth, sourceTop + 34.0f);
-        Draw::ControlBackground(context, sourceRect, 8.0f, WithAlpha(palette.primary, 0.06f),
-            palette.accent, interaction, 2, !snapshot.media.sources.empty());
-        Draw::AddButton(regions, 2, sourceRect, L"showSources", L"选择播放来源",
-            !snapshot.media.sources.empty());
-        float iconLeft = metadataLeft + 8.0f;
-        for (const auto& source : snapshot.media.sources)
-        {
-            if (source.id != snapshot.media.selectedSourceId || source.iconDataUrl.empty()) continue;
-            if (auto* icon = graphics.DecodeImage(source.iconDataUrl, 20, 20))
-                context->DrawBitmap(icon, Draw::Rect(iconLeft, sourceTop + 7.0f, iconLeft + 20.0f, sourceTop + 27.0f),
-                    1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+            // Settings gear pinned top-right.
+            const D2D1_RECT_F gear = Draw::Rect(left + contentWidth - 32.0f, top,
+                left + contentWidth, top + 32.0f);
+            Draw::ControlBackground(context, gear, 16.0f, WithAlpha(palette.primary, 0.06f),
+                palette.accent, interaction, 3);
+            DrawGlyph(context, Glyph::Settings, WithAlpha(palette.primary, 0.85f), gear.left + 8.0f,
+                gear.top + 8.0f, 16.0f);
+            if (rebuildRegions) Draw::AddButton(regions, 3, gear, L"openSettings", L"设置");
         }
-        Draw::Text(context, graphics, Draw::Ellipsize(context, graphics, SourceLabel(snapshot),
-            environment.fontFamily, 12.0f, 400, metadataWidth - 46.0f), environment.fontFamily, 12.0f,
-            400, palette.secondary, Draw::Rect(iconLeft + 28.0f, sourceTop,
-                sourceRect.right - 20.0f, sourceRect.bottom), DWRITE_TEXT_ALIGNMENT_LEADING,
-            false, false, false, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-        DrawGlyph(context, Glyph::Chevron, WithAlpha(palette.secondary, 0.9f),
-            sourceRect.right - 22.0f, sourceTop + 11.0f, 12.0f);
-
-        // Settings gear pinned top-right.
-        const D2D1_RECT_F gear = Draw::Rect(left + contentWidth - 32.0f, top,
-            left + contentWidth, top + 32.0f);
-        Draw::ControlBackground(context, gear, 16.0f, WithAlpha(palette.primary, 0.06f),
-            palette.accent, interaction, 3);
-        DrawGlyph(context, Glyph::Settings, WithAlpha(palette.primary, 0.85f), gear.left + 8.0f,
-            gear.top + 8.0f, 16.0f);
-        Draw::AddButton(regions, 3, gear, L"openSettings", L"设置");
 
         // Lyrics viewport.
         const float lyricTop = top + 90.0f;
-        DrawLyrics(context, graphics, palette, environment, snapshot, lyricTransition, left, lyricTop,
+        if (dynamic) DrawLyrics(context, graphics, palette, environment, snapshot, lyricTransition, left, lyricTop,
             contentWidth);
 
         // Transport row centred above the progress bar.
         const float transportTop = heightDip - Layout::Padding - 84.0f;
-        DrawTransport(context, graphics, palette, environment, snapshot, regions,
-            widthDip / 2.0f, transportTop, interaction);
+        if (stable) DrawTransport(context, graphics, palette, environment, snapshot, regions,
+            widthDip / 2.0f, transportTop, interaction, rebuildRegions);
 
-        // Progress + times.
-        const float progressTop = heightDip - Layout::Padding - 24.0f;
-        const std::wstring position = FormatDuration(snapshot.media.position);
-        const std::wstring duration = FormatDuration(snapshot.media.duration);
-        Draw::Text(context, graphics, position, environment.fontFamily, 10.0f, 400, palette.secondary,
-            Draw::Rect(left, progressTop, left + 40.0f, progressTop + 16.0f));
-        const float railLeft = left + 44.0f;
-        const float railRight = left + contentWidth - 44.0f;
-        const float railWidth = std::max(1.0f, railRight - railLeft);
-        const float railTop = progressTop + 7.0f;
-        const float ratio = snapshot.media.duration > 0.0
-            ? static_cast<float>(snapshot.media.position / snapshot.media.duration) : 0.0f;
-        const float feedback = !snapshot.media.canSeek ? 0.0f
-            : interaction.pressed == 4 ? 0.18f : 0.10f * interaction.Hover(4);
-        Draw::Progress(context, Draw::Rect(railLeft, railTop, railRight, railTop + 3.0f), ratio,
-            Mix(palette.track, palette.accent, feedback), Mix(palette.accent, palette.primary, feedback),
-            true, snapshot.media.canSeek && interaction.focused == 4, palette.accent);
-        Draw::Text(context, graphics, duration, environment.fontFamily, 10.0f, 400, palette.secondary,
-            Draw::Rect(railRight + 4.0f, progressTop, left + contentWidth, progressTop + 16.0f),
-            DWRITE_TEXT_ALIGNMENT_TRAILING);
-        Draw::AddSlider(regions, 4, Draw::Rect(railLeft, railTop - 8.0f, railRight, railTop + 11.0f),
-            L"seek", L"播放进度", snapshot.media.canSeek);
+        if (dynamic)
+        {
+            // Progress + times.
+            const float progressTop = heightDip - Layout::Padding - 24.0f;
+            const std::wstring position = FormatDuration(snapshot.media.position);
+            const std::wstring duration = FormatDuration(snapshot.media.duration);
+            Text(context, graphics, position, environment.fontFamily, 10.0f, 400, palette.secondary,
+                Draw::Rect(left, progressTop, left + 40.0f, progressTop + 16.0f));
+            const float railLeft = left + 44.0f;
+            const float railRight = left + contentWidth - 44.0f;
+            const float railWidth = std::max(1.0f, railRight - railLeft);
+            const float railTop = progressTop + 7.0f;
+            const float ratio = snapshot.media.duration > 0.0
+                ? static_cast<float>(snapshot.media.position / snapshot.media.duration) : 0.0f;
+            const float feedback = !snapshot.media.canSeek ? 0.0f
+                : interaction.pressed == 4 ? 0.18f : 0.10f * interaction.Hover(4);
+            Draw::Progress(context, Draw::Rect(railLeft, railTop, railRight, railTop + 3.0f), ratio,
+                Mix(palette.track, palette.accent, feedback), Mix(palette.accent, palette.primary, feedback),
+                true, snapshot.media.canSeek && interaction.focused == 4, palette.accent);
+            Text(context, graphics, duration, environment.fontFamily, 10.0f, 400, palette.secondary,
+                Draw::Rect(railRight + 4.0f, progressTop, left + contentWidth, progressTop + 16.0f),
+                DWRITE_TEXT_ALIGNMENT_TRAILING);
+            if (rebuildRegions) Draw::AddSlider(regions, 4, Draw::Rect(railLeft, railTop - 8.0f, railRight, railTop + 11.0f),
+                L"seek", L"播放进度", snapshot.media.canSeek);
+        }
     }
 }

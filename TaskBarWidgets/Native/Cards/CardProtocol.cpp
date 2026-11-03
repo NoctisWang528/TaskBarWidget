@@ -300,6 +300,8 @@ namespace Cards::Protocol
             // These are complete weather blocks. Absent details clear old values
             // instead of relabelling the previous city's data as a new result.
             WeatherState state;
+            state.forecastView = target.forecastView;
+            state.forecastOffset = target.forecastOffset;
             state.revision = revision;
             state.provider = Text(weather, L"provider");
             if (state.provider.empty())
@@ -351,6 +353,11 @@ namespace Cards::Protocol
                     state.windScale = Text(current, L"windScale");
                     state.windSpeed = Text(current, L"windSpeed");
                     state.observedAt = Text(current, L"observedAt", state.observedAt);
+                    state.precipitation = Text(current, L"precipitation");
+                    state.precipProbability = Text(current, L"precipProbability");
+                    state.uvIndex = Text(current, L"uvIndex");
+                    state.sunrise = Text(current, L"sunrise");
+                    state.sunset = Text(current, L"sunset");
                 }
                 if (const auto air = Object(details, L"airQuality"))
                 {
@@ -367,6 +374,23 @@ namespace Cards::Protocol
                     state.pm25Unit = Text(air, L"pm25Unit");
                     state.pm10Unit = Text(air, L"pm10Unit");
                 }
+                state.hourlyError = Text(details, L"hourlyError");
+                if (const auto hourly = Array(details, L"hourly"))
+                {
+                    for (const auto& entry : hourly)
+                    {
+                        if (state.hourly.size() >= 24) break;
+                        if (entry.ValueType() != JsonValueType::Object) continue;
+                        const auto item = entry.GetObject();
+                        WeatherHour hour;
+                        hour.time = Text(item, L"time");
+                        hour.temperature = Text(item, L"temperature");
+                        hour.conditionKind = Text(item, L"conditionKind");
+                        hour.precipitation = Text(item, L"precipitation");
+                        hour.precipProbability = Text(item, L"precipProbability");
+                        if (!hour.time.empty() && !hour.temperature.empty()) state.hourly.push_back(std::move(hour));
+                    }
+                }
                 state.alertsError = Text(details, L"alertsError");
                 state.alertsAttribution = Text(details, L"alertsAttribution");
                 if (const auto forecast = Array(details, L"forecast"))
@@ -375,6 +399,7 @@ namespace Cards::Protocol
                     {
                         if (entry.ValueType() != JsonValueType::Object) continue;
                         const auto item = entry.GetObject();
+                        if (state.forecast.size() >= 7) break;
                         WeatherForecastDay day;
                         day.min = Text(item, L"min");
                         day.max = Text(item, L"max");
@@ -382,6 +407,12 @@ namespace Cards::Protocol
                         day.nightKind = Text(item, L"conditionNightKind");
                         day.weatherDay = Text(item, L"weatherDay");
                         day.weatherNight = Text(item, L"weatherNight");
+                        day.date = Text(item, L"date");
+                        day.sunrise = Text(item, L"sunrise");
+                        day.sunset = Text(item, L"sunset");
+                        day.uvIndex = Text(item, L"uvIndex");
+                        day.precipitation = Text(item, L"precipitation");
+                        day.precipProbability = Text(item, L"precipProbability");
                         state.forecast.push_back(std::move(day));
                     }
                 }

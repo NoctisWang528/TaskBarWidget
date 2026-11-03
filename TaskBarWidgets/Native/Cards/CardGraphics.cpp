@@ -9,6 +9,7 @@ namespace
         { 0x8c, 0x58, 0x1d, 0x7f, 0x93, 0xe7, 0xa6, 0xa5 } };
 }
 #include "CardGraphics.h"
+#include "CardIcons.h"
 
 #include <cryptuiapi.h>
 #include <wincrypt.h>
@@ -82,6 +83,9 @@ namespace Cards
         ReleaseMask();
         bitmaps.clear();
         formats.clear();
+        layouts.clear();
+        weatherIcons.clear();
+        iconContext.Reset();
         context.Reset();
         d2dDevice.Reset();
         factory.Reset();
@@ -276,6 +280,99 @@ namespace Cards
         if (FAILED(context->CreateBitmapFromWicBitmap(converter, &properties, bitmap.GetAddressOf())))
             return nullptr;
         return bitmap.Detach();
+    }
+
+    ComPtr<IDWriteTextLayout> Graphics::TextLayout(const std::wstring& text,
+        const std::wstring& family, float sizeDip, int weight, float widthDip, float heightDip,
+        bool italic, bool underline, bool strikeout, bool ellipsis, float dpiScale,
+        DWRITE_TEXT_ALIGNMENT alignment, DWRITE_PARAGRAPH_ALIGNMENT vertical)
+    {
+        if (!write || text.empty() || widthDip <= 0 || heightDip <= 0) return {};
+        // Do not retain arbitrarily large IPC strings in the shared layout cache.
+        const bool cacheable = text.size() <= 4096 && family.size() <= 256;
+        const auto key = std::tie(text, family, sizeDip, weight, widthDip, heightDip,
+            italic, underline, strikeout, ellipsis, dpiScale, alignment, vertical);
+        if (cacheable)
+            for (const auto& entry : layouts) if (entry.first == key) return entry.second;
+        auto* format = TextFormat(family, sizeDip, weight, alignment, false);
+        if (!format) return {};
+        ComPtr<IDWriteTextLayout> layout;
+        if (FAILED(write->CreateTextLayout(text.c_str(), static_cast<UINT32>(text.size()), format,
+            widthDip, heightDip, layout.GetAddressOf()))) return {};
+        layout->SetParagraphAlignment(vertical);
+        const DWRITE_TEXT_RANGE range{ 0, static_cast<UINT32>(text.size()) };
+        layout->SetFontStyle(italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL, range);
+        layout->SetUnderline(underline, range);
+        layout->SetStrikethrough(strikeout, range);
+        if (ellipsis)
+        {
+            ComPtr<IDWriteInlineObject> sign;
+            if (SUCCEEDED(write->CreateEllipsisTrimmingSign(format, sign.GetAddressOf())))
+            {
+                const DWRITE_TRIMMING trimming{ DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0 };
+                layout->SetTrimming(&trimming, sign.Get());
+            }
+        }
+        ++textLayoutCreateCount;
+        if (cacheable)
+        {
+            if (layouts.size() == 64) layouts.erase(layouts.begin());
+            layouts.emplace_back(key, layout);
+        }
+        return layout;
+    }
+
+    void Graphics::WeatherIcon(ID2D1DeviceContext* target, Symbol symbol, bool night, bool dark,
+        float left, float top, float size)
+    {
+        if (!target || !d2dDevice) return;
+        D2D1_MATRIX_3X2_F transform{};
+        target->GetTransform(&transform);
+        const float scale = transform._11;
+        if (scale <= 0 || transform._22 != scale || transform._12 || transform._21)
+        {
+            DrawWeatherSymbol(target, symbol, night, WeatherColors(dark), left, top, size);
+            return;
+        }
+        // Determine subpixel phase before adding the integer atlas translation.
+        // All curve drawing happens near (0,0), independent of atlas allocation.
+        const double x = static_cast<double>(left) * scale, y = static_cast<double>(top) * scale;
+        const int phaseX = static_cast<int>(std::lround((x - std::floor(x)) * 256));
+        const int phaseY = static_cast<int>(std::lround((y - std::floor(y)) * 256));
+        const WeatherIconKey key{symbol, night, dark, size, scale, phaseX, phaseY};
+        ComPtr<ID2D1Bitmap1> bitmap;
+        for (const auto& item : weatherIcons) if (item.first == key) { bitmap = item.second; break; }
+        constexpr float padding = 2;
+        if (!bitmap)
+        {
+            if (!iconContext && FAILED(d2dDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE,
+                iconContext.GetAddressOf()))) return;
+            const UINT pixels = static_cast<UINT>(std::ceil(size * scale)) + 5;
+            if (FAILED(iconContext->CreateBitmap(D2D1::SizeU(pixels, pixels), nullptr, 0,
+                D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET,
+                    D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96),
+                bitmap.GetAddressOf()))) return;
+            iconContext->SetTarget(bitmap.Get());
+            iconContext->SetDpi(96, 96);
+            iconContext->SetUnitMode(D2D1_UNIT_MODE_DIPS);
+            iconContext->SetTransform(D2D1::Matrix3x2F::Scale(scale, scale) *
+                D2D1::Matrix3x2F::Translation(padding + phaseX / 256.0f, padding + phaseY / 256.0f));
+            iconContext->BeginDraw();
+            iconContext->Clear(D2D1::ColorF(0, 0.0f));
+            DrawWeatherSymbol(iconContext.Get(), symbol, night, WeatherColors(dark), 0, 0, size);
+            const auto result = iconContext->EndDraw();
+            iconContext->SetTarget(nullptr);
+            if (FAILED(result)) return;
+            if (weatherIcons.size() == 64) weatherIcons.erase(weatherIcons.begin());
+            weatherIcons.emplace_back(key, bitmap);
+        }
+        const float drawX = static_cast<float>(std::floor(x)) + transform.dx - padding;
+        const float drawY = static_cast<float>(std::floor(y)) + transform.dy - padding;
+        const auto pixels = bitmap->GetPixelSize();
+        target->SetTransform(D2D1::Matrix3x2F::Identity());
+        target->DrawBitmap(bitmap.Get(), D2D1::RectF(drawX, drawY, drawX + pixels.width, drawY + pixels.height),
+            1, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+        target->SetTransform(transform);
     }
 
     ID2D1Bitmap1* Graphics::DecodeImage(const std::wstring& source, int decodeWidthPixels,

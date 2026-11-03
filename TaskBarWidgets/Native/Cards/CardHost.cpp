@@ -15,6 +15,7 @@ namespace Cards
     namespace
     {
         constexpr UINT WM_CARD_TASK = WM_APP + 0x211;
+        constexpr UINT WM_GROUP_FRAME = WM_APP + 0x217;
         constexpr UINT_PTR IdleTimer = 0xCD03;
         constexpr UINT IdleMilliseconds = 10 * 60 * 1000;
 
@@ -83,6 +84,13 @@ namespace Cards
         bool dark{ true };
         bool highContrast{ false };
         bool reducedMotion{ false };
+        std::map<Kind, RECT> groupRestBounds;
+        HANDLE groupTimer{};
+        std::atomic<bool> groupFramePending{false};
+        bool groupMoving{};
+        float groupOffset{}, groupFrom{}, groupTo{}, groupDistance{48.0f};
+        int groupDuration{240};
+        std::chrono::steady_clock::time_point groupStarted;
         POINT anchor{};
         std::wstring lastError;
         ULONGLONG errorUntil{};
@@ -197,6 +205,10 @@ namespace Cards
         void Run(std::promise<bool> ready);
         void CreateCards();
         void PlaceGroup(bool animate, bool showAll);
+        void MoveGroup(float offset);
+        void AnimateGroup(bool showing, bool animate);
+        void StopGroupMotion(bool settle);
+        void GroupFrame();
         void UpdateEnvironment(bool force);
         void RefreshSnapshot(const Protocol::Changes& changes);
         void OnTask();
@@ -302,6 +314,7 @@ namespace Cards
 
     void CardHost::Impl::UpdateEnvironment(bool force)
     {
+        if ((reducedMotion || highContrast) && groupMoving) StopGroupMotion(true);
         CardEnvironment environment;
         environment.graphics = &graphics;
         environment.compositor = compositor;
@@ -321,8 +334,100 @@ namespace Cards
         if (popup) popup->ApplyEnvironment(environment);
     }
 
+    void CardHost::Impl::StopGroupMotion(bool settle)
+    {
+        if (groupTimer)
+        {
+            DeleteTimerQueueTimer(nullptr, groupTimer, INVALID_HANDLE_VALUE);
+            groupTimer = nullptr;
+        }
+        groupFramePending = false;
+        groupMoving = false;
+        if (settle)
+        {
+            if (!visible) for (auto& [kind, card] : cards) card->Hide(false);
+            MoveGroup(0);
+        }
+    }
+
+    void CardHost::Impl::MoveGroup(float offset)
+    {
+        groupOffset = offset;
+        std::vector<std::pair<CardWindow*, RECT>> moves;
+        for (const auto& [kind, rest] : groupRestBounds)
+        {
+            if (auto* card = Card(kind); card && card->Handle())
+            {
+                RECT bounds = rest;
+                OffsetRect(&bounds, 0, static_cast<int>(std::lround(offset)));
+                moves.emplace_back(card, bounds);
+            }
+        }
+        if (moves.empty()) return;
+        constexpr UINT flags = SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER;
+        HDWP transaction = BeginDeferWindowPos(static_cast<int>(moves.size()));
+        for (const auto& [card, bounds] : moves)
+        {
+            if (!transaction) break;
+            transaction = DeferWindowPos(transaction, card->Handle(), nullptr,
+                bounds.left, bounds.top, 0, 0, flags);
+        }
+        const bool committed = transaction && EndDeferWindowPos(transaction);
+        for (const auto& [card, bounds] : moves)
+        {
+            if (committed || SetWindowPos(card->Handle(), nullptr, bounds.left, bounds.top, 0, 0, flags))
+                card->CommitGroupBounds(bounds);
+        }
+    }
+
+    void CardHost::Impl::AnimateGroup(bool showing, bool animate)
+    {
+        StopGroupMotion(false);
+        groupFrom = groupOffset;
+        groupTo = showing ? 0.0f : groupDistance;
+        if (!animate || reducedMotion || highContrast || groupRestBounds.empty() ||
+            std::abs(groupTo - groupFrom) < 0.5f)
+        {
+            if (!showing) for (auto& [kind, card] : cards) card->Hide(false);
+            MoveGroup(0);
+            return;
+        }
+        groupDuration = std::max(1, static_cast<int>((showing ? 240 : 160) *
+            std::min(1.0f, std::abs(groupTo - groupFrom) / std::max(1.0f, groupDistance))));
+        groupStarted = std::chrono::steady_clock::now();
+        groupMoving = true;
+        // One clock drives all HWNDs. The callback only coalesces a wake-up;
+        // geometry, input coordinates and DWM work stay on the card STA.
+        MONITORINFOEXW monitor{}; monitor.cbSize = sizeof(monitor);
+        DEVMODEW mode{}; mode.dmSize = sizeof(mode);
+        UINT interval = 16;
+        if (GetMonitorInfoW(MonitorFromPoint(anchor, MONITOR_DEFAULTTONEAREST), &monitor) &&
+            EnumDisplaySettingsW(monitor.szDevice, ENUM_CURRENT_SETTINGS, &mode) && mode.dmDisplayFrequency > 1)
+            interval = std::clamp<UINT>(1000u / mode.dmDisplayFrequency, 4u, 33u);
+        if (!CreateTimerQueueTimer(&groupTimer, nullptr, [](void* context, BOOLEAN)
+        {
+            auto* self = static_cast<Impl*>(context);
+            if (!self->groupFramePending.exchange(true))
+                if (!PostMessageW(self->window, WM_GROUP_FRAME, 0, 0)) self->groupFramePending = false;
+        }, this, 0, interval, WT_EXECUTEDEFAULT)) StopGroupMotion(true);
+    }
+
+    void CardHost::Impl::GroupFrame()
+    {
+        groupFramePending = false;
+        if (!groupMoving) return;
+        const float elapsed = std::chrono::duration<float, std::milli>(
+            std::chrono::steady_clock::now() - groupStarted).count();
+        const float t = std::clamp(elapsed / groupDuration, 0.0f, 1.0f);
+        const float remaining = 1 - t;
+        MoveGroup(groupFrom + (groupTo - groupFrom) * (1 - remaining * remaining * remaining));
+        if (t >= 1) StopGroupMotion(true);
+    }
+
     void CardHost::Impl::PlaceGroup(bool animate, bool showAll)
     {
+        const bool continuing = groupMoving;
+        StopGroupMotion(false);
         CardEnvironment environment;
         environment.graphics = &graphics;
         environment.compositor = compositor;
@@ -345,10 +450,16 @@ namespace Cards
             Paint::MeasureHeight(Kind::Update, snapshot, environment, Layout::UpdateCardWidth));
         if (!placement.valid)
         {
+            StopGroupMotion(true);
             Status(placement.diagnostic.c_str());
             return;
         }
         lastInteraction = std::chrono::steady_clock::now();
+        groupRestBounds.clear();
+        groupDistance = 48.0f * placement.dpiScale * placement.fit;
+        if (!continuing) groupOffset = animate && !reducedMotion && !highContrast ? groupDistance : 0;
+        RECT groupBounds{};
+        for (const auto& slot : placement.slots) UnionRect(&groupBounds, &groupBounds, &slot.bounds);
         for (const auto& slot : placement.slots)
         {
             auto* card = Card(slot.kind);
@@ -356,16 +467,18 @@ namespace Cards
             if (slot.kind == Kind::Update && !updateVisible) continue;
             RECT bounds = slot.bounds;
             if (diagnosticOffscreen) OffsetRect(&bounds,
-                GetSystemMetrics(SM_XVIRTUALSCREEN) - bounds.right - 1000,
-                GetSystemMetrics(SM_YVIRTUALSCREEN) - bounds.bottom - 1000);
+                GetSystemMetrics(SM_XVIRTUALSCREEN) - groupBounds.right - 1000,
+                GetSystemMetrics(SM_YVIRTUALSCREEN) - groupBounds.bottom - 1000);
+            groupRestBounds[slot.kind] = bounds;
+            OffsetRect(&bounds, 0, static_cast<int>(std::lround(groupOffset)));
             card->Place(bounds, slot.scale);
-            if (showAll) card->Show(animate);
+            if (showAll) { EnableWindow(card->Handle(), TRUE); card->Show(false); }
         }
         // Cards that are no longer part of the layout must hide, not linger.
         for (auto& [kind, card] : cards)
         {
-            if (kind == Kind::Update) { if (!updateVisible) card->Hide(animate); continue; }
-            if (!config.IsEnabled(kind)) card->Hide(animate);
+            if (kind == Kind::Update) { if (!updateVisible) card->Hide(false); continue; }
+            if (!config.IsEnabled(kind)) card->Hide(false);
         }
         if (popup && popup->Visible())
         {
@@ -374,6 +487,7 @@ namespace Cards
                 popupMenu == L"sources" ? L"showSources" : L"showDevices:" + popupMenu) : RECT{};
             if (!ownerCard || !ownerCard->Visible() || !EqualRect(&current, &popupAnchor)) CloseMenu();
         }
+        if (animate || continuing) AnimateGroup(visible, true);
     }
 
     void CardHost::Impl::HideAll(const std::wstring& reason, bool animate)
@@ -385,8 +499,9 @@ namespace Cards
         for (auto& [kind, card] : cards)
         {
             UNREFERENCED_PARAMETER(kind);
-            card->Hide(animate);
+            EnableWindow(card->Handle(), FALSE);
         }
+        AnimateGroup(false, animate);
         // Lyrics subscription stops with the cards so a hidden panel never keeps
         // lyric work alive in the media service.
         client.Request(L"subscribeCardLyrics", "{\"visible\":false,\"session\":1}");
@@ -396,6 +511,8 @@ namespace Cards
     void CardHost::Impl::DestroyIdleCards()
     {
         if (visible || resident) return;
+        StopGroupMotion(false);
+        groupRestBounds.clear();
         for (auto& [kind, card] : cards)
         {
             UNREFERENCED_PARAMETER(kind);
@@ -792,6 +909,28 @@ namespace Cards
             if (!EscapeCard()) HideAll(L"escape", true);
             return;
         }
+        if (action == L"weatherView:today" || action == L"weatherView:forecast" ||
+            action == L"weatherPage:next" || action == L"weatherPage:previous")
+        {
+            if (auto* card = Card(Kind::Weather))
+            {
+                const auto& weather = card->CurrentSnapshot().weather;
+                bool forecast = weather.forecastView;
+                int offset = weather.forecastOffset;
+                if (action.starts_with(L"weatherView:")) { forecast = action == L"weatherView:forecast"; offset = 0; }
+                else
+                {
+                    const int count = static_cast<int>(forecast ? weather.forecast.size() : weather.hourly.size());
+                    const int page = forecast ? 5 : 6;
+                    const int last = count ? ((count - 1) / page) * page : 0;
+                    offset = std::clamp(offset / page * page, 0, last);
+                    offset = std::clamp(offset + (action == L"weatherPage:next" ? page : -page),
+                        0, last);
+                }
+                card->SetWeatherView(forecast, offset);
+            }
+            return;
+        }
         if (action == L"previous" || action == L"playPause" || action == L"next")
         {
             payload = L"{\"action\":" + quote(action) + L"}";
@@ -911,6 +1050,7 @@ namespace Cards
     {
         auto* card = Card(Kind::Device);
         if (!card || !card->Visible()) return;
+        if (groupMoving) StopGroupMotion(true);
         const auto& endpoints = flow == L"input" ? snapshot.audio.inputs : snapshot.audio.outputs;
         std::vector<Layout::Region> items;
         for (const auto& endpoint : endpoints)
@@ -941,6 +1081,7 @@ namespace Cards
     {
         auto* card = Card(Kind::Media);
         if (!card || !card->Visible()) return;
+        if (groupMoving) StopGroupMotion(true);
         std::vector<Layout::Region> items;
         for (const auto& source : snapshot.media.sources)
         {
@@ -1066,7 +1207,12 @@ namespace Cards
 
     void CardHost::Impl::OnLayoutInvalidated()
     {
-        if (visible) PlaceGroup(false, false);
+        if (!visible) return;
+        // WM_DPICHANGED can arrive synchronously inside DeferWindowPos. Finish
+        // that transaction before applying a new group layout and cached bounds.
+        auto command = std::make_unique<Command>();
+        command->kind = COMMAND_PLACE;
+        Post(std::move(command));
     }
 
     void CardHost::Impl::Run(std::promise<bool> ready)
@@ -1093,6 +1239,9 @@ namespace Cards
             if (!self) return DefWindowProcW(window, message, keys, position);
             switch (message)
             {
+            case WM_GROUP_FRAME:
+                self->GroupFrame();
+                return 0;
             case WM_CARD_PIPE_WAKE:
                 self->OnPipeMessages();
                 return 0;
@@ -1169,6 +1318,7 @@ namespace Cards
         }
 
         // Teardown: stop producers first, then release device-bound resources.
+        StopGroupMotion(false);
         client.Stop();
         UninstallHooks();
         popup.reset();

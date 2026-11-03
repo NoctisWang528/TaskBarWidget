@@ -9,7 +9,8 @@
 //   CardRoot
 //   - system Mica background (CardHost supplies it through MicaController)
 //   - background wash and border visual
-//   - content drawing surface (static + dynamic layers painted together)
+//   - media cover/lyrics/progress drawing surface
+//   - stable content drawing surface
 // The wash and content live in a motion container; menus have their own HWND.
 
 #include "CardAccessibility.h"
@@ -77,6 +78,9 @@ namespace Cards
         void SetSnapshot(const Snapshot& snapshot);
 
         void Place(const RECT& bounds, float scale);
+        // CardHost has already moved the group with DeferWindowPos. No layout or paint.
+        void CommitGroupBounds(const RECT& bounds) noexcept;
+        void SetWeatherView(bool forecast, int offset = 0);
         void Show(bool animate);
         void Hide(bool animate);
         bool Visible() const { return visible; }
@@ -120,6 +124,9 @@ namespace Cards
         bool HasActiveBackdropConfiguration() const;
         void RefreshBackdropConfiguration();
         uint64_t ContentPaintCount() const { return contentPaintCount; }
+        uint64_t StaticPaintCount() const { return staticPaintCount; }
+        uint64_t DynamicPaintCount() const { return dynamicPaintCount; }
+        uint64_t RegionBuildCount() const { return regionBuildCount; }
         Paint::Interaction CurrentInteraction() const;
 
     private:
@@ -150,6 +157,9 @@ namespace Cards
         Snapshot snapshot;
         RECT bounds{};
         uint64_t contentPaintCount{};
+        uint64_t staticPaintCount{};
+        uint64_t dynamicPaintCount{};
+        uint64_t regionBuildCount{};
         float scale{ 1.0f };
         float measuredHeightDip{ 0.0f };
         bool visible{ false };
@@ -191,10 +201,13 @@ namespace Cards
             float marquee{ 0.0f };
         };
 
+        enum class MediaLayer { All, Stable, Dynamic };
+
         void Media(ID2D1DeviceContext* context, const Snapshot& snapshot,
             const CoverTransition& cover, const LyricTransition& lyrics,
             const CardEnvironment& environment, Layout::Table& regions, float widthDip, float heightDip,
-            const Interaction& interaction = {});
+            const Interaction& interaction = {}, MediaLayer layer = MediaLayer::All,
+            bool rebuildRegions = true);
         void Device(ID2D1DeviceContext* context, const Snapshot& snapshot,
             const CardEnvironment& environment, Layout::Table& regions, float widthDip, float heightDip,
             const Interaction& interaction = {});

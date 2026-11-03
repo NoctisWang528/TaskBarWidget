@@ -428,8 +428,9 @@ namespace wccs  // WeatherComCnSpider
 
     using SWeatherInfo = DataApiWeatherComCnSpider::SWeatherInfo;
 
-    bool QueryForecastWeather(const std::wstring &code, SWeatherInfo &weather_td, SWeatherInfo &weather_tm, SWeatherInfo &weather_datm)
+    bool QueryForecastWeather(const std::wstring &code, SWeatherInfo &weather_td, SWeatherInfo &weather_tm, SWeatherInfo &weather_datm, std::vector<SWeatherInfo>& forecast)
     {
+        forecast.clear();
         weather_td = SWeatherInfo();
         weather_tm = SWeatherInfo();
         weather_datm = SWeatherInfo();
@@ -442,19 +443,20 @@ namespace wccs  // WeatherComCnSpider
             if (end == std::wstring::npos) return false;
             const auto list = html.substr(begin, end - begin);
             wslist items;
-            for (size_t cursor = 0; items.size() < 3;) {
+            for (size_t cursor = 0; items.size() < 7;) {
                 const auto start = list.find(L"<li", cursor);
                 const auto finish = start == std::wstring::npos ? start : list.find(L"</li>", start);
                 if (finish == std::wstring::npos) break;
                 items.push_back(list.substr(start, finish - start)); cursor = finish + 5;
             }
             if (items.size() < 3) return false;
-            SWeatherInfo* days[] = {&weather_td, &weather_tm, &weather_datm};
             auto extract = [](const std::wstring& value, const wchar_t* pattern) {
                 std::wsmatch match; return std::regex_search(value, match, std::wregex(pattern)) ? match[1].str() : L"";
             };
-            for (size_t i = 0; i < 3; ++i) {
-                auto& day = *days[i]; const auto& item = items[i];
+            for (size_t i = 0; i < items.size(); ++i) {
+                SWeatherInfo day; const auto& item = items[i];
+                // The page supplies day/week labels, not an ISO date. Preserve its label.
+                day.Date = extract(item, LR"(<h1>([^<]+)</h1>)");
                 auto element = [&item](const wchar_t* marker) {
                     auto start = item.find(marker); if (start == std::wstring::npos) return std::wstring{};
                     start = item.find(L'>', start); if (start == std::wstring::npos) return std::wstring{};
@@ -474,8 +476,10 @@ namespace wccs  // WeatherComCnSpider
                 day.WeatherCodeNight = _convertWeatherNameToCode(day.WeatherNight);
                 if (!icons.empty()) day.WeatherCodeDay = icons.front()[1];
                 if (icons.size() > 1) day.WeatherCodeNight = icons.back()[1];
-                if (day.TemperatureNight.empty() || weather.empty()) return false;
+                if (day.TemperatureNight.empty() || weather.empty()) { if (i < 3) return false; break; }
+                forecast.push_back(std::move(day));
             }
+            weather_td = forecast[0]; weather_tm = forecast[1]; weather_datm = forecast[2];
             return true;
         }
 
@@ -712,9 +716,10 @@ std::optional<WeatherDetails> DataApiWeatherComCnSpider::GetWeatherDetails() con
     details.Current.ObservedAt = _realtimeWeather.UpdateTime;
     details.AirQuality.PM2p5 = _realtimeWeather.AqiPM25;
 
-    const SWeatherInfo* days[] = { &_weatherTD, &_weatherTM, &_weatherDATM };
-    for (const auto* source : days) {
+    for (const auto& entry : _forecast) {
+        const auto* source = &entry;
         WeatherForecastDay day;
+        day.Date = source->Date;
         day.TemperatureMin = source->TemperatureNight;
         day.TemperatureMax = source->TemperatureDay;
         day.WeatherDay = source->WeatherDay;
@@ -735,7 +740,7 @@ bool DataApiWeatherComCnSpider::UpdateWeather()
 {
     const auto city = WeatherCDataManager::Instance().GetCurrentCityInfo();
     const auto type = WeatherCDataManager::Instance().GetConfig().m_wit;
-    if (_dataCity != city.CityNO) { _realtimeWeather = {}; _weatherTD = {}; _weatherTM = {}; _weatherDATM = {}; _weatherAlerts.clear(); _dataCity = city.CityNO; }
+    if (_dataCity != city.CityNO) { _realtimeWeather = {}; _weatherTD = {}; _weatherTM = {}; _weatherDATM = {}; _forecast.clear(); _weatherAlerts.clear(); _dataCity = city.CityNO; }
     const bool realtime = QueryRealtimeWeather(city.CityNO);
     const bool forecast = QueryForecastWeather(city.CityNO);
     if (WeatherCDataManager::Instance().GetConfig().m_show_weather_alerts) {
@@ -766,8 +771,12 @@ bool DataApiWeatherComCnSpider::QueryRealtimeWeather(const std::wstring &query)
 bool DataApiWeatherComCnSpider::QueryForecastWeather(const std::wstring &query)
 {
     SWeatherInfo td, tm, datm;
-    if (!wccs::QueryForecastWeather(query, td, tm, datm)) return false;
-    _weatherTD = std::move(td); _weatherTM = std::move(tm); _weatherDATM = std::move(datm); return true;
+    std::vector<SWeatherInfo> forecast;
+    if (!wccs::QueryForecastWeather(query, td, tm, datm, forecast)) return false;
+    if (forecast.empty()) forecast = {td, tm, datm}; // Town/street source currently supplies up to three days.
+    _weatherTD = std::move(td); _weatherTM = std::move(tm); _weatherDATM = std::move(datm);
+    _forecast = std::move(forecast);
+    return true;
 }
 
 bool DataApiWeatherComCnSpider::QueryWeatherAlerts(const std::wstring &query)

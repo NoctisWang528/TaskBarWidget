@@ -12,6 +12,7 @@
 #include <locale>
 #include <cmath>
 #include <algorithm>
+#include <limits>
 
 #include "DataManager.h"
 
@@ -30,6 +31,37 @@ namespace hf
         auto *obj = yyjson_obj_get(j_val, key);
         if (!yyjson_is_str(obj)) return L"";
         else return WeatherCCommon::StrToUnicode(yyjson_get_str(obj), true);
+    }
+
+    // v7 optional quantities are strings; absent/null/invalid is unavailable, never zero.
+    std::wstring optional_number(yyjson_val* object, const char* key, double maximum = (std::numeric_limits<double>::max)())
+    {
+        const auto text = get_json_str_value(object, key);
+        std::wistringstream input(text);
+        input.imbue(std::locale::classic());
+        double value{};
+        input >> std::noskipws >> value;
+        return !text.empty() && !input.fail() && input.eof() && std::isfinite(value) && value >= 0 && value <= maximum ? text : L"";
+    }
+
+    bool date_valid(const std::wstring& value)
+    {
+        if (value.size() != 10 || value[4] != L'-' || value[7] != L'-' ||
+            value.substr(0, 4).find_first_not_of(L"0123456789") != std::wstring::npos ||
+            value.substr(5, 2).find_first_not_of(L"0123456789") != std::wstring::npos ||
+            value.substr(8, 2).find_first_not_of(L"0123456789") != std::wstring::npos) return false;
+        const int year = _wtoi(value.c_str()), month = _wtoi(value.c_str() + 5), day = _wtoi(value.c_str() + 8);
+        const int days[] = {31, 28 + (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)), 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+        return year > 0 && month >= 1 && month <= 12 && day >= 1 && day <= days[month - 1];
+    }
+
+    std::wstring clock_time(const std::wstring& value)
+    {
+        if (value.size() != 5 || value[2] != L':' ||
+            value.substr(0, 2).find_first_not_of(L"0123456789") != std::wstring::npos ||
+            value.substr(3, 2).find_first_not_of(L"0123456789") != std::wstring::npos ||
+            _wtoi(value.c_str()) > 23 || _wtoi(value.c_str() + 3) > 59) return L"";
+        return value;
     }
 
     std::wstring query_func_frame(const CString &url, const std::wstring& key, std::function<void(yyjson_val*)> func, bool alert_schema = false, bool* shared = nullptr)
@@ -404,12 +436,15 @@ std::optional<WeatherDetails> DataApiHefengWeather::GetWeatherDetails() const
     details.Current.WindDirection = _realtimeWeather.WindDirection;
     details.Current.WindScale = _realtimeWeather.WindScale;
     details.Current.WindSpeed = _realtimeWeather.WindSpeed;
-    details.Current.ObservedAt = _realtimeWeather.UpdateTime;
+    details.Current.ObservedAt = _realtimeWeather.ObservedAt;
+    details.Current.Precipitation = _realtimeWeather.Precipitation;
+    details.Hourly = _hourly;
+    details.HourlyError = _hourlyError;
 
     if (config.ShowAirQuality) details.AirQuality = _realtimeAirQuality;
 
-    const ForcastWeather* days[] = { &_forcastWeatherTD, &_forcastWeatherTM, &_forcastWeatherDATM };
-    for (const auto* source : days) {
+    for (const auto& entry : _forecast) {
+        const auto* source = &entry;
         WeatherForecastDay day;
         day.TemperatureMin = source->TemperatureMin;
         day.TemperatureMax = source->TemperatureMax;
@@ -419,8 +454,21 @@ std::optional<WeatherDetails> DataApiHefengWeather::GetWeatherDetails() const
         day.WeatherCodeNight = source->WeatherCodeNight;
         day.ConditionDayKind = WeatherCondition::FromQWeather(source->WeatherCodeDay);
         day.ConditionNightKind = WeatherCondition::FromQWeather(source->WeatherCodeNight);
+        day.Date = source->Date;
+        day.Sunrise = source->Sunrise;
+        day.Sunset = source->Sunset;
+        day.UVIndex = source->UVIndex;
+        day.Precipitation = source->Precipitation;
         if (!day.TemperatureMin.empty() || !day.TemperatureMax.empty() ||
             !day.WeatherDay.empty() || !day.WeatherNight.empty()) details.Forecast.push_back(std::move(day));
+    }
+
+    // Sun times and UV describe the forecast day matching the current observation.
+    for (const auto& day : details.Forecast) if (day.Date == _realtimeWeather.ObservedDate) {
+        details.Current.Sunrise = day.Sunrise;
+        details.Current.Sunset = day.Sunset;
+        details.Current.UVIndex = day.UVIndex;
+        break;
     }
 
     const bool showAlerts = config.ShowWeatherAlert && WeatherCDataManager::Instance().GetConfig().m_show_weather_alerts;
@@ -437,7 +485,7 @@ bool DataApiHefengWeather::UpdateWeather()
 
     const auto &currunt_city = WeatherCDataManager::Instance().GetCurrentCityInfo();
 
-    if (_dataCity != currunt_city.CityNO) { _realtimeWeather = {}; _forcastWeatherTD = {}; _forcastWeatherTM = {}; _forcastWeatherDATM = {}; _realtimeAirQuality = {}; _weatherAlerts.clear(); _alertsError.clear(); _alertsAttribution.clear(); _dataCity = currunt_city.CityNO; }
+    if (_dataCity != currunt_city.CityNO) { _realtimeWeather = {}; _forcastWeatherTD = {}; _forcastWeatherTM = {}; _forcastWeatherDATM = {}; _forecast.clear(); _hourly.clear(); _hourlyError.clear(); _hourlyCity.clear(); _realtimeAirQuality = {}; _weatherAlerts.clear(); _alertsError.clear(); _alertsAttribution.clear(); _dataCity = currunt_city.CityNO; }
     const bool showAlerts = config.ShowWeatherAlert && WeatherCDataManager::Instance().GetConfig().m_show_weather_alerts;
     if (!showAlerts) { _weatherAlerts.clear(); _alertsError.clear(); _alertsAttribution.clear(); }
     if (!config.ShowAirQuality) _realtimeAirQuality = {};
@@ -447,7 +495,12 @@ bool DataApiHefengWeather::UpdateWeather()
     _coordinateError.clear();
     _updating = true;
     struct EndUpdate { bool& value; ~EndUpdate() { value = false; } } endUpdate{ _updating };
-    auto sharedFail = [this, showAlerts]() {
+    auto hourlyFail = [this]() {
+        _hourlyError = L"小时预报获取失败：" + _lastError +
+            (_hourly.empty() ? L"；无可用的上次信息。" : L"；上次数据可能过时。");
+    };
+    auto sharedFail = [this, showAlerts, &hourlyFail]() {
+        hourlyFail();
         if (config.ShowAirQuality) _realtimeAirQuality.Error = L"空气质量获取失败：" + _lastError +
             (_realtimeAirQuality.AQI.empty() && _realtimeAirQuality.PM2p5.empty() && _realtimeAirQuality.PM10.empty() ?
                 L"；无可用的上次信息。" : L"；上次数据可能过时。");
@@ -468,6 +521,10 @@ bool DataApiHefengWeather::UpdateWeather()
     if (_sharedFailure) { sharedFail(); return WeatherCDataManager::Instance().GetConfig().m_wit == EWeatherInfoType::WEATHER_REALTIME ? realtime : forecast; }
     if (showAlerts && !QueryWeatherAlerts(currunt_city.CityNO))
         oss << L"[WeatherAlerts]" << _lastError;
+
+    if (_sharedFailure) hourlyFail();
+    else if (!QueryHourlyWeather(currunt_city.CityNO))
+        oss << L"[HourlyWeather]" << _lastError << std::endl;
 
     if (!_sharedFailure) _lastError = oss.str();
 
@@ -497,13 +554,17 @@ bool DataApiHefengWeather::QueryRealtimeWeather(const std::wstring &query)
 
         data.Temperature = hf::get_json_str_value(now_obj, "temp");
         data.TemperatureFeelsLike = hf::get_json_str_value(now_obj, "feelsLike");
-        data.UpdateTime = hf::short_time(hf::get_json_str_value(now_obj, "obsTime"));
+        const auto observed = hf::get_json_str_value(now_obj, "obsTime");
+        data.ObservedAt = observed;
+        data.UpdateTime = hf::short_time(observed);
+        if (hf::date_valid(observed.substr(0, 10))) data.ObservedDate = observed.substr(0, 10);
         data.WeatherText = hf::get_json_str_value(now_obj, "text");
         data.WeatherCode = hf::get_json_str_value(now_obj, "icon");
         data.WindDirection = hf::get_json_str_value(now_obj, "windDir");
         data.WindScale = hf::get_json_str_value(now_obj, "windScale");
         data.WindSpeed = hf::get_json_str_value(now_obj, "windSpeed");
         data.Humidity = hf::get_json_str_value(now_obj, "humidity");
+        data.Precipitation = hf::optional_number(now_obj, "precip");
     };
 
     auto err = hf::query_func_frame(url, config.AppKey, func, false, &_sharedFailure);
@@ -592,44 +653,93 @@ bool DataApiHefengWeather::QueryForecastWeather(const std::wstring &query)
 {
     CHECK_KEY;
 
-    const auto &dm = WeatherCDataManager::Instance();
-
-    CString url;
-    url.Format(L"https://%s/v7/weather/3d?location=%s&lang=%s",
-               config.ApiHost.c_str(),
-               query.c_str(),
-               dm.StringRes(IDS_HFW_LANG).GetString());
-
-    ForcastWeather td, tm, datm;
-    auto func = [&td, &tm, &datm](yyjson_val *j_val) {
-        auto *daily_arr = yyjson_obj_get(j_val, "daily");
-
-        auto get_daily_info = [](yyjson_val *j_val, ForcastWeather &w) {
-            w.TemperatureMax = hf::get_json_str_value(j_val, "tempMax");
-            w.TemperatureMin = hf::get_json_str_value(j_val, "tempMin");
-            w.WeatherDay = hf::get_json_str_value(j_val, "textDay");
-            w.WeatherNight = hf::get_json_str_value(j_val, "textNight");
-            w.WeatherCodeDay = hf::get_json_str_value(j_val, "iconDay");
-            w.WeatherCodeNight = hf::get_json_str_value(j_val, "iconNight");
-            w.UVIndex = hf::get_json_str_value(j_val, "uvIndex");
-            w.Humidity = hf::get_json_str_value(j_val, "humidity");
-        };
-
-        get_daily_info(yyjson_arr_get(daily_arr, 0), td);
-        get_daily_info(yyjson_arr_get(daily_arr, 1), tm);
-        get_daily_info(yyjson_arr_get(daily_arr, 2), datm);
+    std::vector<ForcastWeather> days;
+    auto func = [&days](yyjson_val* root) {
+        auto* daily = yyjson_obj_get(root, "daily");
+        if (!yyjson_is_arr(daily) || yyjson_arr_size(daily) < 3) return;
+        for (size_t index = 0; index < yyjson_arr_size(daily) && index < 7; ++index) {
+            auto* item = yyjson_arr_get(daily, index);
+            ForcastWeather day;
+            day.Date = hf::get_json_str_value(item, "fxDate");
+            day.TemperatureMax = hf::get_json_str_value(item, "tempMax");
+            day.TemperatureMin = hf::get_json_str_value(item, "tempMin");
+            if (!hf::date_valid(day.Date) || day.TemperatureMin.empty() || day.TemperatureMax.empty() ||
+                (!days.empty() && day.Date <= days.back().Date)) { days.clear(); return; }
+            day.WeatherDay = hf::get_json_str_value(item, "textDay");
+            day.WeatherNight = hf::get_json_str_value(item, "textNight");
+            day.WeatherCodeDay = hf::get_json_str_value(item, "iconDay");
+            day.WeatherCodeNight = hf::get_json_str_value(item, "iconNight");
+            day.UVIndex = hf::optional_number(item, "uvIndex");
+            day.Humidity = hf::get_json_str_value(item, "humidity");
+            day.Sunrise = hf::clock_time(hf::get_json_str_value(item, "sunrise"));
+            day.Sunset = hf::clock_time(hf::get_json_str_value(item, "sunset"));
+            day.Precipitation = hf::optional_number(item, "precip");
+            // v7 daily has no precipitation probability; never infer it from amount.
+            days.push_back(std::move(day));
+        }
     };
-
-    auto err = hf::query_func_frame(url, config.AppKey, func, false, &_sharedFailure);
-    if (err.empty() && (td.TemperatureMin.empty() || td.TemperatureMax.empty() || tm.TemperatureMin.empty() || tm.TemperatureMax.empty() || datm.TemperatureMin.empty() || datm.TemperatureMax.empty())) err = L"和风天气三日预报不完整。";
-    if (err.empty())
-    {
-        _forcastWeatherTD = td;
-        _forcastWeatherTM = tm;
-        _forcastWeatherDATM = datm;
+    auto fetch = [&](const wchar_t* duration) {
+        CString url;
+        url.Format(L"https://%s/v7/weather/%s?location=%s&lang=%s", config.ApiHost.c_str(), duration,
+            WeatherCCommon::URLEncode(query).c_str(), WeatherCDataManager::Instance().StringRes(IDS_HFW_LANG).GetString());
+        days.clear();
+        auto error = hf::query_func_frame(url, config.AppKey, func, false, &_sharedFailure);
+        if (error.empty() && days.size() < 3) error = L"和风天气逐日预报不完整。";
+        return error;
+    };
+    auto error = fetch(L"7d");
+    // Some subscriptions allow only 3d. Keep the same source and existing core forecast.
+    if (!error.empty() && !_sharedFailure) error = fetch(L"3d");
+    if (error.empty()) {
+        _forcastWeatherTD = days[0];
+        _forcastWeatherTM = days[1];
+        _forcastWeatherDATM = days[2];
+        _forecast = std::move(days);
     }
-    _lastError = err;
-    return err.empty();
+    _lastError = error;
+    return error.empty();
+}
+
+bool DataApiHefengWeather::QueryHourlyWeather(const std::wstring& query)
+{
+    if (_hourlyCity != query) { _hourly.clear(); _hourlyCity = query; }
+    auto fail = [this](const std::wstring& error) {
+        _lastError = error;
+        _hourlyError = L"小时预报获取失败：" + error +
+            (_hourly.empty() ? L"；无可用的上次信息。" : L"；上次数据可能过时。");
+        return false;
+    };
+    if (!ValidateConfiguration()) return fail(_lastError);
+    CString url;
+    url.Format(L"https://%s/v7/weather/24h?location=%s&lang=%s", config.ApiHost.c_str(),
+        WeatherCCommon::URLEncode(query).c_str(), WeatherCDataManager::Instance().StringRes(IDS_HFW_LANG).GetString());
+    std::vector<WeatherHour> hours;
+    bool valid = false;
+    auto func = [&hours, &valid](yyjson_val* root) {
+        auto* hourly = yyjson_obj_get(root, "hourly");
+        if (!yyjson_is_arr(hourly) || !yyjson_arr_size(hourly)) return;
+        for (size_t index = 0; index < yyjson_arr_size(hourly) && index < 24; ++index) {
+            auto* item = yyjson_arr_get(hourly, index);
+            WeatherHour hour;
+            hour.Time = hf::get_json_str_value(item, "fxTime");
+            hour.Temperature = hf::get_json_str_value(item, "temp");
+            const auto code = hf::get_json_str_value(item, "icon");
+            if (hour.Time.size() < 16 || !hf::date_valid(hour.Time.substr(0, 10)) || hour.Time[10] != L'T' ||
+                hf::clock_time(hour.Time.substr(11, 5)).empty() || hour.Temperature.empty() || code.empty()) return;
+            hour.ConditionKind = WeatherCondition::FromQWeather(code);
+            hour.Precipitation = hf::optional_number(item, "precip");
+            hour.PrecipProbability = hf::optional_number(item, "pop", 100);
+            hours.push_back(std::move(hour));
+        }
+        valid = true;
+    };
+    const auto error = hf::query_func_frame(url, config.AppKey, func, false, &_sharedFailure);
+    if (!error.empty()) return fail(error);
+    if (!valid) return fail(L"和风天气小时预报响应格式无效或数据不完整。");
+    _hourly = std::move(hours);
+    _hourlyError.clear();
+    _lastError.clear();
+    return true;
 }
 
 bool DataApiHefengWeather::QueryWeatherAlerts(const std::wstring &query)

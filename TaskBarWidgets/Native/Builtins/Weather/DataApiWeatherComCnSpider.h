@@ -34,6 +34,7 @@ public:
 
     struct SWeatherInfo
     {
+        std::wstring Date;
         std::wstring TemperatureDay;
         std::wstring TemperatureNight;
         std::wstring WeatherDay;
@@ -63,6 +64,7 @@ public:
 protected:
     SRealTimeWeather _realtimeWeather;
     SWeatherInfo _weatherTD, _weatherTM, _weatherDATM;
+    std::vector<SWeatherInfo> _forecast;
     std::wstring _lastError, _dataCity, _alertsError;
     WeatherAlertList _weatherAlerts;
 };

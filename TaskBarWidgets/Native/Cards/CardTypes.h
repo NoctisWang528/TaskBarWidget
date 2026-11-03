@@ -186,6 +186,21 @@ namespace Cards
         std::wstring nightKind;
         std::wstring weatherDay;
         std::wstring weatherNight;
+        std::wstring date;
+        std::wstring sunrise;
+        std::wstring sunset;
+        std::wstring uvIndex;
+        std::wstring precipitation;
+        std::wstring precipProbability;
+    };
+
+    struct WeatherHour
+    {
+        std::wstring time;
+        std::wstring temperature;
+        std::wstring conditionKind;
+        std::wstring precipitation;
+        std::wstring precipProbability;
     };
 
     struct WeatherState
@@ -209,6 +224,12 @@ namespace Cards
         std::wstring windScale;
         std::wstring windSpeed;
         std::wstring observedAt;
+        std::wstring precipitation;
+        std::wstring precipProbability;
+        std::wstring uvIndex;
+        std::wstring sunrise;
+        std::wstring sunset;
+        std::wstring hourlyError;
         std::wstring airQuality;
         std::wstring airLevel;
         std::wstring airCategory;
@@ -226,6 +247,9 @@ namespace Cards
         bool stale{ false };
         bool updating{ false };
         bool hasData{ false };
+        bool forecastView{ false };
+        int forecastOffset{ 0 };
+        std::vector<WeatherHour> hourly;
         std::vector<WeatherForecastDay> forecast;
         std::vector<WeatherAlert> alerts;
         long long revision{ -1 };

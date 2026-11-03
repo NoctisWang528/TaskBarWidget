@@ -72,6 +72,29 @@ namespace Cards
 
         // ---- weather primitives (128 x 128 design space) ----
 
+        D2D1_POINT_2F WeatherVisualCenter(Symbol symbol, bool night)
+        {
+            // Visible artwork centers in the design space, including rays,
+            // precipitation and shadows. Clouds occupy its lower-right area;
+            // centering the canvas alone makes forecast columns look staggered.
+            switch (symbol)
+            {
+            case Symbol::Clear: return night ? D2D1::Point2F(71, 64) : D2D1::Point2F(64, 62);
+            case Symbol::PartlyCloudy: return night ? D2D1::Point2F(75, 59.5f) : D2D1::Point2F(68, 55);
+            case Symbol::Overcast: return D2D1::Point2F(78.25f, 63);
+            case Symbol::Rain: return D2D1::Point2F(85.5f, 78.5f);
+            case Symbol::Drizzle: return D2D1::Point2F(85.5f, 78);
+            case Symbol::Snow: return D2D1::Point2F(85.5f, 79);
+            case Symbol::Sleet: return D2D1::Point2F(85.5f, 77);
+            case Symbol::Fog: return D2D1::Point2F(74, 78);
+            case Symbol::Haze: return D2D1::Point2F(64, 57);
+            case Symbol::Dust: return D2D1::Point2F(58.5f, 74);
+            case Symbol::Thunder: return D2D1::Point2F(85.5f, 81.5f);
+            case Symbol::Wind: return D2D1::Point2F(58.5f, 63);
+            default: return D2D1::Point2F(85.5f, 78.5f);
+            }
+        }
+
         void CloudLayer(ID2D1DeviceContext* context, Color color, float ox, float oy, float scale)
         {
             const auto point = [&](float x, float y)
@@ -332,7 +355,9 @@ namespace Cards
         D2D1_MATRIX_3X2_F previous{};
         context->GetTransform(&previous);
         const float scale = size / 128.0f;
-        context->SetTransform(D2D1::Matrix3x2F::Scale(scale, scale) * D2D1::Matrix3x2F::Translation(left, top) * previous);
+        const auto center = WeatherVisualCenter(symbol, night);
+        context->SetTransform(D2D1::Matrix3x2F::Translation(64 - center.x, 64 - center.y) *
+            D2D1::Matrix3x2F::Scale(scale, scale) * D2D1::Matrix3x2F::Translation(left, top) * previous);
 
         switch (symbol)
         {

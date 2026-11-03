@@ -131,27 +131,24 @@ namespace
         if (frame.kind != Kind::Weather) return "other-card";
         // These are the fixed weather fixture's actual painter rectangles, not
         // exclusion masks: every category still participates in exact comparison.
-        constexpr float leftWidth = (Layout::CardWidth - 2 * Layout::Padding) * 0.45f - 12;
-        constexpr float rightLeft = Layout::Padding + (Layout::CardWidth - 2 * Layout::Padding) * 0.45f + 12;
-        constexpr float temperatureRight = Layout::Padding + leftWidth - 48;
-        if (Inside(x, y, D2D1::RectF(temperatureRight + 6, 52, temperatureRight + 48, 94)))
+        if (Inside(x, y, D2D1::RectF(16, 51, 72, 107)))
             return "weather.hero-icon";
         for (int row = 0; row < 5; ++row)
         {
-            const float top = 24 + row * 32.0f;
-            if (Inside(x, y, D2D1::RectF(rightLeft + 33, top + 2, rightLeft + 61, top + 30)))
+            const float top = 212 + row * 22.0f;
+            if (Inside(x, y, D2D1::RectF(93, top, 116, top + 23)))
                 return "weather.forecast-icon";
-            if (Inside(x, y, D2D1::RectF(rightLeft + 94, top + 13, 337, top + 19)))
+            if (Inside(x, y, D2D1::RectF(164, top + 11, 325, top + 16)))
                 return "weather.forecast-gradient-rail";
-            if (Inside(x, y, D2D1::RectF(rightLeft, top + 7, rightLeft + 30, top + 27)) ||
-                Inside(x, y, D2D1::RectF(rightLeft + 64, top + 7, rightLeft + 90, top + 27)) ||
-                Inside(x, y, D2D1::RectF(340, top + 7, 368, top + 27)))
+            if (Inside(x, y, D2D1::RectF(16, top + 4, 92, top + 22)) ||
+                Inside(x, y, D2D1::RectF(122, top + 4, 156, top + 22)) ||
+                Inside(x, y, D2D1::RectF(333, top + 4, 368, top + 22)))
                 return "weather.forecast-text";
         }
-        if (Inside(x, y, D2D1::RectF(16, 138, 16 + leftWidth, 192))) return "weather.alert-text";
-        if (Inside(x, y, D2D1::RectF(16, 44, temperatureRight, 102))) return "weather.temperature-text";
-        if (Inside(x, y, D2D1::RectF(16, 106, 16 + leftWidth, 138))) return "weather.summary-text";
-        if (Inside(x, y, D2D1::RectF(16, 19, 16 + leftWidth - 34, 43))) return "weather.city-text";
+        if (Inside(x, y, D2D1::RectF(16, 325, 368, 340))) return "weather.alert-text";
+        if (Inside(x, y, D2D1::RectF(84, 48, 226, 106))) return "weather.temperature-text";
+        if (Inside(x, y, D2D1::RectF(16, 114, 368, 149))) return "weather.summary-text";
+        if (Inside(x, y, D2D1::RectF(16, 20, 230, 44))) return "weather.city-text";
         for (const auto& region : frame.regions.All())
             if (Inside(x, y, Bounds(region, 1))) return "weather.control";
         return "weather.other";
@@ -262,6 +259,7 @@ namespace
         snapshot.weather.temperature = L"23";
         snapshot.weather.weather = L"多云";
         snapshot.weather.conditionKind = L"cloudy";
+        snapshot.weather.forecastView = true;
         snapshot.weather.observedAt = L"2026-10-30T12:00:00+08:00";
         WeatherAlert alert;
         alert.typeName = L"大风";
@@ -330,7 +328,8 @@ namespace
     std::vector<DWRITE_LINE_METRICS> Lines(Graphics& graphics, const std::wstring& body,
         const std::string& label)
     {
-        // Same typography and column width used by Weather's wrapped alert body.
+        // Keep the original narrow wrapped-text cache regression alongside the
+        // current card's single-line warning pixel comparison.
         const float width = (Layout::CardWidth - 2 * Layout::Padding) * 0.45f - 12.0f;
         const auto format = graphics.TextFormat(L"Microsoft YaHei UI", 10, 400, DWRITE_TEXT_ALIGNMENT_LEADING, true);
         Require(format != nullptr, label + ": wrapped TextFormat unavailable");
@@ -527,7 +526,7 @@ void TestCardRenderingStability(Cards::Graphics& graphics)
         blank.weather.alerts.front().text = L" ";
         const auto withoutBody = Render(graphics, Kind::Weather, blank, dark, scale, origin);
         Require(Compare(weather, withoutBody, scale, label + " warning body presence",
-            D2D1::RectF(15, 155, 163.4f, 193)) > 20, label + ": real weather painter did not draw wrapped warning");
+            D2D1::RectF(15, 325, 369, 341)) > 20, label + ": real weather painter did not draw warning text");
 
         for (Kind kind : kinds)
         {

@@ -35,6 +35,11 @@ struct WeatherCurrent
     std::wstring WindScale;
     std::wstring WindSpeed;
     std::wstring ObservedAt;
+    std::wstring Precipitation;
+    std::wstring PrecipProbability;
+    std::wstring UVIndex;
+    std::wstring Sunrise;
+    std::wstring Sunset;
 };
 
 struct WeatherForecastDay
@@ -47,6 +52,21 @@ struct WeatherForecastDay
     std::wstring WeatherCodeNight;
     std::wstring ConditionDayKind;
     std::wstring ConditionNightKind;
+    std::wstring Date;
+    std::wstring Sunrise;
+    std::wstring Sunset;
+    std::wstring UVIndex;
+    std::wstring Precipitation;
+    std::wstring PrecipProbability;
+};
+
+struct WeatherHour
+{
+    std::wstring Time;
+    std::wstring Temperature;
+    std::wstring ConditionKind;
+    std::wstring Precipitation;
+    std::wstring PrecipProbability;
 };
 
 struct WeatherAirQuality
@@ -80,6 +100,8 @@ struct WeatherDetails
 {
     WeatherCurrent Current;
     std::vector<WeatherForecastDay> Forecast;
+    std::vector<WeatherHour> Hourly;
+    std::wstring HourlyError;
     WeatherAirQuality AirQuality;
     std::vector<WeatherAlert> Alerts;
     std::wstring AlertsError;

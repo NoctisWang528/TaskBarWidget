@@ -22,7 +22,7 @@ namespace Cards
         constexpr float HeightTraffic{ 284.0f };
         constexpr float HeightDevice{ 244.0f };   // baseline; measured by content
         constexpr float HeightMedia{ 248.0f };
-        constexpr float HeightWeather{ 280.0f };  // baseline; measured by content
+        constexpr float HeightWeather{ 388.0f };  // fixed across current/forecast views
         constexpr float HeightUpdate{ 180.0f };
         constexpr float CornerRadius{ 8.0f };
         constexpr float EdgeReserve{ 20.0f };

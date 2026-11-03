@@ -3,6 +3,7 @@
 #include "../Builtins/Weather/DataManager.h"
 #include "../Builtins/Weather/WeatherService.h"
 #include "../TrafficMonitor/PluginIniOptions.h"
+#include "../TrafficMonitor/NativeWeatherBridge.h"
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -16,7 +17,9 @@ namespace {
     std::atomic<int> qweatherCode{}, alertMode{}, chinaAlertMode{};
     std::wstring lastAlertUrl;
     std::wstring lastAirUrl, errorType, failurePath, transportHost{L"test.qweatherapi.com"};
-    int airMode{}, requestCount{}, geoCount{}, failureHttp{};
+    int airMode{}, hourlyMode{}, dailyMode{}, requestCount{}, geoCount{}, failureHttp{};
+    bool chinaWeek{};
+    std::wstring lastHourlyUrl, lastDailyUrl;
     bool transportFailure{};
     bool interruptedBody{};
     HANDLE requestEntered{}, releaseRequest{};
@@ -50,8 +53,48 @@ namespace {
                 if (alertMode == 6) content = LR"({"code":"200","location":[{"id":"101010100","lat":"NaN","lon":"181"}]})";
                 if (alertMode == 8) content = LR"({"code":"200","location":[{"id":"unrelated","lat":"32.05","lon":"118.79"}]})";
             }
-            else if (url.find(L"/v7/weather/now") != std::wstring::npos) content = LR"({"code":"200","now":{"temp":"23","feelsLike":"22","obsTime":"bad","text":"晴","icon":"100"}})";
-            else if (url.find(L"/v7/weather/3d") != std::wstring::npos) content = LR"({"code":"200","daily":[{"tempMin":"19","tempMax":"25"},{"tempMin":"20","tempMax":"26"},{"tempMin":"21","tempMax":"27"}]})";
+            else if (url.find(L"/v7/weather/now") != std::wstring::npos) content = LR"({"code":"200","now":{"temp":"23","feelsLike":"22","obsTime":"2026-11-03T10:00+08:00","text":"晴","icon":"100","precip":"0"}})";
+            else if (url.find(L"/v7/weather/7d") != std::wstring::npos || url.find(L"/v7/weather/3d") != std::wstring::npos) {
+                lastDailyUrl = url;
+                const bool week = url.find(L"/7d") != std::wstring::npos;
+                if (dailyMode == 1 && week) {
+                    WeatherCCommon::SetTestResponse(403, 0);
+                    content = LR"({"error":{"type":"https://dev.qweather.com/docs/resource/error-code/#forbidden"}})";
+                    return false;
+                }
+                if (dailyMode == 2) content = LR"({"code":"200","daily":[{"fxDate":"2026-11-03","tempMin":"99"}]})";
+                else {
+                    content = L"{\"code\":\"200\",\"daily\":[";
+                    for (int day = 0; day < (week ? 7 : 3); ++day) {
+                        if (day) content += L",";
+                        const auto date = dailyMode == 4 && day == 1 ? L"2026-02-30" : L"2026-11-0" + std::to_wstring(day + 3);
+                        content += L"{\"fxDate\":\"" + date + L"\",\"tempMin\":\"19\",\"tempMax\":\"25\",\"iconDay\":\"100\",\"iconNight\":\"150\",\"textDay\":\"Clear\",\"textNight\":\"Clear\",\"sunrise\":";
+                        if (dailyMode == 3) content += L"null,\"sunset\":\"25:80\",\"uvIndex\":\"NaN\",\"precip\":\"-1\"}";
+                        else content += L"\"06:22\",\"sunset\":\"17:15\",\"uvIndex\":\"3\",\"precip\":\"0.0\"}";
+                    }
+                    content += L"]}";
+                }
+            }
+            else if (url.find(L"/v7/weather/24h") != std::wstring::npos) {
+                lastHourlyUrl = url;
+                if (hourlyMode == 1) { WeatherCCommon::SetTestResponse(503, 0); return false; }
+                if (hourlyMode == 2) content = LR"({"code":"200","hourly":[]})";
+                else {
+                    content = L"{\"code\":\"200\",\"hourly\":[";
+                    for (int index = 0; index < 24; ++index) {
+                        if (index) content += L",";
+                        const int hour = (10 + index) % 24;
+                        const auto time = (index < 14 ? L"2026-11-03T" : L"2026-11-04T") +
+                            std::wstring(hour < 10 ? L"0" : L"") + std::to_wstring(hour) + L":00+08:00";
+                        content += L"{\"fxTime\":\"" + time + L"\",\"temp\":\"-2\",\"icon\":";
+                        content += hourlyMode == 3 && index == 1 ? L"null" : L"\"101\"";
+                        if (hourlyMode == 4) content += L",\"precip\":null,\"pop\":null}";
+                        else if (hourlyMode == 5) content += L",\"precip\":\"-1\",\"pop\":\"101\"}";
+                        else content += L",\"precip\":\"0.0\",\"pop\":\"0\"}";
+                    }
+                    content += L"]}";
+                }
+            }
             else if (url.find(L"/airquality/v1/current/") != std::wstring::npos) {
                 lastAirUrl = url;
                 if (airMode == 7) {
@@ -97,6 +140,12 @@ namespace {
         if (url.find(L"/weather/") != std::wstring::npos) {
             if (optionalFailure) return false;
             content = LR"(<ul class="t clearfix"><li class="sky"><big class="png40 n07"></big><p title="小雨" class="wea">小雨</p><p class="tem"><i>20℃</i></p></li><li class="sky"><big class="png40 d01"></big><big class="png40 n07"></big><p title="多云转小雨" class="wea">多云转小雨</p><p class="tem"><span>29℃</span>/<i>21℃</i></p></li><li class="sky"><big class="png40 d00"></big><p class="wea">晴</p><p class="tem"><span>26℃</span>/<i>18℃</i></p></li></ul>)";
+            if (chinaWeek) {
+                const auto end = content.find(L"</ul>");
+                std::wstring rest;
+                for (int day = 4; day <= 7; ++day) rest += L"<li class=\"sky\"><h1>" + std::to_wstring(day) + L"日（周三）</h1><big class=\"png40 d00\"></big><p class=\"wea\">晴</p><p class=\"tem\"><span>26℃</span>/<i>18℃</i></p></li>";
+                content.insert(end, rest);
+            }
             return true;
         }
         if (chinaAlertMode == 1) return false;
@@ -125,6 +174,7 @@ int wmain(int argc, wchar_t** argv)
         Require(argc >= 2, "isolated fixture directory required");
         Require(AfxWinInit(GetModuleHandleW(nullptr), nullptr, GetCommandLineW(), SW_HIDE), "MFC init failed");
         AfxSetResourceHandle(GetModuleHandleW(nullptr));
+        winrt::init_apartment(winrt::apartment_type::single_threaded);
         const std::filesystem::path directory(argv[1]); std::filesystem::create_directories(directory);
         const auto configDirectory = directory / L"config";
         const auto ini = configDirectory / L"weather.ini";
@@ -176,7 +226,15 @@ int wmain(int argc, wchar_t** argv)
             result.status.details.Forecast.size() == 3 && !result.status.details.Current.ConditionKind.empty(),
             "structured weather snapshot");
         Require(data.m_api_wccs->GetTemprature(EWeatherInfoType::WEATHER_TOMMROW) == L"21℃~29℃" && data.m_api_wccs->GetWeatherText(EWeatherInfoType::WEATHER_TOMMROW) == L"多云转小雨" && data.m_api_wccs->GetTemprature(EWeatherInfoType::WEATHER_DAY_AFTER_TOMMROW) == L"18℃~26℃", "current forecast HTML");
-        optionalFailure = true; result = Wait(service.StartRefresh()); Require(result.state == L"success", "optional failure discarded realtime"); optionalFailure = false;
+        Require(result.status.details.Hourly.empty() && result.status.details.Current.Precipitation.empty() &&
+            result.status.details.Current.UVIndex.empty() && result.status.details.Current.Sunrise.empty() &&
+            result.status.details.Forecast[0].PrecipProbability.empty(), "China source invented unsupported weather fields");
+        chinaWeek = true; result = Wait(service.StartRefresh());
+        Require(result.state == L"success" && result.status.details.Forecast.size() == 7 &&
+            result.status.details.Forecast.back().Date == L"7日（周三）", "China page week or source date label lost");
+        optionalFailure = true; result = Wait(service.StartRefresh());
+        Require(result.state == L"success" && result.status.details.Forecast.size() == 7, "optional failure discarded realtime/week cache");
+        optionalFailure = false; chinaWeek = false;
         badRealtime = true; city.cityId = L"101010100"; city.cityName = L"北京"; result = Wait(service.StartConfigure(city));
         Require(result.state == L"error" && result.status.temperature == L"22.6℃" && result.status.lastSuccessCityId == L"101190101" && result.message.find(L"南京") != std::wstring::npos && result.message.find(L"城市设置已保存") != std::wstring::npos, "failed city switch mislabeled retained cache"); badRealtime = false;
         blockRealtime = true; auto pending = service.StartRefresh(); Require(WaitForSingleObject(requestEntered, 2000) == WAIT_OBJECT_0, "request did not enter transport");
@@ -264,6 +322,70 @@ int wmain(int argc, wchar_t** argv)
             result.status.details.AirQuality.PM2p5Unit == L"ug/m3" && result.status.details.AirQuality.PM10Unit == L"ug/m3" &&
             result.status.details.AirQuality.PublishTime.empty() && result.status.details.AirQuality.Attribution == L"Air fixture attribution" &&
             lastAirUrl.find(L"/airquality/v1/current/32.06/118.80") != std::wstring::npos, "v1 air mapping, zero concentration or invented time");
+        Require(lastDailyUrl.find(L"/v7/weather/7d?") != std::wstring::npos && result.status.details.Forecast.size() == 7 &&
+            result.status.details.Forecast[0].Date == L"2026-11-03" && result.status.details.Forecast.back().Date == L"2026-11-09" &&
+            result.status.details.Forecast[0].Sunrise == L"06:22" && result.status.details.Forecast[0].Sunset == L"17:15" &&
+            result.status.details.Forecast[0].UVIndex == L"3" && result.status.details.Forecast[0].Precipitation == L"0.0" &&
+            result.status.details.Forecast[0].PrecipProbability.empty(), "seven-day source dates/sun/UV/precipitation mapping");
+        Require(lastHourlyUrl.find(L"/v7/weather/24h?") != std::wstring::npos && result.status.details.Hourly.size() == 24 &&
+            result.status.details.Hourly[14].Time == L"2026-11-04T00:00+08:00" && result.status.details.Hourly[0].Temperature == L"-2" &&
+            result.status.details.Hourly[0].ConditionKind == L"partly-cloudy" && result.status.details.Hourly[0].Precipitation == L"0.0" &&
+            result.status.details.Hourly[0].PrecipProbability == L"0" && result.status.details.HourlyError.empty(), "hourly date boundary/condition/zero mapping");
+        Require(result.status.details.Current.Precipitation == L"0" && result.status.details.Current.Sunrise == L"06:22" &&
+            result.status.details.Current.ObservedAt.starts_with(L"2026-11-03T") &&
+            result.status.details.Current.Sunset == L"17:15" && result.status.details.Current.UVIndex == L"3" &&
+            result.status.details.Current.PrecipProbability.empty(), "current available fields or invented current probability");
+        {
+            const auto bridge = NativeWeatherBridge::Details(result.status.details);
+            const auto hour = bridge.GetNamedArray(L"hourly").GetObjectAt(14);
+            const auto day = bridge.GetNamedArray(L"forecast").GetObjectAt(0);
+            Require(hour.GetNamedString(L"time") == L"2026-11-04T00:00+08:00" && hour.GetNamedString(L"temperature") == L"-2" &&
+                hour.GetNamedString(L"conditionKind") == L"partly-cloudy" && hour.GetNamedString(L"precipProbability") == L"0" &&
+                day.GetNamedString(L"date") == L"2026-11-03" && day.GetNamedString(L"sunrise") == L"06:22" &&
+                day.GetNamedString(L"uvIndex") == L"3" && day.GetNamedString(L"precipitation") == L"0.0" &&
+                day.GetNamedString(L"precipProbability").empty() && bridge.GetNamedObject(L"current").GetNamedString(L"sunset") == L"17:15",
+                "weather bridge lowerCamel schema contract");
+        }
+        for (int mode : {1, 2, 3}) {
+            hourlyMode = mode; result = Wait(service.StartRefresh());
+            Require(result.state == L"success" && !result.status.stale && result.status.details.Current.Temperature == L"23" &&
+                result.status.details.Forecast.size() == 7 && result.status.details.Hourly.size() == 24 &&
+                !result.status.details.HourlyError.empty(), "optional failed/malformed hourly discarded valid current/daily/hourly");
+        }
+        for (int mode : {4, 5}) {
+            hourlyMode = mode; result = Wait(service.StartRefresh());
+            Require(result.state == L"success" && result.status.details.HourlyError.empty() &&
+                result.status.details.Hourly[0].Precipitation.empty() && result.status.details.Hourly[0].PrecipProbability.empty(),
+                "null/invalid optional hourly values became data or failed valid forecast");
+        }
+        hourlyMode = 0; result = Wait(service.StartRefresh());
+        Require(result.status.details.HourlyError.empty() && result.status.details.Hourly[0].PrecipProbability == L"0", "hourly recovery kept error or lost zero");
+        failureHttp = 401; failurePath = L"/v7/weather/24h";
+        errorType = L"https://dev.qweather.com/docs/resource/error-code/#unauthorized";
+        result = Wait(service.StartRefresh());
+        Require(result.state == L"success" && result.status.details.Forecast.size() == 7 && result.status.details.Hourly.size() == 24 &&
+            result.status.details.HourlyError.find(L"401") != std::wstring::npos && result.status.details.HourlyError.find(L"fixture-key") == std::wstring::npos,
+            "optional hourly account failure discarded valid core data or leaked a secret");
+        failureHttp = 0; failurePath.clear(); result = Wait(service.StartRefresh());
+        for (int mode : {2, 4}) {
+            dailyMode = mode; result = Wait(service.StartRefresh());
+            Require(result.state == L"success" && result.status.details.Forecast.size() == 7 &&
+                result.status.details.Forecast[0].TemperatureMax == L"25" && result.status.details.Forecast[1].Date == L"2026-11-04" &&
+                result.status.details.Hourly.size() == 24, "malformed daily/invalid date replaced cache or blocked hourly/current");
+        }
+        dailyMode = 1; result = Wait(service.StartRefresh());
+        Require(result.state == L"success" && result.status.details.Forecast.size() == 3 &&
+            lastDailyUrl.find(L"/v7/weather/3d?") != std::wstring::npos, "7d-only permission failure did not preserve existing supported 3d endpoint");
+        dailyMode = 3; result = Wait(service.StartRefresh());
+        Require(result.state == L"success" && result.status.details.Forecast.size() == 7 &&
+            result.status.details.Forecast[0].Sunrise.empty() && result.status.details.Forecast[0].Sunset.empty() &&
+            result.status.details.Forecast[0].UVIndex.empty() && result.status.details.Forecast[0].Precipitation.empty() &&
+            result.status.details.Current.Sunrise.empty() && result.status.details.Current.UVIndex.empty(), "null/polar/malformed optional daily values invented data");
+        dailyMode = 0; result = Wait(service.StartRefresh());
+        hourlyMode = 1;
+        Require(!data.m_api_hfw->QueryHourlyWeather(L"101010100") && data.m_api_hfw->GetWeatherDetails()->Hourly.empty() &&
+            data.m_api_hfw->GetWeatherDetails()->HourlyError.find(L"无可用的上次信息") != std::wstring::npos, "hourly city switch reused another city's cache");
+        hourlyMode = 0;
         geoCount = 0; result = Wait(service.StartRefresh());
         Require(geoCount == 1, "air and alerts did not share one Geo lookup");
         result = Wait(service.StartRefresh()); Require(geoCount == 2, "Geo coordinates persisted across refreshes");
@@ -321,7 +443,7 @@ int wmain(int argc, wchar_t** argv)
             Require(requestCount > 1 && result.message.find(L"fixture-key") == std::wstring::npos,
                 "endpoint-only failure blocked independent requests or leaked body");
         }
-        failureHttp = 403; errorType = typePrefix + L"security-restriction"; failurePath = L"/v7/weather/3d"; requestCount = 0;
+        failureHttp = 403; errorType = typePrefix + L"security-restriction"; failurePath = L"/v7/weather/7d"; requestCount = 0;
         result = Wait(service.StartRefresh());
         Require(result.state == L"error" && result.status.stale && requestCount == 2 && result.message.find(L"安全限制") != std::wstring::npos,
             "forecast shared failure was hidden by successful current weather");

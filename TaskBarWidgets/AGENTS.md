@@ -36,7 +36,7 @@ Use existing proven services before adding abstractions. Preserve C++/C# convent
 
 Built-in providers/data managers must initialize after MFC through function-local singletons, never pre-entry-point globals. Native UI WinRT initializes once as STA in InitInstance; balance only successful initialization. Built-in resources belong to the EXE.
 
-Detach D2D targets before resizing swap chains even when caches retain the context. Mode transitions must not change the taskbar HWND's layering or hit-testing. `CardHost` is the only owner of card-group geometry; show/hide animations move composition visuals only and must never move card HWND bounds. Cross-thread card state is immutable snapshots plus explicit commands; the card thread never touches MFC objects or hardware managers. Elevated in-window module dragging uses pointer capture, not system OLE/DataPackage drag-drop.
+Detach D2D targets before resizing swap chains even when caches retain the context. Mode transitions must not change the taskbar HWND's layering or hit-testing. `CardHost` is the only owner of card-group geometry; show/hide animations move all card HWNDs together by one shared vertical offset, including material and borders. Commit group bounds without repainting content; menus retain their own Composition animation. Coalesce DPI relayout after a position transaction, and respect reduced motion/high contrast. Cross-thread card state is immutable snapshots plus explicit commands; the card thread never touches MFC objects or hardware managers. Elevated in-window module dragging uses pointer capture, not system OLE/DataPackage drag-drop.
 
 ## Builds and validation
 

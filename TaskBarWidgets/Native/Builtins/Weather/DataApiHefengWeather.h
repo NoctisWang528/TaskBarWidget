@@ -27,12 +27,15 @@ public:
         std::wstring Temperature;
         std::wstring TemperatureFeelsLike;
         std::wstring UpdateTime;
+        std::wstring ObservedDate;
+        std::wstring ObservedAt;
         std::wstring WeatherText;
         std::wstring WeatherCode;
         std::wstring WindDirection;
         std::wstring WindScale;
         std::wstring WindSpeed;
         std::wstring Humidity;
+        std::wstring Precipitation;
     };
 
     using RealtimeAirQuality = WeatherAirQuality;
@@ -45,6 +48,10 @@ public:
         std::wstring WeatherNight;
         std::wstring WeatherCodeDay;
         std::wstring WeatherCodeNight;
+        std::wstring Date;
+        std::wstring Sunrise;
+        std::wstring Sunset;
+        std::wstring Precipitation;
         std::wstring UVIndex;
         std::wstring Humidity;
     };
@@ -76,6 +83,7 @@ public:
 
     bool QueryRealtimeWeather(const std::wstring &query);
     bool QueryForecastWeather(const std::wstring &query);
+    bool QueryHourlyWeather(const std::wstring& query);
     bool QueryRealtimeAirQuality(const std::wstring &query);
     bool QueryWeatherAlerts(const std::wstring &query);
 
@@ -87,6 +95,9 @@ protected:
     std::wstring _coordinates, _coordinateError, _airCity;
     RealtimeWeather _realtimeWeather;
     ForcastWeather _forcastWeatherTD, _forcastWeatherTM, _forcastWeatherDATM;
+    std::vector<ForcastWeather> _forecast;
+    std::vector<WeatherHour> _hourly;
+    std::wstring _hourlyError, _hourlyCity;
     RealtimeAirQuality _realtimeAirQuality;
     WeatherAlertList _weatherAlerts;
     std::wstring _alertsError, _alertsCity, _alertsAttribution;
