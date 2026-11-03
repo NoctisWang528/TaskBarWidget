@@ -5,7 +5,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Hosting;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.Foundation;
@@ -35,13 +35,18 @@ internal sealed class PointerReorder
     private readonly Border _insertion;
     private readonly Queue<string> _entries = new();
     private readonly HashSet<FrameworkElement> _previewRows = [];
-    private readonly HashSet<FrameworkElement> _touchedRows = [];
-    private readonly Dictionary<FrameworkElement, Vector3> _baseOffsets = [];
+    private readonly Dictionary<FrameworkElement, RowMotion> _rowMotions = [];
     private readonly bool _animationsEnabled;
     private Gesture? _gesture;
     private FrameworkElement? _previewSource;
     private double _sourceOpacity = 1;
     private long _sequence;
+    private sealed class RowMotion(Vector3 origin, Vector3KeyFrameAnimation? animation)
+    {
+        public Vector3 Origin { get; } = origin;
+        public Vector3 Target { get; set; } = origin;
+        public Vector3KeyFrameAnimation? Animation { get; } = animation;
+    }
     private sealed class Gesture(long sequence, Button source, Pointer pointer, Point origin, Action? tap, Action<Point> move, Action<Point> drop)
     {
         public long Sequence { get; } = sequence;
@@ -84,6 +89,7 @@ internal sealed class PointerReorder
         root.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, args) => { if (args.Key == VirtualKey.Escape && _gesture is not null) { Cancel("escape"); args.Handled = true; } }), true);
     }
     public bool IsActive => _gesture is not null;
+    internal int RowAnimationStarts { get; private set; }
     internal string[] Entries => _entries.ToArray();
     public void Record(string stage, string detail = "")
     {
@@ -177,19 +183,25 @@ internal sealed class PointerReorder
     public void ShowVerticalGap(FrameworkElement anchor, bool after, double inset = 6)
     {
         if (anchor.ActualWidth <= 0 || anchor.ActualHeight <= 0) return;
-        var origin = anchor.TransformToVisual(_root).TransformPoint(new Point(0, 0));
+        var bounds = LayoutBounds(anchor, _root);
         ShowInsertion(new Rect(
-            origin.X + inset,
-            origin.Y + (after ? anchor.ActualHeight - 1 : -2),
+            bounds.X + inset,
+            bounds.Y + (after ? anchor.ActualHeight - 1 : -2),
             Math.Max(16, anchor.ActualWidth - inset * 2),
             3));
     }
+    // Use arranged row positions, not the animated preview, when resolving gaps.
+    // Transforming the parent also keeps these coordinates current while scrolling.
+    internal static Rect LayoutBounds(FrameworkElement row, UIElement root)
+    {
+        var slot = LayoutInformation.GetLayoutSlot(row);
+        var parent = (UIElement)VisualTreeHelper.GetParent(row);
+        var origin = parent.TransformToVisual(root).TransformPoint(new Point(slot.X, slot.Y));
+        return new Rect(origin.X, origin.Y, row.ActualWidth, row.ActualHeight);
+    }
     public void HideInsertion() => _insertion.Visibility = Visibility.Collapsed;
-    internal Rect InsertionBounds => new(
-        Canvas.GetLeft(_insertion),
-        Canvas.GetTop(_insertion),
-        _insertion.ActualWidth > 0 ? _insertion.ActualWidth : _insertion.Width,
-        _insertion.ActualHeight > 0 ? _insertion.ActualHeight : _insertion.Height);
+    internal Rect InsertionBounds => _insertion.TransformToVisual(_root).TransformBounds(
+        new Rect(0, 0, _insertion.Width, _insertion.Height));
     internal Visibility InsertionVisibility => _insertion.Visibility;
 
     internal static FrameworkElement CreateDragGhost(string glyph, string title, string subtitle)
@@ -256,32 +268,44 @@ internal sealed class PointerReorder
         foreach (var (row, offset) in offsets)
         {
             _previewRows.Add(row);
-            _touchedRows.Add(row);
             AnimateRowOffset(row, offset, vertical);
         }
     }
 
     private void AnimateRowOffset(FrameworkElement row, double offset, bool vertical)
     {
-        var visual = ElementCompositionPreview.GetElementVisual(row);
-        if (!_baseOffsets.TryGetValue(row, out var baseOffset))
+        if (!_rowMotions.TryGetValue(row, out var motion))
         {
-            baseOffset = visual.Offset;
-            _baseOffsets[row] = baseOffset;
+            Vector3KeyFrameAnimation? animation = null;
+            if (_animationsEnabled)
+            {
+                var compositor = CompositionTarget.GetCompositorForCurrentThread();
+                animation = compositor.CreateVector3KeyFrameAnimation();
+                animation.Target = nameof(UIElement.Translation);
+                animation.Duration = TimeSpan.FromMilliseconds(140);
+                animation.InsertExpressionKeyFrame(0, "this.StartingValue");
+            }
+            motion = new RowMotion(row.Translation, animation);
+            _rowMotions.Add(row, motion);
         }
-        var target = baseOffset + (vertical ? new Vector3(0, (float)offset, 0) : new Vector3((float)offset, 0, 0));
-        visual.StopAnimation(nameof(Visual.Offset));
-        if (!_animationsEnabled)
+        var target = motion.Origin + (vertical ? new Vector3(0, (float)offset, 0) : new Vector3((float)offset, 0, 0));
+        if (target == motion.Target) return; // Pointer moves and scroll ticks must not restart an unchanged animation.
+        motion.Target = target;
+        if (motion.Animation is null)
         {
-            visual.Offset = target;
+            row.Translation = target;
             return;
         }
-        var animation = visual.Compositor.CreateVector3KeyFrameAnimation();
-        animation.Duration = TimeSpan.FromMilliseconds(140);
-        animation.InsertKeyFrame(0, visual.Offset);
-        animation.InsertKeyFrame(1, target, visual.Compositor.CreateCubicBezierEasingFunction(
+        motion.Animation.InsertKeyFrame(1, target, motion.Animation.Compositor.CreateCubicBezierEasingFunction(
             new Vector2(.16f, 1), new Vector2(.3f, 1)));
-        visual.StartAnimation(nameof(Visual.Offset), animation);
+        row.StartAnimation(motion.Animation);
+        RowAnimationStarts++;
+    }
+
+    public void ClearRowPreview()
+    {
+        foreach (var row in _previewRows) AnimateRowOffset(row, 0, true);
+        _previewRows.Clear();
     }
 
     public void Cancel(string reason = "page-or-operation-change")
@@ -293,10 +317,13 @@ internal sealed class PointerReorder
     {
         var gesture = _gesture; _gesture = null;
         _scrollTick.Stop(); _ghost.Visibility = _insertion.Visibility = Visibility.Collapsed;
-        foreach (var row in _touchedRows) AnimateRowOffset(row, 0, true);
+        foreach (var (row, motion) in _rowMotions)
+        {
+            if (motion.Animation is not null) row.StopAnimation(motion.Animation);
+            row.Translation = motion.Origin;
+        }
         _previewRows.Clear();
-        _touchedRows.Clear();
-        _baseOffsets.Clear();
+        _rowMotions.Clear();
         if (_previewSource is not null) _previewSource.Opacity = _sourceOpacity;
         _previewSource = null;
         _sourceOpacity = 1;

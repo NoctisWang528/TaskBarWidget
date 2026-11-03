@@ -35,9 +35,6 @@ public sealed partial class SettingsWindow
             : "系统当前使用纯色回退（例如关闭了透明效果），调节值保留，材质恢复后生效。";
         _micaStatus.Text = $"当前预览：{theme}模式。另一主题的参数需切换界面主题后预览。\n{detail}";
     }
-    private int _cardOrderDragColumn = -1;
-    private int _cardOrderDragSlot = -1;
-    private string? _cardOrderDragSourceId;
     private List<string> QuickCardOrderList()
     {
         var value = _media.Get("quickCardOrder") as JsonArray;
@@ -424,9 +421,6 @@ public sealed partial class SettingsWindow
     private bool StartQuickCardPointerDrag(PointerDragButton source, string id, PointerRoutedEventArgs args, Border? surface)
     {
         if (_busy) return false;
-        _cardOrderDragColumn = -1;
-        _cardOrderDragSlot = -1;
-        _cardOrderDragSourceId = id;
         return _pointerReorder?.Begin(source, args, null, point => MoveQuickCardDrag(id, point),
             point => FinishQuickCardDrag(id, point), surface,
             PointerReorder.CreateDragGhost(
@@ -435,37 +429,40 @@ public sealed partial class SettingsWindow
                 "快捷卡片")) == true;
     }
 
-    private void MoveQuickCardDrag(string id, Windows.Foundation.Point point)
+    private (Border Cell, int Column, int Gap)? FindQuickCardDropTarget(Windows.Foundation.Point point)
     {
-        Border? target = null;
-        var targetColumn = -1;
-        var targetSlot = -1;
-        var lowerHalf = false;
+        if (_pageScroll is null || !ContainsPoint(_pageScroll, point)) return null;
+        var (left, right) = QuickCardLayout();
         foreach (var (cell, column, slot) in _cardOrderCells)
         {
-            var origin = cell.TransformToVisual(_navigation).TransformPoint(new Windows.Foundation.Point(0, 0));
-            if (point.X >= origin.X && point.X <= origin.X + cell.ActualWidth && point.Y >= origin.Y - 4 && point.Y <= origin.Y + cell.ActualHeight + 4)
+            var bounds = PointerReorder.LayoutBounds(cell, _navigation);
+            if (point.X >= bounds.X && point.X <= bounds.Right && point.Y >= bounds.Y - 4 && point.Y <= bounds.Bottom + 4)
             {
-                target = cell;
-                targetColumn = column;
-                targetSlot = slot;
-                lowerHalf = point.Y > origin.Y + cell.ActualHeight / 2;
-                break;
+                return (cell, column, CardTargetGap(slot, column == 0 ? left.Count : right.Count,
+                    point.Y > bounds.Y + bounds.Height / 2));
             }
         }
+        return null;
+    }
+
+    private void MoveQuickCardDrag(string id, Windows.Foundation.Point point)
+    {
+        if (_busy) { CancelModulePointerDrag(); return; }
+        AutoScrollDrag(point);
+        var target = FindQuickCardDropTarget(point);
         foreach (var (cell, _, _) in _cardOrderCells)
         {
-            cell.BorderBrush = cell == target ? new Microsoft.UI.Xaml.Media.SolidColorBrush(AccentColor()) : null;
+            cell.ClearValue(Border.BorderBrushProperty);
             cell.BorderThickness = new Thickness(1);
+            if (cell.Tag is string tag && tag.StartsWith("quick-card-empty:", StringComparison.Ordinal)) cell.Opacity = 1;
         }
         _pointerReorder?.HideInsertion();
-        var targetGap = -1;
-        if (_cardOrderDragSourceId is { } sourceId)
+        if (target is { Column: var targetColumn, Gap: var targetGap })
         {
             var (left, right) = QuickCardLayout();
-            var sourceColumn = QuickCardColumnValues().GetValueOrDefault(sourceId);
+            var sourceColumn = QuickCardColumnValues().GetValueOrDefault(id);
             var sourceIds = sourceColumn == 0 ? left : right;
-            var targetIds = targetColumn == 0 ? left : targetColumn == 1 ? right : [];
+            var targetIds = targetColumn == 0 ? left : right;
             var sourceRows = _cardOrderCells
                 .Where(cell => cell.Column == sourceColumn && cell.Slot < sourceIds.Count)
                 .OrderBy(cell => cell.Slot)
@@ -476,37 +473,34 @@ public sealed partial class SettingsWindow
                 .OrderBy(cell => cell.Slot)
                 .Select(cell => (FrameworkElement)cell.Cell)
                 .ToArray();
-            var sourceIndex = sourceIds.IndexOf(sourceId);
-            if (sourceIndex >= 0 && targetColumn >= 0)
+            var sourceIndex = sourceIds.IndexOf(id);
+            if (sourceIndex >= 0)
             {
-                targetGap = CardTargetGap(targetSlot, targetIds.Count, lowerHalf);
                 var extent = sourceRows[sourceIndex].ActualHeight + 10;
                 if (sourceColumn == targetColumn)
                     _pointerReorder?.ShowRowPreview(sourceRows, sourceIndex, targetGap, extent);
                 else
                     _pointerReorder?.ShowCrossLanePreview(sourceRows, sourceIndex, targetRows, targetGap, extent);
-                if (targetSlot >= targetIds.Count && target is not null)
-                {
-                    var origin = target.TransformToVisual(_navigation).TransformPoint(new Windows.Foundation.Point(0, 0));
-                    _pointerReorder?.ShowDropZone(new Windows.Foundation.Rect(origin.X, origin.Y, target.ActualWidth, target.ActualHeight));
-                }
-                else if (targetRows.Length > 0)
-                {
-                    if (targetGap < targetRows.Length) _pointerReorder?.ShowVerticalGap(targetRows[targetGap], false);
-                    else _pointerReorder?.ShowVerticalGap(targetRows[^1], true);
-                }
+                // A shifted last row occupies the old empty tile. Hide that tile
+                // so its text/background cannot show through the moving card.
+                if (sourceColumn != targetColumn && targetGap < targetIds.Count)
+                    _cardOrderCells.Single(cell => cell.Column == targetColumn && cell.Slot == targetIds.Count).Cell.Opacity = 0;
+                // The highlighted vacancy is the final slot after removing the
+                // dragged item, while pointer hits retain pre-removal gap semantics.
+                var finalSlot = targetGap - (sourceColumn == targetColumn && sourceIndex < targetGap ? 1 : 0);
+                var anchor = _cardOrderCells.Single(cell => cell.Column == targetColumn && cell.Slot == finalSlot).Cell;
+                _pointerReorder?.ShowDropZone(PointerReorder.LayoutBounds(anchor, _navigation));
             }
         }
-        _cardOrderDragColumn = targetColumn;
-        _cardOrderDragSlot = targetGap;
+        else _pointerReorder?.ClearRowPreview();
         _saveStatus.Text = target is null ? "拖到左/右任意格子上调整布局；Esc 取消。" : "释放到高亮格子以应用新的卡片布局。";
     }
 
     private void FinishQuickCardDrag(string id, Windows.Foundation.Point point)
     {
-        if (_cardOrderDragColumn is not (0 or 1) || _cardOrderDragSlot < 0) return;
+        if (_busy || FindQuickCardDropTarget(point) is not { Column: var column, Gap: var gap }) return;
         var (left, right) = QuickCardLayout();
-        var moved = MoveQuickCardToGap(left, right, id, _cardOrderDragColumn, _cardOrderDragSlot);
+        var moved = MoveQuickCardToGap(left, right, id, column, gap);
         if (moved.Left.SequenceEqual(left) && moved.Right.SequenceEqual(right)) return;
         SetQuickCardLayout(moved.Left, moved.Right);
     }
@@ -549,9 +543,9 @@ public sealed partial class SettingsWindow
     internal int ProbeQuickCardDrop(string id, int targetColumn, int targetGap)
     {
         var before = PageRenderCount;
-        _cardOrderDragColumn = targetColumn;
-        _cardOrderDragSlot = targetGap;
-        FinishQuickCardDrag(id, new Windows.Foundation.Point());
+        var cell = _cardOrderCells.Single(item => item.Column == targetColumn && item.Slot == targetGap).Cell;
+        var bounds = PointerReorder.LayoutBounds(cell, _navigation);
+        FinishQuickCardDrag(id, new Windows.Foundation.Point(bounds.X + bounds.Width / 2, bounds.Y + 4));
         return PageRenderCount - before;
     }
 

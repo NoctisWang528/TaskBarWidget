@@ -408,8 +408,8 @@ public sealed partial class SettingsWindow
         if (_sourceOrderSurface is null || _pageScroll is null || !ContainsPoint(_pageScroll, point) || !ContainsPoint(_sourceOrderSurface, point)) return null;
         for (var index = 0; index < _sourceRows.Count; index++) {
             var row = _sourceRows[index].Surface;
-            var origin = row.TransformToVisual(_navigation).TransformPoint(new Point(0, 0));
-            if (point.Y < origin.Y + row.ActualHeight / 2) return index;
+            var bounds = PointerReorder.LayoutBounds(row, _navigation);
+            if (point.Y < bounds.Y + bounds.Height / 2) return index;
         }
         return _sourceRows.Count;
     }
@@ -422,6 +422,7 @@ public sealed partial class SettingsWindow
         if (SourceDropGap(point) is not { } gap)
         {
             _pointerReorder?.HideInsertion();
+            _pointerReorder?.ClearRowPreview();
             _saveStatus.Text = "将来源拖到播放器列表内后释放；Esc 取消。";
             return;
         }
@@ -431,7 +432,8 @@ public sealed partial class SettingsWindow
             _pointerReorder?.ShowRowPreview(rows, sourceIndex, gap, rows[sourceIndex].ActualHeight + 8);
         if (rows.Length > 0)
         {
-            if (gap < rows.Length) _pointerReorder?.ShowVerticalGap(rows[gap], false);
+            var finalGap = gap - (sourceIndex >= 0 && sourceIndex < gap ? 1 : 0);
+            if (finalGap < rows.Length) _pointerReorder?.ShowVerticalGap(rows[finalGap], false);
             else _pointerReorder?.ShowVerticalGap(rows[^1], true);
         }
         if (_sourceRows.Count > 0) {

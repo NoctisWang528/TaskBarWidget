@@ -22,7 +22,9 @@ public sealed partial class SettingsWindow
     private void InitializeModuleGestures()
     {
         if (!_root.Children.Contains(_titleBar)) _root.Children.Add(_titleBar);
-        _root.Children.Add(_navigation); Grid.SetRow(_navigation, 1); _root.Children.Add(_dragOverlay);
+        _root.Children.Add(_navigation); Grid.SetRow(_navigation, 1);
+        Grid.SetRow(_dragOverlay, 1); // Pointer coordinates are relative to navigation, below the title bar.
+        _root.Children.Add(_dragOverlay);
         _pointerReorder = new PointerReorder(_navigation, _dragOverlay, ResetReorderFeedback);
         Activated += (_, args) => { if (args.WindowActivationState == WindowActivationState.Deactivated) _pointerReorder.Cancel("deactivated"); };
     }
@@ -141,7 +143,10 @@ public sealed partial class SettingsWindow
     private void ResetReorderFeedback()
     {
         foreach (var target in _moduleDropTargets) { target.Surface.ClearValue(Border.BorderBrushProperty); target.Surface.BorderThickness = new Thickness(1); }
-        foreach (var (cell, _, _) in _cardOrderCells) { cell.ClearValue(Border.BorderBrushProperty); cell.BorderThickness = new Thickness(1); }
+        foreach (var (cell, _, _) in _cardOrderCells) {
+            cell.ClearValue(Border.BorderBrushProperty); cell.BorderThickness = new Thickness(1);
+            if (cell.Tag is string tag && tag.StartsWith("quick-card-empty:", StringComparison.Ordinal)) cell.Opacity = 1;
+        }
         ResetSourceReorderFeedback();
         UpdateSaveStatus();
     }
