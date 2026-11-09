@@ -42,6 +42,8 @@ namespace Cards
         std::map<std::wstring, int> columns{ { L"weather", 0 }, { L"traffic", 1 }, { L"device", 0 }, { L"media", 1 } };
         std::map<std::wstring, bool> enabled{ { L"weather", false }, { L"traffic", true }, { L"device", true }, { L"media", true } };
         std::wstring resourceMode{ L"Resident" };
+        int animationSpeedPercent{150};
+        int animationFps{0}; // 0 follows the monitor refresh rate.
         std::wstring font{ L"Microsoft YaHei UI" };
         MicaTuning mica{};
         long long revision{ 0 };
@@ -49,6 +51,7 @@ namespace Cards
         bool IsEnabled(Kind kind) const;
         int ColumnFor(Kind kind) const;
         bool OnDemand() const;
+        void SetAnimation(double speedPercent, double fps);
     };
 
     struct MediaSource

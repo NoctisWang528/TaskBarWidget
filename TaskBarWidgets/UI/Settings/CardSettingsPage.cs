@@ -263,6 +263,40 @@ public sealed partial class SettingsWindow
             section.Children.Add(warning);
         }
 
+        var motion = Section("进出动画", "控制整组卡片从屏幕底部进入和退出的动画，保存后生效。");
+        var speed = new Slider
+        {
+            Minimum = 50, Maximum = 300, StepFrequency = 10, SmallChange = 10, LargeChange = 50,
+            Value = Math.Clamp(_media.Number("quickCardAnimationSpeedPercent", 150), 50, 300),
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        AutomationProperties.SetName(speed, "卡片动画速度百分比");
+        AutomationProperties.SetAutomationId(speed, "setting-quickCardAnimationSpeedPercent");
+        speed.Header = $"动画速度 · {speed.Value / 100:0.0}×";
+        speed.ValueChanged += (_, _) =>
+        {
+            speed.Header = $"动画速度 · {speed.Value / 100:0.0}×";
+            _media.Set("quickCardAnimationSpeedPercent", (int)Math.Round(speed.Value));
+            Changed();
+        };
+        motion.Children.Add(speed);
+        motion.Children.Add(Copy("0.5× 更慢，3× 更快；默认 1.5×。"));
+        var frameRates = new[] { 0, 30, 60, 90, 120, 144, 165, 240 };
+        var frameRate = new ComboBox { Header = "目标帧率", HorizontalAlignment = HorizontalAlignment.Stretch };
+        foreach (var fps in frameRates) frameRate.Items.Add(fps == 0 ? "跟随屏幕（最高 240 FPS）" : $"{fps} FPS");
+        var selectedFps = Array.IndexOf(frameRates, (int)_media.Number("quickCardAnimationFps"));
+        frameRate.SelectedIndex = selectedFps >= 0 ? selectedFps : 0;
+        AutomationProperties.SetName(frameRate, "卡片动画目标帧率");
+        AutomationProperties.SetAutomationId(frameRate, "setting-quickCardAnimationFps");
+        frameRate.SelectionChanged += (_, _) =>
+        {
+            if (frameRate.SelectedIndex < 0) return;
+            _media.Set("quickCardAnimationFps", frameRates[frameRate.SelectedIndex]);
+            Changed();
+        };
+        motion.Children.Add(frameRate);
+        motion.Children.Add(Copy("较高帧率更流畅，也会增加动画期间的资源消耗；实际帧率受屏幕和系统负载影响。系统关闭动画时仍立即显示或隐藏。"));
+
         var performance = Section("后台资源", "常驻模式在后台准备卡片画面，数据变化时更新，打开更快；按需模式隐藏后停止绘制，10 分钟后释放窗口和绘图缓存。");
         var modes = new[] { "Resident", "OnDemand" };
         var mode = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };

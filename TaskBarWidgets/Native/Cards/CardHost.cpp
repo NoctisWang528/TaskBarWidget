@@ -15,7 +15,6 @@ namespace Cards
     namespace
     {
         constexpr UINT WM_CARD_TASK = WM_APP + 0x211;
-        constexpr UINT WM_GROUP_FRAME = WM_APP + 0x217;
         constexpr UINT_PTR IdleTimer = 0xCD03;
         constexpr UINT_PTR WarmupTimer = 0xCD04;
         constexpr UINT IdleMilliseconds = 10 * 60 * 1000;
@@ -88,11 +87,11 @@ namespace Cards
         bool reducedMotion{ false };
         std::map<Kind, RECT> groupRestBounds;
         HANDLE groupTimer{};
-        std::atomic<bool> groupFramePending{false};
         bool groupMoving{};
         float groupOffset{}, groupFrom{}, groupTo{}, groupDistance{};
         int groupDuration{240};
-        std::chrono::steady_clock::time_point groupStarted;
+        std::chrono::steady_clock::time_point groupStarted, groupNextFrame;
+        std::chrono::nanoseconds groupFrameInterval{};
         POINT anchor{};
         std::wstring lastError;
         ULONGLONG errorUntil{};
@@ -348,12 +347,7 @@ namespace Cards
     void CardHost::Impl::StopGroupMotion(bool settle)
     {
         const bool wasMoving = groupMoving;
-        if (groupTimer)
-        {
-            DeleteTimerQueueTimer(nullptr, groupTimer, INVALID_HANDLE_VALUE);
-            groupTimer = nullptr;
-        }
-        groupFramePending = false;
+        if (groupTimer) CancelWaitableTimer(groupTimer);
         groupMoving = false;
         if (settle)
         {
@@ -406,28 +400,27 @@ namespace Cards
             return;
         }
         groupDuration = std::max(1, static_cast<int>((showing ? 280 : 240) *
+            (100.0f / std::clamp(config.animationSpeedPercent, 50, 300)) *
             std::min(1.0f, std::abs(groupTo - groupFrom) / std::max(1.0f, groupDistance))));
-        groupStarted = std::chrono::steady_clock::now();
-        groupMoving = true;
-        // One clock drives all HWNDs. The callback only coalesces a wake-up;
-        // geometry, input coordinates and DWM work stay on the card STA.
+        // The card STA waits on a high-resolution timer alongside its messages.
+        // No worker callback or continuously running background frame loop.
         MONITORINFOEXW monitor{}; monitor.cbSize = sizeof(monitor);
         DEVMODEW mode{}; mode.dmSize = sizeof(mode);
-        UINT interval = 16;
-        if (GetMonitorInfoW(MonitorFromPoint(anchor, MONITOR_DEFAULTTONEAREST), &monitor) &&
+        int fps = config.animationFps;
+        if (fps == 0 && GetMonitorInfoW(MonitorFromPoint(anchor, MONITOR_DEFAULTTONEAREST), &monitor) &&
             EnumDisplaySettingsW(monitor.szDevice, ENUM_CURRENT_SETTINGS, &mode) && mode.dmDisplayFrequency > 1)
-            interval = std::clamp<UINT>(1000u / mode.dmDisplayFrequency, 4u, 33u);
-        if (!CreateTimerQueueTimer(&groupTimer, nullptr, [](void* context, BOOLEAN)
-        {
-            auto* self = static_cast<Impl*>(context);
-            if (!self->groupFramePending.exchange(true))
-                if (!PostMessageW(self->window, WM_GROUP_FRAME, 0, 0)) self->groupFramePending = false;
-        }, this, 0, interval, WT_EXECUTEDEFAULT)) StopGroupMotion(true);
+            fps = static_cast<int>(mode.dmDisplayFrequency);
+        groupFrameInterval = std::chrono::nanoseconds(1'000'000'000 / std::clamp(fps > 0 ? fps : 60, 30, 240));
+        if (!groupTimer) groupTimer = CreateWaitableTimerExW(nullptr, nullptr,
+            CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_MODIFY_STATE | SYNCHRONIZE);
+        groupStarted = groupNextFrame = std::chrono::steady_clock::now();
+        groupMoving = true;
+        LARGE_INTEGER due{}; due.QuadPart = -1;
+        if (!groupTimer || !SetWaitableTimer(groupTimer, &due, 0, nullptr, nullptr, FALSE)) StopGroupMotion(true);
     }
 
     void CardHost::Impl::GroupFrame()
     {
-        groupFramePending = false;
         if (!groupMoving) return;
         const float elapsed = std::chrono::duration<float, std::milli>(
             std::chrono::steady_clock::now() - groupStarted).count();
@@ -435,7 +428,13 @@ namespace Cards
         const float remaining = 1 - t;
         const float progress = visible ? 1 - remaining * remaining * remaining : t * t;
         MoveGroup(groupFrom + (groupTo - groupFrom) * progress);
-        if (t >= 1) StopGroupMotion(true);
+        if (t >= 1) { StopGroupMotion(true); return; }
+        const auto now = std::chrono::steady_clock::now();
+        groupNextFrame += groupFrameInterval;
+        if (groupNextFrame <= now) groupNextFrame = now + groupFrameInterval;
+        LARGE_INTEGER due{};
+        due.QuadPart = -std::max(1LL, std::chrono::duration_cast<std::chrono::nanoseconds>(groupNextFrame - now).count() / 100);
+        if (!SetWaitableTimer(groupTimer, &due, 0, nullptr, nullptr, FALSE)) StopGroupMotion(true);
     }
 
     void CardHost::Impl::PlaceGroup(bool animate, bool showAll)
@@ -1298,9 +1297,6 @@ namespace Cards
             if (!self) return DefWindowProcW(window, message, keys, position);
             switch (message)
             {
-            case WM_GROUP_FRAME:
-                self->GroupFrame();
-                return 0;
             case WM_CARD_PIPE_WAKE:
                 self->OnPipeMessages();
                 return 0;
@@ -1373,15 +1369,24 @@ namespace Cards
         }
 
         MSG message{};
-        while (GetMessageW(&message, nullptr, 0, 0) > 0)
+        for (;;)
         {
-            TranslateMessage(&message);
-            DispatchMessageW(&message);
+            const DWORD result = MsgWaitForMultipleObjectsEx(groupMoving ? 1 : 0,
+                groupMoving ? &groupTimer : nullptr, INFINITE, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+            if (result == WAIT_FAILED) break;
+            if (groupMoving && result == WAIT_OBJECT_0) { GroupFrame(); continue; }
+            if (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE))
+            {
+                if (message.message == WM_QUIT) break;
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
         }
 
         // Teardown: stop producers first, then release device-bound resources.
         CancelWarmup();
         StopGroupMotion(false);
+        if (groupTimer) { CloseHandle(groupTimer); groupTimer = nullptr; }
         client.Stop();
         UninstallHooks();
         popup.reset();

@@ -650,6 +650,7 @@ public partial class App : System.Windows.Application
         : Task.CompletedTask;
     private object QuickCards() => new { order = Settings.QuickCardOrder, columns = Settings.QuickCardColumns, enabled = Settings.QuickCardEnabled,
         resourceMode = Settings.QuickCardResourceMode.ToString(), font = Settings.CardFontFamily,
+        animationSpeedPercent = Settings.QuickCardAnimationSpeedPercent, animationFps = Settings.QuickCardAnimationFps,
         mica = new
         {
             vivid = Settings.CardMicaVivid,
@@ -675,6 +676,8 @@ public partial class App : System.Windows.Application
             columns = Settings.QuickCardColumns,
             enabled = Settings.QuickCardEnabled,
             resourceMode = Settings.QuickCardResourceMode.ToString(),
+            animationSpeedPercent = Settings.QuickCardAnimationSpeedPercent,
+            animationFps = Settings.QuickCardAnimationFps,
             font = Settings.CardFontFamily,
             mica = new
             {

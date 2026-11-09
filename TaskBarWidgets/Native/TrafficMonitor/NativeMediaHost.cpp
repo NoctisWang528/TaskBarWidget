@@ -1124,6 +1124,8 @@ struct NativeMediaHost::Impl
             }
             if (quick.HasKey(L"resourceMode"))
                 config.resourceMode = quick.GetNamedString(L"resourceMode").c_str();
+            config.SetAnimation(quick.GetNamedNumber(L"animationSpeedPercent", config.animationSpeedPercent),
+                quick.GetNamedNumber(L"animationFps", config.animationFps));
             if (quick.HasKey(L"font"))
                 config.font = quick.GetNamedString(L"font").c_str();
             if (quick.HasKey(L"mica"))

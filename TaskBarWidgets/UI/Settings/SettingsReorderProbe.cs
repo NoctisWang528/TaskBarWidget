@@ -2,6 +2,7 @@ using System.Numerics;
 using System.Text.Json.Nodes;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using TaskBarWidgets.UI.Settings;
 
@@ -92,7 +93,29 @@ public sealed partial class SettingsWindow
 
             window.ShowPage("quickCards");
             await Task.Delay(120);
-            window._pageScroll!.ChangeView(null, window._pageScroll.ScrollableHeight, null, true);
+            var speed = WalkTheme(window._page).OfType<Slider>().Single(control =>
+                AutomationProperties.GetAutomationId(control) == "setting-quickCardAnimationSpeedPercent");
+            var fps = WalkTheme(window._page).OfType<ComboBox>().Single(control =>
+                AutomationProperties.GetAutomationId(control) == "setting-quickCardAnimationFps");
+            speed.Value = 220;
+            fps.SelectedIndex = 4; // 120 FPS.
+            if (window._media.Number("quickCardAnimationSpeedPercent") != 220 || window._media.Number("quickCardAnimationFps") != 120)
+                throw new InvalidOperationException("Animation controls did not update the settings draft.");
+            window.RenderPage();
+            await Task.Delay(120);
+            speed = WalkTheme(window._page).OfType<Slider>().Single(control =>
+                AutomationProperties.GetAutomationId(control) == "setting-quickCardAnimationSpeedPercent");
+            fps = WalkTheme(window._page).OfType<ComboBox>().Single(control =>
+                AutomationProperties.GetAutomationId(control) == "setting-quickCardAnimationFps");
+            if (speed.Value != 220 || fps.SelectedIndex != 4)
+                throw new InvalidOperationException("Animation draft was lost after rerendering settings.");
+            speed.StartBringIntoView(new BringIntoViewOptions { AnimationDesired = false, VerticalAlignmentRatio = 0 });
+            await Task.Delay(120);
+            await UiLayoutProbe.CaptureAsync(window._root, Path.Combine(AppContext.BaseDirectory, "..", "ui-layout-check",
+                "settings-card-animation.png"));
+            var firstCard = window._cardOrderCells[0].Cell.TransformToVisual(window._pageScroll)
+                .TransformPoint(new Windows.Foundation.Point());
+            window._pageScroll!.ChangeView(null, Math.Max(0, window._pageScroll.VerticalOffset + firstCard.Y - 80), null, true);
             await Task.Delay(120);
             window._root.UpdateLayout();
             var (leftBefore, _) = window.QuickCardLayout();
@@ -154,7 +177,8 @@ public sealed partial class SettingsWindow
                 dropCommitsOnce = true,
                 overlayCoordinates = true,
                 stableAnimatedTargets = true,
-                outsideReleaseCanceled = true
+                outsideReleaseCanceled = true,
+                animationSettingsDraft = true
             };
         }
         finally

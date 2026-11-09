@@ -5,8 +5,21 @@ namespace TaskbarLyrics.App.Tests;
 
 public sealed class SettingsStoreTests
 {
-    [Fact]
-    public void QuickCardsRoundTripAndNormalizeUnknownValues()
+    [Theory]
+    [InlineData(50, 0, 50, 0)]
+    [InlineData(150, 30, 150, 30)]
+    [InlineData(175, 60, 175, 60)]
+    [InlineData(200, 90, 200, 90)]
+    [InlineData(225, 120, 225, 120)]
+    [InlineData(250, 144, 250, 144)]
+    [InlineData(275, 165, 275, 165)]
+    [InlineData(300, 240, 300, 240)]
+    [InlineData(int.MinValue, -1, 50, 0)]
+    [InlineData(49, 59, 50, 0)]
+    [InlineData(301, 241, 300, 0)]
+    [InlineData(int.MaxValue, int.MaxValue, 300, 0)]
+    public void QuickCardsRoundTripAndNormalizeUnknownValues(
+        int speedPercent, int fps, int expectedSpeedPercent, int expectedFps)
     {
         var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
         var filePath = Path.Combine(directory, "settings.json");
@@ -23,14 +36,24 @@ public sealed class SettingsStoreTests
                     ["unknown"] = true
                 },
                 QuickCardResourceMode = QuickCardResourceMode.OnDemand,
+                QuickCardAnimationSpeedPercent = speedPercent,
+                QuickCardAnimationFps = fps,
                 CardFontFamily = "Segoe UI",
                 CardMicaTintOpacity = 0.34,
                 CardMicaLuminosityOpacity = 0.50,
                 CardMicaDarkTintOpacity = 0.22,
                 CardMicaDarkLuminosityOpacity = 0.40
             };
-            Assert.True(new SettingsStore(filePath).Save(settings));
-            var loaded = new SettingsStore(filePath).Load();
+            var clone = settings.Clone();
+            Assert.Equal(speedPercent, clone.QuickCardAnimationSpeedPercent);
+            Assert.Equal(fps, clone.QuickCardAnimationFps);
+            var store = new SettingsStore(filePath);
+            Assert.True(store.Save(settings));
+            Assert.Equal(expectedSpeedPercent, settings.QuickCardAnimationSpeedPercent);
+            Assert.Equal(expectedFps, settings.QuickCardAnimationFps);
+            var loaded = store.Load();
+            Assert.Equal(expectedSpeedPercent, loaded.QuickCardAnimationSpeedPercent);
+            Assert.Equal(expectedFps, loaded.QuickCardAnimationFps);
             Assert.Equal(["media", "traffic", "weather", "device"], loaded.QuickCardOrder);
             Assert.False(loaded.QuickCardEnabled["media"]);
             Assert.True(loaded.QuickCardEnabled["weather"]);
@@ -43,6 +66,12 @@ public sealed class SettingsStoreTests
             Assert.Equal(0.22, loaded.CardMicaDarkTintOpacity, 6);
             Assert.Equal(0.40, loaded.CardMicaDarkLuminosityOpacity, 6);
             Assert.True(loaded.CardMicaVivid);
+
+            // Exercise load normalization independently of Save's normalization.
+            File.WriteAllText(filePath, System.Text.Json.JsonSerializer.Serialize(clone));
+            loaded = store.Load();
+            Assert.Equal(expectedSpeedPercent, loaded.QuickCardAnimationSpeedPercent);
+            Assert.Equal(expectedFps, loaded.QuickCardAnimationFps);
         }
         finally
         {
@@ -99,6 +128,8 @@ public sealed class SettingsStoreTests
         try
         {
             var loaded = new SettingsStore(filePath).Load(systemUsesLightTheme);
+            Assert.Equal(150, loaded.QuickCardAnimationSpeedPercent);
+            Assert.Equal(0, loaded.QuickCardAnimationFps);
 
             Assert.Equal(0.10, loaded.CardMicaTintOpacity, 6);
             Assert.Equal(0.85, loaded.CardMicaLuminosityOpacity, 6);
@@ -380,6 +411,8 @@ public sealed class SettingsStoreTests
             Assert.True(loaded.QuickCardEnabled["device"]);
             Assert.True(loaded.QuickCardEnabled["media"]);
             Assert.Equal(["weather", "device", "traffic", "media"], loaded.QuickCardOrder);
+            Assert.Equal(150, loaded.QuickCardAnimationSpeedPercent);
+            Assert.Equal(0, loaded.QuickCardAnimationFps);
         }
         finally
         {

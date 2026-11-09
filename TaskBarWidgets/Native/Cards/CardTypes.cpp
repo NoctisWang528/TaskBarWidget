@@ -50,6 +50,15 @@ namespace Cards
         return mode == L"ondemand";
     }
 
+    void Config::SetAnimation(double speedPercent, double fps)
+    {
+        animationSpeedPercent = std::isfinite(speedPercent)
+            ? static_cast<int>(std::clamp(speedPercent, 50.0, 300.0)) : 150;
+        animationFps = 0;
+        for (const int option : {30, 60, 90, 120, 144, 165, 240})
+            if (fps == option) { animationFps = option; break; }
+    }
+
     const TrafficDay* TrafficState::Selected() const
     {
         for (const auto& day : days)

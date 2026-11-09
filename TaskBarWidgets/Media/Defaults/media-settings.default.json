@@ -146,6 +146,8 @@
     "media": true
   },
   "QuickCardResourceMode": 0,
+  "QuickCardAnimationSpeedPercent": 150,
+  "QuickCardAnimationFps": 0,
   "CardFontFamily": "Microsoft YaHei UI",
   "CardMicaVivid": true,
   "CardMicaTintOpacity": 0.1,

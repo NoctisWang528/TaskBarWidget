@@ -59,6 +59,8 @@ internal sealed class CardSnapshotBuilder
             columns = settings.QuickCardColumns,
             enabled = settings.QuickCardEnabled,
             resourceMode = settings.QuickCardResourceMode.ToString(),
+            animationSpeedPercent = settings.QuickCardAnimationSpeedPercent,
+            animationFps = settings.QuickCardAnimationFps,
             font = settings.CardFontFamily,
             revision = ConfigurationRevision,
             mica = new

@@ -148,7 +148,7 @@ static bool SameBounds(const GroupBounds& a, const GroupBounds& b)
     }
     return true;
 }
-static void CheckGroupMotion(Cards::CardHost& host, POINT anchor)
+static void CheckGroupMotion(Cards::CardHost& host, POINT anchor, const Cards::Config& originalConfig)
 {
     // Warm/rest geometry, then exercise the actual host entry path. All HWNDs
     // stay outside the virtual desktop and this host has no global input hook.
@@ -246,6 +246,67 @@ static void CheckGroupMotion(Cards::CardHost& host, POINT anchor)
     WaitForCards(host, 0);
     host.Toggle(anchor);
     WaitForCards(host, 4);
+    if (motionEnabled)
+    {
+        const auto waitFor = [&](bool shown)
+        {
+            const auto deadline = GetTickCount64() + 10000;
+            while (GetTickCount64() < deadline)
+            {
+                const auto frame = readBounds();
+                if (shown ? host.Visible() && SameBounds(rest, frame) : !host.Visible() && frame.empty()) return;
+                PumpFor(1);
+            }
+            throw std::runtime_error("animation settings probe did not settle");
+        };
+        const auto measureExit = [&](int speed, int fps)
+        {
+            host.Hide(L"probe-prepare");
+            waitFor(false);
+            auto settings = originalConfig;
+            settings.SetAnimation(speed, fps);
+            host.ApplyConfig(settings);
+            host.Show(anchor);
+            waitFor(true);
+            host.Hide(L"probe-animation-settings");
+            const auto deadline = GetTickCount64() + 10000;
+            ULONGLONG firstMovement = 0, elapsed = 0;
+            LONG previous = 0;
+            int changes = 0;
+            while (GetTickCount64() < deadline)
+            {
+                const auto frame = readBounds();
+                if (!host.Visible() && frame.empty())
+                {
+                    if (firstMovement) elapsed = GetTickCount64() - firstMovement;
+                    break;
+                }
+                if (frame.size() == rest.size() && SameBounds(frame, readBounds()))
+                {
+                    const LONG offset = frame.begin()->second.top - rest.at(frame.begin()->first).top;
+                    if (offset > 0 && offset != previous)
+                    {
+                        if (!firstMovement) firstMovement = GetTickCount64();
+                        previous = offset;
+                        ++changes;
+                    }
+                }
+                PumpFor(1);
+            }
+            Require(elapsed > 0 && changes > 0, "configured animation must move before hiding");
+            std::cout << "Animation speed=" << speed << "% fps=" << fps << ": " <<
+                elapsed << " ms after first movement, " << changes << " observed positions.\n";
+            return std::pair{elapsed, changes};
+        };
+        const auto lowRate = measureExit(50, 30);
+        const auto highRate = measureExit(50, 120);
+        const auto fast = measureExit(200, 120);
+        Require(highRate.second > lowRate.second, "120 FPS produces more movement steps than 30 FPS");
+        Require(fast.first * 2 < highRate.first, "higher speed actually shortens the animation");
+        host.ApplyConfig(originalConfig);
+        host.Show(anchor);
+        waitFor(true);
+    }
 }
 struct Services : Cards::CardHostServices
 {
@@ -456,6 +517,22 @@ int wmain(int argc, wchar_t** argv)
             auto device = graphics.CreateGraphicsDevice(compositor, error);
             Require(device != nullptr, "composition must be backed by the D2D device");
             Cards::Snapshot duplicate;
+            Cards::Snapshot motionConfig;
+            Cards::Protocol::Changes motionChanges;
+            Require(Cards::Protocol::ApplySnapshot(motionConfig,
+                LR"({"quickCards":{"revision":1,"animationSpeedPercent":220,"animationFps":120}})", motionChanges) &&
+                motionChanges.config && motionConfig.config.animationSpeedPercent == 220 && motionConfig.config.animationFps == 120,
+                "native snapshot carries animation speed and target frame rate");
+            Cards::Protocol::Changes staleMotion;
+            Cards::Protocol::ApplySnapshot(motionConfig,
+                LR"({"quickCards":{"revision":1,"animationSpeedPercent":50,"animationFps":30}})", staleMotion);
+            Require(!staleMotion.config && motionConfig.config.animationSpeedPercent == 220,
+                "stale configuration cannot replace newer animation settings");
+            Cards::Protocol::Changes invalidMotion;
+            Cards::Protocol::ApplySnapshot(motionConfig,
+                LR"({"quickCards":{"revision":2,"animationSpeedPercent":999,"animationFps":999}})", invalidMotion);
+            Require(motionConfig.config.animationSpeedPercent == 300 && motionConfig.config.animationFps == 0,
+                "native animation settings clamp speed and reject unsupported frame rates");
             Cards::Protocol::Changes initial, repeated;
             const std::wstring weather = LR"({"weather":{"revision":7,"temperature":"23"}})";
             Require(Cards::Protocol::ApplySnapshot(duplicate, weather, initial) && initial.weather, "first weather frame");
@@ -830,7 +907,7 @@ int wmain(int argc, wchar_t** argv)
             const POINT anchor{ GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN) };
             host.Toggle(anchor);
             WaitForCards(host, 4);
-            CheckGroupMotion(host, anchor);
+            CheckGroupMotion(host, anchor, config);
             host.Toggle(anchor);
             WaitForCards(host, 0);
             host.Toggle(anchor);

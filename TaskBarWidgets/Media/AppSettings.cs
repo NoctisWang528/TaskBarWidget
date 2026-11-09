@@ -161,6 +161,8 @@ public sealed class AppSettings
     };
 
     public QuickCardResourceMode QuickCardResourceMode { get; set; } = QuickCardResourceMode.Resident;
+    public int QuickCardAnimationSpeedPercent { get; set; } = 150;
+    public int QuickCardAnimationFps { get; set; } = 0;
 
     public string CardFontFamily { get; set; } = DefaultFontFamily;
 
@@ -375,6 +377,9 @@ public sealed class AppSettings
             QuickCardEnabled.Remove(key);
 
         if (!Enum.IsDefined(QuickCardResourceMode)) QuickCardResourceMode = QuickCardResourceMode.Resident;
+        QuickCardAnimationSpeedPercent = Math.Clamp(QuickCardAnimationSpeedPercent, 50, 300);
+        if (QuickCardAnimationFps is not (0 or 30 or 60 or 90 or 120 or 144 or 165 or 240))
+            QuickCardAnimationFps = 0;
 
         CardFontFamily = NormalizeFontFamily(CardFontFamily);
         CardMicaTintOpacity = NormalizeMicaOpacity(

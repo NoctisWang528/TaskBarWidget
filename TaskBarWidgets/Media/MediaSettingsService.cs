@@ -1092,6 +1092,8 @@ public sealed class MediaSettingsService : IDisposable
                 _settings.QuickCardEnabled,
                 StringComparer.Ordinal),
             QuickCardResourceMode = _settings.QuickCardResourceMode,
+            QuickCardAnimationSpeedPercent = _settings.QuickCardAnimationSpeedPercent,
+            QuickCardAnimationFps = _settings.QuickCardAnimationFps,
             CardFontFamily = _settings.CardFontFamily,
             CardMicaVivid = _settings.CardMicaVivid,
             CardMicaTintOpacity = _settings.CardMicaTintOpacity,
@@ -1470,6 +1472,14 @@ public sealed class MediaSettingsService : IDisposable
                 {
                     _settings.QuickCardResourceMode = resourceMode;
                 }
+                break;
+            case "quickCardAnimationSpeedPercent":
+                _settings.QuickCardAnimationSpeedPercent = ReadInt(element, _settings.QuickCardAnimationSpeedPercent);
+                _settings.NormalizeQuickCards();
+                break;
+            case "quickCardAnimationFps":
+                _settings.QuickCardAnimationFps = ReadInt(element, 0);
+                _settings.NormalizeQuickCards();
                 break;
             case "cardFontFamily":
                 _settings.CardFontFamily = AppSettings.NormalizeFontFamily(
@@ -1940,6 +1950,17 @@ public sealed class MediaSettingsService : IDisposable
         };
     }
 
+    private static int ReadInt(JsonElement element, int fallback)
+    {
+        return element.ValueKind switch
+        {
+            JsonValueKind.Number when element.TryGetInt32(out var value) => value,
+            JsonValueKind.String when int.TryParse(
+                element.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) => value,
+            _ => fallback
+        };
+    }
+
     private static double ReadDouble(JsonElement element, double fallback)
     {
         return element.ValueKind switch
@@ -2071,6 +2092,8 @@ public sealed class MediaSettingsService : IDisposable
             source.QuickCardEnabled,
             StringComparer.Ordinal);
         target.QuickCardResourceMode = source.QuickCardResourceMode;
+        target.QuickCardAnimationSpeedPercent = source.QuickCardAnimationSpeedPercent;
+        target.QuickCardAnimationFps = source.QuickCardAnimationFps;
         target.CardFontFamily = source.CardFontFamily;
         target.CardMicaVivid = source.CardMicaVivid;
         target.CardMicaTintOpacity = source.CardMicaTintOpacity;
@@ -2208,6 +2231,8 @@ public sealed class MediaSettingsService : IDisposable
         public Dictionary<string, int> QuickCardColumns { get; set; } = new(StringComparer.Ordinal);
         public Dictionary<string, bool> QuickCardEnabled { get; set; } = new(StringComparer.Ordinal);
         public QuickCardResourceMode QuickCardResourceMode { get; set; }
+        public int QuickCardAnimationSpeedPercent { get; set; } = 150;
+        public int QuickCardAnimationFps { get; set; } = 0;
         public string CardFontFamily { get; set; } = AppSettings.DefaultFontFamily;
         public bool CardMicaVivid { get; set; } = AppSettings.DefaultCardMicaVivid;
         public double CardMicaTintOpacity { get; set; } = AppSettings.DefaultCardMicaTintOpacity;

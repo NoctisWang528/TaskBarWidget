@@ -115,6 +115,8 @@ namespace Cards::Protocol
             }
             const auto mode = Text(quickCards, L"resourceMode");
             if (!mode.empty()) config.resourceMode = mode;
+            config.SetAnimation(Number(quickCards, L"animationSpeedPercent", config.animationSpeedPercent),
+                Number(quickCards, L"animationFps", config.animationFps));
             const auto font = Text(quickCards, L"font");
             if (!font.empty()) config.font = font;
             MicaTuningFrom(quickCards, config.mica);
