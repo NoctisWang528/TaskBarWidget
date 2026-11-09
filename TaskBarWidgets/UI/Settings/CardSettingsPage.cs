@@ -263,7 +263,7 @@ public sealed partial class SettingsWindow
             section.Children.Add(warning);
         }
 
-        var performance = Section("后台资源", "常驻模式保留歌词浏览器和图片缓存，重新打开更快；按需模式在隐藏 10 分钟后释放这些缓存。");
+        var performance = Section("后台资源", "常驻模式在后台准备卡片画面，数据变化时更新，打开更快；按需模式隐藏后停止绘制，10 分钟后释放窗口和绘图缓存。");
         var modes = new[] { "Resident", "OnDemand" };
         var mode = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
         mode.Items.Add("常驻（优先速度）");
@@ -277,7 +277,7 @@ public sealed partial class SettingsWindow
             Changed();
         };
         performance.Children.Add(mode);
-        performance.Children.Add(Copy("系统内存压力较大时，常驻模式仍会把歌词浏览器降为低内存优先级，但不会销毁页面。"));
+        performance.Children.Add(Copy("常驻模式占用更多内存，隐藏时不播放动画；按需模式释放资源后，再次打开需要重新准备画面。"));
     }
 
     private void RenderQuickCardsWeather()

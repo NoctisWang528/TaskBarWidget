@@ -68,6 +68,9 @@ internal sealed class MediaCoordinator : IDisposable
 
     internal event Action<object>? FrameReady;
     internal event Action<object>? CardFrameReady;
+    // Authoritative state changes also feed resident hidden cards, without
+    // enabling their visible lyric/presentation scheduler.
+    internal event Action? CardStateChanged;
 
     internal object Snapshot() => Volatile.Read(ref _frame);
     internal object CardSnapshot => Volatile.Read(ref _card);
@@ -560,6 +563,7 @@ internal sealed class MediaCoordinator : IDisposable
 
         MediaPublicationPolicy.PublishFrame(update, _taskbarVisible, FrameReady);
         MediaPublicationPolicy.PublishCard(update, _cardVisible, CardFrameReady);
+        CardStateChanged?.Invoke();
         // Timeline changes can move the lyrics before another SMTC event arrives.
         // Keep authoritative reads low-frequency, then smooth only within the
         // current lyric line's own interval.

@@ -79,6 +79,34 @@ static int VisibleProbeCards()
     return count;
 }
 
+static std::vector<HWND> ProbeWindows(const wchar_t* className)
+{
+    struct Query { const wchar_t* name; std::vector<HWND> windows; } query{className};
+    EnumWindows([](HWND window, LPARAM data) -> BOOL
+    {
+        auto& query = *reinterpret_cast<Query*>(data);
+        DWORD process{}; GetWindowThreadProcessId(window, &process);
+        wchar_t name[80]{}; GetClassNameW(window, name, ARRAYSIZE(name));
+        if (process == GetCurrentProcessId() && wcscmp(name, query.name) == 0)
+            query.windows.push_back(window);
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&query));
+    return query.windows;
+}
+
+static void WaitForHiddenCards(int count)
+{
+    const auto deadline = GetTickCount64() + 3000;
+    while (GetTickCount64() < deadline)
+    {
+        const auto windows = ProbeWindows(L"TaskBarWidgetsCardWindow");
+        if (windows.size() == count && std::none_of(windows.begin(), windows.end(),
+            [](HWND window) { return IsWindowVisible(window) != FALSE; })) return;
+        Sleep(10);
+    }
+    throw std::runtime_error("hidden resource mode did not create/release the expected card windows");
+}
+
 static void WaitForCards(Cards::CardHost& host, int count)
 {
     const auto deadline = GetTickCount64() + 10000;
@@ -572,6 +600,24 @@ int wmain(int argc, wchar_t** argv)
                 card.Paint();
                 Require(card.HasRenderedContent(), "card must commit content while hidden");
                 Require(!IsWindowVisible(card.Handle()), "probe must not show or activate a card");
+                auto background = snapshot;
+                background.statusText = L"Background refresh";
+                const auto beforeBackground = card.ContentPaintCount();
+                card.SetSnapshot(background);
+                SendMessageW(card.Handle(), WM_PAINT, 0, 0);
+                Require(card.ContentPaintCount() == beforeBackground,
+                    "hidden snapshots and WM_PAINT must not draw without resident warmup");
+                card.Paint(); // The resident host explicitly prepares a dirty hidden card.
+                Require(card.ContentPaintCount() == beforeBackground + 1 && card.HasRenderedContent(),
+                    "resident warmup commits updated hidden content once");
+                const auto prepared = card.ContentPaintCount();
+                card.Place(card.Bounds(), card.DpiScale());
+                card.Show(false);
+                Require(card.ContentPaintCount() == prepared,
+                    "opening a prepared card must reuse its drawing surfaces without repainting");
+                card.Hide(false);
+                card.SetSnapshot(snapshot);
+                card.Paint();
                 if (kind == Cards::Kind::Traffic)
                 {
                     // Cold first open: no history yet, then the asynchronous reply
@@ -725,6 +771,23 @@ int wmain(int argc, wchar_t** argv)
             config.resourceMode = L"OnDemand";
             for (auto& [id, enabled] : config.enabled) enabled = true;
             host.ApplyConfig(config);
+            PumpFor(300);
+            Require(ProbeWindows(L"TaskBarWidgetsCardWindow").empty(), "on-demand must not pre-create hidden cards");
+            config.resourceMode = L"Resident";
+            host.ApplyConfig(config);
+            WaitForHiddenCards(4);
+            config.resourceMode = L"OnDemand";
+            host.ApplyConfig(config);
+            const auto hostWindows = ProbeWindows(L"TaskBarWidgetsCardHost");
+            Require(hostWindows.size() == 1, "isolated probe owns exactly one host");
+            // Deliver the existing idle timer directly instead of waiting ten minutes.
+            Require(PostMessageW(hostWindows.front(), WM_TIMER, 0xCD03, 0) != FALSE,
+                "queue idle expiry after the resource-mode command");
+            WaitForHiddenCards(0);
+            config.resourceMode = L"Resident";
+            host.ApplyConfig(config);
+            WaitForHiddenCards(4);
+            std::cout << "Resident hidden warmup and on-demand resource release/recovery passed.\n";
             const POINT anchor{ GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN) };
             host.Toggle(anchor);
             WaitForCards(host, 4);

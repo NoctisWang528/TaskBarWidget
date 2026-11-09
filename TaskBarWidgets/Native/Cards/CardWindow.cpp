@@ -73,7 +73,7 @@ namespace Cards
                 PAINTSTRUCT paint{};
                 BeginPaint(window, &paint);
                 EndPaint(window, &paint);
-                card->Paint();
+                if (card->Visible()) card->Paint();
                 return 0;
             }
             case WM_MOUSEMOVE:
@@ -511,7 +511,7 @@ namespace Cards
         const double previousPaintedScan = snapshot.lyrics.wordScan;
         const bool newLyrics = value.lyrics.revision != impl->lyricsRevision || !sameLine || !samePlayback ||
             value.lyrics.wordScan != impl->scanProgress;
-        if (kind == Kind::Media && !sameLine && value.lyrics.animateTransition && !environment.reducedMotion &&
+        if (visible && kind == Kind::Media && !sameLine && value.lyrics.animateTransition && !environment.reducedMotion &&
             !snapshot.lyrics.current.empty())
         {
             impl->lyricPrevious = snapshot.lyrics.current;
@@ -700,8 +700,7 @@ namespace Cards
         // Snapshot/layout refreshes must not restart an entrance or cover a menu.
         if (visible) { Paint(); return; }
         visible = true;
-        impl->dirty = true;
-        impl->mediaStaticDirty = true;
+        // Placement and resident warmup already committed unchanged content.
         Paint();
         impl->transition.Start(true, scale, animate && !environment.reducedMotion && !environment.highContrast,
             window, AnimationMilliseconds);
@@ -717,9 +716,17 @@ namespace Cards
         visible = false;
         if (!window) return;
         CancelPointer();
+        const bool hadFeedback = impl->hotRegion || !impl->hover.empty();
+        impl->dirty |= hadFeedback || impl->coverFadeStart || impl->lyricWrapStart;
+        impl->mediaStaticDirty |= hadFeedback;
         impl->hotRegion = 0;
         impl->hover.clear();
         impl->trackingLeave = false;
+        impl->coverFadeStart = impl->lyricWrapStart = 0;
+        if (environment.graphics && impl->previousCoverData != snapshot.media.coverDataUrl)
+            environment.graphics->ForgetImage(impl->previousCoverData);
+        impl->previousCoverData.clear();
+        impl->previousCoverKey.clear();
         impl->transition.Start(false, scale, animate && !environment.reducedMotion && !environment.highContrast,
             window, AnimationMilliseconds);
         if (!impl->transition.Running()) ShowWindow(window, SW_HIDE);

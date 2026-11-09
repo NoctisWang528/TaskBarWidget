@@ -92,7 +92,7 @@ public partial class App : System.Windows.Application
             _cards.Start();
             _cardTimer = new System.Windows.Threading.DispatcherTimer(TimeSpan.FromMilliseconds(400),
                 System.Windows.Threading.DispatcherPriority.Background,
-                (_, _) => TaskObserver.Observe(RefreshVisibleCardsAsync(), "card state refresh"), Dispatcher);
+                (_, _) => TaskObserver.Observe(RefreshCardsAsync(), "card state refresh"), Dispatcher);
             // The signal only says "re-read the bridge". Applying the authoritative
             // state on the dispatcher keeps a late release from overriding a newer
             // subscription that was accepted after the disconnect.
@@ -123,6 +123,10 @@ public partial class App : System.Windows.Application
             }
             _media.CardFrameReady += _ui.PublishCardLyrics;
             _media.CardFrameReady += _ => _cards?.PublishSnapshot();
+            _media.CardStateChanged += () =>
+            {
+                if (KeepCardsWarm && _cards?.CardLyricsVisible != true) _cards?.PublishSnapshot();
+            };
             _pipe.Start();
             _media.Start();
             _updates?.Start();
@@ -309,29 +313,35 @@ public partial class App : System.Windows.Application
         if (visible && !_cardWasVisible)
         {
             _nextCardAudio = _nextCardWeather = _nextCardTraffic = DateTimeOffset.MinValue;
-            TaskObserver.Observe(RefreshVisibleCardsAsync(), "card initial refresh");
+            TaskObserver.Observe(RefreshCardsAsync(), "card initial refresh");
         }
         _cardWasVisible = visible;
     }
 
-    // One asynchronous refresh at a time, only while the group is visible. Audio
-    // shares the mutation/readback gate with both front-ends; weather/history do
-    // not hold it. Snapshot coalescing happens on the writer, not on this timer.
-    private async Task RefreshVisibleCardsAsync()
+    private bool KeepCardsWarm => Settings.QuickCardResourceMode == QuickCardResourceMode.Resident &&
+        Settings.QuickCardEnabled.Values.Any(enabled => enabled);
+
+    private bool ShouldRefreshCard(string id) => _cards?.Connected == true &&
+        (_cards.CardLyricsVisible || KeepCardsWarm) && Settings.QuickCardEnabled.GetValueOrDefault(id);
+
+    // Resident data stays fresh without pretending the cards are visible.
+    // Only real visible cards use presentation ticks; hidden media is published
+    // by authoritative state changes. Audio/weather/history keep separate lanes.
+    private async Task RefreshCardsAsync()
     {
-        if (_shutdownRequested || _cards?.CardLyricsVisible != true) return;
+        if (_shutdownRequested || _cards?.Connected != true || (!_cards.CardLyricsVisible && !KeepCardsWarm)) return;
         // Each lane has its own in-flight guard. Slow audio must not delay a
         // traffic retry or the media controls/position snapshot either.
-        _cards.PublishSnapshot();
+        if (_cards.CardLyricsVisible) _cards.PublishSnapshot();
         TaskObserver.Observe(RefreshCardWeatherAsync(), "card weather refresh");
         TaskObserver.Observe(RefreshCardTrafficAsync(), "card traffic refresh");
-        if (_cardRefreshRunning) return;
+        if (_cardRefreshRunning || !ShouldRefreshCard("device")) return;
         _cardRefreshRunning = true;
         try
         {
             if (DateTimeOffset.UtcNow >= _nextCardAudio)
             {
-                _nextCardAudio = DateTimeOffset.UtcNow.AddSeconds(1);
+                _nextCardAudio = DateTimeOffset.UtcNow.AddSeconds(_cards.CardLyricsVisible ? 1 : 5);
                 await HandleAudioRequestAsync("getAudio", default, _stop.Token);
             }
         }
@@ -344,16 +354,17 @@ public partial class App : System.Windows.Application
 
     private async Task RefreshCardWeatherAsync()
     {
-        if (_shutdownRequested || _cards?.CardLyricsVisible != true || _cardWeatherRunning ||
+        var cards = _cards;
+        if (_shutdownRequested || cards is null || !ShouldRefreshCard("weather") || _cardWeatherRunning ||
             _nativeSettings is null || DateTimeOffset.UtcNow < _nextCardWeather) return;
         _cardWeatherRunning = true;
         try
         {
-            var generation = _cards.ConnectionGeneration;
+            var generation = cards.ConnectionGeneration;
             var weather = await _nativeSettings.RequestAsync("weatherCommand", JsonSerializer.SerializeToElement(new { operation = "status" }), _stop.Token);
-            if (!_cards.IsConnectionCurrent(generation) || !_cards.CardLyricsVisible) return;
+            if (!cards.IsConnectionCurrent(generation) || !ShouldRefreshCard("weather")) return;
             _cardSnapshot!.SetWeather(weather);
-            _cards.PublishSnapshot();
+            cards.PublishSnapshot();
         }
         catch (Exception error) when (error is IOException or InvalidOperationException or TimeoutException or OperationCanceledException or System.Runtime.InteropServices.COMException)
         {
@@ -364,19 +375,20 @@ public partial class App : System.Windows.Application
 
     private async Task RefreshCardTrafficAsync()
     {
-        if (_shutdownRequested || _cards?.CardLyricsVisible != true || _cardTrafficRunning ||
+        var cards = _cards;
+        if (_shutdownRequested || cards is null || !ShouldRefreshCard("traffic") || _cardTrafficRunning ||
             _nativeSettings is null || DateTimeOffset.UtcNow < _nextCardTraffic) return;
         _cardTrafficRunning = true;
         var succeeded = false;
         try
         {
-            var generation = _cards.ConnectionGeneration;
+            var generation = cards.ConnectionGeneration;
             using var request = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
             request.CancelAfter(TimeSpan.FromSeconds(5));
             var traffic = await GetTrafficHistoryAsync(request.Token);
-            if (!_cards.IsConnectionCurrent(generation) || !_cards.CardLyricsVisible) return;
+            if (!cards.IsConnectionCurrent(generation) || !ShouldRefreshCard("traffic")) return;
             _cardSnapshot!.SetTraffic(traffic);
-            _cards.PublishSnapshot();
+            cards.PublishSnapshot();
             succeeded = true;
         }
         catch (Exception error) when (error is IOException or InvalidOperationException or TimeoutException or

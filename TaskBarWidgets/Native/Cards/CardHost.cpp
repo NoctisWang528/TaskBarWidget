@@ -17,7 +17,9 @@ namespace Cards
         constexpr UINT WM_CARD_TASK = WM_APP + 0x211;
         constexpr UINT WM_GROUP_FRAME = WM_APP + 0x217;
         constexpr UINT_PTR IdleTimer = 0xCD03;
+        constexpr UINT_PTR WarmupTimer = 0xCD04;
         constexpr UINT IdleMilliseconds = 10 * 60 * 1000;
+        constexpr UINT WarmupMilliseconds = 250;
 
         constexpr UINT COMMAND_SHOW = 1;
         constexpr UINT COMMAND_HIDE = 2;
@@ -96,6 +98,7 @@ namespace Cards
         ULONGLONG errorUntil{};
         std::chrono::steady_clock::time_point lastInteraction{};
         bool resident{ true };
+        bool warmupPending{};
         std::unique_ptr<CardPopup> popup;
         std::wstring popupMenu;
         RECT popupAnchor{};
@@ -218,6 +221,10 @@ namespace Cards
         void HideAll(const std::wstring& reason, bool animate);
         void ShowCards();
         void DestroyIdleCards();
+        void ScheduleWarmup();
+        void CancelWarmup();
+        void WarmResidentCards();
+        void UpdateIdleTimer();
         void RequestInitialState();
         void ApplyConfig(const Config& value);
         void Status(const wchar_t* message);
@@ -250,9 +257,14 @@ namespace Cards
 
     void CardHost::Impl::RequestInitialState()
     {
-        client.Request(L"getAudio", {}, L"audio");
-        client.Request(L"getTrafficHistory", {}, L"traffic");
-        client.Request(L"weatherCommand", "{\"operation\":\"status\"}", L"weather");
+        // Resident caches are refreshed by Media before the group opens. The
+        // visibility subscription revalidates them without duplicate requests.
+        if (!resident)
+        {
+            client.Request(L"getAudio", {}, L"audio");
+            client.Request(L"getTrafficHistory", {}, L"traffic");
+            client.Request(L"weatherCommand", "{\"operation\":\"status\"}", L"weather");
+        }
         client.Request(L"getState", "{\"artworkDelta\":true}", L"state");
         client.Request(L"getUpdateState", {}, L"update");
         client.Request(L"subscribeCardLyrics", "{\"visible\":true,\"session\":1}", L"lyrics");
@@ -283,7 +295,6 @@ namespace Cards
                 lastError = L"card window creation failed";
                 continue;
             }
-            card->ApplyEnvironment(environment);
             card->SetSnapshot(snapshot);
             cards[kind] = std::move(card);
         }
@@ -336,6 +347,7 @@ namespace Cards
 
     void CardHost::Impl::StopGroupMotion(bool settle)
     {
+        const bool wasMoving = groupMoving;
         if (groupTimer)
         {
             DeleteTimerQueueTimer(nullptr, groupTimer, INVALID_HANDLE_VALUE);
@@ -347,6 +359,7 @@ namespace Cards
         {
             if (!visible) for (auto& [kind, card] : cards) card->Hide(false);
             MoveGroup(0);
+            if (!visible && wasMoving) ScheduleWarmup();
         }
     }
 
@@ -505,7 +518,44 @@ namespace Cards
         // Lyrics subscription stops with the cards so a hidden panel never keeps
         // lyric work alive in the media service.
         client.Request(L"subscribeCardLyrics", "{\"visible\":false,\"session\":1}");
-        if (window) SetTimer(window, IdleTimer, IdleMilliseconds, nullptr);
+        UpdateIdleTimer();
+        ScheduleWarmup();
+    }
+
+    void CardHost::Impl::UpdateIdleTimer()
+    {
+        if (!window) return;
+        if (visible || resident) KillTimer(window, IdleTimer);
+        else SetTimer(window, IdleTimer, IdleMilliseconds, nullptr);
+    }
+
+    void CardHost::Impl::CancelWarmup()
+    {
+        if (window) KillTimer(window, WarmupTimer);
+        warmupPending = false;
+    }
+
+    void CardHost::Impl::ScheduleWarmup()
+    {
+        if (!window || visible || !resident || shuttingDown || groupMoving || warmupPending) return;
+        // Coalesce incoming snapshots without postponing work on every update.
+        // A hidden group has no animation or continuous frame timer.
+        warmupPending = SetTimer(window, WarmupTimer, WarmupMilliseconds, nullptr) != 0;
+    }
+
+    void CardHost::Impl::WarmResidentCards()
+    {
+        CancelWarmup();
+        if (visible || !resident || shuttingDown || groupMoving) return;
+        // On-demand may already have released the shared drawing resources.
+        if (!graphics.Ready() && !graphics.Initialize()) return;
+        if (!device) { std::wstring error; device = graphics.CreateGraphicsDevice(compositor, error); }
+        if (!device) return;
+        RECT entry{};
+        if (owner && GetWindowRect(owner, &entry))
+            anchor = { entry.left + (entry.right - entry.left) / 2, entry.top };
+        CreateCards();
+        PlaceGroup(false, false);
     }
 
     void CardHost::Impl::DestroyIdleCards()
@@ -526,6 +576,7 @@ namespace Cards
 
     void CardHost::Impl::ShowCards()
     {
+        CancelWarmup();
         if (!graphics.Ready())
         {
             if (!graphics.Initialize())
@@ -536,7 +587,6 @@ namespace Cards
         }
         if (!device) { std::wstring error; device = graphics.CreateGraphicsDevice(compositor, error); }
         if (!device) return;
-        UpdateEnvironment(true);
         visible = true;
         if (window) KillTimer(window, IdleTimer);
         CreateCards();
@@ -554,6 +604,8 @@ namespace Cards
         config = value;
         snapshot.config = value;
         resident = !config.OnDemand();
+        if (!resident) CancelWarmup();
+        UpdateIdleTimer();
         UpdateEnvironment(true);
         if (visible)
         {
@@ -561,16 +613,7 @@ namespace Cards
             PlaceGroup(false, true);
             return;
         }
-        // Resident mode prewarms the enabled cards while the group stays hidden, so
-        // the first click only shows already-created windows. On-demand creates
-        // them on the first click instead.
-        if (resident && !shuttingDown)
-        {
-            if (!device) { std::wstring error; device = graphics.CreateGraphicsDevice(compositor, error); }
-            if (!device) return;
-            CreateCards();
-            PlaceGroup(false, false);
-        }
+        ScheduleWarmup();
     }
 
     void CardHost::Impl::RefreshSnapshot(const Protocol::Changes& changes)
@@ -588,10 +631,12 @@ namespace Cards
         {
             config = snapshot.config;
             resident = !config.OnDemand();
+            if (!resident) CancelWarmup();
+            UpdateIdleTimer();
             UpdateEnvironment(true);
         }
         else if (changes.theme) UpdateEnvironment(true);
-        if ((visible || resident) && (changes.config || changes.update))
+        if (visible && (changes.config || changes.update))
         {
             if (!device) { std::wstring error; device = graphics.CreateGraphicsDevice(compositor, error); }
             if (device) CreateCards();
@@ -607,6 +652,7 @@ namespace Cards
                 if (card) card->Hide(true);
             }
         }
+        ScheduleWarmup();
     }
 
     void CardHost::Impl::OnPipeMessages()
@@ -743,6 +789,7 @@ namespace Cards
                 popup.reset(); cards.clear(); device = nullptr;
                 graphics.OnDeviceLost();
                 if (restore) ShowCards();
+                else ScheduleWarmup();
                 break;
             }
             case COMMAND_TOGGLE:
@@ -761,6 +808,7 @@ namespace Cards
                 break;
             case COMMAND_PLACE:
                 if (visible) PlaceGroup(false, false);
+                else ScheduleWarmup();
                 break;
             case COMMAND_ESCAPE:
                 // Escape closes an open menu first; a second Escape closes cards.
@@ -782,14 +830,17 @@ namespace Cards
                     previewDark = command->previewDark;
                 }
                 UpdateEnvironment(true);
+                ScheduleWarmup();
                 break;
             case COMMAND_OWNER:
                 owner = command->owner;
+                ScheduleWarmup();
                 break;
             case COMMAND_CLEAR_PREVIEW:
                 previewMica = false;
                 previewTheme = false;
                 UpdateEnvironment(true);
+                ScheduleWarmup();
                 break;
             case COMMAND_MENU:
                 OpenMenu(command->menu, command->items, command->menuAnchor);
@@ -1207,7 +1258,7 @@ namespace Cards
 
     void CardHost::Impl::OnLayoutInvalidated()
     {
-        if (!visible) return;
+        if (!visible) { ScheduleWarmup(); return; }
         // WM_DPICHANGED can arrive synchronously inside DeferWindowPos. Finish
         // that transaction before applying a new group layout and cached bounds.
         auto command = std::make_unique<Command>();
@@ -1253,15 +1304,18 @@ namespace Cards
                 self->DetectEnvironment();
                 self->UpdateEnvironment(true);
                 if (self->visible) self->PlaceGroup(false, false);
+                else self->ScheduleWarmup();
                 return 0;
             case WM_DISPLAYCHANGE:
                 if (self->visible) self->PlaceGroup(false, false);
+                else self->ScheduleWarmup();
                 return 0;
             case WM_TIMER:
                 if (keys == IdleTimer)
                 {
                     self->OnIdle();
                 }
+                else if (keys == WarmupTimer) self->WarmResidentCards();
                 return 0;
             default:
                 return DefWindowProcW(window, message, keys, position);
@@ -1318,6 +1372,7 @@ namespace Cards
         }
 
         // Teardown: stop producers first, then release device-bound resources.
+        CancelWarmup();
         StopGroupMotion(false);
         client.Stop();
         UninstallHooks();
