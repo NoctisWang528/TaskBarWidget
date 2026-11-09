@@ -71,7 +71,7 @@ static int VisibleProbeCards()
         if (process == GetCurrentProcessId() && wcscmp(name, L"TaskBarWidgetsCardWindow") == 0 && IsWindowVisible(window))
         {
             RECT bounds{}; GetWindowRect(window, &bounds);
-            if (bounds.right < GetSystemMetrics(SM_XVIRTUALSCREEN) &&
+            if (bounds.right < GetSystemMetrics(SM_XVIRTUALSCREEN) ||
                 bounds.bottom < GetSystemMetrics(SM_YVIRTUALSCREEN)) ++*reinterpret_cast<int*>(data);
         }
         return TRUE;
@@ -155,6 +155,25 @@ static void CheckGroupMotion(Cards::CardHost& host, POINT anchor)
     PumpFor(350);
     const auto rest = ReadGroupBounds();
     Require(rest.size() == 4, "group has four distinct windows");
+    // Enumerate the desktop once; sample only our known HWNDs during motion.
+    // Repeated desktop enumeration can outlast an entire animation.
+    const auto readBounds = [&rest]
+    {
+        GroupBounds frame;
+        for (const auto& [window, original] : rest)
+        {
+            RECT bounds{};
+            if (IsWindowVisible(window) && GetWindowRect(window, &bounds)) frame.emplace(window, bounds);
+        }
+        return frame;
+    };
+    RECT groupBounds{};
+    for (const auto& [window, bounds] : rest) UnionRect(&groupBounds, &groupBounds, &bounds);
+    BOOL animations = FALSE;
+    HIGHCONTRASTW contrast{sizeof(contrast)};
+    SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0);
+    const bool motionEnabled = SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0) &&
+        animations && !(contrast.dwFlags & HCF_HIGHCONTRASTON);
     for (auto a = rest.begin(); a != rest.end(); ++a)
     for (auto b = std::next(a); b != rest.end(); ++b)
     {
@@ -162,17 +181,39 @@ static void CheckGroupMotion(Cards::CardHost& host, POINT anchor)
         Require(!IntersectRect(&overlap, &a->second, &b->second), "offscreen diagnostic preserves nonoverlapping group layout");
     }
     host.Toggle(anchor);
+    LONG exitTravel = 0;
+    const auto exitDeadline = GetTickCount64() + 10000;
+    while (GetTickCount64() < exitDeadline)
+    {
+        const auto frame = readBounds();
+        if (frame.empty() && !host.Visible()) break;
+        if (frame.size() == rest.size() && SameBounds(frame, readBounds()))
+        {
+            const LONG dy = frame.begin()->second.top - rest.at(frame.begin()->first).top;
+            for (const auto& [window, bounds] : frame)
+            {
+                auto expected = rest.at(window);
+                OffsetRect(&expected, 0, dy);
+                Require(EqualRect(&expected, &bounds), "exit moves all complete windows together");
+            }
+            exitTravel = std::max(exitTravel, dy);
+        }
+        PumpFor(2);
+    }
     WaitForCards(host, 0);
+    std::cout << "Group exit travel: " << exitTravel << " px; group height: " <<
+        groupBounds.bottom - groupBounds.top << " px.\n";
+    if (motionEnabled) Require(exitTravel > (groupBounds.bottom - groupBounds.top) / 2,
+        "exit must travel toward the screen bottom instead of disappearing after a short slide");
     host.Toggle(anchor);
-    WaitForCards(host, 4);
-    bool moved = false;
+    LONG entryTravel = 0;
     int samples = 0;
-    const auto until = GetTickCount64() + 330;
+    const auto until = GetTickCount64() + 10000;
     while (GetTickCount64() < until)
     {
-        const auto frame = ReadGroupBounds();
+        const auto frame = readBounds();
         // Avoid sampling halfway across a window-position transaction.
-        if (frame.size() == rest.size() && SameBounds(frame, ReadGroupBounds()))
+        if (frame.size() == rest.size() && SameBounds(frame, readBounds()))
         {
             const LONG dy = frame.begin()->second.top - rest.at(frame.begin()->first).top;
             for (const auto& [window, bounds] : frame)
@@ -182,23 +223,21 @@ static void CheckGroupMotion(Cards::CardHost& host, POINT anchor)
                 Require(EqualRect(&expected, &bounds), "all four full windows move by one common Y offset");
             }
             Require(dy >= 0, "entrance comes from below the final group position");
-            moved |= dy > 0;
+            entryTravel = std::max(entryTravel, dy);
             ++samples;
+            if (samples > 1 && SameBounds(rest, frame)) break;
         }
-        Sleep(2);
+        PumpFor(2);
     }
-    BOOL animations = FALSE;
-    HIGHCONTRASTW contrast{sizeof(contrast)};
-    SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0);
-    if (SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0) && animations &&
-        !(contrast.dwFlags & HCF_HIGHCONTRASTON)) Require(moved, "host entrance actually moves window bounds");
-    Require(samples > 1 && SameBounds(rest, ReadGroupBounds()), "group settles at its original bounds");
+    if (motionEnabled) Require(entryTravel > (groupBounds.bottom - groupBounds.top) / 2,
+        "entrance must travel from the screen bottom instead of appearing near the final position");
+    Require(samples > 1 && SameBounds(rest, readBounds()), "group settles at its original bounds");
     host.Toggle(anchor);
     PumpFor(30);
     host.Toggle(anchor); // Reverse an in-flight exit.
     WaitForCards(host, 4);
     PumpFor(350);
-    Require(SameBounds(rest, ReadGroupBounds()), "reversing exit retains all four windows and final geometry");
+    Require(SameBounds(rest, readBounds()), "reversing exit retains all four windows and final geometry");
     host.Toggle(anchor);
     WaitForCards(host, 0);
     host.Toggle(anchor);

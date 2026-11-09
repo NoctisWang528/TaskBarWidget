@@ -90,7 +90,7 @@ namespace Cards
         HANDLE groupTimer{};
         std::atomic<bool> groupFramePending{false};
         bool groupMoving{};
-        float groupOffset{}, groupFrom{}, groupTo{}, groupDistance{48.0f};
+        float groupOffset{}, groupFrom{}, groupTo{}, groupDistance{};
         int groupDuration{240};
         std::chrono::steady_clock::time_point groupStarted;
         POINT anchor{};
@@ -405,7 +405,7 @@ namespace Cards
             MoveGroup(0);
             return;
         }
-        groupDuration = std::max(1, static_cast<int>((showing ? 240 : 160) *
+        groupDuration = std::max(1, static_cast<int>((showing ? 280 : 240) *
             std::min(1.0f, std::abs(groupTo - groupFrom) / std::max(1.0f, groupDistance))));
         groupStarted = std::chrono::steady_clock::now();
         groupMoving = true;
@@ -433,7 +433,8 @@ namespace Cards
             std::chrono::steady_clock::now() - groupStarted).count();
         const float t = std::clamp(elapsed / groupDuration, 0.0f, 1.0f);
         const float remaining = 1 - t;
-        MoveGroup(groupFrom + (groupTo - groupFrom) * (1 - remaining * remaining * remaining));
+        const float progress = visible ? 1 - remaining * remaining * remaining : t * t;
+        MoveGroup(groupFrom + (groupTo - groupFrom) * progress);
         if (t >= 1) StopGroupMotion(true);
     }
 
@@ -469,10 +470,17 @@ namespace Cards
         }
         lastInteraction = std::chrono::steady_clock::now();
         groupRestBounds.clear();
-        groupDistance = 48.0f * placement.dpiScale * placement.fit;
-        if (!continuing) groupOffset = animate && !reducedMotion && !highContrast ? groupDistance : 0;
         RECT groupBounds{};
         for (const auto& slot : placement.slots) UnionRect(&groupBounds, &groupBounds, &slot.bounds);
+        MONITORINFO monitor{sizeof(monitor)};
+        const LONG bottom = GetMonitorInfoW(MonitorFromPoint(anchor, MONITOR_DEFAULTTONEAREST), &monitor)
+            ? monitor.rcMonitor.bottom : groupBounds.bottom;
+        // Move the highest card (including its shadow) beyond the physical screen,
+        // not just the work area above the taskbar. Use the real layout before the
+        // diagnostic-only offscreen translation below.
+        groupDistance = static_cast<float>(std::max(0L, bottom - groupBounds.top)) +
+            Layout::EdgeReserve * placement.dpiScale;
+        if (!continuing) groupOffset = animate && !reducedMotion && !highContrast ? groupDistance : 0;
         for (const auto& slot : placement.slots)
         {
             auto* card = Card(slot.kind);
