@@ -59,6 +59,28 @@ Media pushes `quickCards` (order, columns, enabled map, resource mode, font and 
 
 Both the `quickCards` command and snapshot configuration carry `animationSpeedPercent` (50–300, default 150) and `animationFps` (0 = follow the current monitor up to 240 FPS; explicit values: 30, 60, 90, 120, 144, 165, 240). Settings use `quickCardAnimationSpeedPercent` and `quickCardAnimationFps`; invalid frame rates normalize to 0. Missing fields retain existing/default values. These settings affect whole-group entrance/exit motion only, preserve system reduced-motion behavior, and do not enable hidden animation frames.
 
+## Local update debug channel
+
+Media always serves the separate current-user-only local pipe `TaskBarWidgets.UpdateDebug.<native PID>`; the suffix is the native host PID, not Media's PID. This does not launch the settings UI or enable imports by itself. Each import dynamically requires the regular, non-reparse-point marker `<installationRoot>\Data\config\update-debug.enabled`; absent means disabled. No weather credentials, raw configuration, or unrelated settings are included in this protocol.
+
+Transport is strict UTF-8 newline JSON, one request and one correlated response per connection. The request line is at most 16 KiB and the response line at most 64 KiB (including LF). Request:
+
+```json
+{"version":1,"requestId":"<guid>","action":"importLocalUpdate","releaseDirectory":"C:\\local-release"}
+```
+
+`requestId` is a GUID in D format (with hyphens). `releaseDirectory` is an absolute local fixed-drive directory containing `update.json`, `SHA256SUMS.txt`, and the matching ZIP. Response is sent only after full import verification (allow up to five minutes), not merely admission to a queue:
+
+```json
+{"version":1,"requestId":"<same guid>","success":true,"snapshot":{"phase":"ready"},"error":null}
+```
+
+`snapshot` is the full existing `UpdateSnapshot`, not just the abbreviated phase above. Failures return `success:false` with a safe error string; the snapshot may be null or omitted. Clients must check version, requestId, boolean success, and `snapshot.phase == "ready"` before reporting success. Clients bound responses and connection/read timeouts, surface failures without dumping snapshots or secrets, and must not interpret timeout/disconnection as cancellation or installation approval.
+
+Only the version comparison is relaxed: same/older local versions are accepted. Normal metadata, checksums, ZIP/hash/size, manifest hash, inventory, per-file validation, and path restrictions still apply. Imported candidates are session-only and never restored on restart. Automatic checks pause while a local candidate is staged; an explicit check returns to the official fixed-repository channel. Import never auto-installs: the existing update UI requires user confirmation and retains draft/save guards.
+
+Use `scripts/push-local-update.ps1 -InstallationDirectory <path> -ReleaseDirectory <path>`; `-EnableDebug` explicitly creates the marker before pushing, while the standalone `-DisableDebug` parameter set removes it and returns without process discovery. The client resolves exactly one running native executable by full installation path and neither starts nor stops any product process. Marker changes reject network paths and reparse-point ancestors. Older installed versions require one manual upgrade to obtain this interface. See [本地调试包推送](docs/更新协议.md#本地调试包推送默认关闭) for commands and lifecycle details.
+
 ## WinUI frontend channel
 
 The settings process is started on demand — opening settings or confirming an update — and exits when its last window closes; nothing else keeps it resident. Media launches sibling `UI/TaskBarWidgets.UI.exe --host-pid <media PID> --pipe-name TaskBarWidgets.UI.<media PID>`. It owns a second current-user-only newline UTF-8 pipe; WinUI is the client. Both ends cap messages at4MiB. Requests use `{version:1,type:"command",action,requestId,payload}` and responses `{version:1,type:"command",action:"uiResult",requestId,success,payload,error}`. UI events are `openSettings` with optional page and `shutdown`. Foreground permission is delegated from native to media and then to UI for explicit user interaction. The UI watches its host PID. The post-update health handshake still starts the settings UI in update-health mode and exits it after the handshake; the updater already tolerates `uiPid=0`.

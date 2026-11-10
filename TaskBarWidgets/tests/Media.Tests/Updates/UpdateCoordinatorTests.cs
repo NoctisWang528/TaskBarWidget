@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.IO;
 using System.IO.Compression;
+using System.IO.Pipes;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -14,6 +15,235 @@ namespace TaskBarWidgets.Media.Tests.Updates;
 
 public sealed class UpdateCoordinatorTests
 {
+    [Fact]
+    public async Task LocalImportRequiresExplicitDebugOptIn()
+    {
+        await using var test = new Scenario();
+        var coordinator = test.Create();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.ImportLocalAsync("not a path"));
+        Assert.False(Directory.Exists(test.CacheRoot));
+        Assert.Empty(test.Requests);
+    }
+
+    [Theory]
+    [InlineData("261018-1200")]
+    [InlineData(Scenario.Latest)]
+    [InlineData("271001-1200")]
+    [InlineData("development")]
+    public async Task LocalPackagesSupportUpgradeReinstallAndRollbackWithoutNetwork(string current)
+    {
+        await using var test = new Scenario();
+        var coordinator = test.Create(current, debugEnabled: () => true);
+        var directory = test.WriteLocalRelease();
+        var state = await coordinator.ImportLocalAsync(directory);
+        Assert.Equal("ready", state.Phase);
+        Assert.True(state.CanInstall);
+        Assert.Contains("本地调试", state.Notes);
+        // Installation uses its own verified copy, never the caller's mutable input.
+        File.Delete(Directory.GetFiles(directory, "*.zip").Single());
+        var prepared = await coordinator.PrepareInstall();
+        Assert.Equal(Scenario.Latest, prepared.Version);
+        Assert.Empty(test.Requests);
+        Assert.DoesNotContain(test.Changes, snapshot => snapshot.Phase == "installing");
+    }
+
+    [Theory]
+    [InlineData("hash")]
+    [InlineData("manifest-hash")]
+    [InlineData("file-hash")]
+    [InlineData("traversal")]
+    [InlineData("personal")]
+    [InlineData("duplicate")]
+    [InlineData("unlisted")]
+    [InlineData("symlink")]
+    public async Task LocalPackagesRetainTheOfficialIntegrityAndPathChecks(string problem)
+    {
+        await using var test = new Scenario(problem);
+        var coordinator = test.Create(debugEnabled: () => true);
+        var state = await coordinator.ImportLocalAsync(test.WriteLocalRelease());
+        Assert.Equal("error", state.Phase);
+        Assert.False(state.CanInstall);
+        Assert.False(state.CanDownload);
+        Assert.Empty(Directory.GetFiles(test.CacheRoot, "TaskBarWidgets.exe", SearchOption.AllDirectories));
+        Assert.Empty(test.Requests);
+    }
+
+    [Fact]
+    public async Task LocalImportRejectsChecksumsAndOversizedMetadata()
+    {
+        await using var test = new Scenario { MetadataProblem = "checksum" };
+        var coordinator = test.Create(debugEnabled: () => true);
+        var directory = test.WriteLocalRelease();
+        Assert.Equal("error", (await coordinator.ImportLocalAsync(directory)).Phase);
+        Assert.False(coordinator.Snapshot.CanInstall);
+        File.WriteAllBytes(Path.Combine(directory, "update.json"), new byte[65537]);
+        Assert.Equal("error", (await coordinator.ImportLocalAsync(directory)).Phase);
+        Assert.Empty(test.Requests);
+    }
+
+    [Fact]
+    public async Task LocalReadyPackagePausesAutomaticChecksButExplicitCheckReturnsToOfficialChannel()
+    {
+        var clock = new TestClock();
+        await using var test = new Scenario();
+        var coordinator = test.Create(clock: clock, debugEnabled: () => true);
+        coordinator.Start(); await coordinator.Initialization;
+        await coordinator.ImportLocalAsync(test.WriteLocalRelease());
+        await Eventually(() => clock.PendingTimers > 0);
+        clock.Advance(TimeSpan.FromDays(1));
+        await Eventually(() => clock.PendingTimers > 0);
+        coordinator.Check(false); await coordinator.WaitForIdleAsync();
+        Assert.Empty(test.Requests);
+        Assert.Equal("ready", coordinator.Snapshot.Phase);
+        coordinator.Check(); await coordinator.WaitForIdleAsync();
+        Assert.Equal("available", coordinator.Snapshot.Phase);
+        Assert.Equal(3, test.Requests.Count);
+        Assert.DoesNotContain("本地调试", coordinator.Snapshot.Notes);
+    }
+
+    [Fact]
+    public async Task LocalReadyPackageIsSessionOnlyAndOptOutBlocksInstall()
+    {
+        await using var test = new Scenario();
+        var enabled = true;
+        var coordinator = test.Create(debugEnabled: () => enabled);
+        await coordinator.ImportLocalAsync(test.WriteLocalRelease());
+        enabled = false;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.PrepareInstall());
+        await coordinator.DisposeAsync();
+        var restored = test.Create(debugEnabled: () => true);
+        restored.Start(); await restored.Initialization;
+        Assert.Equal("idle", restored.Snapshot.Phase);
+        Assert.False(restored.Snapshot.CanInstall);
+        Assert.Empty(test.Requests);
+    }
+
+    [Fact]
+    public async Task FailedExplicitCheckLeavesLocalModeAndAllowsAutomaticRetry()
+    {
+        var clock = new TestClock();
+        await using var test = new Scenario { RateLimited = true };
+        var coordinator = test.Create(clock: clock, debugEnabled: () => true);
+        coordinator.Start(); await coordinator.Initialization;
+        await coordinator.ImportLocalAsync(test.WriteLocalRelease());
+        coordinator.Check(); await coordinator.WaitForIdleAsync();
+        Assert.Equal("error", coordinator.Snapshot.Phase);
+        Assert.False(coordinator.Snapshot.CanInstall);
+        Assert.Null(coordinator.Snapshot.LatestVersion);
+        Assert.Null(coordinator.Snapshot.Notes);
+        await Eventually(() => clock.PendingTimers > 0);
+        clock.Advance(TimeSpan.FromHours(2));
+        await Eventually(() => test.Requests.Count == 2);
+        await coordinator.WaitForIdleAsync();
+    }
+
+    [Fact]
+    public async Task CancelledLocalImportCannotReportAnOlderReadyPackageAsItsSuccess()
+    {
+        await using var test = new Scenario();
+        var coordinator = test.Create(debugEnabled: () => true);
+        await coordinator.ImportLocalAsync(test.WriteLocalRelease());
+        test.Publish("261020-1200");
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        var result = await coordinator.ImportLocalAsync(test.WriteLocalRelease(), cancelled.Token);
+        Assert.Equal("error", result.Phase);
+        Assert.False(result.CanInstall);
+    }
+
+    [Fact]
+    public async Task LocalImportCannotRaceAnActiveDownloadOrInstall()
+    {
+        await using var test = new Scenario { BlockZip = true };
+        var coordinator = test.Create(debugEnabled: () => true);
+        var directory = test.WriteLocalRelease();
+        coordinator.Check(false);
+        await test.ZipRequested.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.ImportLocalAsync(directory));
+        test.UnblockZip.TrySetResult();
+        await coordinator.WaitForIdleAsync();
+        await coordinator.PrepareInstall();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.ImportLocalAsync(directory));
+    }
+
+    [Fact]
+    public async Task LocalDebugPipeRejectsInvalidClientsAndObservesLiveOptIn()
+    {
+        await using var test = new Scenario();
+        var coordinator = test.Create(debugEnabled: () => UpdateDebugServer.IsEnabled(test.InstallationRoot));
+        var fixturePid = Random.Shared.Next(1000000, int.MaxValue);
+        var name = "TaskBarWidgets.UpdateDebug." + fixturePid;
+        await using var server = new UpdateDebugServer(name, coordinator);
+        server.Start();
+        var id = Guid.NewGuid().ToString("D");
+        var request = JsonSerializer.Serialize(new { version = 1, requestId = id, action = "importLocalUpdate", releaseDirectory = test.WriteLocalRelease() });
+        async Task<JsonElement> Send(string json)
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var pipe = new NamedPipeClientStream(".", name, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+            await pipe.ConnectAsync(timeout.Token);
+            await pipe.WriteAsync(Encoding.UTF8.GetBytes(json + "\n"), timeout.Token);
+            using var reader = new StreamReader(pipe);
+            var line = await reader.ReadLineAsync(timeout.Token);
+            using var response = JsonDocument.Parse(line!);
+            return response.RootElement.Clone();
+        }
+        var disabled = await Send(request);
+        Assert.False(disabled.GetProperty("success").GetBoolean());
+        Assert.Equal(id, disabled.GetProperty("requestId").GetString());
+        Assert.False((await Send("{}")).GetProperty("success").GetBoolean());
+        var oversizedId = await Send("{\"version\":1,\"requestId\":\"" + new string('<', 11000) + "\",\"action\":\"importLocalUpdate\"}");
+        Assert.False(oversizedId.GetProperty("success").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, oversizedId.GetProperty("requestId").ValueKind);
+        Assert.True(Encoding.UTF8.GetByteCount(oversizedId.GetRawText()) < 65536);
+        Assert.False((await Send(new string('x', 16385))).GetProperty("success").GetBoolean());
+        var marker = Path.Combine(test.InstallationRoot, "Data", "config", "update-debug.enabled");
+        Directory.CreateDirectory(Path.GetDirectoryName(marker)!);
+        File.WriteAllText(marker, "");
+        var accepted = await Send(request);
+        Assert.True(accepted.GetProperty("success").GetBoolean());
+        Assert.Equal("ready", accepted.GetProperty("snapshot").GetProperty("phase").GetString());
+        File.Delete(marker);
+        Assert.False((await Send(request)).GetProperty("success").GetBoolean());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.PrepareInstall());
+        Assert.Empty(test.Requests);
+
+        // Run the shipped PowerShell client against the real pipe, substituting only
+        // process discovery so no normal product process needs to be started.
+        var product = new DirectoryInfo(AppContext.BaseDirectory);
+        while (product is not null && !File.Exists(Path.Combine(product.FullName, "scripts", "push-local-update.ps1")))
+            product = product.Parent;
+        Assert.NotNull(product);
+        var wrapper = Path.Combine(test.InstallationRoot, "push-fixture.ps1");
+        File.WriteAllText(Path.Combine(test.InstallationRoot, "TaskBarWidgets.exe"), "fixture only");
+        File.WriteAllText(wrapper, """
+            $ErrorActionPreference = 'Stop'
+            function Get-CimInstance {
+                param($ClassName, $Filter)
+                [pscustomobject]@{ ExecutablePath = (Join-Path $env:TBW_TEST_INSTALL 'TaskBarWidgets.exe'); ProcessId = [int]$env:TBW_TEST_PID }
+            }
+            & $env:TBW_TEST_SCRIPT -InstallationDirectory $env:TBW_TEST_INSTALL -ReleaseDirectory $env:TBW_TEST_RELEASE -EnableDebug
+            & $env:TBW_TEST_SCRIPT -InstallationDirectory $env:TBW_TEST_INSTALL -DisableDebug
+            """);
+        var start = new System.Diagnostics.ProcessStartInfo("pwsh")
+        {
+            UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
+        };
+        foreach (var argument in new[] { "-NoProfile", "-File", wrapper }) start.ArgumentList.Add(argument);
+        start.Environment["TBW_TEST_INSTALL"] = test.InstallationRoot;
+        start.Environment["TBW_TEST_PID"] = fixturePid.ToString();
+        start.Environment["TBW_TEST_RELEASE"] = test.WriteLocalRelease();
+        start.Environment["TBW_TEST_SCRIPT"] = Path.Combine(product!.FullName, "scripts", "push-local-update.ps1");
+        using var client = System.Diagnostics.Process.Start(start)!;
+        var output = client.StandardOutput.ReadToEndAsync();
+        var errors = client.StandardError.ReadToEndAsync();
+        await client.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.True(client.ExitCode == 0, await errors);
+        Assert.Contains("verified and ready", await output);
+        Assert.False(File.Exists(marker));
+        Assert.Empty(test.Requests);
+    }
+
     [Fact]
     public void PublishedSettingsResourcesAreAllowedWithoutAllowingPersonalSettings()
     {
@@ -339,6 +569,7 @@ public sealed class UpdateCoordinatorTests
         private byte[] _manifest = [];
         internal byte[] Zip { get; private set; } = [];
         internal string CacheRoot => Path.Combine(_root, "cache");
+        internal string InstallationRoot => Path.Combine(_root, "installation");
         internal readonly ConcurrentQueue<ObservedRequest> Requests = new();
         internal readonly ConcurrentQueue<UpdateSnapshot> Changes = new();
         internal readonly TaskCompletionSource ZipRequested = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -389,10 +620,20 @@ public sealed class UpdateCoordinatorTests
             Zip = buffer.ToArray();
         }
 
-        internal UpdateCoordinator Create(string current = "261018-1200", TimeProvider? clock = null)
+        internal string WriteLocalRelease()
+        {
+            var directory = Path.Combine(_root, "release");
+            Directory.CreateDirectory(directory);
+            File.WriteAllBytes(Path.Combine(directory, "update.json"), Metadata());
+            File.WriteAllText(Path.Combine(directory, "SHA256SUMS.txt"), Sums(), new UTF8Encoding(false));
+            File.WriteAllBytes(Path.Combine(directory, AssetName), Zip);
+            return directory;
+        }
+
+        internal UpdateCoordinator Create(string current = "261018-1200", TimeProvider? clock = null, Func<bool>? debugEnabled = null)
         {
             var coordinator = new UpdateCoordinator(Path.Combine(_root, "installation"), current, true, Changes.Enqueue,
-                CacheRoot, new SyntheticHandler(Respond), clock);
+                CacheRoot, new SyntheticHandler(Respond), clock, debugEnabled);
             _coordinators.Add(coordinator);
             return coordinator;
         }

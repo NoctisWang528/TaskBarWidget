@@ -33,6 +33,7 @@ public partial class App : System.Windows.Application
     private DateTimeOffset _nextCardAudio, _nextCardWeather, _nextCardTraffic;
     private System.Windows.Threading.DispatcherTimer? _cardTimer;
     private UpdateCoordinator? _updates;
+    private UpdateDebugServer? _updateDebug;
     private UpdateInstallBridge? _updateInstaller;
     private UpdateSnapshot _updateUnavailable = new() { Phase = "error", Error = "更新服务尚未准备好。" };
     private StorageCommandService? _storage;
@@ -111,7 +112,8 @@ public partial class App : System.Windows.Application
                     {
                         _cards?.PublishSnapshot();
                         _ui?.PublishUpdateState(snapshot);
-                    });
+                    }, debugEnabled: () => UpdateDebugServer.IsEnabled(applicationRoot));
+                _updateDebug = new UpdateDebugServer($"TaskBarWidgets.UpdateDebug.{_host.Id}", _updates);
                 _updateInstaller = new UpdateInstallBridge(_updates, _nativeSettings, _ui, _host, applicationRoot, AppDataPaths.RootDirectory);
             }
             catch (Exception error)
@@ -130,6 +132,7 @@ public partial class App : System.Windows.Application
             _pipe.Start();
             _media.Start();
             _updates?.Start();
+            _updateDebug?.Start();
             if (_updateInstaller is not null) TaskObserver.Observe(_updateInstaller.ReportPreviousFailureAsync(_stop.Token), "previous update outcome");
             TaskObserver.Observe(WatchHostAsync(), "parent lifecycle");
             SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
@@ -747,6 +750,7 @@ public partial class App : System.Windows.Application
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
         _cardTimer?.Stop();
         _stop.Cancel();
+        if (_updateDebug is not null) TaskObserver.Observe(_updateDebug.DisposeAsync().AsTask(), "update debug pipe shutdown");
         if (_updates is not null) TaskObserver.Observe(_updates.DisposeAsync().AsTask(), "update service shutdown");
         _settingsService?.Dispose();
         _audio.Dispose();
@@ -765,6 +769,7 @@ public partial class App : System.Windows.Application
         _nativeSettings?.Dispose();
         _cardTimer?.Stop();
         _stop.Cancel();
+        if (_updateDebug is not null) await _updateDebug.DisposeAsync();
         if (_updates is not null) await _updates.DisposeAsync();
         // Stop input producers before releasing the media services they call into.
         _settingsService?.Dispose();

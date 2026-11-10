@@ -28,7 +28,7 @@ public sealed record PreparedUpdate(string Version, string StageRoot, string Pac
 internal sealed record UpdateMetadata(int ProtocolVersion, string Version, string Architecture,
     string AssetName, long Size, string Sha256, string FileManifestSha256, UpdateRequirements Requirements);
 
-internal sealed record UpdateCandidate(UpdateMetadata Metadata, string PackageUrl, string ReleaseUrl, string Notes);
+internal sealed record UpdateCandidate(UpdateMetadata Metadata, string PackageUrl, string ReleaseUrl, string Notes, bool IsLocalDebug = false);
 internal sealed record AppFile(string Path, long Bytes, string Sha256);
 internal sealed record AppFileManifest(int ProtocolVersion, string Version, string Architecture, AppFile[] Files);
 

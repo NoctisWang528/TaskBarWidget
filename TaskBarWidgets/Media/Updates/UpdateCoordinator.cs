@@ -19,6 +19,7 @@ public sealed class UpdateCoordinator : IAsyncDisposable
     private readonly HttpClient _http;
     private readonly Action<UpdateSnapshot> _onChanged;
     private readonly TimeProvider _time;
+    private readonly Func<bool> _debugEnabled;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly SemaphoreSlim _persistGate = new(1, 1);
     private UpdateSnapshot _snapshot;
@@ -42,7 +43,7 @@ public sealed class UpdateCoordinator : IAsyncDisposable
 
     public UpdateCoordinator(string installationRoot, string currentVersion, bool automaticEnabled,
         Action<UpdateSnapshot> onChanged, string? cacheRootOverride = null, HttpMessageHandler? httpMessageHandler = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null, Func<bool>? debugEnabled = null)
     {
         var installation = Path.GetFullPath(installationRoot).TrimEnd(Path.DirectorySeparatorChar);
         UpdatePackage.EnsureSafePath(installation);
@@ -55,6 +56,7 @@ public sealed class UpdateCoordinator : IAsyncDisposable
             throw new ArgumentException("Update cache must be outside the installation directory.", nameof(cacheRootOverride));
         _onChanged = onChanged ?? throw new ArgumentNullException(nameof(onChanged));
         _time = timeProvider ?? TimeProvider.System;
+        _debugEnabled = debugEnabled ?? (() => false);
         _http = new HttpClient(httpMessageHandler ?? new HttpClientHandler { AllowAutoRedirect = false, AutomaticDecompression = DecompressionMethods.None })
             { Timeout = Timeout.InfiniteTimeSpan };
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("TaskBarWidgets-Updater/1.0");
@@ -80,7 +82,8 @@ public sealed class UpdateCoordinator : IAsyncDisposable
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_installationPrepared || _operation is { IsCompleted: false } || (!userInitiated && !_snapshot.AutomaticEnabled)) return _snapshot;
+            if (_installationPrepared || _operation is { IsCompleted: false } ||
+                (!userInitiated && (!_snapshot.AutomaticEnabled || _candidate?.IsLocalDebug == true && _prepared is not null))) return _snapshot;
             BeginLocked(token => CheckAsync(!userInitiated, token), !userInitiated);
             return _snapshot;
         }
@@ -91,7 +94,7 @@ public sealed class UpdateCoordinator : IAsyncDisposable
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_installationPrepared || _operation is { IsCompleted: false } || _candidate is null || _prepared is not null) return _snapshot;
+            if (_installationPrepared || _operation is { IsCompleted: false } || _candidate is not { IsLocalDebug: false } || _prepared is not null) return _snapshot;
             BeginLocked(token => DownloadAsync(_candidate, token), false);
             return _snapshot;
         }
@@ -104,6 +107,62 @@ public sealed class UpdateCoordinator : IAsyncDisposable
             if (!_installationPrepared && _snapshot.Phase is "downloading" or "verifying") _operationCancellation?.Cancel();
             return _snapshot;
         }
+    }
+
+    /// <summary>Imports a local release without installing it. Debug mode is explicitly opt-in.</summary>
+    public async Task<UpdateSnapshot> ImportLocalAsync(string releaseDirectory, CancellationToken cancellationToken = default)
+    {
+        Task operation;
+        UpdateSnapshot? imported = null;
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (!_debugEnabled()) throw new InvalidOperationException("Local update debug mode is disabled.");
+            if (_installationPrepared || _operation is { IsCompleted: false })
+                throw new InvalidOperationException("The updater is busy. Retry after the current operation finishes.");
+            BeginLocked(async token =>
+            {
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, cancellationToken);
+                await ImportLocalCoreAsync(releaseDirectory, linked.Token);
+                imported = Snapshot;
+            }, false);
+            operation = _operation!;
+        }
+        await operation;
+        // Correlate the result with this import, even if a cancelled request left an
+        // older package ready or another operation starts before the caller resumes.
+        if (imported is not null) return imported;
+        var failure = Snapshot;
+        return failure with { Phase = "error", CanInstall = false, Error = failure.Error ?? "Local update import did not complete." };
+    }
+
+    private async Task ImportLocalCoreAsync(string releaseDirectory, CancellationToken token)
+    {
+        if (!Path.IsPathFullyQualified(releaseDirectory) || releaseDirectory.StartsWith(@"\\", StringComparison.Ordinal) ||
+            new DriveInfo(Path.GetPathRoot(releaseDirectory)!).DriveType != DriveType.Fixed)
+            throw new InvalidDataException("Local updates require an absolute path on a local fixed drive.");
+        var root = Path.GetFullPath(releaseDirectory);
+        UpdatePackage.EnsureSafePath(root);
+        async Task<byte[]> ReadSmall(string name, int limit)
+        {
+            var path = UpdatePackage.ChildPath(root, name);
+            await using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 16384, true);
+            if (input.Length > limit) throw new InvalidDataException("Local update metadata exceeds its size limit.");
+            using var output = new MemoryStream();
+            await UpdatePackage.CopyBounded(input, output, input.Length, token);
+            return output.ToArray();
+        }
+        var metadata = UpdatePackage.ParseJson<UpdateMetadata>(await ReadSmall("update.json", 65536));
+        ValidateMetadata(metadata);
+        ValidateChecksums(Encoding.UTF8.GetString(await ReadSmall("SHA256SUMS.txt", 256 * 1024)), metadata);
+        var package = UpdatePackage.ChildPath(root, metadata.AssetName);
+        var candidate = new UpdateCandidate(metadata, "", ReleasesUrl,
+            "本地调试更新包（可重装或回退）。安装前仍会校验并备份个人数据。", true);
+        lock (_gate) { _candidate = candidate; _prepared = null; }
+        Change(state => state with { LatestVersion = metadata.Version, Notes = candidate.Notes, ReleaseUrl = candidate.ReleaseUrl });
+        // Clear any older official cached candidate; local debug packages are session-only.
+        await PersistAsync(token);
+        await DownloadAsync(candidate, token, package);
     }
 
     public UpdateSnapshot SetAutomatic(bool enabled)
@@ -127,6 +186,8 @@ public sealed class UpdateCoordinator : IAsyncDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (_installationPrepared || _operation is { IsCompleted: false } || _prepared is null || _candidate is null || _snapshot.Phase != "ready")
                 throw new InvalidOperationException("No verified update is ready for installation.");
+            if (_candidate.IsLocalDebug && !_debugEnabled())
+                throw new InvalidOperationException("Local update debug mode is disabled.");
             _installationPrepared = true;
             Change(state => state with { Phase = "preparing", CanDownload = false, CanInstall = false, Error = null });
             var prepared = _prepared;
@@ -172,17 +233,17 @@ public sealed class UpdateCoordinator : IAsyncDisposable
             try { await operation(token); }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
-                Change(state => state with { Phase = _prepared is not null ? "ready" : _candidate is not null ? "available" : "idle",
+                Change(state => state with { Phase = _prepared is not null ? "ready" : _candidate is { IsLocalDebug: false } ? "available" : "idle",
                     LatestVersion = _candidate?.Metadata.Version ?? state.LatestVersion,
                     Notes = _candidate?.Notes ?? state.Notes, ReleaseUrl = _candidate?.ReleaseUrl ?? state.ReleaseUrl,
                     TotalBytes = _candidate?.Metadata.Size ?? state.TotalBytes, BytesDownloaded = _prepared is not null ? _candidate?.Metadata.Size ?? 0 : 0,
-                    CanDownload = _candidate is not null && _prepared is null, CanInstall = _prepared is not null, Error = null, Message = "Update operation cancelled." });
+                    CanDownload = _candidate is { IsLocalDebug: false } && _prepared is null, CanInstall = _prepared is not null, Error = null, Message = "Update operation cancelled." });
             }
             catch (Exception error)
             {
                 lock (_gate) _nextAutomaticCheck = _retryAfter ?? _time.GetUtcNow().AddMinutes(15);
                 Change(state => state with { Phase = "error", Error = SafeError(error), Message = "The update could not be verified. Try again later.",
-                    CanDownload = _candidate is not null && _prepared is null, CanInstall = false });
+                    CanDownload = _candidate is { IsLocalDebug: false } && _prepared is null, CanInstall = false });
                 try { await PersistAsync(CancellationToken.None); } catch (IOException) { } catch (UnauthorizedAccessException) { }
             }
         });
@@ -214,7 +275,7 @@ public sealed class UpdateCoordinator : IAsyncDisposable
                 lock (_gate)
                 {
                     var due = _nextAutomaticCheck ?? _snapshot.LastCheckedAt?.Add(CheckInterval);
-                    if (_snapshot.AutomaticEnabled && !_installationPrepared &&
+                    if (_snapshot.AutomaticEnabled && !_installationPrepared && !(_candidate?.IsLocalDebug == true && _prepared is not null) &&
                         _operation is not { IsCompleted: false } && (!due.HasValue || _time.GetUtcNow() >= due) &&
                         (!_retryAfter.HasValue || _time.GetUtcNow() >= _retryAfter))
                         BeginLocked(token => CheckAsync(true, token), true);
@@ -227,6 +288,22 @@ public sealed class UpdateCoordinator : IAsyncDisposable
 
     private async Task CheckAsync(bool automatic, CancellationToken token)
     {
+        var leavingLocalDebug = false;
+        lock (_gate)
+        {
+            if (!automatic && _candidate?.IsLocalDebug == true)
+            {
+                _candidate = null;
+                _prepared = null;
+                leavingLocalDebug = true;
+            }
+        }
+        if (leavingLocalDebug)
+        {
+            Change(state => state with { Phase = "checking", LatestVersion = null, Notes = null, ReleaseUrl = ReleasesUrl,
+                BytesDownloaded = 0, TotalBytes = 0, CanDownload = false, CanInstall = false });
+            await PersistAsync(token);
+        }
         Change(state => state with { Phase = "checking", Error = null, Message = null, CanDownload = false, CanInstall = false });
         if (!UpdateVersion.TryParse(Snapshot.CurrentVersion, out var current))
         {
@@ -271,26 +348,13 @@ public sealed class UpdateCoordinator : IAsyncDisposable
             if (metadata.Version != tag || !assets.TryGetValue(metadata.AssetName, out var package) || package.Size != metadata.Size)
                 throw new InvalidDataException("Release asset metadata disagrees with the update manifest.");
             var sums = Encoding.UTF8.GetString(await GetSmall(sumsAsset.Url, 256 * 1024, requestTimeout.Token, sumsAsset.Size));
-            var matching = new List<string>();
-            foreach (var line in sums.Split('\n', StringSplitOptions.RemoveEmptyEntries))
-            {
-                var text = line.TrimEnd('\r');
-                if (text.Length < 67 || text[64] != ' ' || (text[65] != ' ' && text[65] != '*') || !UpdatePackage.IsHash(text[..64]))
-                    throw new InvalidDataException("Invalid release checksum manifest.");
-                if (text[66..].Equals(metadata.AssetName, StringComparison.OrdinalIgnoreCase))
-                {
-                    if (text[66..] != metadata.AssetName) throw new InvalidDataException("Checksum asset name casing mismatch.");
-                    matching.Add(text[..64]);
-                }
-            }
-            if (matching.Count != 1 || !matching[0].Equals(metadata.Sha256, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidDataException("Release checksums disagree with the update metadata.");
+            ValidateChecksums(sums, metadata);
             metadataVerified = true;
             var candidate = new UpdateCandidate(metadata, package.Url.AbsoluteUri, releaseUrl!, notes);
             PreparedUpdate? reusable;
             lock (_gate)
             {
-                reusable = _candidate?.Metadata == metadata ? _prepared : null;
+                reusable = _candidate is { IsLocalDebug: false } && _candidate.Metadata == metadata ? _prepared : null;
                 _candidate = candidate;
                 _prepared = null;
             }
@@ -330,6 +394,24 @@ public sealed class UpdateCoordinator : IAsyncDisposable
             throw new InvalidDataException("Incompatible update metadata.");
     }
 
+    private static void ValidateChecksums(string sums, UpdateMetadata metadata)
+    {
+        var matching = new List<string>();
+        foreach (var line in sums.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var text = line.TrimEnd('\r');
+            if (text.Length < 67 || text[64] != ' ' || (text[65] != ' ' && text[65] != '*') || !UpdatePackage.IsHash(text[..64]))
+                throw new InvalidDataException("Invalid release checksum manifest.");
+            if (text[66..].Equals(metadata.AssetName, StringComparison.OrdinalIgnoreCase))
+            {
+                if (text[66..] != metadata.AssetName) throw new InvalidDataException("Checksum asset name casing mismatch.");
+                matching.Add(text[..64]);
+            }
+        }
+        if (matching.Count != 1 || !matching[0].Equals(metadata.Sha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Release checksums disagree with the update metadata.");
+    }
+
     private sealed record ReleaseAsset(Uri Url, long Size);
     private static Dictionary<string, ReleaseAsset> ReadAssets(JsonElement release, string tag)
     {
@@ -349,7 +431,7 @@ public sealed class UpdateCoordinator : IAsyncDisposable
         return result;
     }
 
-    private async Task DownloadAsync(UpdateCandidate candidate, CancellationToken token)
+    private async Task DownloadAsync(UpdateCandidate candidate, CancellationToken token, string? localPackage = null)
     {
         var metadata = candidate.Metadata;
         Change(state => state with { Phase = "downloading", BytesDownloaded = 0, TotalBytes = metadata.Size, Error = null, Message = null, CanDownload = false, CanInstall = false });
@@ -363,11 +445,8 @@ public sealed class UpdateCoordinator : IAsyncDisposable
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
             timeout.CancelAfter(TimeSpan.FromMinutes(30));
-            using (var response = await Send(new Uri(candidate.PackageUrl), timeout.Token))
+            async Task CopyPackage(Stream source)
             {
-                if (response.Content.Headers.ContentLength is { } length && length != metadata.Size)
-                    throw new InvalidDataException("The ZIP size does not match release metadata.");
-                await using var source = await response.Content.ReadAsStreamAsync(timeout.Token);
                 await using var output = new FileStream(partial, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, true);
                 var nextProgress = _time.GetUtcNow();
                 await UpdatePackage.CopyBounded(source, output, metadata.Size, timeout.Token, count =>
@@ -378,6 +457,21 @@ public sealed class UpdateCoordinator : IAsyncDisposable
                     Change(state => state with { BytesDownloaded = count });
                 });
                 await output.FlushAsync(timeout.Token);
+            }
+            if (localPackage is not null)
+            {
+                UpdatePackage.EnsureSafePath(localPackage);
+                await using var source = new FileStream(localPackage, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, true);
+                if (source.Length != metadata.Size) throw new InvalidDataException("The local ZIP size does not match update metadata.");
+                await CopyPackage(source);
+            }
+            else
+            {
+                using var response = await Send(new Uri(candidate.PackageUrl), timeout.Token);
+                if (response.Content.Headers.ContentLength is { } length && length != metadata.Size)
+                    throw new InvalidDataException("The ZIP size does not match release metadata.");
+                await using var source = await response.Content.ReadAsStreamAsync(timeout.Token);
+                await CopyPackage(source);
             }
             UpdatePackage.EnsureSafePath(package);
             File.Move(partial, package);
@@ -478,7 +572,8 @@ public sealed class UpdateCoordinator : IAsyncDisposable
         try
         {
             CachedState state;
-            lock (_gate) state = new(_snapshot.LastCheckedAt, _retryAfter, _nextAutomaticCheck, _candidate, _prepared);
+            lock (_gate) state = new(_snapshot.LastCheckedAt, _retryAfter, _nextAutomaticCheck,
+                _candidate?.IsLocalDebug == true ? null : _candidate, _candidate?.IsLocalDebug == true ? null : _prepared);
             UpdatePackage.EnsureSafePath(CacheRoot);
             Directory.CreateDirectory(CacheRoot);
             var path = UpdatePackage.ChildPath(CacheRoot, "state.json");
@@ -510,7 +605,7 @@ public sealed class UpdateCoordinator : IAsyncDisposable
             if (state is null) return;
             lock (_gate) { _retryAfter = state.RetryAfter; _nextAutomaticCheck = state.NextAutomaticCheck; }
             Change(snapshot => snapshot with { LastCheckedAt = state.LastCheckedAt });
-            if (state.Candidate is not { } candidate || !UpdateVersion.TryParse(Snapshot.CurrentVersion, out var current) ||
+            if (state.Candidate is not { IsLocalDebug: false } candidate || !UpdateVersion.TryParse(Snapshot.CurrentVersion, out var current) ||
                 !UpdateVersion.TryParse(candidate.Metadata.Version, out var latest) || latest <= current) return;
             ValidateMetadata(candidate.Metadata);
             if (candidate.ReleaseUrl != RepositoryUrl + "/releases/tag/" + candidate.Metadata.Version ||
