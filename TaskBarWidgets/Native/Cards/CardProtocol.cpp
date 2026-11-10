@@ -103,14 +103,16 @@ namespace Cards::Protocol
             if (revision >= 0 && revision <= config.revision) return false;
             const auto order = Strings(quickCards, L"order");
             if (!order.empty()) config.order = order;
+            if (std::find(config.order.begin(), config.order.end(), L"peripheralBattery") == config.order.end())
+                config.order.push_back(L"peripheralBattery");
             if (const auto columns = Object(quickCards, L"columns"))
             {
-                for (const wchar_t* id : { L"weather", L"traffic", L"device", L"media" })
+                for (const wchar_t* id : { L"weather", L"traffic", L"device", L"media", L"peripheralBattery" })
                     config.columns[id] = Integer(columns, id, config.columns[id]);
             }
             if (const auto enabled = Object(quickCards, L"enabled"))
             {
-                for (const wchar_t* id : { L"weather", L"traffic", L"device", L"media" })
+                for (const wchar_t* id : { L"weather", L"traffic", L"device", L"media", L"peripheralBattery" })
                     config.enabled[id] = Boolean(enabled, id, config.enabled[id]);
             }
             const auto mode = Text(quickCards, L"resourceMode");
@@ -441,6 +443,55 @@ namespace Cards::Protocol
             return true;
         }
 
+        bool PeripheralFrom(const JsonObject& object, PeripheralBatteryState& target)
+        {
+            if (!object || Number(object, L"version", -1) != 1) return false;
+            const double revision = Number(object, L"revision", -1);
+            if (revision < 0 || revision > 9007199254740991.0 || std::floor(revision) != revision ||
+                revision <= target.revision) return false;
+            PeripheralBatteryState state;
+            state.revision = static_cast<long long>(revision);
+            state.mode = Text(object, L"mode") == L"detailed" ? L"detailed" : L"compact";
+            state.hideDisconnected = Boolean(object, L"hideDisconnected");
+            state.refreshing = Boolean(object, L"refreshing");
+            state.error = Text(object, L"error");
+            if (const auto devices = Array(object, L"devices"))
+            for (const auto& entry : devices)
+            {
+                if (entry.ValueType() != JsonValueType::Object) continue;
+                const auto item = entry.GetObject();
+                PeripheralDevice device;
+                device.id = Text(item, L"id");
+                if (device.id.empty() || std::any_of(state.devices.begin(), state.devices.end(),
+                    [&](const auto& prior) { return prior.id == device.id; })) continue;
+                device.name = Text(item, L"name"); device.kind = Text(item, L"kind");
+                device.brand = Text(item, L"brand");
+                device.connection = Text(item, L"connection"); device.state = Text(item, L"state");
+                device.updatedAt = Text(item, L"updatedAt"); device.source = Text(item, L"source");
+                device.compatibility = Text(item, L"compatibility");
+                device.stale = Boolean(item, L"stale"); device.showInCard = Boolean(item, L"showInCard");
+                device.canRead = Boolean(item, L"canRead");
+                if (const auto batteries = Array(item, L"batteries"))
+                for (const auto& value : batteries)
+                {
+                    if (value.ValueType() != JsonValueType::Object) continue;
+                    const auto battery = value.GetObject();
+                    PeripheralBatteryReading reading;
+                    reading.role = Text(battery, L"role"); reading.levelText = Text(battery, L"levelText");
+                    reading.estimated = Boolean(battery, L"estimated");
+                    const double percentage = Number(battery, L"percentage", -1);
+                    if (percentage >= 0 && percentage <= 100 && std::floor(percentage) == percentage)
+                        reading.percentage = static_cast<int>(percentage);
+                    if (battery.HasKey(L"charging") && battery.GetNamedValue(L"charging").ValueType() == JsonValueType::Boolean)
+                        reading.charging = battery.GetNamedBoolean(L"charging");
+                    device.batteries.push_back(std::move(reading));
+                }
+                state.devices.push_back(std::move(device));
+            }
+            target = std::move(state);
+            return true;
+        }
+
         bool UpdateFrom(const JsonObject& update, UpdateState& state)
         {
             if (!update) return false;
@@ -525,6 +576,7 @@ namespace Cards::Protocol
         target.traffic.revision = -1;
         target.weather.revision = -1;
         target.update.revision = -1;
+        target.peripheralBattery.revision = -1;
     }
 
     bool ApplySnapshot(Snapshot& target, const std::wstring& payloadJson, Changes& changes)
@@ -547,6 +599,8 @@ namespace Cards::Protocol
                 changes.weather = WeatherFrom(weather, target.weather);
             if (const auto update = Object(payload, L"update"))
                 changes.update = UpdateFrom(update, target.update);
+            if (const auto peripherals = Object(payload, L"peripheralBattery"))
+                changes.peripheralBattery = PeripheralFrom(peripherals, target.peripheralBattery);
             const auto status = Text(payload, L"statusText");
             if (status != target.statusText) { target.statusText = status; changes.status = true; }
             const int theme = std::clamp(Integer(payload, L"toolWindowTheme", target.toolWindowTheme), 0, 2);
@@ -611,6 +665,12 @@ namespace Cards::Protocol
             UNREFERENCED_PARAMETER(changes);
             return UpdateFrom(payload, target);
         }
+        catch (...) { return false; }
+    }
+
+    bool ApplyPeripheralBatteryReply(PeripheralBatteryState& target, const std::wstring& payloadJson)
+    {
+        try { return PeripheralFrom(JsonObject::Parse(payloadJson), target); }
         catch (...) { return false; }
     }
 

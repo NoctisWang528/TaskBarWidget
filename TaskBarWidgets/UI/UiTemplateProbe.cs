@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Hosting;
 using TaskBarWidgets.UI.Cards;
@@ -27,6 +28,7 @@ internal static class UiTemplateProbe
         object? weatherControls = null;
         object? offsetSettings = null;
         object? reorderControls = null;
+        object? peripheralSettings = null;
         string? error = null;
         try
         {
@@ -44,7 +46,13 @@ internal static class UiTemplateProbe
             checks.Add(new { surface = "settings", width = content.ActualWidth, loaded = content.IsLoaded });
             var fixtureIndex = Array.IndexOf(args, "--fixture");
             if (fixtureIndex >= 0 && fixtureIndex + 1 < args.Length)
+            {
                 layoutChecks = await UiLayoutProbe.RunAsync(settings, args[fixtureIndex + 1], Path.Combine(AppContext.BaseDirectory, "..", "ui-layout-check"));
+                var fixture = JsonNode.Parse(await File.ReadAllTextAsync(args[fixtureIndex + 1]))!.AsObject();
+                peripheralSettings = await SettingsWindow.ProbePeripheralBatteryControlsAsync(
+                    fixture["native"]!.AsObject(), fixture["media"]!.AsObject(),
+                    Path.Combine(AppContext.BaseDirectory, "..", "ui-layout-check"));
+            }
             if (layoutChecks is not null)
             {
                 reorderControls = await SettingsWindow.ProbeReorderControlsAsync(settings);
@@ -63,7 +71,7 @@ internal static class UiTemplateProbe
             var result = resultIndex >= 0 && resultIndex + 1 < args.Length ? args[resultIndex + 1] : Path.Combine(AppContext.BaseDirectory, "template-probe.json");
             var winUiModule = System.Diagnostics.Process.GetCurrentProcess().Modules.Cast<System.Diagnostics.ProcessModule>()
                 .FirstOrDefault(module => string.Equals(module.ModuleName, "Microsoft.ui.xaml.dll", StringComparison.OrdinalIgnoreCase))?.FileName;
-            File.WriteAllText(result, JsonSerializer.Serialize(new { success = error is null, error, runtimeDirectory = RuntimeEnvironment.GetRuntimeDirectory(), winUiModule, checks, weatherControls, offsetSettings, reorderControls, layoutChecks, probeActivated = activated, externalForegroundChanged = GetForegroundWindow() != before }, new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(result, JsonSerializer.Serialize(new { success = error is null, error, runtimeDirectory = RuntimeEnvironment.GetRuntimeDirectory(), winUiModule, checks, weatherControls, offsetSettings, reorderControls, peripheralSettings, layoutChecks, probeActivated = activated, externalForegroundChanged = GetForegroundWindow() != before }, new JsonSerializerOptions { WriteIndented = true }));
             Environment.ExitCode = error is null ? 0 : 1;
             app.Exit();
         }

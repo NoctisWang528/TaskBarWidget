@@ -82,7 +82,7 @@ namespace Cards
             if (!table) return;
             for (const auto& region : table().All())
             {
-                if (region.type == Layout::RegionType::Text) continue;
+                if (region.type == Layout::RegionType::Text && region.action != L"peripheralReading") continue;
                 if (auto child = CreateChild(region.id)) children.push_back(child);
             }
         }

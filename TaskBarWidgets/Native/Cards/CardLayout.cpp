@@ -44,13 +44,14 @@ namespace Cards::Layout
         case Kind::Media: return HeightMedia;
         case Kind::Weather: return HeightWeather;
         case Kind::Update: return HeightUpdate;
+        case Kind::PeripheralBattery: return HeightPeripheralCompact;
         }
         return HeightMedia;
     }
 
     bool AutoHeight(Kind kind)
     {
-        return kind == Kind::Weather || kind == Kind::Device;
+        return kind == Kind::Weather || kind == Kind::Device || kind == Kind::PeripheralBattery;
     }
 
     float WidthDip(Kind kind)

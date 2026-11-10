@@ -19,6 +19,10 @@ internal static class OffsetSettingsProbe
 
         window.ProbeRequestHandler = async (request, payload) =>
         {
+            if (request == "subscribePeripheralBatteries") return new JsonObject();
+            if (request == "getPeripheralBatteries")
+                return new JsonObject { ["version"] = 1, ["revision"] = 0, ["devices"] = new JsonArray() };
+            if (request == "getNativeSettings") return window.ProbeNativeSchema;
             if (request != "settingsCommand")
                 throw new InvalidOperationException($"Unexpected settings request: {request}.");
             var command = payload?["action"]?.ToString() ?? "";

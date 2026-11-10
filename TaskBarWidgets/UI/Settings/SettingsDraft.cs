@@ -39,6 +39,55 @@ internal sealed class SettingsDraft
 }
 
 internal sealed record DisplayModule(string Id, string Name, string Sample, bool DoubleLineExclusive = false);
+
+// All peripheral edits use the existing revisioned, global Apply draft.
+internal sealed class PeripheralSettingsDraft(SettingsDraft draft)
+{
+    // Polling charge/state changes must not reload the taskbar editor's schema.
+    public static string InventoryKey(JsonObject snapshot) => JsonSerializer.Serialize(
+        (snapshot["devices"] as JsonArray ?? []).OfType<JsonObject>()
+            .OrderBy(device => device["id"]?.ToString(), StringComparer.Ordinal)
+            .Select(device => new
+            {
+                Id = device["id"]?.ToString(), Name = device["name"]?.ToString(), Kind = device["kind"]?.ToString(),
+                Roles = (device["batteries"] as JsonArray ?? []).OfType<JsonObject>()
+                    .Select(battery => battery["role"]?.ToString()).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray()
+            }));
+    public JsonObject Values => draft.Get("peripheralBattery") as JsonObject ?? new JsonObject();
+    public bool Bool(string key) => Values[key] is JsonValue value && value.TryGetValue<bool>(out var result) && result;
+    public string Mode => Values["mode"]?.ToString() == "detailed" ? "detailed" : "compact";
+    public void Set(string key, object value)
+    {
+        var values = Values;
+        values[key] = JsonSerializer.SerializeToNode(value);
+        draft.SetNode("peripheralBattery", values);
+    }
+    public bool Visible(string id, bool fallback) => Values["cardVisibility"] is JsonObject visibility &&
+        visibility[id] is JsonValue value && value.TryGetValue<bool>(out var enabled) ? enabled : fallback;
+    public void SetVisible(string id, bool visible)
+    {
+        var values = Values;
+        var visibility = values["cardVisibility"] as JsonObject ?? new JsonObject();
+        visibility[id] = visible;
+        if (visibility.Parent is null) values["cardVisibility"] = visibility;
+        draft.SetNode("peripheralBattery", values);
+    }
+    public string[] Order(IEnumerable<string> inventory)
+    {
+        var saved = (Values["order"] as JsonArray ?? []).OfType<JsonValue>()
+            .Select(value => value.TryGetValue<string>(out var id) ? id : "").Where(id => id.Length > 0);
+        return saved.Concat(inventory).Distinct(StringComparer.Ordinal).ToArray();
+    }
+    public void Reorder(IReadOnlyList<string> visibleOrder, string id, int gap)
+    {
+        var moved = ReorderSequence.MoveToGap(visibleOrder, id, gap);
+        // Keep remembered positions for devices missing from the current inventory.
+        var full = Order(visibleOrder);
+        var visible = visibleOrder.ToHashSet(StringComparer.Ordinal);
+        var index = 0;
+        Set("order", full.Select(item => visible.Contains(item) ? moved[index++] : item).ToArray());
+    }
+}
 internal sealed record DisplayColumn(DisplayModule? Upper, DisplayModule? Lower, DisplayModule? FullHeight = null);
 
 internal sealed class ModuleLayout(SettingsDraft draft, IReadOnlyList<DisplayModule> modules)

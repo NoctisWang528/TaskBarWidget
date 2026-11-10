@@ -15,6 +15,8 @@ namespace Cards::Paint
         {
             return WeatherHeight(snapshot, environment, widthDip);
         }
+        case Kind::PeripheralBattery:
+            return snapshot.peripheralBattery.mode == L"detailed" ? Layout::HeightPeripheralDetailed : Layout::HeightPeripheralCompact;
         case Kind::Device:
         {
             const float section = 16.0f + 3.0f + 32.0f + 4.0f + 32.0f + 8.0f;

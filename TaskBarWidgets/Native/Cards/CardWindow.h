@@ -78,9 +78,13 @@ namespace Cards
         void SetSnapshot(const Snapshot& snapshot);
 
         void Place(const RECT& bounds, float scale);
+        // Paint the destination once while CardHost animates the physical window bounds.
+        void PrepareGroupReflow(const RECT& bounds, float scale);
         // CardHost has already moved the group with DeferWindowPos. No layout or paint.
-        void CommitGroupBounds(const RECT& bounds) noexcept;
+        void CommitGroupBounds(const RECT& bounds);
         void SetWeatherView(bool forecast, int offset = 0);
+        void SetPeripheralPage(int page);
+        int PeripheralPage() const { return peripheralPage; }
         void Show(bool animate);
         void Hide(bool animate);
         bool Visible() const { return visible; }
@@ -136,6 +140,8 @@ namespace Cards
         void BuildVisualTree(HINSTANCE instance);
         void UpdateTimer();
         void PaintContent(bool rebuildRegions);
+        void AnimatePeripheralContent(float direction = 0);
+        void ResetPeripheralAnimation();
         void SetHotRegion(int id);
         void PruneInteraction();
         POINT ToDip(POINT pixels) const;
@@ -163,6 +169,7 @@ namespace Cards
         float scale{ 1.0f };
         float measuredHeightDip{ 0.0f };
         bool visible{ false };
+        int peripheralPage{ 0 };
         HWND window{};
     };
 
@@ -220,6 +227,9 @@ namespace Cards
         void Update(ID2D1DeviceContext* context, const Snapshot& snapshot,
             const CardEnvironment& environment, Layout::Table& regions, float widthDip, float heightDip,
             const Interaction& interaction = {});
+        void PeripheralBattery(ID2D1DeviceContext* context, const Snapshot& snapshot,
+            const CardEnvironment& environment, Layout::Table& regions, float widthDip, float heightDip,
+            const Interaction& interaction = {}, int page = 0);
 
         // Auto-height measurement for the weather and device cards.
         float MeasureHeight(Kind kind, const Snapshot& snapshot, const CardEnvironment& environment,

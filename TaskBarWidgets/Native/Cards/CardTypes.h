@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -18,6 +19,7 @@ namespace Cards
         Device = 2,
         Media = 3,
         Update = 4,
+        PeripheralBattery = 5,
     };
 
     const wchar_t* IdOf(Kind kind);
@@ -38,9 +40,9 @@ namespace Cards
     // parameters all come from here; none of it is re-derived natively.
     struct Config
     {
-        std::vector<std::wstring> order{ L"weather", L"traffic", L"device", L"media" };
-        std::map<std::wstring, int> columns{ { L"weather", 0 }, { L"traffic", 1 }, { L"device", 0 }, { L"media", 1 } };
-        std::map<std::wstring, bool> enabled{ { L"weather", false }, { L"traffic", true }, { L"device", true }, { L"media", true } };
+        std::vector<std::wstring> order{ L"weather", L"traffic", L"device", L"media", L"peripheralBattery" };
+        std::map<std::wstring, int> columns{ { L"weather", 0 }, { L"traffic", 1 }, { L"device", 0 }, { L"media", 1 }, { L"peripheralBattery", 0 } };
+        std::map<std::wstring, bool> enabled{ { L"weather", false }, { L"traffic", true }, { L"device", true }, { L"media", true }, { L"peripheralBattery", true } };
         std::wstring resourceMode{ L"Resident" };
         int animationSpeedPercent{150};
         int animationFps{0}; // 0 follows the monitor refresh rate.
@@ -258,6 +260,39 @@ namespace Cards
         long long revision{ -1 };
     };
 
+    struct PeripheralBatteryReading
+    {
+        std::wstring role;
+        std::optional<int> percentage;
+        std::wstring levelText;
+        bool estimated{ false };
+        std::optional<bool> charging;
+        bool operator==(const PeripheralBatteryReading&) const = default;
+    };
+
+    struct PeripheralDevice
+    {
+        std::wstring id, name, kind, connection, state, updatedAt, source, compatibility;
+        std::vector<PeripheralBatteryReading> batteries;
+        bool stale{ false }, showInCard{ false }, canRead{ false };
+        std::wstring brand; // Optional provider identity; empty in older snapshots.
+        bool Eligible(bool hideDisconnected) const;
+    };
+
+    struct PeripheralBatteryState
+    {
+        long long revision{ -1 };
+        std::wstring mode{ L"compact" }, error;
+        bool hideDisconnected{ false }, refreshing{ false };
+        std::vector<PeripheralDevice> devices;
+        std::vector<const PeripheralDevice*> Selected() const;
+        int PageSize() const { return mode == L"detailed" ? 4 : 3; }
+        int PageCount() const;
+        int ClampPage(int page) const;
+        bool Visible() const;
+        bool SameAppearance(const PeripheralBatteryState& other, int page = 0) const;
+    };
+
     struct UpdateState
     {
         long long revision{ -1 };
@@ -285,6 +320,7 @@ namespace Cards
         TrafficState traffic;
         WeatherState weather;
         UpdateState update;
+        PeripheralBatteryState peripheralBattery;
         std::wstring statusText;
         int toolWindowTheme{ 0 }; // AppSettings: System=0, Light=1, Dark=2.
         bool connected{ false };

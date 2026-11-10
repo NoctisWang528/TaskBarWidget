@@ -184,6 +184,7 @@ namespace Cards
         bool mediaStaticDirty{ true };
         bool mediaRegionsDirty{ true };
         SurfaceHandle boundSurface{ nullptr };
+        SIZE reflowSurfaceSize{};
         UINT timerInterval{};
         muxc::MicaController mica{ nullptr };
         muxc::SystemBackdropConfiguration micaConfiguration{ nullptr };
@@ -280,7 +281,8 @@ namespace Cards
             },
             [this](const Layout::Region& region, const std::wstring& payload)
             {
-                if (auto* host = Host()) host->OnRequest(region.action, payload);
+                if (kind == Kind::PeripheralBattery && region.action.starts_with(L"peripheralPage:")) Activate(region);
+                else if (auto* host = Host()) host->OnRequest(region.action, payload);
             }, [this](const Layout::Region& region) { return host.IsMenuExpanded(region.action); },
             [this](int id)
             {
@@ -384,6 +386,8 @@ namespace Cards
     void CardWindow::ApplyEnvironment(const CardEnvironment& cardEnvironment)
     {
         environment = cardEnvironment;
+        if (kind == Kind::PeripheralBattery && impl->content && (environment.reducedMotion || environment.highContrast))
+            ResetPeripheralAnimation();
         if (environment.reducedMotion || environment.highContrast)
         {
             impl->hover.clear();
@@ -482,6 +486,31 @@ namespace Cards
 
     void CardWindow::SetSnapshot(const Snapshot& value)
     {
+        if (kind == Kind::PeripheralBattery)
+        {
+            const auto& incoming = value.peripheralBattery;
+            const auto& previous = snapshot.peripheralBattery;
+            // A 400-ms global media snapshot must not repaint this independent card.
+            // Revision ordering belongs to Protocol, including reconnect counter resets.
+            const bool changed = !previous.SameAppearance(incoming, peripheralPage);
+            bool valuesChanged = false;
+            if (changed && previous.mode == incoming.mode)
+            {
+                const auto a = previous.Selected(), b = incoming.Selected();
+                const int first = peripheralPage * previous.PageSize();
+                for (int i = first; i < first + previous.PageSize() && i < static_cast<int>(a.size()) && i < static_cast<int>(b.size()); ++i)
+                    if (a[i]->id == b[i]->id && a[i]->batteries != b[i]->batteries) valuesChanged = true;
+            }
+            const bool modeChanged = incoming.mode != previous.mode;
+            const bool statusChanged = snapshot.statusText != value.statusText;
+            snapshot = value;
+            peripheralPage = snapshot.peripheralBattery.ClampPage(modeChanged ? 0 : peripheralPage);
+            if (modeChanged) ResetPeripheralAnimation();
+            impl->dirty |= changed || statusChanged;
+            if (visible) Paint();
+            if (modeChanged || valuesChanged) AnimatePeripheralContent();
+            return;
+        }
         const auto now = GetTickCount64();
         const bool stableChanged = kind == Kind::Media &&
             (StableMedia(value.media) != StableMedia(snapshot.media) || !SameSources(value.media, snapshot.media));
@@ -638,7 +667,21 @@ namespace Cards
     void CardWindow::Place(const RECT& targetBounds, float targetScale)
     {
         targetScale = targetScale > 0.0f ? targetScale : 1.0f;
-        if (EqualRect(&bounds, &targetBounds) && scale == targetScale)
+        const bool reflowChanged = impl->reflowSurfaceSize.cx &&
+            (impl->reflowSurfaceSize.cx != targetBounds.right - targetBounds.left ||
+                impl->reflowSurfaceSize.cy != targetBounds.bottom - targetBounds.top);
+        if (impl->reflowSurfaceSize.cx)
+        {
+            impl->reflowSurfaceSize = {};
+            impl->content.Size({ 0, 0 });
+            impl->content.RelativeSizeAdjustment({ 1, 1 });
+            if (impl->dynamicContent)
+            {
+                impl->dynamicContent.Size({ 0, 0 });
+                impl->dynamicContent.RelativeSizeAdjustment({ 1, 1 });
+            }
+        }
+        if (!reflowChanged && EqualRect(&bounds, &targetBounds) && scale == targetScale)
         {
             Paint();
             return;
@@ -648,7 +691,7 @@ namespace Cards
             impl->transition.Set(visible, targetScale);
             if (!visible && window) ShowWindow(window, SW_HIDE);
         }
-        const bool contentChanged = scale != targetScale ||
+        const bool contentChanged = reflowChanged || scale != targetScale ||
             bounds.right - bounds.left != targetBounds.right - targetBounds.left ||
             bounds.bottom - bounds.top != targetBounds.bottom - targetBounds.top;
         bounds = targetBounds;
@@ -672,9 +715,40 @@ namespace Cards
         Paint();
     }
 
-    void CardWindow::CommitGroupBounds(const RECT& targetBounds) noexcept
+    void CardWindow::CommitGroupBounds(const RECT& targetBounds)
     {
+        const bool resized = bounds.right - bounds.left != targetBounds.right - targetBounds.left ||
+            bounds.bottom - bounds.top != targetBounds.bottom - targetBounds.top;
         bounds = targetBounds;
+        if (resized && impl->corner)
+            impl->corner.Size({ static_cast<float>(bounds.right - bounds.left),
+                static_cast<float>(bounds.bottom - bounds.top) });
+    }
+
+    void CardWindow::PrepareGroupReflow(const RECT& targetBounds, float targetScale)
+    {
+        const auto actualBounds = bounds;
+        const bool contentChanged = scale != targetScale ||
+            bounds.right - bounds.left != targetBounds.right - targetBounds.left ||
+            bounds.bottom - bounds.top != targetBounds.bottom - targetBounds.top;
+        bounds = targetBounds;
+        scale = targetScale;
+        measuredHeightDip = static_cast<float>(bounds.bottom - bounds.top) / scale;
+        impl->reflowSurfaceSize = { bounds.right - bounds.left, bounds.bottom - bounds.top };
+        const winrt::Windows::Foundation::Numerics::float2 size{
+            static_cast<float>(impl->reflowSurfaceSize.cx), static_cast<float>(impl->reflowSurfaceSize.cy) };
+        impl->content.RelativeSizeAdjustment({ 0, 0 });
+        impl->content.Size(size);
+        if (impl->dynamicContent)
+        {
+            impl->dynamicContent.RelativeSizeAdjustment({ 0, 0 });
+            impl->dynamicContent.Size(size);
+        }
+        impl->dirty |= contentChanged;
+        impl->mediaStaticDirty |= contentChanged;
+        impl->mediaRegionsDirty |= contentChanged;
+        Paint();
+        bounds = actualBounds;
     }
 
     void CardWindow::SetWeatherView(bool forecast, int offset)
@@ -686,6 +760,48 @@ namespace Cards
         snapshot.weather.forecastOffset = offset;
         impl->dirty = true;
         if (visible) Paint();
+    }
+
+    void CardWindow::SetPeripheralPage(int page)
+    {
+        if (kind != Kind::PeripheralBattery) return;
+        page = snapshot.peripheralBattery.ClampPage(page);
+        if (page == peripheralPage) return;
+        const float direction = page > peripheralPage ? 1.f : -1.f;
+        peripheralPage = page;
+        impl->dirty = true;
+        if (visible) Paint();
+        AnimatePeripheralContent(direction);
+    }
+
+    void CardWindow::ResetPeripheralAnimation()
+    {
+        if (!impl->content) return;
+        impl->content.StopAnimation(L"Opacity");
+        impl->content.StopAnimation(L"Offset.X");
+        impl->content.Opacity(1);
+        impl->content.Offset({ 0, 0, 0 });
+    }
+
+    void CardWindow::AnimatePeripheralContent(float direction)
+    {
+        ResetPeripheralAnimation();
+        if (!visible || environment.reducedMotion || environment.highContrast || !impl->content) return;
+        // Composition owns the short transition; hidden cards need no animation timer.
+        const auto ease = impl->compositor.CreateCubicBezierEasingFunction({ 0.2f, 0 }, { 0, 1 });
+        auto fade = impl->compositor.CreateScalarKeyFrameAnimation();
+        fade.Duration(std::chrono::milliseconds(180));
+        fade.InsertKeyFrame(0, direction == 0 ? 0.7f : 0.35f);
+        fade.InsertKeyFrame(1, 1.f, ease);
+        impl->content.StartAnimation(L"Opacity", fade);
+        if (direction != 0)
+        {
+            auto slide = impl->compositor.CreateScalarKeyFrameAnimation();
+            slide.Duration(std::chrono::milliseconds(180));
+            slide.InsertKeyFrame(0, direction * 12.f * scale);
+            slide.InsertKeyFrame(1, 0.f, ease);
+            impl->content.StartAnimation(L"Offset.X", slide);
+        }
     }
 
     void CardWindow::OnMotionCompleted(UINT_PTR generation)
@@ -714,6 +830,8 @@ namespace Cards
     void CardWindow::Hide(bool animate)
     {
         visible = false;
+        if (kind == Kind::PeripheralBattery && impl->content)
+            ResetPeripheralAnimation();
         if (!window) return;
         CancelPointer();
         const bool hadFeedback = impl->hotRegion || !impl->hover.empty();
@@ -813,8 +931,10 @@ namespace Cards
     void CardWindow::PaintContent(bool rebuildRegions)
     {
         if (!impl->compositor || !environment.device || !environment.graphics) return;
-        const int widthPixels = (std::max)(1, static_cast<int>(bounds.right - bounds.left));
-        const int heightPixels = (std::max)(1, static_cast<int>(bounds.bottom - bounds.top));
+        const int widthPixels = (std::max)(1, static_cast<int>(impl->reflowSurfaceSize.cx ?
+            impl->reflowSurfaceSize.cx : bounds.right - bounds.left));
+        const int heightPixels = (std::max)(1, static_cast<int>(impl->reflowSurfaceSize.cy ?
+            impl->reflowSurfaceSize.cy : bounds.bottom - bounds.top));
         impl->surface.Ensure(environment.device, widthPixels, heightPixels);
         if (!impl->surface.Ready()) return;
 
@@ -929,6 +1049,9 @@ namespace Cards
                     break;
                 case Kind::Weather:
                     Paint::Weather(context, painted, environment, regions, widthDip, heightDip, interaction);
+                    break;
+                case Kind::PeripheralBattery:
+                    Paint::PeripheralBattery(context, painted, environment, regions, widthDip, heightDip, interaction, peripheralPage);
                     break;
                 case Kind::Update:
                     Paint::Update(context, painted, environment, regions, widthDip, heightDip, interaction);
@@ -1079,10 +1202,11 @@ namespace Cards
         }
         const auto* hit = regions.Hit(dip);
         const int id = hit ? hit->id : 0;
-        SetHotRegion(hit && hit->enabled ? id : 0);
+        const bool actionable = hit && hit->enabled && hit->type != Layout::RegionType::Text;
+        SetHotRegion(actionable ? id : 0);
         if (message == WM_LBUTTONDOWN || message == WM_LBUTTONDBLCLK)
         {
-            if (!hit || !hit->enabled) return false;
+            if (!actionable) return false;
             const auto region = *hit;
             SetFocus(window); SetCapture(window);
             impl->capturedRegion = region.id;
@@ -1235,6 +1359,13 @@ namespace Cards
 
     void CardWindow::Activate(const Layout::Region& region)
     {
+        // Text regions exist for UI Automation; clicking a reading is not a command.
+        if (!region.enabled || region.type == Layout::RegionType::Text || region.action.empty()) return;
+        if (kind == Kind::PeripheralBattery && region.action.starts_with(L"peripheralPage:"))
+        {
+            SetPeripheralPage(peripheralPage + (region.action == L"peripheralPage:next" ? 1 : -1));
+            return;
+        }
         host.OnRequest(region.action, L"");
     }
 
@@ -1253,6 +1384,7 @@ namespace Cards
         case Kind::Device: name = L"音频设备"; break;
         case Kind::Media: name = L"媒体"; break;
         case Kind::Update: name = L"更新"; break;
+        case Kind::PeripheralBattery: name = L"外设电量"; break;
         }
         return name;
     }

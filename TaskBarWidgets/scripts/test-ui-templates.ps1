@@ -46,6 +46,20 @@ if (-not $result.reorderControls.sameColumn -or -not $result.reorderControls.cro
     -not $result.reorderControls.dropCommitsOnce) {
     throw 'Reorder interaction checks did not complete.'
 }
+$peripheral = $result.peripheralSettings
+foreach ($check in @('taskbarDemandScoped','sharedPageDemand','snapshotPolling','schemaChangesOnly','modes',
+    'perDeviceVisibility','reorder','draftPreservation','globalApply','newerEditPreserved','noPollingRebuild',
+    'unknownBatteryPreserved','disconnectCallbacksIgnored','leaveCallbacksIgnored','unsubscribedOnLeave')) {
+    if ($peripheral.$check -ne $true) { throw "Peripheral settings check failed: $check" }
+}
+if ($peripheral.realHardwareOrSettingsTouched -ne $false -or $peripheral.probeActivated -ne $false -or
+    @($peripheral.layouts).Count -ne 4) { throw 'Peripheral settings isolation or theme/width coverage failed.' }
+foreach ($layout in $peripheral.layouts) {
+    if ($layout.rowCount -ne 3 -or $layout.rowWidth -le 0 -or $layout.modeWidth -le 0 -or
+        -not (Test-Path -LiteralPath $layout.png) -or -not (Test-Path -LiteralPath $layout.devicesPng)) {
+        throw 'Peripheral settings rows, mode control or screenshots were not realized.'
+    }
+}
 foreach ($layout in @($result.layoutChecks | Where-Object { $_.kind -eq 'settingsTaskbarLayout' })) {
     if ($layout.advancedFields -lt 1 -or -not $layout.viewport.scrollbarAtRight -or
         -not $layout.titleBar.custom -or $layout.titleBar.height -lt 44 -or -not $layout.titleBar.icon -or -not $layout.titleBar.title) {

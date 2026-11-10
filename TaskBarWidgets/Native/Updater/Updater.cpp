@@ -15,6 +15,7 @@
 #include <memory>
 #include <set>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <stdexcept>
 #include <string>
 #include <tlhelp32.h>
@@ -139,6 +140,10 @@ void Relative(const std::string &s, bool program = false)
         return;
     static const std::set<std::wstring> roots = {L"taskbarwidgets.exe",
                                                  L"taskbarwidgets.updater.exe",
+                                                 L"taskbarwidgets.peripheralprobe.exe",
+                                                 L"peripheral-compatibility.csv",
+                                                 L"peripheral-compatibility.json",
+                                                 L"外设电量.md",
                                                  L"openhardwaremonitorapi.dll",
                                                  L"librehardwaremonitorlib.dll",
                                                  L"build-info.json",
@@ -165,6 +170,9 @@ void Relative(const std::string &s, bool program = false)
             throw Failure("Unmanaged root file: " + s);
         return;
     }
+    if (parts.size() == 3 && Has({L"dependencies"}, parts[0]) && Has({L"headsetcontrol"}, parts[1]) &&
+        Has({L"headsetcontrol.exe", L"headsetcontrol-4.1.0-source.zip", L"license", L"readme.md"}, parts[2]))
+        return;
     Require(Has({L"media", L"ui", L"language", L"licenses"}, parts[0]), "Unmanaged program directory");
     const bool settingsResource = Has({L"ui/settings/settingsthemeresources.xbf",
         L"media/web/settings/bridge.js", L"media/web/settings/hotkeys.js", L"media/web/settings/integration.js",
@@ -220,15 +228,17 @@ struct Handle
 std::string Read(const fs::path &p, size_t max = 4 * 1024 * 1024)
 {
     Safe(p);
-    std::ifstream f(p, std::ios::binary);
-    Require((bool)f, "Cannot read JSON");
-    f.seekg(0, std::ios::end);
-    auto n = f.tellg();
-    Require(n >= 0 && (uint64_t)n <= max, "JSON exceeds size limit");
-    f.seekg(0);
-    std::string s((size_t)n, 0);
-    f.read(s.data(), n);
-    Require((bool)f, "Incomplete JSON read");
+    // Readers of atomic journal/status snapshots must allow rename while holding
+    // the old file open. A bridge polls the legacy helper's journal during launch.
+    Handle f(CreateFileW(p.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
+    Require(f.h != INVALID_HANDLE_VALUE, "Cannot read JSON");
+    LARGE_INTEGER size{};
+    Require(GetFileSizeEx(f.h, &size) && size.QuadPart >= 0 && (uint64_t)size.QuadPart <= max &&
+        size.QuadPart <= MAXDWORD, "JSON exceeds size limit");
+    std::string s((size_t)size.QuadPart, 0);
+    DWORD read = 0;
+    Require(ReadFile(f.h, s.data(), (DWORD)s.size(), &read, nullptr) && read == s.size(), "Incomplete JSON read");
     return s;
 }
 using Json = std::unique_ptr<yyjson_doc, decltype(&yyjson_doc_free)>;
@@ -308,6 +318,23 @@ std::string LowerA(std::string s)
         c = (char)tolower((unsigned char)c);
     return s;
 }
+bool CommitRename(const fs::path &source, const fs::path &target)
+{
+    // Indexers and snapshot readers can briefly hold a deny-delete handle. Retry
+    // only sharing/lock errors, bounded to one second; never force a file closed.
+    for (unsigned attempt = 0; ; ++attempt)
+    {
+        if (MoveFileExW(source.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+            return true;
+        auto error = GetLastError();
+        if (attempt == 40 || (error != ERROR_SHARING_VIOLATION && error != ERROR_LOCK_VIOLATION && error != ERROR_ACCESS_DENIED))
+        {
+            SetLastError(error);
+            return false;
+        }
+        Sleep(25);
+    }
+}
 void Atomic(const fs::path &path, const std::string &data)
 {
     Safe(path);
@@ -321,8 +348,9 @@ void Atomic(const fs::path &path, const std::string &data)
             "Cannot flush transaction state");
     CloseHandle(h.h);
     h.h = INVALID_HANDLE_VALUE;
-    Require(MoveFileExW(temp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH),
-            "Cannot commit transaction state");
+    if (!CommitRename(temp, path))
+        throw Failure("Cannot commit transaction state " + Utf8(path.filename().wstring()) +
+            " (Win32 " + std::to_string(GetLastError()) + ")");
 }
 std::string Quote(const std::string &s)
 {
@@ -363,7 +391,7 @@ struct Job
     uint64_t windowsBuild{};
     std::string dotnet, winui;
 };
-Job LoadJob(const fs::path &p)
+Job LoadJob(const fs::path &p, bool bridgeEntry = false)
 {
     auto d = Parse(p);
     auto v = yyjson_doc_get_root(d.get());
@@ -412,7 +440,8 @@ Job LoadJob(const fs::path &p)
     j.winui = String(r, "windowsAppRuntime");
     wchar_t own[32768];
     DWORD len = GetModuleFileNameW(nullptr, own, 32768);
-    Require(len && len < 32768 && Under(fs::path(own), j.work), "Updater must run from its job directory");
+    Require(len && len < 32768 && (bridgeEntry ? Equal(fs::path(own), j.install / L"TaskBarWidgets.exe") :
+                Under(fs::path(own), j.work)), "Updater must run from its job directory");
     return j;
 }
 std::vector<File> Manifest(const fs::path &p, const std::string &version = "")
@@ -551,7 +580,21 @@ std::vector<Handle> OldProcesses(const Job &j)
             Require(GetLastError() == ERROR_INVALID_PARAMETER, "Cannot inspect old process");
             continue;
         }
-        Require(Equal(Image(h.h), j.install / expected[i]), "Process ID no longer belongs to this installation");
+        // The bridge deliberately exits immediately after launching its helper.
+        // An already-signaled process cannot be running from a foreign path; its
+        // image may no longer be queryable although OpenProcess still succeeded.
+        if (WaitForSingleObject(h.h, 0) == WAIT_OBJECT_0)
+            continue;
+        try
+        {
+            Require(Equal(Image(h.h), j.install / expected[i]), "Process ID no longer belongs to this installation");
+        }
+        catch (const Failure &)
+        {
+            if (WaitForSingleObject(h.h, 0) == WAIT_OBJECT_0)
+                continue;
+            throw;
+        }
         out.push_back(std::move(h));
     }
     return out;
@@ -655,10 +698,12 @@ void Replace(const fs::path &source, const fs::path &target, const std::string &
     Require(!fs::exists(temp), "Pending replacement file exists");
     Copy(source, temp);
     Require(Sha(temp) == LowerA(expectedHash), "Replacement changed after verification");
-    if (!MoveFileExW(temp.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+    if (!CommitRename(temp, target))
     {
+        const auto error = GetLastError();
         DeleteFileW(temp.c_str());
-        throw Failure("Cannot atomically replace program file");
+        throw Failure("Cannot atomically replace program file " + Utf8(target.filename().wstring()) +
+            " (Win32 " + std::to_string(error) + ")");
     }
 }
 bool NativePersonal(const std::string &rel)
@@ -712,6 +757,7 @@ struct Journal
     std::string phase;
     std::vector<Saved> saved;
     DWORD launched = 0;
+    bool bridge = false; // The original backup survives both bridge and final installation.
 };
 fs::path Base(const Job &j, const std::string &g)
 {
@@ -742,7 +788,8 @@ void ValidSaved(const Saved &s)
 void SaveJournal(const Job &j, const Journal &journal)
 {
     std::string s = "{\"protocolVersion\":1,\"nonce\":" + Quote(j.nonce) + ",\"phase\":" + Quote(journal.phase) +
-                    ",\"launchedPid\":" + std::to_string(journal.launched) + ",\"files\":[";
+                    ",\"launchedPid\":" + std::to_string(journal.launched) +
+                    ",\"bridge\":" + (journal.bridge ? "true" : "false") + ",\"files\":[";
     bool first = true;
     for (auto &f : journal.saved)
     {
@@ -761,6 +808,11 @@ Journal ReadJournal(const Job &j)
     Require(Number(v, "protocolVersion") == 1 && String(v, "nonce") == j.nonce, "Journal does not belong to job");
     Journal t;
     t.phase = String(v, "phase");
+    if (auto bridge = yyjson_obj_get(v, "bridge"))
+    {
+        Require(yyjson_is_bool(bridge), "Invalid bridge journal flag");
+        t.bridge = yyjson_is_true(bridge);
+    }
     Require(t.phase == "backingUp" || t.phase == "prepared" || t.phase == "installing" || t.phase == "installed" ||
                 t.phase == "starting" || t.phase == "complete" || t.phase == "rollingBack" || t.phase == "rolledBack",
             "Unknown transaction phase");
@@ -902,7 +954,7 @@ void Apply(const Job &j, const std::vector<File> &files, Journal &t)
             Replace(Child(j.stage, f.path, true), Child(j.install, f.path, true), f.hash);
             SaveJournal(j, t);
 #ifdef TBW_UPDATER_TEST
-            if (fs::exists(j.work / L"test-interrupt"))
+            if (fs::exists(j.work / L"test-interrupt") || (t.bridge && fs::exists(j.work / L"test-bridge-interrupt")))
                 ExitProcess(91);
 #endif
         }
@@ -932,7 +984,7 @@ Handle Launch(const Job &j, bool health, DWORD *pid = nullptr)
 bool Healthy(const Job &j, HANDLE process)
 {
 #ifdef TBW_UPDATER_TEST
-    const DWORD timeout = 1500;
+    const DWORD timeout = 5000;
 #else
     const DWORD timeout = 60000;
 #endif
@@ -1121,6 +1173,7 @@ void RotateOlderBackups(const Job &j)
         { /* Retaining an older backup never invalidates a healthy install. */
         }
 }
+#include "UpgradeBridge.h"
 int Run(const Job &j, bool recover)
 {
     auto mutexName = TaskBarWidgetsUpdateMutexName(j.install.wstring());
@@ -1132,6 +1185,13 @@ int Run(const Job &j, bool recover)
         try
         {
             auto t = ReadJournal(j);
+            if (BridgePending(j) && t.phase != "rolledBack" && !(t.bridge && t.phase == "complete"))
+            {
+                Require(StopNew(j, t), "Close the bridge before recovery");
+                Rollback(j, t);
+                RestartOld(j, lock);
+                return 0;
+            }
             if (t.phase == "complete" || t.phase == "rolledBack")
             {
                 Status(j.work, t.phase);
@@ -1231,9 +1291,9 @@ int Run(const Job &j, bool recover)
             RestartOld(j, lock);
             return 1;
         }
-        catch (const std::exception &)
+        catch (const std::exception &rollbackError)
         {
-            Status(j.work, "recoveryRequired", "Rollback could not finish safely; backup and journal retained");
+            Status(j.work, "recoveryRequired", std::string("Rollback could not finish safely; backup and journal retained: ") + rollbackError.what());
             return 2;
         }
     }
@@ -1246,6 +1306,25 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     fs::path work;
     try
     {
+        if (argv && (count == 1 || (count == 4 && wcscmp(argv[1], L"--update-health") == 0)))
+        {
+            const int result = BridgeEntry(count, argv);
+            LocalFree(argv);
+            return result;
+        }
+        if (argv && count == 4 && wcscmp(argv[1], L"--continue-bridge") == 0)
+        {
+            auto j = LoadJob(Absolute(Utf8(argv[2])));
+            work = j.work;
+            const std::wstring pidText = argv[3];
+            Require(!pidText.empty() && pidText.size() <= 10 &&
+                pidText.find_first_not_of(L"0123456789") == std::wstring::npos, "Invalid bridge process ID");
+            auto pid = std::stoull(pidText);
+            Require(pid > 0 && pid <= MAXDWORD, "Invalid bridge process ID");
+            LocalFree(argv);
+            argv = nullptr;
+            return ContinueBridge(j, (DWORD)pid);
+        }
         Require(argv && count == 3 && (wcscmp(argv[1], L"--job") == 0 || wcscmp(argv[1], L"--recover") == 0),
                 "Usage: TaskBarWidgets.Updater.exe --job|--recover job.json");
         auto path = Absolute(Utf8(argv[2]));

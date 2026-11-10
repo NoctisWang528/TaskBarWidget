@@ -70,4 +70,8 @@ namespace Cards::Draw
 namespace Cards::Paint
 {
     float WeatherHeight(const Snapshot& snapshot, const CardEnvironment& environment, float widthDip);
+    // Battery values fit their measured text box; percentages never use ellipsis.
+    Microsoft::WRL::ComPtr<IDWriteTextLayout> PeripheralValueLayout(Graphics& graphics,
+        const std::wstring& value, const std::wstring& family, float size, int weight,
+        float width, float height, DWRITE_TEXT_ALIGNMENT alignment);
 }

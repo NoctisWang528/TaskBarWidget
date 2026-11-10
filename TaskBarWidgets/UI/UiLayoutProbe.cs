@@ -107,7 +107,7 @@ internal static class UiLayoutProbe
             await SettleAsync(content);
             pageScroll.ChangeView(null, 0, null, true);
             await SettleAsync(content);
-            var cardIds = new[] { "weather", "traffic", "device", "media" };
+            var cardIds = new[] { "weather", "traffic", "device", "media", "peripheralBattery" };
             var cells = Walk(content).OfType<Border>().Where(border => border.Tag is string tag && cardIds.Contains(tag)).ToList();
             if (cells.Count < 2) throw new InvalidOperationException("Quick-card reorder grid did not realize its cells.");
             var heights = cells.Select(cell => (id: cell.Tag, height: Math.Round(cell.ActualHeight, 2))).ToArray();

@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$OutputDirectory, [string]$ReleaseDirectory, [switch]$AllowDirtyLocal, [string]$CompatibilityDirectory)
+param([string]$OutputDirectory, [string]$ReleaseDirectory, [switch]$AllowDirtyLocal, [string[]]$CompatibilityDirectory)
 $ErrorActionPreference = 'Stop'
 $productRoot = Split-Path -Parent $PSScriptRoot
 $repoRoot = Split-Path -Parent $productRoot
@@ -20,13 +20,14 @@ $artifactPrefix = [IO.Path]::GetFullPath((Join-Path $productRoot 'artifacts')).T
 if (-not $releaseRoot.StartsWith($artifactPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'Release staging must be inside product artifacts.' }
 if (Test-Path -LiteralPath $releaseRoot) { throw 'Release staging already exists; inspect it before packaging again.' }
 $packageName = "TaskBarWidgets-$version-win-x64"
-$stage = Join-Path $releaseRoot $packageName
+$portableName = $packageName + "-portable"
+$stage = Join-Path $releaseRoot $portableName
 New-Item -ItemType Directory -Path $stage | Out-Null
 # Only runtime roots are selected. Diagnostics and acceptance screenshots remain local.
-$files = @('TaskBarWidgets.exe','TaskBarWidgets.Updater.exe','build-info.json','THIRD-PARTY-NOTICES.md')
+$files = @('TaskBarWidgets.exe','TaskBarWidgets.Updater.exe','TaskBarWidgets.PeripheralProbe.exe','build-info.json','THIRD-PARTY-NOTICES.md','peripheral-compatibility.csv','peripheral-compatibility.json','外设电量.md')
 $files += @(Get-ChildItem -LiteralPath $source -File -Filter '*.dll' | Select-Object -ExpandProperty Name)
 foreach ($relative in $files) { Copy-Item -LiteralPath (Join-Path $source $relative) -Destination (Join-Path $stage $relative) }
-foreach ($directory in @('Media','UI','language','licenses')) {
+foreach ($directory in @('Media','UI','language','licenses','Dependencies')) {
     $from = Join-Path $source $directory
     if (-not (Test-Path -LiteralPath $from -PathType Container)) { throw "Missing runtime directory: $directory" }
     foreach ($file in Get-ChildItem -LiteralPath $from -File -Recurse) {
@@ -90,20 +91,72 @@ $programFiles = @(Get-ChildItem -LiteralPath $stage -File -Recurse | Sort-Object
 [ordered]@{ protocolVersion = 1; version = $version; architecture = 'win-x64'; files = $programFiles } |
     ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $stage 'app-files.json') -Encoding utf8
 $inventoryHash = (Get-FileHash -LiteralPath (Join-Path $stage 'app-files.json') -Algorithm SHA256).Hash.ToLowerInvariant()
-$zip = Join-Path $releaseRoot ($packageName + '.zip')
-[IO.Compression.ZipFile]::CreateFromDirectory($stage, $zip, [IO.Compression.CompressionLevel]::Optimal, $true)
-$sha = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-"$sha  $([IO.Path]::GetFileName($zip))" | Set-Content -LiteralPath (Join-Path $releaseRoot 'SHA256SUMS.txt') -Encoding ascii
-[ordered]@{ protocolVersion = 1; version = $version; architecture = 'win-x64'; assetName = [IO.Path]::GetFileName($zip);
-    size = (Get-Item -LiteralPath $zip).Length; sha256 = $sha; fileManifestSha256 = $inventoryHash;
-    requirements = [ordered]@{ dotnetDesktop = '8.0.0'; windowsAppRuntime = '2.5.1.0'; windowsBuild = 22000 } } |
-    ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $releaseRoot 'update.json') -Encoding utf8
-Write-Host "ZIP: $zip"
-Write-Host "SHA256: $sha"
-# Never declare a package ready based on hashes alone. Use the actual updater
-# implementation in isolated pwsh processes, optionally including an older build.
-$validatorScript = Join-Path $PSScriptRoot 'test-release-package.ps1'
-foreach ($validator in @($source, $CompatibilityDirectory) | Where-Object { $_ } | Select-Object -Unique) {
-    & pwsh -NoProfile -File $validatorScript -ReleaseDirectory $releaseRoot -ValidatorDirectory $validator
-    if ($LASTEXITCODE -ne 0) { throw 'The complete ZIP failed updater validation; do not publish this package.' }
+# The portable archive is the actual final ROOT layout. The standard update ZIP
+# remains a legacy-compatible envelope on EVERY release so skipped versions work.
+$updater = Join-Path $stage 'TaskBarWidgets.Updater.exe'
+if (-not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($updater)).Contains('TBW_BRIDGE_V1')) {
+    throw 'Rebuild the native updater with UpgradeBridge.h before packaging this layout.'
 }
+$requirements = [ordered]@{ dotnetDesktop = '8.0.0'; windowsAppRuntime = '2.5.1.0'; windowsBuild = 22000 }
+function Write-Archive([string]$Directory, [string]$Name, [string]$MetadataName, [string]$ManifestHash) {
+    $zip = Join-Path $releaseRoot ($Name + '.zip')
+    [IO.Compression.ZipFile]::CreateFromDirectory($Directory, $zip, [IO.Compression.CompressionLevel]::Optimal, $true)
+    if ((Get-Item -LiteralPath $zip).Length -gt 512MB) { throw 'Update ZIP exceeds the supported size limit.' }
+    $sha = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+    [ordered]@{ protocolVersion = 1; version = $version; architecture = 'win-x64'; assetName = [IO.Path]::GetFileName($zip);
+        size = (Get-Item -LiteralPath $zip).Length; sha256 = $sha; fileManifestSha256 = $ManifestHash; requirements = $requirements } |
+        ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $releaseRoot $MetadataName) -Encoding utf8
+    Write-Host "ZIP: $zip"
+    return "$sha  $([IO.Path]::GetFileName($zip))"
+}
+$portableSum = Write-Archive $stage $portableName 'portable-update.json' $inventoryHash
+$envelope = Join-Path $releaseRoot $packageName
+$payload = Join-Path $envelope 'Media/UpgradePayload'
+New-Item -ItemType Directory -Path $payload -Force | Out-Null
+# Only these new ROOT paths and the native entry need transport indirection.
+# Everything else keeps the established paths, including runtimeconfig/bootstrap
+# inputs required by the old native updater's dependency preflight.
+$relocated = @('TaskBarWidgets.exe', 'TaskBarWidgets.PeripheralProbe.exe', 'peripheral-compatibility.csv', 'peripheral-compatibility.json', '外设电量.md', 'README.txt')
+foreach ($file in $programFiles) {
+    if ($file.path -like 'Media/UpgradePayload/*') { throw 'The bridge payload directory is reserved.' }
+    $relative = if ($file.path -in $relocated -or $file.path.StartsWith('Dependencies/', [StringComparison]::OrdinalIgnoreCase)) {
+        'Media/UpgradePayload/' + $file.sha256.Substring(0,16) + '.bin'
+    } else { $file.path }
+    $target = Join-Path $envelope $relative
+    if ((Test-Path -LiteralPath $target) -and (Get-FileHash -LiteralPath $target).Hash -ne $file.sha256) {
+        throw 'Bridge transport-name collision; refuse an ambiguous payload.'
+    }
+    New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $stage $file.path) -Destination $target -Force
+}
+Copy-Item -LiteralPath $updater -Destination (Join-Path $envelope 'TaskBarWidgets.exe')
+"这是应用内自动更新包。手动安装请完整解压 $portableName.zip 并运行其中的 TaskBarWidgets.exe。" |
+    Set-Content -LiteralPath (Join-Path $envelope 'README.txt') -Encoding utf8
+Copy-Item -LiteralPath (Join-Path $stage 'app-files.json') -Destination (Join-Path $payload 'manifest.json')
+[ordered]@{ format = 'TBW_BRIDGE_V1'; version = $version; fileManifestSha256 = $inventoryHash } |
+    ConvertTo-Json | Set-Content -LiteralPath (Join-Path $payload 'bridge.json') -Encoding utf8
+# Inventoried placeholder: the confirmed bridge records its resume pointer here;
+# final Apply/rollback removes it along with the other transport files.
+'{}' | Set-Content -LiteralPath (Join-Path $payload 'resume.json') -Encoding utf8
+$envelopeFiles = @(Get-ChildItem -LiteralPath $envelope -File -Recurse | Sort-Object FullName | ForEach-Object {
+    [ordered]@{ path = [IO.Path]::GetRelativePath($envelope, $_.FullName).Replace('\','/'); bytes = $_.Length;
+        sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
+})
+if ($envelopeFiles.Count -ge 8192 -or ($envelopeFiles | Measure-Object -Property bytes -Sum).Sum -gt 2GB) {
+    throw 'Bridge envelope exceeds update inventory limits.'
+}
+[ordered]@{ protocolVersion = 1; version = $version; architecture = 'win-x64'; files = $envelopeFiles } |
+    ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $envelope 'app-files.json') -Encoding utf8
+$envelopeHash = (Get-FileHash -LiteralPath (Join-Path $envelope 'app-files.json') -Algorithm SHA256).Hash.ToLowerInvariant()
+$updateSum = Write-Archive $envelope $packageName 'update.json' $envelopeHash
+@($updateSum, $portableSum) | Set-Content -LiteralPath (Join-Path $releaseRoot 'SHA256SUMS.txt') -Encoding ascii
+$validatorScript = Join-Path $PSScriptRoot 'test-release-package.ps1'
+# The final archive must pass the NEW validator; only the envelope is expected to
+# pass old clients. Do not claim widening a new whitelist fixes old validators.
+& pwsh -NoProfile -File $validatorScript -ReleaseDirectory $releaseRoot -ValidatorDirectory $source -Portable
+if ($LASTEXITCODE -ne 0) { throw 'Final ROOT-layout ZIP failed validation; do not publish.' }
+foreach ($validator in @($source) + @($CompatibilityDirectory) | Where-Object { $_ } | Select-Object -Unique) {
+    & pwsh -NoProfile -File $validatorScript -ReleaseDirectory $releaseRoot -ValidatorDirectory $validator
+    if ($LASTEXITCODE -ne 0) { throw 'Bridge ZIP failed updater validation; do not publish.' }
+}
+Write-Host 'Ready: update.json selects the bridge ZIP; portable.zip is for manual extraction. Local package push uses this same release directory.'

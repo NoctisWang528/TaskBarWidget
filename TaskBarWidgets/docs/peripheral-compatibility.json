@@ -1,0 +1,4764 @@
+{
+  "schemaVersion": 2,
+  "sourceDatabaseVersion": 179,
+  "hardwareValidated": false,
+  "sourceReceiverRecords": 262,
+  "sourceReceiverProtocols": 99,
+  "receiverStatusCounts": {
+    "implemented": 261,
+    "extension": 1
+  },
+  "families": [
+    {
+      "sourceProtocol": "ajazz_159p",
+      "status": "implemented",
+      "sourceIdentities": [
+        "248A:5C2E",
+        "248A:5C2F",
+        "248A:5D2E",
+        "248A:5E2E",
+        "249A:5C2F"
+      ],
+      "admittedIdentities": [
+        "248A:5C2E",
+        "248A:5C2F",
+        "248A:5D2E",
+        "248A:5E2E",
+        "249A:5C2F"
+      ],
+      "nativeAdapters": [
+        "ExtraMouse"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "ajazz_159p_legacy",
+      "status": "implemented",
+      "sourceIdentities": [
+        "248A:5B2F"
+      ],
+      "admittedIdentities": [
+        "248A:5B2F"
+      ],
+      "nativeAdapters": [
+        "ExtraMouse"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "ajazz_159pro",
+      "status": "implemented",
+      "sourceIdentities": [
+        "3151:4027"
+      ],
+      "admittedIdentities": [
+        "3151:4027"
+      ],
+      "nativeAdapters": [
+        "ExtraMouse"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "alpha2",
+      "status": "implemented",
+      "sourceIdentities": [
+        "03F0:08BE"
+      ],
+      "admittedIdentities": [
+        "03F0:08BE"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "atk_a87",
+      "status": "implemented",
+      "sourceIdentities": [
+        "373B:111E",
+        "373B:111F",
+        "373B:114D",
+        "373B:114E",
+        "373B:1151",
+        "373B:1152",
+        "373B:1231"
+      ],
+      "admittedIdentities": [
+        "373B:111E",
+        "373B:111F",
+        "373B:114D",
+        "373B:114E",
+        "373B:1151",
+        "373B:1152",
+        "373B:1231"
+      ],
+      "nativeAdapters": [
+        "ExtraKeyboard"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "atk_n9pro_serial",
+      "status": "implemented",
+      "sourceIdentities": [
+        "373B:11CB",
+        "373B:1204"
+      ],
+      "admittedIdentities": [
+        "373B:11CB",
+        "373B:1204"
+      ],
+      "nativeAdapters": [
+        "Special::N9Serial"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "atk_n9v2",
+      "status": "implemented",
+      "sourceIdentities": [
+        "373B:1262",
+        "373B:12D6"
+      ],
+      "admittedIdentities": [
+        "373B:1262",
+        "373B:12D6"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "atk_v75x",
+      "status": "implemented",
+      "sourceIdentities": [
+        "320F:5088"
+      ],
+      "admittedIdentities": [
+        "320F:5088"
+      ],
+      "nativeAdapters": [
+        "ExtraKeyboard"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "aula_f87pro_input",
+      "status": "implemented",
+      "sourceIdentities": [
+        "3554:FA09"
+      ],
+      "admittedIdentities": [
+        "3554:FA09"
+      ],
+      "nativeAdapters": [
+        "Protocol::F87Passive"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "仅被动读取已定义报告；共享FA09身份须通过报告确认。"
+    },
+    {
+      "sourceProtocol": "aula_f99pro",
+      "status": "implemented",
+      "sourceIdentities": [
+        "3554:FA09"
+      ],
+      "admittedIdentities": [
+        "3554:FA09"
+      ],
+      "nativeAdapters": [
+        "ExtraKeyboard"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "aula_g9",
+      "status": "implemented",
+      "sourceIdentities": [
+        "38A6:0030"
+      ],
+      "admittedIdentities": [
+        "38A6:0030"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "aula_hub_keyboard",
+      "status": "implemented",
+      "sourceIdentities": [
+        "0C45:FEF9",
+        "0C45:FEFC",
+        "0C45:FEFE"
+      ],
+      "admittedIdentities": [
+        "0C45:FEF9",
+        "0C45:FEFC",
+        "0C45:FEFE"
+      ],
+      "nativeAdapters": [
+        "ExtraKeyboard"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "aula_nova75",
+      "status": "implemented",
+      "sourceIdentities": [
+        "05AC:024F"
+      ],
+      "admittedIdentities": [
+        "05AC:024F"
+      ],
+      "nativeAdapters": [
+        "ExtraKeyboard"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "aula_v9",
+      "status": "implemented",
+      "sourceIdentities": [
+        "373B:1058"
+      ],
+      "admittedIdentities": [
+        "373B:1058"
+      ],
+      "nativeAdapters": [
+        "ExtraMouse"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "aula_x5",
+      "status": "implemented",
+      "sourceIdentities": [
+        "38A6:28E9",
+        "38A6:28F9",
+        "38A6:28FD",
+        "38A6:2F1A"
+      ],
+      "admittedIdentities": [
+        "38A6:28E9",
+        "38A6:28F9",
+        "38A6:28FD",
+        "38A6:2F1A"
+      ],
+      "nativeAdapters": [
+        "ExtraMouse"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "barracuda_pa",
+      "status": "implemented",
+      "sourceIdentities": [
+        "1532:053A"
+      ],
+      "admittedIdentities": [
+        "1532:053A"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "blackshark2020",
+      "status": "implemented",
+      "sourceIdentities": [
+        "1532:0528"
+      ],
+      "admittedIdentities": [
+        "1532:0528"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "blackshark_pa",
+      "status": "implemented",
+      "sourceIdentities": [
+        "1532:0555",
+        "1532:0556"
+      ],
+      "admittedIdentities": [
+        "1532:0555",
+        "1532:0556"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "blackshark_v2_hs",
+      "status": "implemented",
+      "sourceIdentities": [
+        "1532:0565"
+      ],
+      "admittedIdentities": [
+        "1532:0565"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": true,
+      "hardwareValidatedIdentities": [
+        "1532:0565"
+      ],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "blackshark_v3_passive",
+      "status": "implemented",
+      "sourceIdentities": [
+        "1532:057A"
+      ],
+      "admittedIdentities": [
+        "1532:057A"
+      ],
+      "nativeAdapters": [
+        "Protocol::Blackshark"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "仅被动读取已定义报告。"
+    },
+    {
+      "sourceProtocol": "blackshark_v3_pro",
+      "status": "implemented",
+      "sourceIdentities": [
+        "1532:0577",
+        "1532:101B"
+      ],
+      "admittedIdentities": [
+        "1532:0577",
+        "1532:101B"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "cherry_mx2pro",
+      "status": "implemented",
+      "sourceIdentities": [
+        "046A:01DE",
+        "046A:01E0"
+      ],
+      "admittedIdentities": [
+        "046A:01DE",
+        "046A:01E0"
+      ],
+      "nativeAdapters": [
+        "ExtraKeyboard"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "cloud2",
+      "status": "implemented",
+      "sourceIdentities": [
+        "03F0:018B"
+      ],
+      "admittedIdentities": [
+        "03F0:018B"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "cloud3",
+      "status": "implemented",
+      "sourceIdentities": [
+        "03F0:05B7",
+        "03F0:069F",
+        "03F0:0995",
+        "03F0:0C9D",
+        "03F0:0FCC"
+      ],
+      "admittedIdentities": [
+        "03F0:05B7",
+        "03F0:069F",
+        "03F0:0995",
+        "03F0:0C9D",
+        "03F0:0FCC"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "cloud3s",
+      "status": "implemented",
+      "sourceIdentities": [
+        "03F0:02CC",
+        "03F0:06BE"
+      ],
+      "admittedIdentities": [
+        "03F0:02CC",
+        "03F0:06BE"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "cloud_flight2",
+      "status": "implemented",
+      "sourceIdentities": [
+        "03F0:0AC1"
+      ],
+      "admittedIdentities": [
+        "03F0:0AC1"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "corsair_bragi",
+      "status": "implemented",
+      "sourceIdentities": [
+        "1B1C:1B62"
+      ],
+      "admittedIdentities": [
+        "1B1C:1B62"
+      ],
+      "nativeAdapters": [
+        "ExtraMouse"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "dailing_g3",
+      "status": "implemented",
+      "sourceIdentities": [
+        "3654:4255"
+      ],
+      "admittedIdentities": [
+        "3654:4255"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "dareu_a98",
+      "status": "implemented",
+      "sourceIdentities": [
+        "260D:0037",
+        "260D:0051"
+      ],
+      "admittedIdentities": [
+        "260D:0037",
+        "260D:0051"
+      ],
+      "nativeAdapters": [
+        "KeyboardAdvanced"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "dareu_flex87",
+      "status": "implemented",
+      "sourceIdentities": [
+        "260D:0211"
+      ],
+      "admittedIdentities": [
+        "260D:0211"
+      ],
+      "nativeAdapters": [
+        "KeyboardAdvanced"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "delux_m700",
+      "status": "implemented",
+      "sourceIdentities": [
+        "320F:228A"
+      ],
+      "admittedIdentities": [
+        "320F:228A"
+      ],
+      "nativeAdapters": [
+        "ExtraMouse"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "delux_pro_input",
+      "status": "implemented",
+      "sourceIdentities": [
+        "1D57:FA60",
+        "1D57:FA65"
+      ],
+      "admittedIdentities": [
+        "1D57:FA60",
+        "1D57:FA65"
+      ],
+      "nativeAdapters": [
+        "Protocol::DeluxPassive"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "仅被动读取；共享FA60/FA65接口不发送主动探测。"
+    },
+    {
+      "sourceProtocol": "eightbitdo_input",
+      "status": "implemented",
+      "sourceIdentities": [
+        "2DC8:6000",
+        "2DC8:6001",
+        "2DC8:6003",
+        "2DC8:6006",
+        "2DC8:6009",
+        "2DC8:6100",
+        "2DC8:6101"
+      ],
+      "admittedIdentities": [
+        "2DC8:6000",
+        "2DC8:6001",
+        "2DC8:6003",
+        "2DC8:6006",
+        "2DC8:6009",
+        "2DC8:6100",
+        "2DC8:6101"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "epos_h3pro",
+      "status": "implemented",
+      "sourceIdentities": [
+        "1395:0303"
+      ],
+      "admittedIdentities": [
+        "1395:0303"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "eweadn_s9",
+      "status": "implemented",
+      "sourceIdentities": [
+        "372E:1026",
+        "372E:1029",
+        "372E:103D"
+      ],
+      "admittedIdentities": [
+        "372E:1026",
+        "372E:1029",
+        "372E:103D"
+      ],
+      "nativeAdapters": [
+        "ExtraMouse"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "exx_alpha87",
+      "status": "implemented",
+      "sourceIdentities": [
+        "258A:02D8",
+        "372E:10EB"
+      ],
+      "admittedIdentities": [
+        "258A:02D8",
+        "372E:10EB"
+      ],
+      "nativeAdapters": [
+        "ExtraKeyboard"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "flydigi_apex5",
+      "status": "implemented",
+      "sourceIdentities": [
+        "37D7:2501"
+      ],
+      "admittedIdentities": [
+        "37D7:2501"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "flydigi_vader5",
+      "status": "implemented",
+      "sourceIdentities": [
+        "37D7:2401"
+      ],
+      "admittedIdentities": [
+        "37D7:2401"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "hecate_g3m",
+      "status": "implemented",
+      "sourceIdentities": [
+        "320F:706E"
+      ],
+      "admittedIdentities": [
+        "320F:706E"
+      ],
+      "nativeAdapters": [
+        "ExtraMouse"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "hecate_g5max",
+      "status": "implemented",
+      "sourceIdentities": [
+        "35BB:A00B",
+        "35BB:A220"
+      ],
+      "admittedIdentities": [
+        "35BB:A00B",
+        "35BB:A220"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "hecate_gx03",
+      "status": "implemented",
+      "sourceIdentities": [
+        "35BB:A217"
+      ],
+      "admittedIdentities": [
+        "35BB:A217"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "ikf",
+      "status": "implemented",
+      "sourceIdentities": [
+        "38B1:3411",
+        "38B1:3412",
+        "38B1:3418",
+        "38B1:3419"
+      ],
+      "admittedIdentities": [
+        "38B1:3411",
+        "38B1:3412",
+        "38B1:3418",
+        "38B1:3419"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "ikf_legacy",
+      "status": "implemented",
+      "sourceIdentities": [
+        "0D8C:0334"
+      ],
+      "admittedIdentities": [
+        "0D8C:0334"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "ipi_aurora",
+      "status": "implemented",
+      "sourceIdentities": [
+        "372E:106C"
+      ],
+      "admittedIdentities": [
+        "372E:106C"
+      ],
+      "nativeAdapters": [
+        "KeyboardAdvanced"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "ipi_uni",
+      "status": "implemented",
+      "sourceIdentities": [
+        "372E:10F9"
+      ],
+      "admittedIdentities": [
+        "372E:10F9"
+      ],
+      "nativeAdapters": [
+        "ExtraMouse"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "irok_royuan",
+      "status": "implemented",
+      "sourceIdentities": [
+        "3151:5038"
+      ],
+      "admittedIdentities": [
+        "3151:5038"
+      ],
+      "nativeAdapters": [
+        "Protocol::Irok"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "jbl910",
+      "status": "implemented",
+      "sourceIdentities": [
+        "0ECB:2088"
+      ],
+      "admittedIdentities": [
+        "0ECB:2088"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "keychron_status",
+      "status": "implemented",
+      "sourceIdentities": [
+        "3434:D028",
+        "3434:D048"
+      ],
+      "admittedIdentities": [
+        "3434:D028",
+        "3434:D048"
+      ],
+      "nativeAdapters": [
+        "ExtraMouse"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "keycool_k19",
+      "status": "implemented",
+      "sourceIdentities": [
+        "3151:5026"
+      ],
+      "admittedIdentities": [
+        "3151:5026"
+      ],
+      "nativeAdapters": [
+        "KeyboardAdvanced"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "kzzi_k75v2_input",
+      "status": "implemented",
+      "sourceIdentities": [
+        "3554:FA09"
+      ],
+      "admittedIdentities": [
+        "3554:FA09"
+      ],
+      "nativeAdapters": [
+        "ExtraKeyboard"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "langtu_t75",
+      "status": "implemented",
+      "sourceIdentities": [
+        "1A2C:8FFF"
+      ],
+      "admittedIdentities": [
+        "1A2C:8FFF"
+      ],
+      "nativeAdapters": [
+        "Protocol::Langtu"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "leadjoy_zhiwan",
+      "status": "implemented",
+      "sourceIdentities": [
+        "4131:3519"
+      ],
+      "admittedIdentities": [
+        "4131:3519"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "lofree",
+      "status": "implemented",
+      "sourceIdentities": [
+        "388D:0025"
+      ],
+      "admittedIdentities": [
+        "388D:0025"
+      ],
+      "nativeAdapters": [
+        "KeyboardAdvanced"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "mchose_frame",
+      "status": "implemented",
+      "sourceIdentities": [
+        "3837:6011",
+        "3837:6013"
+      ],
+      "admittedIdentities": [
+        "3837:6011",
+        "3837:6013"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "mchose_g87",
+      "status": "implemented",
+      "sourceIdentities": [
+        "05AC:024F",
+        "3837:201B",
+        "41E4:2001"
+      ],
+      "admittedIdentities": [
+        "05AC:024F",
+        "3837:201B",
+        "41E4:2001"
+      ],
+      "nativeAdapters": [
+        "ExtraKeyboard"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "mchose_k99v3",
+      "status": "implemented",
+      "sourceIdentities": [
+        "3837:3033"
+      ],
+      "admittedIdentities": [
+        "3837:3033"
+      ],
+      "nativeAdapters": [
+        "KeyboardAdvanced"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "mchose_qhw",
+      "status": "implemented",
+      "sourceIdentities": [
+        "3837:1015"
+      ],
+      "admittedIdentities": [
+        "3837:1015"
+      ],
+      "nativeAdapters": [
+        "ExtraKeyboard"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "核对产品名及配对板号；G98与K87 V3板号不可互换。"
+    },
+    {
+      "sourceProtocol": "mchose_v9pro",
+      "status": "implemented",
+      "sourceIdentities": [
+        "291D:385D"
+      ],
+      "admittedIdentities": [
+        "291D:385D"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "mchose_v9turbo",
+      "status": "implemented",
+      "sourceIdentities": [
+        "3837:600A"
+      ],
+      "admittedIdentities": [
+        "3837:600A"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "misiom",
+      "status": "implemented",
+      "sourceIdentities": [
+        "3206:7015",
+        "39A5:3D21",
+        "39A5:3FF1",
+        "3A95:3EE3"
+      ],
+      "admittedIdentities": [
+        "3206:7015",
+        "39A5:3D21",
+        "39A5:3FF1",
+        "3A95:3EE3"
+      ],
+      "nativeAdapters": [
+        "Special::OHub"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "须用户启用厂商扩展，且对应厂商驱动已安装；不安装或启动厂商软件。"
+    },
+    {
+      "sourceProtocol": "mloong_mx301pro",
+      "status": "implemented",
+      "sourceIdentities": [
+        "A8A5:2255"
+      ],
+      "admittedIdentities": [
+        "A8A5:2255"
+      ],
+      "nativeAdapters": [
+        "ExtraMouse"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "moondrop_gm",
+      "status": "implemented",
+      "sourceIdentities": [
+        "35D8:012D",
+        "35D8:0133"
+      ],
+      "admittedIdentities": [
+        "35D8:012D",
+        "35D8:0133"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "nintendo_bt",
+      "status": "implemented",
+      "sourceIdentities": [
+        "057E:2006",
+        "057E:2007",
+        "057E:2009"
+      ],
+      "admittedIdentities": [
+        "057E:2006",
+        "057E:2007",
+        "057E:2009"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "nzxt_telemetry",
+      "status": "implemented",
+      "sourceIdentities": [
+        "1E71:2101",
+        "1E71:2129"
+      ],
+      "admittedIdentities": [
+        "1E71:2101",
+        "1E71:2129"
+      ],
+      "nativeAdapters": [
+        "ExtraMouse"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "pmo_wave75",
+      "status": "implemented",
+      "sourceIdentities": [
+        "36B0:3002"
+      ],
+      "admittedIdentities": [
+        "36B0:3002"
+      ],
+      "nativeAdapters": [
+        "KeyboardAdvanced"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "pulsar_sonix",
+      "status": "implemented",
+      "sourceIdentities": [
+        "3710:5402",
+        "3710:5403"
+      ],
+      "admittedIdentities": [
+        "3710:5402",
+        "3710:5403"
+      ],
+      "nativeAdapters": [
+        "Protocol::Sonix"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "rainy75_receiver",
+      "status": "implemented",
+      "sourceIdentities": [
+        "320F:5088"
+      ],
+      "admittedIdentities": [
+        "320F:5088"
+      ],
+      "nativeAdapters": [
+        "Protocol::Rainy75"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "rainy75_wired",
+      "status": "implemented",
+      "sourceIdentities": [
+        "320F:5055"
+      ],
+      "admittedIdentities": [
+        "320F:5055"
+      ],
+      "nativeAdapters": [
+        "Protocol::Rainy75"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "rapoo_v700_input",
+      "status": "implemented",
+      "sourceIdentities": [
+        "24AE:1924"
+      ],
+      "admittedIdentities": [
+        "24AE:1924"
+      ],
+      "nativeAdapters": [
+        "ExtraKeyboard"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "razer_headset",
+      "status": "implemented",
+      "sourceIdentities": [
+        "1532:0557"
+      ],
+      "admittedIdentities": [
+        "1532:0557"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "razer_keyboard",
+      "status": "implemented",
+      "sourceIdentities": [
+        "1532:025C"
+      ],
+      "admittedIdentities": [
+        "1532:025C"
+      ],
+      "nativeAdapters": [
+        "ExtraKeyboard"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "rog_azoth_x",
+      "status": "implemented",
+      "sourceIdentities": [
+        "0B05:196B",
+        "0B05:1A85",
+        "0B05:1C24",
+        "0B05:1C25"
+      ],
+      "admittedIdentities": [
+        "0B05:196B",
+        "0B05:1A85",
+        "0B05:1C24",
+        "0B05:1C25"
+      ],
+      "nativeAdapters": [
+        "ExtraKeyboard"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [
+        "0B05:1A85"
+      ],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "rog_delta2",
+      "status": "implemented",
+      "sourceIdentities": [
+        "0B05:1AFA"
+      ],
+      "admittedIdentities": [
+        "0B05:1AFA"
+      ],
+      "nativeAdapters": [
+        "Protocol::Pelta"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "rog_omni_keyboard",
+      "status": "implemented",
+      "sourceIdentities": [
+        "0B05:1ACE",
+        "0B05:1AD0"
+      ],
+      "admittedIdentities": [
+        "0B05:1ACE",
+        "0B05:1AD0"
+      ],
+      "nativeAdapters": [
+        "KeyboardAdvanced"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "须同一物理接收器的report1/report2配对接口及子键盘身份。"
+    },
+    {
+      "sourceProtocol": "rog_pelta",
+      "status": "implemented",
+      "sourceIdentities": [
+        "0B05:1B84"
+      ],
+      "admittedIdentities": [
+        "0B05:1B84"
+      ],
+      "nativeAdapters": [
+        "Protocol::Pelta"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "royuan_legacy_status",
+      "status": "implemented",
+      "sourceIdentities": [
+        "3151:4015"
+      ],
+      "admittedIdentities": [
+        "3151:4015"
+      ],
+      "nativeAdapters": [
+        "ExtraKeyboard"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "sony_ds4",
+      "status": "implemented",
+      "sourceIdentities": [
+        "054C:05C4",
+        "054C:05C5",
+        "054C:09CC",
+        "054C:0BA0"
+      ],
+      "admittedIdentities": [
+        "054C:05C4",
+        "054C:05C5",
+        "054C:09CC",
+        "054C:0BA0"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "sony_dualsense",
+      "status": "implemented",
+      "sourceIdentities": [
+        "054C:0CE6",
+        "054C:0DF2"
+      ],
+      "admittedIdentities": [
+        "054C:0CE6",
+        "054C:0DF2"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "sony_h5",
+      "status": "extension",
+      "sourceIdentities": [
+        "054C:0EBF"
+      ],
+      "admittedIdentities": [
+        "054C:0EBF"
+      ],
+      "nativeAdapters": [
+        "HeadsetControl 4.1.0"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "须启用随包提供的HeadsetControl 4.1.0；默认关闭。"
+    },
+    {
+      "sourceProtocol": "sony_h9_serial",
+      "status": "implemented",
+      "sourceIdentities": [
+        "054C:0E53"
+      ],
+      "admittedIdentities": [
+        "054C:0E53"
+      ],
+      "nativeAdapters": [
+        "Special::SonyH9"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "titan_t87",
+      "status": "implemented",
+      "sourceIdentities": [
+        "056D:C077"
+      ],
+      "admittedIdentities": [
+        "056D:C077"
+      ],
+      "nativeAdapters": [
+        "KeyboardAdvanced"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "valkyrie_m2",
+      "status": "implemented",
+      "sourceIdentities": [
+        "374A:A304",
+        "374A:A305",
+        "374A:A307",
+        "374A:A308"
+      ],
+      "admittedIdentities": [
+        "374A:A304",
+        "374A:A305",
+        "374A:A307",
+        "374A:A308"
+      ],
+      "nativeAdapters": [
+        "ExtraMouse"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "valkyrie_m5",
+      "status": "implemented",
+      "sourceIdentities": [
+        "3151:5045",
+        "374A:A329"
+      ],
+      "admittedIdentities": [
+        "3151:5045",
+        "374A:A329"
+      ],
+      "nativeAdapters": [
+        "ExtraMouse"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "valkyrie_vk75",
+      "status": "implemented",
+      "sourceIdentities": [
+        "05AC:024F",
+        "0C45:FEFE"
+      ],
+      "admittedIdentities": [
+        "05AC:024F",
+        "0C45:FEFE"
+      ],
+      "nativeAdapters": [
+        "ExtraKeyboard"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "valkyrie_vk99_ry",
+      "status": "implemented",
+      "sourceIdentities": [
+        "374A:A263",
+        "374A:A278",
+        "374A:A281"
+      ],
+      "admittedIdentities": [
+        "374A:A263",
+        "374A:A278",
+        "374A:A281"
+      ],
+      "nativeAdapters": [
+        "KeyboardAdvanced"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "vgn_dragonfly3_master",
+      "status": "implemented",
+      "sourceIdentities": [
+        "391D:102D",
+        "391D:1A05"
+      ],
+      "admittedIdentities": [
+        "391D:102D",
+        "391D:1A05"
+      ],
+      "nativeAdapters": [
+        "ExtraMouse"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "vgn_dragonfly3_se",
+      "status": "implemented",
+      "sourceIdentities": [
+        "391D:1A01"
+      ],
+      "admittedIdentities": [
+        "391D:1A01"
+      ],
+      "nativeAdapters": [
+        "ExtraMouse"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "vgn_neon75_air",
+      "status": "implemented",
+      "sourceIdentities": [
+        "385D:2A05"
+      ],
+      "admittedIdentities": [
+        "385D:2A05"
+      ],
+      "nativeAdapters": [
+        "ExtraKeyboard"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "须MI1、明确col01及匹配的Feature报告。"
+    },
+    {
+      "sourceProtocol": "vgn_siren",
+      "status": "implemented",
+      "sourceIdentities": [
+        "040B:F779",
+        "391D:0003"
+      ],
+      "admittedIdentities": [
+        "040B:F779",
+        "391D:0003"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "vgn_v98pro",
+      "status": "implemented",
+      "sourceIdentities": [
+        "320F:5088"
+      ],
+      "admittedIdentities": [
+        "320F:5088"
+      ],
+      "nativeAdapters": [
+        "ExtraKeyboard"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "vgn_v98pro_v3",
+      "status": "implemented",
+      "sourceIdentities": [
+        "258A:024F",
+        "258A:027F"
+      ],
+      "admittedIdentities": [
+        "258A:024F",
+        "258A:027F"
+      ],
+      "nativeAdapters": [
+        "ExtraKeyboard"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "vgn_v98pro_v4",
+      "status": "implemented",
+      "sourceIdentities": [
+        "391D:2A03",
+        "391D:2A04",
+        "391D:2A0A"
+      ],
+      "admittedIdentities": [
+        "391D:2A03",
+        "391D:2A04",
+        "391D:2A0A"
+      ],
+      "nativeAdapters": [
+        "ExtraKeyboard"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "vgn_zhou",
+      "status": "implemented",
+      "sourceIdentities": [
+        "372E:10BB"
+      ],
+      "admittedIdentities": [
+        "372E:10BB"
+      ],
+      "nativeAdapters": [
+        "HeadsetController"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "仅已定义的64字节报告；已观察到的32/32/16布局保持仅识别。"
+    },
+    {
+      "sourceProtocol": "weikav_nut75",
+      "status": "implemented",
+      "sourceIdentities": [
+        "0C45:FEF9"
+      ],
+      "admittedIdentities": [
+        "0C45:FEF9"
+      ],
+      "nativeAdapters": [
+        "ExtraKeyboard"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "x23_compx",
+      "status": "implemented",
+      "sourceIdentities": [
+        "3554:F515",
+        "3554:F517",
+        "3554:F59F",
+        "3554:F5A0",
+        "3554:F5B2",
+        "3554:F5B3",
+        "3554:F5B5",
+        "3554:FB35",
+        "3554:FB36",
+        "3554:FB45",
+        "3554:FB47",
+        "3554:FB48",
+        "35BB:D3FB"
+      ],
+      "admittedIdentities": [
+        "3554:F515",
+        "3554:F517",
+        "3554:F59F",
+        "3554:F5A0",
+        "3554:F5B2",
+        "3554:F5B3",
+        "3554:F5B5",
+        "3554:FB35",
+        "3554:FB36",
+        "3554:FB45",
+        "3554:FB47",
+        "3554:FB48",
+        "35BB:D3FB"
+      ],
+      "nativeAdapters": [
+        "ExtraMouse"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "x23_freq",
+      "status": "implemented",
+      "sourceIdentities": [
+        "A8A4:2255",
+        "A8A5:2255"
+      ],
+      "admittedIdentities": [
+        "A8A4:2255",
+        "A8A5:2255"
+      ],
+      "nativeAdapters": [
+        "ExtraMouse"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "sourceProtocol": "x23_pro_input",
+      "status": "implemented",
+      "sourceIdentities": [
+        "04F3:026F"
+      ],
+      "admittedIdentities": [
+        "04F3:026F"
+      ],
+      "nativeAdapters": [
+        "Protocol::X23Passive"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "x23_standard",
+      "status": "implemented",
+      "sourceIdentities": [
+        "089D:062F"
+      ],
+      "admittedIdentities": [
+        "089D:062F"
+      ],
+      "nativeAdapters": [
+        "Protocol::X23"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "xiberia_t10",
+      "status": "implemented",
+      "sourceIdentities": [
+        "36F9:F001",
+        "36F9:F008",
+        "36F9:F010"
+      ],
+      "admittedIdentities": [
+        "36F9:F001",
+        "36F9:F008",
+        "36F9:F010"
+      ],
+      "nativeAdapters": [
+        "Protocol::Xiberia"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "sourceProtocol": "xiberia_x7",
+      "status": "implemented",
+      "sourceIdentities": [
+        "36F9:AA20"
+      ],
+      "admittedIdentities": [
+        "36F9:AA20"
+      ],
+      "nativeAdapters": [
+        "ExtraMouse"
+      ],
+      "hardwareValidated": false,
+      "hardwareValidatedIdentities": [],
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    }
+  ],
+  "devices": [
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "rapoo_v700_input",
+      "identity": "24AE:1924",
+      "name": "雷柏 V700DIY-98 长续航版",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "atk_v75x",
+      "identity": "320F:5088",
+      "name": "ATK V75X",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "langtu_t75",
+      "identity": "1A2C:8FFF",
+      "name": "无线键盘（8FFF）",
+      "nativeAdapter": "Protocol::Langtu",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "vgn_dragonfly3_se",
+      "identity": "391D:1A01",
+      "name": "VGN 蜻蜓 3 SE",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "pmo_wave75",
+      "identity": "36B0:3002",
+      "name": "2.4G 键盘接收器（型号待核验）",
+      "nativeAdapter": "KeyboardAdvanced",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "ipi_aurora",
+      "identity": "372E:106C",
+      "name": "IPI 极光 65 无线系列",
+      "nativeAdapter": "KeyboardAdvanced",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "ipi_uni",
+      "identity": "372E:10F9",
+      "name": "IPI 雾",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "sony_h9_serial",
+      "identity": "054C:0E53",
+      "name": "索尼 INZONE H9 / H7 接收器",
+      "nativeAdapter": "Special::SonyH9",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "atk_n9pro_serial",
+      "identity": "373B:1204",
+      "name": "ATK N9 Ultra",
+      "nativeAdapter": "Special::N9Serial",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "atk_n9pro_serial",
+      "identity": "373B:11CB",
+      "name": "ATK N9 Pro",
+      "nativeAdapter": "Special::N9Serial",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "atk_n9v2",
+      "identity": "373B:1262",
+      "name": "ATK N9 V2 Ultimate",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "atk_n9v2",
+      "identity": "373B:12D6",
+      "name": "ATK N9 V2 ULTRA",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "xiberia_x7",
+      "identity": "36F9:AA20",
+      "name": "西伯利亚 X7 系列 / 8K 接收器",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_pro_input",
+      "identity": "04F3:026F",
+      "name": "前行者 X23 Pro（老款）",
+      "nativeAdapter": "Protocol::X23Passive",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A4:2255",
+      "name": "前行者 X23 星闪版",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A4:2255",
+      "name": "前行者 X23 Max",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A4:2255",
+      "name": "前行者 X23 SE",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A4:2255",
+      "name": "前行者 X23 Pro",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A4:2255",
+      "name": "前行者 X23 碳纤维版",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A4:2255",
+      "name": "前行者 X23L 碳纤维版",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "前行者 X23 星闪版",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "前行者 X23 Max",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "前行者 X23 SE",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "前行者 X23 Pro",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "前行者 X23 碳纤维版",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "前行者 X23L 碳纤维版",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_compx",
+      "identity": "35BB:D3FB",
+      "name": "HECATE G3M Pro 升级版",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_compx",
+      "identity": "3554:F5A0",
+      "name": "前行者 X23 Max",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_compx",
+      "identity": "3554:F59F",
+      "name": "前行者 X23 Max",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_compx",
+      "identity": "3554:F5B2",
+      "name": "前行者 X23 Max",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_compx",
+      "identity": "3554:F5B3",
+      "name": "前行者 X23 Max",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_compx",
+      "identity": "3554:F5B5",
+      "name": "前行者 X23 Max",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_compx",
+      "identity": "3554:FB35",
+      "name": "前行者鼠标接收器",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_compx",
+      "identity": "3554:FB36",
+      "name": "前行者有线鼠标",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_standard",
+      "identity": "089D:062F",
+      "name": "2.4G 鼠标接收器",
+      "nativeAdapter": "Protocol::X23",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "exx_alpha87",
+      "identity": "372E:10EB",
+      "name": "EXX 阿尔法 87",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "exx_alpha87",
+      "identity": "258A:02D8",
+      "name": "EXX 阿尔法 87",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "dareu_flex87",
+      "identity": "260D:0211",
+      "name": "达尔优 FLEX87",
+      "nativeAdapter": "KeyboardAdvanced",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "dareu_a98",
+      "identity": "260D:0037",
+      "name": "达尔优共享接收器（待确认键盘）",
+      "nativeAdapter": "KeyboardAdvanced",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "rog_omni_keyboard",
+      "identity": "0B05:1ACE",
+      "name": "ROG Omni 键盘",
+      "nativeAdapter": "KeyboardAdvanced",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "须同一物理接收器的report1/report2配对接口及子键盘身份。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "hecate_g5max",
+      "identity": "35BB:A00B",
+      "name": "HECATE G5 MAX 无线版",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "hecate_gx03",
+      "identity": "35BB:A217",
+      "name": "HECATE GX03 ULTRA",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "mchose_k99v3",
+      "identity": "3837:3033",
+      "name": "迈从 G87 V2 (8K) 无线键盘",
+      "nativeAdapter": "KeyboardAdvanced",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "mchose_k99v3",
+      "identity": "3837:3033",
+      "name": "迈从 G75 V2 (8K) 无线键盘",
+      "nativeAdapter": "KeyboardAdvanced",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "mchose_k99v3",
+      "identity": "3837:3033",
+      "name": "迈从 K99 V3",
+      "nativeAdapter": "KeyboardAdvanced",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "cherry_mx2pro",
+      "identity": "046A:01E0",
+      "name": "CHERRY MX 2.0S Pro (2.4G)",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "cherry_mx2pro",
+      "identity": "046A:01DE",
+      "name": "CHERRY MX 2.0S Pro (USB)",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "xiberia_t10",
+      "identity": "36F9:F001",
+      "name": "西伯利亚 T10 无线版",
+      "nativeAdapter": "Protocol::Xiberia",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "xiberia_t10",
+      "identity": "36F9:F008",
+      "name": "西伯利亚 T7",
+      "nativeAdapter": "Protocol::Xiberia",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "blackshark_v3_passive",
+      "identity": "1532:057A",
+      "name": "雷蛇 BlackShark V3",
+      "nativeAdapter": "Protocol::Blackshark",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "仅被动读取已定义报告。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "blackshark_v3_pro",
+      "identity": "1532:0577",
+      "name": "雷蛇 BlackShark V3 Pro",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "blackshark_v3_pro",
+      "identity": "1532:101B",
+      "name": "雷蛇 BlackShark V3 Pro PS",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "xiberia_t10",
+      "identity": "36F9:F010",
+      "name": "西伯利亚 T10 无线版",
+      "nativeAdapter": "Protocol::Xiberia",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "vgn_siren",
+      "identity": "040B:F779",
+      "name": "玄武 2.0 / VGN 共用编号接收器",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "vgn_siren",
+      "identity": "391D:0003",
+      "name": "VGN Siren V2",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "vgn_zhou",
+      "identity": "372E:10BB",
+      "name": "VGN 周听系列",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "仅已定义的64字节报告；已观察到的32/32/16布局保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "aula_g9",
+      "identity": "38A6:0030",
+      "name": "AULA G9",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "mchose_frame",
+      "identity": "3837:6011",
+      "name": "MCHOSE V9 Pro 2",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "mchose_v9turbo",
+      "identity": "3837:600A",
+      "name": "MCHOSE V9 Turbo+",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "mchose_frame",
+      "identity": "3837:6013",
+      "name": "MCHOSE R9",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "mchose_v9pro",
+      "identity": "291D:385D",
+      "name": "MCHOSE V9 Pro",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "mchose_g87",
+      "identity": "41E4:2001",
+      "name": "迈从 G87 无线键盘",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "mchose_g87",
+      "identity": "3837:201B",
+      "name": "迈从 G87 V2 (1K) 无线键盘",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "jbl910",
+      "identity": "0ECB:2088",
+      "name": "JBL Quantum 910 Wireless",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "alpha2",
+      "identity": "03F0:08BE",
+      "name": "HyperX Cloud Alpha 2",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "lofree",
+      "identity": "388D:0025",
+      "name": "Lofree Hyzen",
+      "nativeAdapter": "KeyboardAdvanced",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "vgn_v98pro",
+      "identity": "320F:5088",
+      "name": "VGN V98 Pro",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "vgn_v98pro",
+      "identity": "320F:5088",
+      "name": "VGN N75 Pro",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "vgn_v98pro",
+      "identity": "320F:5088",
+      "name": "VGN / VXE V87",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "vgn_v98pro",
+      "identity": "320F:5088",
+      "name": "VGN V98 Pro V2",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "vgn_v98pro",
+      "identity": "320F:5088",
+      "name": "VGN VXE75",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "vgn_v98pro",
+      "identity": "320F:5088",
+      "name": "VGN S99",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "razer_keyboard",
+      "identity": "1532:025C",
+      "name": "Razer BlackWidow V3 Pro",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "blackshark2020",
+      "identity": "1532:0528",
+      "name": "Razer BlackShark V2 Pro (2020)",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "razer_headset",
+      "identity": "1532:0557",
+      "name": "Razer BlackShark V2 Pro (2023)",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "blackshark_v2_hs",
+      "identity": "1532:0565",
+      "name": "雷蛇 旋风黑鲨 V2 极速版",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": true,
+      "hardwareEvidence": "2026-11-10 BlackShark V2 HS 2.4：MI3 FF14:1，实际两次关联回复为76%；充电状态未知。",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "blackshark_pa",
+      "identity": "1532:0555",
+      "name": "Razer BlackShark V2 Pro (2023)",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "blackshark_pa",
+      "identity": "1532:0556",
+      "name": "Razer BlackShark V2 Pro (2023)",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "barracuda_pa",
+      "identity": "1532:053A",
+      "name": "Razer Barracuda Pro",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "cloud3",
+      "identity": "03F0:05B7",
+      "name": "HyperX Cloud III Wireless",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "cloud3",
+      "identity": "03F0:0C9D",
+      "name": "HyperX Cloud III Wireless",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "cloud2",
+      "identity": "03F0:018B",
+      "name": "HyperX Cloud II Wireless",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "cloud3",
+      "identity": "03F0:069F",
+      "name": "HyperX Cloud II Core Wireless",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "cloud3",
+      "identity": "03F0:0995",
+      "name": "HyperX Cloud II Core Wireless",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "ikf",
+      "identity": "38B1:3412",
+      "name": "iKF-King G",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "ikf",
+      "identity": "38B1:3411",
+      "name": "iKF-V11 Pro 驱动版",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "ikf",
+      "identity": "38B1:3418",
+      "name": "iKF-影刺 Pro",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "ikf",
+      "identity": "38B1:3419",
+      "name": "iKF-V11 Pro⁺",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "moondrop_gm",
+      "identity": "35D8:012D",
+      "name": "MOONDROP Gaming Maestro (GM01)",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "moondrop_gm",
+      "identity": "35D8:0133",
+      "name": "MOONDROP GM01 Pro",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "cloud3",
+      "identity": "03F0:0FCC",
+      "name": "HyperX Cloud III Wireless",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "rog_delta2",
+      "identity": "0B05:1AFA",
+      "name": "ROG 棱镜 2 / Delta II",
+      "nativeAdapter": "Protocol::Pelta",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "rog_pelta",
+      "identity": "0B05:1B84",
+      "name": "ROG 破风 PELTA",
+      "nativeAdapter": "Protocol::Pelta",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "cloud_flight2",
+      "identity": "03F0:0AC1",
+      "name": "HyperX 飓风炫彩版 / Cloud Flight 2",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "cloud3s",
+      "identity": "03F0:02CC",
+      "name": "HyperX Cloud III S Wireless",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "cloud3s",
+      "identity": "03F0:06BE",
+      "name": "HyperX Cloud III S Wireless",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "mchose_g87",
+      "identity": "41E4:2001",
+      "name": "迈从 G75 V2 无线键盘",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "mchose_g87",
+      "identity": "05AC:024F",
+      "name": "迈从 K99 一代无线键盘",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "vgn_v98pro_v3",
+      "identity": "258A:024F",
+      "name": "VGN V98 Pro V3",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "vgn_v98pro_v3",
+      "identity": "258A:027F",
+      "name": "VGN V98 Pro V3",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "vgn_v98pro_v4",
+      "identity": "391D:2A03",
+      "name": "VGN V98 Pro V4 8K",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "vgn_v98pro_v4",
+      "identity": "391D:2A04",
+      "name": "VGN V98 Pro V4 1K",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "vgn_v98pro_v4",
+      "identity": "391D:2A0A",
+      "name": "VGN V98 Pro V4 8K TIMI",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "kzzi_k75v2_input",
+      "identity": "3554:FA09",
+      "name": "无线键盘（待确认型号）",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "aula_f99pro",
+      "identity": "3554:FA09",
+      "name": "无线键盘（型号待确认）",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "aula_f87pro_input",
+      "identity": "3554:FA09",
+      "name": "无线键盘（FA09）",
+      "nativeAdapter": "Protocol::F87Passive",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "仅被动读取已定义报告；共享FA09身份须通过报告确认。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "aula_nova75",
+      "identity": "05AC:024F",
+      "name": "NOVA75 / F75 Max 协议键盘",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "aula_nova75",
+      "identity": "05AC:024F",
+      "name": "狼蛛 F98 Pro V3",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "aula_nova75",
+      "identity": "05AC:024F",
+      "name": "狼途 LT75 Pro",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "rog_azoth_x",
+      "identity": "0B05:1A85",
+      "name": "ROG 夜魔 / Azoth",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": true,
+      "hardwareEvidence": "2026-11-10 ROG AZOTH接收器：实际100%、正在充电；稳定USB父设备序列号通过重复发现验证。",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "rog_azoth_x",
+      "identity": "0B05:1C24",
+      "name": "ROG Azoth X",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "rog_azoth_x",
+      "identity": "0B05:1C25",
+      "name": "ROG Azoth X",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "leadjoy_zhiwan",
+      "identity": "4131:3519",
+      "name": "LEADJOY 兼容手柄",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "flydigi_apex5",
+      "identity": "37D7:2501",
+      "name": "飞智 八爪鱼 5",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "flydigi_vader5",
+      "identity": "37D7:2401",
+      "name": "飞智 黑武士 5 Pro",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "sony_ds4",
+      "identity": "054C:05C4",
+      "name": "Sony DualShock 4",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "sony_ds4",
+      "identity": "054C:09CC",
+      "name": "Sony DualShock 4 v2",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "sony_ds4",
+      "identity": "054C:05C5",
+      "name": "Sony DualShock 4",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "sony_ds4",
+      "identity": "054C:0BA0",
+      "name": "Sony DualShock 4 无线适配器",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "sony_dualsense",
+      "identity": "054C:0CE6",
+      "name": "Sony DualSense",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "sony_dualsense",
+      "identity": "054C:0DF2",
+      "name": "Sony DualSense Edge",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "eightbitdo_input",
+      "identity": "2DC8:6000",
+      "name": "八位堂 SF30 Pro",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "eightbitdo_input",
+      "identity": "2DC8:6100",
+      "name": "八位堂 SF30 Pro",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "eightbitdo_input",
+      "identity": "2DC8:6001",
+      "name": "八位堂 SN30 Pro",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "eightbitdo_input",
+      "identity": "2DC8:6101",
+      "name": "八位堂 SN30 Pro",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "eightbitdo_input",
+      "identity": "2DC8:6003",
+      "name": "八位堂 Pro 2",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "eightbitdo_input",
+      "identity": "2DC8:6006",
+      "name": "八位堂 Pro 2",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "eightbitdo_input",
+      "identity": "2DC8:6009",
+      "name": "八位堂 Pro 3",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "nintendo_bt",
+      "identity": "057E:2006",
+      "name": "Nintendo Joy-Con (L)",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "nintendo_bt",
+      "identity": "057E:2007",
+      "name": "Nintendo Joy-Con (R)",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "nintendo_bt",
+      "identity": "057E:2009",
+      "name": "Nintendo Switch Pro Controller",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "epos_h3pro",
+      "identity": "1395:0303",
+      "name": "EPOS H3PRO",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "dailing_g3",
+      "identity": "3654:4255",
+      "name": "戴灵 G3 / G4",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "irok_royuan",
+      "identity": "3151:5038",
+      "name": "艾石头无线键盘（MG68 系列）",
+      "nativeAdapter": "Protocol::Irok",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "weikav_nut75",
+      "identity": "0C45:FEF9",
+      "name": "WEIKAV NUT75",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "ajazz_159pro",
+      "identity": "3151:4027",
+      "name": "AJAZZ 2.4G 接收器",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "ajazz_159p",
+      "identity": "248A:5C2F",
+      "name": "2.4G 鼠标接收器",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "ajazz_159p",
+      "identity": "249A:5C2F",
+      "name": "2.4G 鼠标接收器",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "ajazz_159p_legacy",
+      "identity": "248A:5B2F",
+      "name": "AJAZZ 2.4G 鼠标接收器",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "corsair_bragi",
+      "identity": "1B1C:1B62",
+      "name": "海盗船无线接收器（配对型号待读取）",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "delux_m700",
+      "identity": "320F:228A",
+      "name": "多彩 M700 Ultra / Pro+ 2.4G",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "delux_pro_input",
+      "identity": "1D57:FA65",
+      "name": "1D57:FA65 无线鼠标",
+      "nativeAdapter": "Protocol::DeluxPassive",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "仅被动读取；共享FA60/FA65接口不发送主动探测。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "delux_pro_input",
+      "identity": "1D57:FA60",
+      "name": "1D57:FA60 无线鼠标",
+      "nativeAdapter": "Protocol::DeluxPassive",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "仅被动读取；共享FA60/FA65接口不发送主动探测。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "royuan_legacy_status",
+      "identity": "3151:4015",
+      "name": "ROYUAN 无线键盘",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "rainy75_wired",
+      "identity": "320F:5055",
+      "name": "WOB Rainy 75",
+      "nativeAdapter": "Protocol::Rainy75",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A4:2255",
+      "name": "前行者 S9 SE",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "前行者 S9 SE",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A4:2255",
+      "name": "前行者 A6 Pro",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "前行者 A6 Pro",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A4:2255",
+      "name": "前行者 A6 Max",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "前行者 A6 Max",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A4:2255",
+      "name": "前行者 A7 SE",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "前行者 A7 SE",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A4:2255",
+      "name": "前行者 A7",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "前行者 A7",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A4:2255",
+      "name": "前行者 A7 Pro",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "前行者 A7 Pro",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A4:2255",
+      "name": "前行者 E7",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "前行者 E7",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A4:2255",
+      "name": "前行者 E7 Pro",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "前行者 E7 Pro",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A4:2255",
+      "name": "前行者 E9 Carbon",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "前行者 E9 Carbon",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A4:2255",
+      "name": "前行者 E9 Pro Carbon",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "前行者 E9 Pro Carbon",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A4:2255",
+      "name": "前行者 E9",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "前行者 E9",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A4:2255",
+      "name": "前行者 E11",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "前行者 E11",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A4:2255",
+      "name": "前行者 E11 Pro",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "前行者 E11 Pro",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A4:2255",
+      "name": "前行者 A6",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A4:2255",
+      "name": "前行者 G2SE A",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "前行者 G2SE A",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "前行者 A6",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A4:2255",
+      "name": "前行者 S7 Plus",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "前行者 S7 Plus",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A4:2255",
+      "name": "前行者 S2",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "前行者 S2",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A4:2255",
+      "name": "前行者 S7",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "前行者 S7",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A4:2255",
+      "name": "前行者 S7 SE",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "前行者 S7 SE",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A4:2255",
+      "name": "前行者 G5",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "前行者 G5",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_compx",
+      "identity": "3554:F515",
+      "name": "前行者有线鼠标",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_compx",
+      "identity": "3554:F517",
+      "name": "前行者鼠标接收器",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_compx",
+      "identity": "3554:FB45",
+      "name": "前行者鼠标接收器",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_compx",
+      "identity": "3554:FB47",
+      "name": "前行者有线鼠标",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_compx",
+      "identity": "3554:FB48",
+      "name": "前行者鼠标接收器",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "mloong_mx301pro",
+      "identity": "A8A5:2255",
+      "name": "名龙星球 MX300",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "mloong_mx301pro",
+      "identity": "A8A5:2255",
+      "name": "名龙星球 MX301",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "mloong_mx301pro",
+      "identity": "A8A5:2255",
+      "name": "名龙星球 MX301 PRO",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "mloong_mx301pro",
+      "identity": "A8A5:2255",
+      "name": "名龙星球 MX301 PRO Gold",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "mloong_mx301pro",
+      "identity": "A8A5:2255",
+      "name": "名龙星球 MX301 PRO Lite",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "mloong_mx301pro",
+      "identity": "A8A5:2255",
+      "name": "名龙星球 MX301 PRO V2",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "mloong_mx301pro",
+      "identity": "A8A5:2255",
+      "name": "名龙星球 MX302",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "mloong_mx301pro",
+      "identity": "A8A5:2255",
+      "name": "名龙星球 MX306",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "vgn_dragonfly3_master",
+      "identity": "391D:1A05",
+      "name": "VGN 蜻蜓 3 大师版",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "vgn_dragonfly3_master",
+      "identity": "391D:102D",
+      "name": "VGN 蜻蜓 F2 大师版 (MasterGT)",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "pulsar_sonix",
+      "identity": "3710:5402",
+      "name": "Pulsar Fusion2 1K 接收器",
+      "nativeAdapter": "Protocol::Sonix",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "pulsar_sonix",
+      "identity": "3710:5403",
+      "name": "Pulsar Fusion2 8K 接收器",
+      "nativeAdapter": "Protocol::Sonix",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "mchose_qhw",
+      "identity": "3837:1015",
+      "name": "迈从 G98 V3",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "核对产品名及配对板号；G98与K87 V3板号不可互换。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "mchose_qhw",
+      "identity": "3837:1015",
+      "name": "迈从 K87 V3",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "核对产品名及配对板号；G98与K87 V3板号不可互换。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "狼途 M8 无线鼠标",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "x23_freq",
+      "identity": "A8A5:2255",
+      "name": "FREQ 2.4G 鼠标接收器",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "aula_v9",
+      "identity": "373B:1058",
+      "name": "狼蛛 V9 Pro",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "aula_x5",
+      "identity": "38A6:28F9",
+      "name": "AULA 无线鼠标",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "rainy75_receiver",
+      "identity": "320F:5088",
+      "name": "320F 无线键盘",
+      "nativeAdapter": "Protocol::Rainy75",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "ikf_legacy",
+      "identity": "0D8C:0334",
+      "name": "iKF V11 系列",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "atk_a87",
+      "identity": "373B:111E",
+      "name": "ATK A87 Pro",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "atk_a87",
+      "identity": "373B:111F",
+      "name": "ATK A87 Pro",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "eweadn_s9",
+      "identity": "372E:1029",
+      "name": "前行者 S9 Pro",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "eweadn_s9",
+      "identity": "372E:1026",
+      "name": "前行者 S9 接收器（型号待确认）",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "eweadn_s9",
+      "identity": "372E:103D",
+      "name": "前行者 S9 接收器（型号待确认）",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "sony_h5",
+      "identity": "054C:0EBF",
+      "name": "索尼 INZONE H5",
+      "nativeAdapter": "HeadsetControl 4.1.0",
+      "status": "extension",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "须启用随包提供的HeadsetControl 4.1.0；默认关闭。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "valkyrie_vk75",
+      "identity": "05AC:024F",
+      "name": "瓦尔基里 VK75",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "keycool_k19",
+      "identity": "3151:5026",
+      "name": "共享无线键盘接收器（型号待确认）",
+      "nativeAdapter": "KeyboardAdvanced",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "valkyrie_m5",
+      "identity": "374A:A329",
+      "name": "瓦尔基里 VK M5 Pro 接收器",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "valkyrie_vk75",
+      "identity": "0C45:FEFE",
+      "name": "X75 协议键盘",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "titan_t87",
+      "identity": "056D:C077",
+      "name": "056D:C077 无线键盘",
+      "nativeAdapter": "KeyboardAdvanced",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "vgn_neon75_air",
+      "identity": "385D:2A05",
+      "name": "VGN Neon75 Air",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "须MI1、明确col01及匹配的Feature报告。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "hecate_g3m",
+      "identity": "320F:706E",
+      "name": "HECATE G3M Pro",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "keychron_status",
+      "identity": "3434:D028",
+      "name": "Keychron Ultra-Link 8K（接收器，型号待确认）",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "keychron_status",
+      "identity": "3434:D048",
+      "name": "Keychron M5",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "nzxt_telemetry",
+      "identity": "1E71:2101",
+      "name": "NZXT Lift Elite Wireless",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "nzxt_telemetry",
+      "identity": "1E71:2129",
+      "name": "NZXT Lift Elite（USB）",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "valkyrie_vk75",
+      "identity": "05AC:024F",
+      "name": "瓦尔基里 VK99",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "valkyrie_m2",
+      "identity": "374A:A308",
+      "name": "瓦尔基里 VK M2 接收器",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "rog_omni_keyboard",
+      "identity": "0B05:1AD0",
+      "name": "ROG 8K 键盘接收器",
+      "nativeAdapter": "KeyboardAdvanced",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "须同一物理接收器的report1/report2配对接口及子键盘身份。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "valkyrie_m2",
+      "identity": "374A:A304",
+      "name": "瓦尔基里 VK M2 有线",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "valkyrie_m2",
+      "identity": "374A:A305",
+      "name": "瓦尔基里 VK M2 接收器",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "valkyrie_m2",
+      "identity": "374A:A307",
+      "name": "瓦尔基里 VK M2 有线",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "valkyrie_vk99_ry",
+      "identity": "374A:A263",
+      "name": "瓦尔基里键盘接收器",
+      "nativeAdapter": "KeyboardAdvanced",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "valkyrie_vk99_ry",
+      "identity": "374A:A278",
+      "name": "瓦尔基里键盘接收器",
+      "nativeAdapter": "KeyboardAdvanced",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "valkyrie_vk99_ry",
+      "identity": "374A:A281",
+      "name": "瓦尔基里键盘接收器",
+      "nativeAdapter": "KeyboardAdvanced",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "ajazz_159p",
+      "identity": "248A:5C2E",
+      "name": "USB 鼠标",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "ajazz_159p",
+      "identity": "248A:5D2E",
+      "name": "USB 鼠标",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "ajazz_159p",
+      "identity": "248A:5E2E",
+      "name": "USB 鼠标",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "valkyrie_vk75",
+      "identity": "05AC:024F",
+      "name": "2.4G 无线键盘",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "aula_x5",
+      "identity": "38A6:2F1A",
+      "name": "AULA 无线鼠标",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "aula_x5",
+      "identity": "38A6:28FD",
+      "name": "AULA 无线鼠标",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "aula_x5",
+      "identity": "38A6:28E9",
+      "name": "AULA 无线鼠标",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "dareu_a98",
+      "identity": "260D:0051",
+      "name": "达尔优 A98（USB）",
+      "nativeAdapter": "KeyboardAdvanced",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "atk_a87",
+      "identity": "373B:114D",
+      "name": "ATK A98",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "atk_a87",
+      "identity": "373B:114E",
+      "name": "ATK A98",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "atk_a87",
+      "identity": "373B:1151",
+      "name": "ATK A98 Pro",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "atk_a87",
+      "identity": "373B:1152",
+      "name": "ATK A98 Pro",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "atk_a87",
+      "identity": "373B:1231",
+      "name": "ATK A87 Ultra",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "aula_hub_keyboard",
+      "identity": "0C45:FEFC",
+      "name": "狼蛛 F87 Pro V2 C",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "aula_hub_keyboard",
+      "identity": "0C45:FEFE",
+      "name": "狼蛛 F87 Pro V2 D",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "aula_hub_keyboard",
+      "identity": "0C45:FEFE",
+      "name": "狼蛛 F87 Pro V2 Z",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "aula_hub_keyboard",
+      "identity": "0C45:FEFE",
+      "name": "狼蛛 F108 Pro V2",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "aula_hub_keyboard",
+      "identity": "0C45:FEFC",
+      "name": "狼蛛 F108 Pro V2 C",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "aula_hub_keyboard",
+      "identity": "0C45:FEFC",
+      "name": "狼蛛 NOVA75 Pro",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "aula_hub_keyboard",
+      "identity": "0C45:FEFC",
+      "name": "Epomaker × 狼蛛 F75 V2",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "aula_hub_keyboard",
+      "identity": "0C45:FEFC",
+      "name": "狼蛛 F75 V2",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "aula_hub_keyboard",
+      "identity": "0C45:FEFC",
+      "name": "狼蛛 NOVA98",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "aula_hub_keyboard",
+      "identity": "0C45:FEF9",
+      "name": "狼蛛 F75 Master",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "hecate_g5max",
+      "identity": "35BB:A220",
+      "name": "HECATE G3 无线版",
+      "nativeAdapter": "HeadsetController",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "valkyrie_m5",
+      "identity": "3151:5045",
+      "name": "无线鼠标（5045）",
+      "nativeAdapter": "ExtraMouse",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_receivers",
+      "sourceProtocol": "rog_azoth_x",
+      "identity": "0B05:196B",
+      "name": "ROG 龙骑士二代 / CLAYMORE II",
+      "nativeAdapter": "ExtraKeyboard",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
+    },
+    {
+      "section": "wireless_usb",
+      "sourceProtocol": "misiom",
+      "identity": "39A5:3D21",
+      "name": "觅声 白羊座Pro",
+      "nativeAdapter": "Special::OHub",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "须用户启用厂商扩展，且对应厂商驱动已安装；不安装或启动厂商软件。"
+    },
+    {
+      "section": "wireless_usb",
+      "sourceProtocol": "misiom",
+      "identity": "3A95:3EE3",
+      "name": "觅声 天蝎底座版",
+      "nativeAdapter": "Special::OHub",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "须用户启用厂商扩展，且对应厂商驱动已安装；不安装或启动厂商软件。"
+    },
+    {
+      "section": "wireless_usb",
+      "sourceProtocol": "misiom",
+      "identity": "39A5:3FF1",
+      "name": "觅声 阿尔法Pro",
+      "nativeAdapter": "Special::OHub",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "须用户启用厂商扩展，且对应厂商驱动已安装；不安装或启动厂商软件。"
+    },
+    {
+      "section": "wireless_usb",
+      "sourceProtocol": "misiom",
+      "identity": "3206:7015",
+      "name": "觅声 天蝎座",
+      "nativeAdapter": "Special::OHub",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "须用户启用厂商扩展，且对应厂商驱动已安装；不安装或启动厂商软件。"
+    }
+  ],
+  "hardwareChecks": [
+    {
+      "name": "ROG AZOTH wired + receiver",
+      "identity": "0B05:1A83 / 0B05:1A85",
+      "source": "rog_azoth_x",
+      "hardwareValidated": true,
+      "evidence": "2026-11-10：用户切到有线模式并保留接收器；唯一USB父序列号相同，仅呈现一把键盘，保留相同稳定ID；有线100%、正在充电。"
+    },
+    {
+      "name": "Logitech G502 X",
+      "identity": "046D:C547",
+      "source": "hidpp20",
+      "hardwareValidated": true,
+      "evidence": "2026-11-10：HID++4.2、1004电量特性，实际27%、未充电；首个唤醒探测等待2500ms。"
+    },
+    {
+      "name": "Xiaomi 耳夹式耳机",
+      "source": "windows-pnp",
+      "hardwareValidated": true,
+      "evidence": "2026-11-10：连接后实际100→97→96→94→89%，不是固定值或未知转零。"
+    },
+    {
+      "name": "FlyDigi BS2",
+      "source": "bluetooth-bas",
+      "hardwareValidated": true,
+      "evidence": "2026-11-10：标准180F/2A19首次读取94%，通知订阅成功。"
+    }
+  ],
+  "additionalProviders": [
+    {
+      "name": "Windows properties / BLE BAS / declared standard HID / Windows gamepad battery",
+      "status": "implemented",
+      "limit": "仅系统或协议明确的电量字段；档位、估算和多电池分量分别保留。"
+    },
+    {
+      "name": "HID++ / COMPX / Nordic / Razer / ROG / M HUB / Sonix",
+      "status": "implemented",
+      "limit": "有限的已定义接口；HID++配对单元使用协议身份，不使用接收器槽位作为稳定ID。"
+    },
+    {
+      "name": "Beyerdynamic MMX 230 GAIA RFCOMM",
+      "status": "identityOnly",
+      "limit": "现有资料无法证明不可伪装的型号/服务身份；仅显示识别信息，不发送RFCOMM请求。"
+    }
+  ]
+}

@@ -17,7 +17,8 @@ public sealed partial class SettingsWindow
         ("weather", "天气", "\uE9CA"),
         ("traffic", "流量消耗", "\uE9D9"),
         ("device", "音频设备", "\uE7F5"),
-        ("media", "媒体", "\uE8D6")
+        ("media", "媒体", "\uE8D6"),
+        ("peripheralBattery", "外设电量", "\uE996")
     ];
     private readonly List<(Border Cell, int Column, int Slot)> _cardOrderCells = [];
     private TextBlock? _micaStatus;
@@ -57,7 +58,7 @@ public sealed partial class SettingsWindow
                     result[item.Key] = number;
         var order = QuickCardOrderList();
         for (var index = 0; index < order.Count; index++)
-            if (!result.ContainsKey(order[index])) result[order[index]] = index % 2;
+            if (!result.ContainsKey(order[index])) result[order[index]] = order[index] == "peripheralBattery" ? 1 : index % 2;
         foreach (var key in result.Keys.Where(key => !QuickCardDefinitions.Any(card => card.Id == key)).ToArray())
             result.Remove(key);
         return result;

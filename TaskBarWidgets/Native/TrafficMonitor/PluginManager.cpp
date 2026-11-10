@@ -11,6 +11,8 @@
 #include "Common.h"
 #include "TrafficMonitor.h"
 #include "../Builtins/BuiltinFeatures.h"
+#include "../Builtins/Peripherals/PeripheralTaskbar.h"
+#include "SettingsHelper.h"
 
 #define PLUGIN_UNSUPPORT_VERSION 0      //不被支持的插件版本
 
@@ -34,10 +36,31 @@ static wstring WcharArrayToWString(const wchar_t* str)
 void CPluginManager::LoadPlugins()
 {
     if (!m_modules.empty()) return;
+    // Restore memory-only placeholders before loading settings. Media will supply
+    // names/readings later, including cached offline devices. No hardware access.
+    auto& peripherals = PeripheralTaskbar::Provider::Instance();
+    peripherals.SetChinese(theApp.m_str_table.IsSimplifiedChinese() ||
+        theApp.m_str_table.GetLanguageInfo().bcp_47 == L"zh-TW");
+    CSettingsHelper ini;
+    std::vector<std::wstring> saved;
+    CCommon::StringSplit(ini.GetString(L"task_bar", L"item_order_ids", L"") + L"," +
+        ini.GetString(L"task_bar", L"plugin_display_item", L""), L',', saved);
+    std::map<std::wstring, std::wstring> labels;
+    ini.GetAllKeyValues(L"plugin_display_str_taskbar_window", labels);
+    for (const auto& [id, label] : labels) saved.push_back(id);
+    std::map<std::wstring, std::wstring> colors;
+    ini.GetAllKeyValues(L"task_bar_task_bar_text_color_peripherals", colors);
+    for (const auto& [key, value] : colors) saved.push_back(key.substr(0, key.find(L'.')));
+    for (auto id : saved)
+    {
+        if (id.starts_with(L"builtin_")) id.erase(0, 8);
+        peripherals.Ensure(PeripheralTaskbar::DeviceId(id));
+    }
     const std::pair<const wchar_t*, ITMPlugin*> features[] = {
         {L"Battery.dll", BatteryTMPluginGetInstance()},
         {L"PowerMonPlugin.dll", PowerTMPluginGetInstance()},
-        {L"WeatherPro.dll", WeatherTMPluginGetInstance()}
+        {L"WeatherPro.dll", WeatherTMPluginGetInstance()},
+        {L"Peripherals", &peripherals}
     };
     const std::wstring config_dir = theApp.m_data_dir + L"\\config\\";
     CreateDirectoryW(config_dir.c_str(), nullptr);
@@ -64,6 +87,31 @@ void CPluginManager::LoadPlugins()
     ReplaceMfcDrawTextFunction();
     for (const auto& item : AllDisplayItems) m_all_display_items_with_plugins.insert(item);
     for (auto* item : m_plugins) m_all_display_items_with_plugins.insert(item);
+}
+
+bool CPluginManager::SyncPeripheralItems()
+{
+    auto& provider = PeripheralTaskbar::Provider::Instance();
+    bool changed = false;
+    std::unique_ptr<CSettingsHelper> settings;
+    for (int index = 0; auto* item = provider.GetItem(index); ++index)
+    {
+        if (m_plguin_item_map.find(item) != m_plguin_item_map.end()) continue;
+        m_plugins.push_back(item);
+        m_plguin_item_map[item] = &provider;
+        m_all_display_items_with_plugins.insert(item);
+        for (auto& module : m_modules)
+            if (module.plugin == &provider) module.plugin_items.push_back(item);
+        if (!settings) settings = std::make_unique<CSettingsHelper>();
+        settings->LoadPeripheralTaskbarItem(item, theApp.m_taskbar_data);
+        changed = true;
+    }
+    if (changed)
+    {
+        theApp.m_taskbar_data.item_order.Init();
+        theApp.m_taskbar_default_style.RegisterPeripheralItems();
+    }
+    return changed;
 }
 
 const std::vector<IPluginItem*>& CPluginManager::GetPluginItems() const

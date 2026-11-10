@@ -86,6 +86,8 @@ namespace Cards
         bool highContrast{ false };
         bool reducedMotion{ false };
         std::map<Kind, RECT> groupRestBounds;
+        std::map<Kind, RECT> groupReflowFrom;
+        float groupReflowProgress{1};
         HANDLE groupTimer{};
         bool groupMoving{};
         float groupOffset{}, groupFrom{}, groupTo{}, groupDistance{};
@@ -206,9 +208,10 @@ namespace Cards
 
         void Run(std::promise<bool> ready);
         void CreateCards();
-        void PlaceGroup(bool animate, bool showAll);
+        void PlaceGroup(bool animate, bool showAll, bool reflow = false);
         void MoveGroup(float offset);
         void AnimateGroup(bool showing, bool animate);
+        void StartGroupTimer();
         void StopGroupMotion(bool settle);
         void GroupFrame();
         void UpdateEnvironment(bool force);
@@ -266,6 +269,7 @@ namespace Cards
         }
         client.Request(L"getState", "{\"artworkDelta\":true}", L"state");
         client.Request(L"getUpdateState", {}, L"update");
+        client.Request(L"getPeripheralBatteries", {}, L"peripheral");
         client.Request(L"subscribeCardLyrics", "{\"visible\":true,\"session\":1}", L"lyrics");
     }
 
@@ -283,9 +287,10 @@ namespace Cards
         environment.mica = previewMica ? previewTuning : config.mica;
         if (previewMica) environment.mica.vivid = previewVivid;
         environment.fontFamily = config.font.empty() ? L"Microsoft YaHei UI" : config.font;
-        for (Kind kind : { Kind::Weather, Kind::Traffic, Kind::Device, Kind::Media, Kind::Update })
+        for (Kind kind : { Kind::Weather, Kind::Traffic, Kind::Device, Kind::Media, Kind::Update, Kind::PeripheralBattery })
         {
-            const bool enabled = kind == Kind::Update ? snapshot.update.Visible() : config.IsEnabled(kind);
+            const bool enabled = kind == Kind::Update ? snapshot.update.Visible() : config.IsEnabled(kind) &&
+                (kind != Kind::PeripheralBattery || snapshot.peripheralBattery.Visible());
             if (!enabled) { cards.erase(kind); continue; }
             if (cards.find(kind) != cards.end()) continue;
             auto card = std::make_unique<CardWindow>(kind, *this);
@@ -349,6 +354,19 @@ namespace Cards
         const bool wasMoving = groupMoving;
         if (groupTimer) CancelWaitableTimer(groupTimer);
         groupMoving = false;
+        if (!groupReflowFrom.empty())
+        {
+            if (settle) { groupReflowProgress = 1; MoveGroup(0); }
+            // End the content-size pin once, never on an animation frame. An
+            // interrupted resize continues show/hide from its current geometry.
+            for (auto& [kind, rest] : groupRestBounds)
+                if (auto* card = Card(kind))
+                {
+                    if (!settle) rest = card->Bounds();
+                    card->Place(rest, card->DpiScale());
+                }
+            groupReflowFrom.clear();
+        }
         if (settle)
         {
             if (!visible) for (auto& [kind, card] : cards) card->Hide(false);
@@ -366,23 +384,33 @@ namespace Cards
             if (auto* card = Card(kind); card && card->Handle())
             {
                 RECT bounds = rest;
+                if (const auto from = groupReflowFrom.find(kind); from != groupReflowFrom.end())
+                {
+                    const auto mix = [this](LONG a, LONG b) {
+                        return a + static_cast<LONG>(std::lround((b - a) * groupReflowProgress));
+                    };
+                    bounds = {mix(from->second.left, rest.left), mix(from->second.top, rest.top),
+                        mix(from->second.right, rest.right), mix(from->second.bottom, rest.bottom)};
+                }
                 OffsetRect(&bounds, 0, static_cast<int>(std::lround(offset)));
                 moves.emplace_back(card, bounds);
             }
         }
         if (moves.empty()) return;
-        constexpr UINT flags = SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER;
+        const UINT flags = SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER |
+            (groupReflowFrom.empty() ? SWP_NOSIZE : 0);
         HDWP transaction = BeginDeferWindowPos(static_cast<int>(moves.size()));
         for (const auto& [card, bounds] : moves)
         {
             if (!transaction) break;
             transaction = DeferWindowPos(transaction, card->Handle(), nullptr,
-                bounds.left, bounds.top, 0, 0, flags);
+                bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top, flags);
         }
         const bool committed = transaction && EndDeferWindowPos(transaction);
         for (const auto& [card, bounds] : moves)
         {
-            if (committed || SetWindowPos(card->Handle(), nullptr, bounds.left, bounds.top, 0, 0, flags))
+            if (committed || SetWindowPos(card->Handle(), nullptr, bounds.left, bounds.top,
+                bounds.right - bounds.left, bounds.bottom - bounds.top, flags))
                 card->CommitGroupBounds(bounds);
         }
     }
@@ -402,6 +430,11 @@ namespace Cards
         groupDuration = std::max(1, static_cast<int>((showing ? 280 : 240) *
             (100.0f / std::clamp(config.animationSpeedPercent, 50, 300)) *
             std::min(1.0f, std::abs(groupTo - groupFrom) / std::max(1.0f, groupDistance))));
+        StartGroupTimer();
+    }
+
+    void CardHost::Impl::StartGroupTimer()
+    {
         // The card STA waits on a high-resolution timer alongside its messages.
         // No worker callback or continuously running background frame loop.
         MONITORINFOEXW monitor{}; monitor.cbSize = sizeof(monitor);
@@ -427,6 +460,7 @@ namespace Cards
         const float t = std::clamp(elapsed / groupDuration, 0.0f, 1.0f);
         const float remaining = 1 - t;
         const float progress = visible ? 1 - remaining * remaining * remaining : t * t;
+        groupReflowProgress = progress;
         MoveGroup(groupFrom + (groupTo - groupFrom) * progress);
         if (t >= 1) { StopGroupMotion(true); return; }
         const auto now = std::chrono::steady_clock::now();
@@ -437,10 +471,11 @@ namespace Cards
         if (!SetWaitableTimer(groupTimer, &due, 0, nullptr, nullptr, FALSE)) StopGroupMotion(true);
     }
 
-    void CardHost::Impl::PlaceGroup(bool animate, bool showAll)
+    void CardHost::Impl::PlaceGroup(bool animate, bool showAll, bool reflow)
     {
-        const bool continuing = groupMoving;
+        const bool continuing = groupMoving && groupReflowFrom.empty();
         StopGroupMotion(false);
+        const bool resize = reflow && visible && !animate && !continuing && !reducedMotion && !highContrast;
         CardEnvironment environment;
         environment.graphics = &graphics;
         environment.compositor = compositor;
@@ -459,10 +494,18 @@ namespace Cards
                 heights[kind] = Paint::MeasureHeight(kind, snapshot, environment, Layout::WidthDip(kind));
         }
         const bool updateVisible = snapshot.update.Visible();
-        const auto placement = Layout::PlaceGroup(config, heights, anchor, owner, updateVisible,
+        auto visibleConfig = config;
+        visibleConfig.enabled[L"peripheralBattery"] = config.IsEnabled(Kind::PeripheralBattery) && snapshot.peripheralBattery.Visible();
+        const auto placement = Layout::PlaceGroup(visibleConfig, heights, anchor, owner, updateVisible,
             Paint::MeasureHeight(Kind::Update, snapshot, environment, Layout::UpdateCardWidth));
         if (!placement.valid)
         {
+            if (visible && placement.diagnostic == L"no visible card")
+            {
+                HideAll(L"no-selected-cards", false);
+                groupRestBounds.clear();
+                return;
+            }
             StopGroupMotion(true);
             Status(placement.diagnostic.c_str());
             return;
@@ -491,14 +534,23 @@ namespace Cards
                 GetSystemMetrics(SM_YVIRTUALSCREEN) - groupBounds.bottom - 1000);
             groupRestBounds[slot.kind] = bounds;
             OffsetRect(&bounds, 0, static_cast<int>(std::lround(groupOffset)));
-            card->Place(bounds, slot.scale);
-            if (showAll) { EnableWindow(card->Handle(), TRUE); card->Show(false); }
+            const auto previous = card->Bounds();
+            if (resize && card->Visible() && card->DpiScale() == slot.scale && !EqualRect(&previous, &bounds))
+            {
+                groupReflowFrom[slot.kind] = previous;
+                card->PrepareGroupReflow(bounds, slot.scale);
+            }
+            else card->Place(bounds, slot.scale);
+            if (showAll && visible)
+            {
+                EnableWindow(card->Handle(), TRUE);
+                if (!card->Visible()) card->Show(false);
+            }
         }
         // Cards that are no longer part of the layout must hide, not linger.
         for (auto& [kind, card] : cards)
         {
-            if (kind == Kind::Update) { if (!updateVisible) card->Hide(false); continue; }
-            if (!config.IsEnabled(kind)) card->Hide(false);
+            if (!groupRestBounds.contains(kind)) card->Hide(false);
         }
         if (popup && popup->Visible())
         {
@@ -507,7 +559,17 @@ namespace Cards
                 popupMenu == L"sources" ? L"showSources" : L"showDevices:" + popupMenu) : RECT{};
             if (!ownerCard || !ownerCard->Visible() || !EqualRect(&current, &popupAnchor)) CloseMenu();
         }
-        if (animate || continuing) AnimateGroup(visible, true);
+        if (!groupReflowFrom.empty())
+        {
+            CloseMenu(false);
+            groupFrom = groupTo = groupOffset = 0;
+            groupReflowProgress = 0;
+            MoveGroup(0);
+            groupDuration = std::max(1, static_cast<int>(180 *
+                (100.0f / std::clamp(config.animationSpeedPercent, 50, 300))));
+            StartGroupTimer();
+        }
+        else if (animate || continuing) AnimateGroup(visible, true);
     }
 
     void CardHost::Impl::HideAll(const std::wstring& reason, bool animate)
@@ -625,12 +687,17 @@ namespace Cards
 
     void CardHost::Impl::RefreshSnapshot(const Protocol::Changes& changes)
     {
+        const auto* peripheral = Card(Kind::PeripheralBattery);
+        const bool peripheralLayout = changes.peripheralBattery &&
+            ((peripheral != nullptr) != (config.IsEnabled(Kind::PeripheralBattery) && snapshot.peripheralBattery.Visible()) ||
+                (peripheral && peripheral->CurrentSnapshot().peripheralBattery.mode != snapshot.peripheralBattery.mode));
         for (auto& [kind, card] : cards)
         {
             const bool changed = changes.config || changes.theme || changes.status ||
                 (kind == Kind::Media && (changes.media || changes.lyrics)) ||
                 (kind == Kind::Device && changes.audio) || (kind == Kind::Traffic && changes.traffic) ||
-                (kind == Kind::Weather && changes.weather) || (kind == Kind::Update && changes.update);
+                (kind == Kind::Weather && changes.weather) || (kind == Kind::Update && changes.update) ||
+                (kind == Kind::PeripheralBattery && changes.peripheralBattery);
             if (!changed) continue;
             card->SetSnapshot(snapshot);
         }
@@ -643,12 +710,13 @@ namespace Cards
             UpdateEnvironment(true);
         }
         else if (changes.theme) UpdateEnvironment(true);
-        if (visible && (changes.config || changes.update))
+        if (visible && (changes.config || changes.update || peripheralLayout))
         {
             if (!device) { std::wstring error; device = graphics.CreateGraphicsDevice(compositor, error); }
             if (device) CreateCards();
         }
-        if (visible && (changes.config || changes.update || changes.weather || changes.audio)) PlaceGroup(false, true);
+        if (visible && (changes.config || changes.update || changes.weather || changes.audio || peripheralLayout))
+            PlaceGroup(false, true, peripheralLayout || !groupReflowFrom.empty());
         // A ready update must never open the group by itself: the update card only
         // joins the layout while the user already has cards open.
         if (changes.update && !snapshot.update.Visible() && visible)
@@ -684,6 +752,7 @@ namespace Cards
                     accumulated.traffic |= changes.traffic;
                     accumulated.weather |= changes.weather;
                     accumulated.update |= changes.update;
+                    accumulated.peripheralBattery |= changes.peripheralBattery;
                     accumulated.status |= changes.status;
                 }
             }
@@ -729,6 +798,11 @@ namespace Cards
                         changed = true;
                     }
                 }
+                else if (reply.requestId.rfind(L"peripheral", 0) == 0)
+                {
+                    if (Protocol::ApplyPeripheralBatteryReply(snapshot.peripheralBattery, reply.payloadJson))
+                    { accumulated.peripheralBattery = true; changed = true; }
+                }
                 else if (reply.requestId.rfind(L"media", 0) == 0)
                 {
                     if (Protocol::ApplyMediaReply(snapshot.media, reply.payloadJson))
@@ -750,6 +824,7 @@ namespace Cards
                         accumulated.traffic |= stateChanges.traffic;
                         accumulated.weather |= stateChanges.weather;
                         accumulated.update |= stateChanges.update;
+                        accumulated.peripheralBattery |= stateChanges.peripheralBattery;
                         accumulated.status |= stateChanges.status;
                         changed = true;
                     }
@@ -1003,6 +1078,17 @@ namespace Cards
             payload = L"{\"action\":\"seek\",\"positionSeconds\":" + std::to_wstring(seconds) + L"}";
             request = L"mediaCommand";
             kind = L"media";
+        }
+        else if (action == L"refreshPeripheralBatteries")
+        {
+            request = action;
+            kind = L"peripheral";
+        }
+        else if (action == L"peripheralMode:compact" || action == L"peripheralMode:detailed")
+        {
+            request = L"setPeripheralBatteryMode";
+            payload = L"{\"mode\":" + quote(action.substr(15)) + L"}";
+            kind = L"peripheral";
         }
         else if (action == L"refreshWeather")
         {

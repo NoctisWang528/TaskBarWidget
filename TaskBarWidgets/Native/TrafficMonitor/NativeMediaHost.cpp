@@ -12,6 +12,7 @@
 #include "TrafficMonitor.h"
 #include "NativeSettingsBridge.h"
 #include "NativeWeatherBridge.h"
+#include "../Builtins/Peripherals/PeripheralTaskbarJson.h"
 #include <winrt/Windows.Data.Json.h>
 #include <atomic>
 #include <chrono>
@@ -337,12 +338,12 @@ struct NativeMediaHost::Impl
         PostWake();
     }
 
-    void Send(const JsonObject& message)
+    bool Send(const JsonObject& message)
     {
         const auto action = message.GetNamedString(L"action", L"");
         if (action == L"openSettings")
         {
-            if (UpdateHealth::AwaitingHealth()) return;
+            if (UpdateHealth::AwaitingHealth()) return false;
             const DWORD pid = helperPid;
             if (pid) AllowSetForegroundWindow(pid);
         }
@@ -350,8 +351,61 @@ struct NativeMediaHost::Impl
         if (outgoing.size() < 64)
             outgoing.push_back(Utf8(message.Stringify().c_str()) + "\n");
         else
+        {
             Log(L"Command queue full: " + std::wstring(action));
+            return false;
+        }
         if (workerWake) SetEvent(workerWake);
+        return true;
+    }
+
+    bool peripheralDemandReady{}, peripheralDemandPending = true;
+    std::wstring lastPeripheralDemand;
+
+    void PublishPeripheralDemand()
+    {
+        if (!peripheralDemandReady) return;
+        JsonArray ids;
+        // Demand follows saved selection, including disconnected/late items;
+        // showInCard and hideDisconnected do not remove acquisition demand.
+        for (const auto& item : theApp.m_taskbar_data.plugin_display_item.data())
+        {
+            const auto id = PeripheralTaskbar::DeviceId(item);
+            if (!id.empty()) ids.Append(JsonValue::CreateStringValue(id));
+        }
+        JsonObject payload;
+        payload.SetNamedValue(L"deviceIds", ids);
+        const std::wstring serialized = payload.Stringify().c_str();
+        if (!peripheralDemandPending && serialized == lastPeripheralDemand) return;
+        auto message = Command(L"peripheralBatteryDemand");
+        message.SetNamedValue(L"payload", payload);
+        if (Send(message))
+        {
+            peripheralDemandPending = false;
+            lastPeripheralDemand = serialized;
+        }
+    }
+
+    void ApplyPeripheralSnapshot(const JsonObject& payload)
+    {
+        // Parse the complete payload before touching live items. This method is
+        // reached only by ProcessIncoming on the native UI/main thread.
+        const auto snapshot = PeripheralTaskbar::ReadSnapshot(payload);
+        auto& provider = PeripheralTaskbar::Provider::Instance();
+        std::vector<IPluginItem*> defaultLabels;
+        for (int index = 0; auto* item = provider.GetItem(index); ++index)
+            if (theApp.m_taskbar_data.disp_str.GetConst(item) == item->GetItemLableText())
+                defaultLabels.push_back(item);
+        if (!provider.Apply(snapshot)) return;
+        theApp.m_plugins.SyncPeripheralItems();
+        for (auto* item : defaultLabels)
+            theApp.m_taskbar_data.disp_str.Get(item) = item->GetItemLableText();
+        if (auto* monitor = CTrafficMonitorDlg::Instance())
+            if (auto* taskbar = monitor->GetTaskbarWindow())
+            {
+                taskbar->WidthChanged();
+                taskbar->Invalidate(FALSE);
+            }
     }
 
     void LaunchHelper()
@@ -903,6 +957,10 @@ struct NativeMediaHost::Impl
                 error = L"Media helper does not support native renderVersion 2.";
                 return false;
             }
+            PeripheralTaskbar::Provider::Instance().Disconnected();
+            peripheralDemandReady = true;
+            peripheralDemandPending = true;
+            PublishPeripheralDemand();
             store.Reset();
             state.Disconnect();
             firstFramePending = true;
@@ -973,6 +1031,9 @@ struct NativeMediaHost::Impl
         }
         if (type == L"disconnected")
         {
+            PeripheralTaskbar::Provider::Instance().Disconnected();
+            peripheralDemandReady = false;
+            peripheralDemandPending = true;
             state.Disconnect();
             firstFramePending = true;
             stateDirty = true;
@@ -999,6 +1060,8 @@ struct NativeMediaHost::Impl
                 TrafficHistory(message);
             else if (action == L"weatherCommand")
                 WeatherCommand(message);
+            else if (action == L"peripheralBatteries")
+                ApplyPeripheralSnapshot(message.GetNamedObject(L"payload"));
             else if (action == L"quickCards")
                 ApplyQuickCards(message);
             else if (action == L"toggleCards")
@@ -1102,23 +1165,26 @@ struct NativeMediaHost::Impl
             if (!quick) return;
 
             Cards::Config config;
+            config.columns[L"peripheralBattery"] = 1;
             if (quick.HasKey(L"order"))
             {
                 config.order.clear();
                 for (const auto& entry : quick.GetNamedArray(L"order"))
                     config.order.push_back(entry.GetString().c_str());
             }
+            if (std::find(config.order.begin(), config.order.end(), L"peripheralBattery") == config.order.end())
+                config.order.push_back(L"peripheralBattery");
             if (quick.HasKey(L"columns"))
             {
                 const auto columns = quick.GetNamedObject(L"columns");
-                for (const wchar_t* id : { L"weather", L"traffic", L"device", L"media" })
+                for (const wchar_t* id : { L"weather", L"traffic", L"device", L"media", L"peripheralBattery" })
                     if (columns.HasKey(id))
                         config.columns[id] = static_cast<int>(columns.GetNamedNumber(id));
             }
             if (quick.HasKey(L"enabled"))
             {
                 const auto enabled = quick.GetNamedObject(L"enabled");
-                for (const wchar_t* id : { L"weather", L"traffic", L"device", L"media" })
+                for (const wchar_t* id : { L"weather", L"traffic", L"device", L"media", L"peripheralBattery" })
                     if (enabled.HasKey(id))
                         config.enabled[id] = enabled.GetNamedBoolean(id);
             }
@@ -1274,6 +1340,7 @@ struct NativeMediaHost::Impl
     {
         uiWakePosted = false;
         ProcessIncoming();
+        PublishPeripheralDemand();
         const std::uint64_t now = GetTickCount64();
         if (!owner || !IsWindow(owner))
         {

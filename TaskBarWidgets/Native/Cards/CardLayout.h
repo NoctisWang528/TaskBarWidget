@@ -24,6 +24,15 @@ namespace Cards
         constexpr float HeightMedia{ 248.0f };
         constexpr float HeightWeather{ 388.0f };  // fixed across current/forecast views
         constexpr float HeightUpdate{ 180.0f };
+        constexpr float HeightPeripheralCompact{ 184.0f };
+        constexpr float HeightPeripheralDetailed{ 288.0f };
+        constexpr float PeripheralCompactNameTop{ 96.0f };
+        constexpr float PeripheralCompactNameHeight{ 16.0f };
+        constexpr float PeripheralCompactDetailsTop{ 114.0f };
+        constexpr float PeripheralCompactDetailHeight{ 12.0f };
+        constexpr float PeripheralCompactStatusTop{ 139.0f };
+        constexpr float PeripheralCompactStatusHeight{ 12.0f };
+        constexpr float PeripheralFooterBottomGap{ 8.0f };
         constexpr float CornerRadius{ 8.0f };
         constexpr float EdgeReserve{ 20.0f };
 

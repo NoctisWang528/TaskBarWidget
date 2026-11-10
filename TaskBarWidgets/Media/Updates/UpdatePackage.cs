@@ -17,6 +17,7 @@ internal static class UpdatePackage
     private static readonly HashSet<string> RootFiles = new(StringComparer.OrdinalIgnoreCase)
     {
         "TaskBarWidgets.exe", "TaskBarWidgets.Updater.exe", "OpenHardwareMonitorApi.dll", "LibreHardwareMonitorLib.dll",
+        "TaskBarWidgets.PeripheralProbe.exe", "peripheral-compatibility.csv", "peripheral-compatibility.json", "外设电量.md",
         "build-info.json", "release-manifest.json", "LICENSE", "NOTICE", "THIRD-PARTY-NOTICES.md", "ACCEPTANCE.md", "README.txt",
         "concrt140.dll", "vccorlib140.dll", "msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll", "msvcp140_atomic_wait.dll",
         "msvcp140_codecvt_ids.dll", "vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threads.dll", "mfc140u.dll",
@@ -70,6 +71,10 @@ internal static class UpdatePackage
             return path;
         }
         var settingsResource = path.Equals("UI/Settings/SettingsThemeResources.xbf", StringComparison.OrdinalIgnoreCase);
+        if (parts.Length == 3 && parts[0].Equals("Dependencies", StringComparison.OrdinalIgnoreCase) &&
+            parts[1].Equals("HeadsetControl", StringComparison.OrdinalIgnoreCase) &&
+            new[] { "headsetcontrol.exe", "HeadsetControl-4.1.0-source.zip", "LICENSE", "README.md" }.Contains(parts[2], StringComparer.OrdinalIgnoreCase))
+            return path;
         if (!ProgramDirectories.Contains(parts[0]) || (!settingsResource && parts.Skip(1).Any(PersonalDirectories.Contains)))
             throw new InvalidDataException("Personal data cannot be included in updates.");
         var name = parts[^1];
@@ -278,7 +283,43 @@ internal static class UpdatePackage
             if (new FileInfo(path).Length != file.Bytes) throw new InvalidDataException("Staged file size mismatch.");
             await VerifyHash(path, file.Sha256, token);
         }
+        await VerifyBridgePayload(stage, metadata, manifest, token);
     }
+
+    // Legacy clients validate the envelope; the native bridge checks this same
+    // final inventory before acknowledging its first-stage health. New clients
+    // can reject a malformed payload already at download/preparation time.
+    private static async Task VerifyBridgePayload(string stage, UpdateMetadata metadata, AppFileManifest envelope, CancellationToken token)
+    {
+        const string prefix = "Media/UpgradePayload/";
+        if (!envelope.Files.Any(file => file.Path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))) return;
+        var descriptor = ChildPath(stage, prefix + "bridge.json");
+        if (new FileInfo(descriptor).Length > 4096) throw new InvalidDataException("Oversized bridge descriptor.");
+        var bridge = ParseJson<BridgeMetadata>(await File.ReadAllBytesAsync(descriptor, token));
+        if (bridge.Format != "TBW_BRIDGE_V1" || bridge.Version != metadata.Version || !IsHash(bridge.FileManifestSha256))
+            throw new InvalidDataException("Unsupported bridge envelope.");
+        var innerPath = ChildPath(stage, prefix + "manifest.json");
+        if (new FileInfo(innerPath).Length > MaxManifestBytes) throw new InvalidDataException("Oversized bridge inventory.");
+        await VerifyHash(innerPath, bridge.FileManifestSha256, token);
+        var inner = ParseManifest(await File.ReadAllBytesAsync(innerPath, token), metadata);
+        var sources = envelope.Files.ToDictionary(file => file.Path, StringComparer.Ordinal);
+        if (!sources.TryGetValue("TaskBarWidgets.exe", out var entry) ||
+            !sources.TryGetValue("TaskBarWidgets.Updater.exe", out var helper) ||
+            !entry.Sha256.Equals(helper.Sha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Bridge entry must be the packaged updater.");
+        foreach (var file in inner.Files)
+        {
+            if (file.Path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Nested bridge payload is forbidden.");
+            bool Matches(AppFile? source) => source is not null && source.Bytes == file.Bytes &&
+                source.Sha256.Equals(file.Sha256, StringComparison.OrdinalIgnoreCase);
+            if (!sources.TryGetValue(file.Path, out var source) || !Matches(source))
+                sources.TryGetValue(prefix + file.Sha256.ToLowerInvariant()[..16] + ".bin", out source);
+            if (!Matches(source)) throw new InvalidDataException("Final file is not bound to the bridge inventory.");
+        }
+    }
+
+    private sealed record BridgeMetadata(string Format, string Version, string FileManifestSha256);
 
     internal static async Task CopyBounded(Stream source, Stream destination, long expected, CancellationToken token, Action<long>? progress = null)
     {

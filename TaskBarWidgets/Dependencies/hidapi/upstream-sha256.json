@@ -1,0 +1,19 @@
+{
+  "tag": "hidapi-0.15.0",
+  "licenseChoice": "BSD-3-Clause",
+  "upstream": "https://github.com/libusb/hidapi/tree/hidapi-0.15.0",
+  "sha256": {
+    "AUTHORS.txt": "38102075d829116ee23d7a1fe0cb53f0c6932a9275da0ca1a3885b44db1963b4",
+    "LICENSE-bsd.txt": "30eb1bef29b46f8ba7ab8b416035dbd93cb034a45481dd97815b944284582cd2",
+    "LICENSE.txt": "7d3b087c34f35d4d538e3bcddd1ff8f66e92f9ef336881999482800ddf840913",
+    "hidapi/hidapi.h": "c9cef28c53a13a9403e54d5a8a099d51afff119ab04094df89356df0833a822e",
+    "windows/hid.c": "d7f2e2302d49550aba46decd90e4f0bd21a358c21fce9a9508e0ea02025c8877",
+    "windows/hidapi_cfgmgr32.h": "24ff3ec9afe0427b8e6567112109ee8d448d8583e50c9450bfe9c03044f1c7a0",
+    "windows/hidapi_descriptor_reconstruct.c": "51f87c1b937e53d4488cd07f698ec6a805307af6544b0dce8b8500e703063324",
+    "windows/hidapi_descriptor_reconstruct.h": "ab631642aa243117577f89508c1de9c254fa09b4b8f785d7b8213dc2d0451767",
+    "windows/hidapi_hidclass.h": "f71f97ac3841884b54928623f931868735703cfe4b33cdaba77ad32ba189bf6f",
+    "windows/hidapi_hidpi.h": "19b6de0dc54a1e0ac9668b1fd3a28a604c2062f32c485d46ff40394e7b29e4fb",
+    "windows/hidapi_hidsdi.h": "d2bf3100b316b1991efc1343a2947b2601b658e9ea45a4e58e653f5e67aa52a7",
+    "windows/hidapi_winapi.h": "45de813b517c96ec6e335c7a9d9b5a5c90c8bc7a69f0aa188626faedbdf25efe"
+  }
+}

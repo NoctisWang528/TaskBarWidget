@@ -36,6 +36,7 @@ public:
     CPluginManager();
     ~CPluginManager();
     void LoadPlugins();
+    bool SyncPeripheralItems(); // Main thread only; append without replacing item objects.
 
     const std::vector<IPluginItem*>& GetPluginItems() const;
     const std::vector<PluginInfo>& GetPlugins() const;

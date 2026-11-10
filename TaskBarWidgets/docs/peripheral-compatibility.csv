@@ -1,0 +1,267 @@
+﻿section,sourceProtocol,identity,name,nativeAdapter,status,hardwareValidated,hardwareEvidence,limit
+wireless_receivers,rapoo_v700_input,24AE:1924,雷柏 V700DIY-98 长续航版,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,atk_v75x,320F:5088,ATK V75X,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,langtu_t75,1A2C:8FFF,无线键盘（8FFF）,Protocol::Langtu,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,vgn_dragonfly3_se,391D:1A01,VGN 蜻蜓 3 SE,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,pmo_wave75,36B0:3002,2.4G 键盘接收器（型号待核验）,KeyboardAdvanced,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,ipi_aurora,372E:106C,IPI 极光 65 无线系列,KeyboardAdvanced,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,ipi_uni,372E:10F9,IPI 雾,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,sony_h9_serial,054C:0E53,索尼 INZONE H9 / H7 接收器,Special::SonyH9,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,atk_n9pro_serial,373B:1204,ATK N9 Ultra,Special::N9Serial,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,atk_n9pro_serial,373B:11CB,ATK N9 Pro,Special::N9Serial,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,atk_n9v2,373B:1262,ATK N9 V2 Ultimate,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,atk_n9v2,373B:12D6,ATK N9 V2 ULTRA,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,xiberia_x7,36F9:AA20,西伯利亚 X7 系列 / 8K 接收器,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,x23_pro_input,04F3:026F,前行者 X23 Pro（老款）,Protocol::X23Passive,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,x23_freq,A8A4:2255,前行者 X23 星闪版,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A4:2255,前行者 X23 Max,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A4:2255,前行者 X23 SE,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A4:2255,前行者 X23 Pro,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A4:2255,前行者 X23 碳纤维版,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A4:2255,前行者 X23L 碳纤维版,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,前行者 X23 星闪版,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,前行者 X23 Max,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,前行者 X23 SE,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,前行者 X23 Pro,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,前行者 X23 碳纤维版,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,前行者 X23L 碳纤维版,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_compx,35BB:D3FB,HECATE G3M Pro 升级版,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,x23_compx,3554:F5A0,前行者 X23 Max,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,x23_compx,3554:F59F,前行者 X23 Max,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,x23_compx,3554:F5B2,前行者 X23 Max,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,x23_compx,3554:F5B3,前行者 X23 Max,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,x23_compx,3554:F5B5,前行者 X23 Max,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,x23_compx,3554:FB35,前行者鼠标接收器,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,x23_compx,3554:FB36,前行者有线鼠标,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,x23_standard,089D:062F,2.4G 鼠标接收器,Protocol::X23,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,exx_alpha87,372E:10EB,EXX 阿尔法 87,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,exx_alpha87,258A:02D8,EXX 阿尔法 87,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,dareu_flex87,260D:0211,达尔优 FLEX87,KeyboardAdvanced,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,dareu_a98,260D:0037,达尔优共享接收器（待确认键盘）,KeyboardAdvanced,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,rog_omni_keyboard,0B05:1ACE,ROG Omni 键盘,KeyboardAdvanced,implemented,False,,须同一物理接收器的report1/report2配对接口及子键盘身份。
+wireless_receivers,hecate_g5max,35BB:A00B,HECATE G5 MAX 无线版,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,hecate_gx03,35BB:A217,HECATE GX03 ULTRA,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,mchose_k99v3,3837:3033,迈从 G87 V2 (8K) 无线键盘,KeyboardAdvanced,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,mchose_k99v3,3837:3033,迈从 G75 V2 (8K) 无线键盘,KeyboardAdvanced,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,mchose_k99v3,3837:3033,迈从 K99 V3,KeyboardAdvanced,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,cherry_mx2pro,046A:01E0,CHERRY MX 2.0S Pro (2.4G),ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,cherry_mx2pro,046A:01DE,CHERRY MX 2.0S Pro (USB),ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,xiberia_t10,36F9:F001,西伯利亚 T10 无线版,Protocol::Xiberia,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,xiberia_t10,36F9:F008,西伯利亚 T7,Protocol::Xiberia,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,blackshark_v3_passive,1532:057A,雷蛇 BlackShark V3,Protocol::Blackshark,implemented,False,,仅被动读取已定义报告。
+wireless_receivers,blackshark_v3_pro,1532:0577,雷蛇 BlackShark V3 Pro,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,blackshark_v3_pro,1532:101B,雷蛇 BlackShark V3 Pro PS,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,xiberia_t10,36F9:F010,西伯利亚 T10 无线版,Protocol::Xiberia,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,vgn_siren,040B:F779,玄武 2.0 / VGN 共用编号接收器,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,vgn_siren,391D:0003,VGN Siren V2,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,vgn_zhou,372E:10BB,VGN 周听系列,HeadsetController,implemented,False,,仅已定义的64字节报告；已观察到的32/32/16布局保持仅识别。
+wireless_receivers,aula_g9,38A6:0030,AULA G9,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,mchose_frame,3837:6011,MCHOSE V9 Pro 2,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,mchose_v9turbo,3837:600A,MCHOSE V9 Turbo+,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,mchose_frame,3837:6013,MCHOSE R9,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,mchose_v9pro,291D:385D,MCHOSE V9 Pro,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,mchose_g87,41E4:2001,迈从 G87 无线键盘,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,mchose_g87,3837:201B,迈从 G87 V2 (1K) 无线键盘,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,jbl910,0ECB:2088,JBL Quantum 910 Wireless,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,alpha2,03F0:08BE,HyperX Cloud Alpha 2,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,lofree,388D:0025,Lofree Hyzen,KeyboardAdvanced,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,vgn_v98pro,320F:5088,VGN V98 Pro,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,vgn_v98pro,320F:5088,VGN N75 Pro,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,vgn_v98pro,320F:5088,VGN / VXE V87,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,vgn_v98pro,320F:5088,VGN V98 Pro V2,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,vgn_v98pro,320F:5088,VGN VXE75,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,vgn_v98pro,320F:5088,VGN S99,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,razer_keyboard,1532:025C,Razer BlackWidow V3 Pro,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,blackshark2020,1532:0528,Razer BlackShark V2 Pro (2020),HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,razer_headset,1532:0557,Razer BlackShark V2 Pro (2023),HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,blackshark_v2_hs,1532:0565,雷蛇 旋风黑鲨 V2 极速版,HeadsetController,implemented,True,2026-11-10 BlackShark V2 HS 2.4：MI3 FF14:1，实际两次关联回复为76%；充电状态未知。,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,blackshark_pa,1532:0555,Razer BlackShark V2 Pro (2023),HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,blackshark_pa,1532:0556,Razer BlackShark V2 Pro (2023),HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,barracuda_pa,1532:053A,Razer Barracuda Pro,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,cloud3,03F0:05B7,HyperX Cloud III Wireless,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,cloud3,03F0:0C9D,HyperX Cloud III Wireless,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,cloud2,03F0:018B,HyperX Cloud II Wireless,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,cloud3,03F0:069F,HyperX Cloud II Core Wireless,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,cloud3,03F0:0995,HyperX Cloud II Core Wireless,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,ikf,38B1:3412,iKF-King G,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,ikf,38B1:3411,iKF-V11 Pro 驱动版,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,ikf,38B1:3418,iKF-影刺 Pro,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,ikf,38B1:3419,iKF-V11 Pro⁺,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,moondrop_gm,35D8:012D,MOONDROP Gaming Maestro (GM01),HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,moondrop_gm,35D8:0133,MOONDROP GM01 Pro,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,cloud3,03F0:0FCC,HyperX Cloud III Wireless,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,rog_delta2,0B05:1AFA,ROG 棱镜 2 / Delta II,Protocol::Pelta,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,rog_pelta,0B05:1B84,ROG 破风 PELTA,Protocol::Pelta,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,cloud_flight2,03F0:0AC1,HyperX 飓风炫彩版 / Cloud Flight 2,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,cloud3s,03F0:02CC,HyperX Cloud III S Wireless,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,cloud3s,03F0:06BE,HyperX Cloud III S Wireless,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,mchose_g87,41E4:2001,迈从 G75 V2 无线键盘,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,mchose_g87,05AC:024F,迈从 K99 一代无线键盘,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,vgn_v98pro_v3,258A:024F,VGN V98 Pro V3,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,vgn_v98pro_v3,258A:027F,VGN V98 Pro V3,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,vgn_v98pro_v4,391D:2A03,VGN V98 Pro V4 8K,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,vgn_v98pro_v4,391D:2A04,VGN V98 Pro V4 1K,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,vgn_v98pro_v4,391D:2A0A,VGN V98 Pro V4 8K TIMI,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,kzzi_k75v2_input,3554:FA09,无线键盘（待确认型号）,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,aula_f99pro,3554:FA09,无线键盘（型号待确认）,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,aula_f87pro_input,3554:FA09,无线键盘（FA09）,Protocol::F87Passive,implemented,False,,仅被动读取已定义报告；共享FA09身份须通过报告确认。
+wireless_receivers,aula_nova75,05AC:024F,NOVA75 / F75 Max 协议键盘,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,aula_nova75,05AC:024F,狼蛛 F98 Pro V3,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,aula_nova75,05AC:024F,狼途 LT75 Pro,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,rog_azoth_x,0B05:1A85,ROG 夜魔 / Azoth,ExtraKeyboard,implemented,True,2026-11-10 ROG AZOTH接收器：实际100%、正在充电；稳定USB父设备序列号通过重复发现验证。,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,rog_azoth_x,0B05:1C24,ROG Azoth X,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,rog_azoth_x,0B05:1C25,ROG Azoth X,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,leadjoy_zhiwan,4131:3519,LEADJOY 兼容手柄,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,flydigi_apex5,37D7:2501,飞智 八爪鱼 5,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,flydigi_vader5,37D7:2401,飞智 黑武士 5 Pro,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,sony_ds4,054C:05C4,Sony DualShock 4,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,sony_ds4,054C:09CC,Sony DualShock 4 v2,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,sony_ds4,054C:05C5,Sony DualShock 4,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,sony_ds4,054C:0BA0,Sony DualShock 4 无线适配器,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,sony_dualsense,054C:0CE6,Sony DualSense,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,sony_dualsense,054C:0DF2,Sony DualSense Edge,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,eightbitdo_input,2DC8:6000,八位堂 SF30 Pro,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,eightbitdo_input,2DC8:6100,八位堂 SF30 Pro,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,eightbitdo_input,2DC8:6001,八位堂 SN30 Pro,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,eightbitdo_input,2DC8:6101,八位堂 SN30 Pro,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,eightbitdo_input,2DC8:6003,八位堂 Pro 2,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,eightbitdo_input,2DC8:6006,八位堂 Pro 2,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,eightbitdo_input,2DC8:6009,八位堂 Pro 3,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,nintendo_bt,057E:2006,Nintendo Joy-Con (L),HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,nintendo_bt,057E:2007,Nintendo Joy-Con (R),HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,nintendo_bt,057E:2009,Nintendo Switch Pro Controller,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,epos_h3pro,1395:0303,EPOS H3PRO,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,dailing_g3,3654:4255,戴灵 G3 / G4,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,irok_royuan,3151:5038,艾石头无线键盘（MG68 系列）,Protocol::Irok,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,weikav_nut75,0C45:FEF9,WEIKAV NUT75,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,ajazz_159pro,3151:4027,AJAZZ 2.4G 接收器,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,ajazz_159p,248A:5C2F,2.4G 鼠标接收器,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,ajazz_159p,249A:5C2F,2.4G 鼠标接收器,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,ajazz_159p_legacy,248A:5B2F,AJAZZ 2.4G 鼠标接收器,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,corsair_bragi,1B1C:1B62,海盗船无线接收器（配对型号待读取）,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,delux_m700,320F:228A,多彩 M700 Ultra / Pro+ 2.4G,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,delux_pro_input,1D57:FA65,1D57:FA65 无线鼠标,Protocol::DeluxPassive,implemented,False,,仅被动读取；共享FA60/FA65接口不发送主动探测。
+wireless_receivers,delux_pro_input,1D57:FA60,1D57:FA60 无线鼠标,Protocol::DeluxPassive,implemented,False,,仅被动读取；共享FA60/FA65接口不发送主动探测。
+wireless_receivers,royuan_legacy_status,3151:4015,ROYUAN 无线键盘,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,rainy75_wired,320F:5055,WOB Rainy 75,Protocol::Rainy75,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,x23_freq,A8A4:2255,前行者 S9 SE,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,前行者 S9 SE,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A4:2255,前行者 A6 Pro,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,前行者 A6 Pro,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A4:2255,前行者 A6 Max,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,前行者 A6 Max,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A4:2255,前行者 A7 SE,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,前行者 A7 SE,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A4:2255,前行者 A7,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,前行者 A7,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A4:2255,前行者 A7 Pro,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,前行者 A7 Pro,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A4:2255,前行者 E7,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,前行者 E7,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A4:2255,前行者 E7 Pro,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,前行者 E7 Pro,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A4:2255,前行者 E9 Carbon,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,前行者 E9 Carbon,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A4:2255,前行者 E9 Pro Carbon,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,前行者 E9 Pro Carbon,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A4:2255,前行者 E9,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,前行者 E9,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A4:2255,前行者 E11,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,前行者 E11,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A4:2255,前行者 E11 Pro,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,前行者 E11 Pro,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A4:2255,前行者 A6,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A4:2255,前行者 G2SE A,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,前行者 G2SE A,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,前行者 A6,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A4:2255,前行者 S7 Plus,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,前行者 S7 Plus,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A4:2255,前行者 S2,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,前行者 S2,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A4:2255,前行者 S7,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,前行者 S7,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A4:2255,前行者 S7 SE,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,前行者 S7 SE,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A4:2255,前行者 G5,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,前行者 G5,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_compx,3554:F515,前行者有线鼠标,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,x23_compx,3554:F517,前行者鼠标接收器,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,x23_compx,3554:FB45,前行者鼠标接收器,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,x23_compx,3554:FB47,前行者有线鼠标,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,x23_compx,3554:FB48,前行者鼠标接收器,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,mloong_mx301pro,A8A5:2255,名龙星球 MX300,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,mloong_mx301pro,A8A5:2255,名龙星球 MX301,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,mloong_mx301pro,A8A5:2255,名龙星球 MX301 PRO,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,mloong_mx301pro,A8A5:2255,名龙星球 MX301 PRO Gold,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,mloong_mx301pro,A8A5:2255,名龙星球 MX301 PRO Lite,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,mloong_mx301pro,A8A5:2255,名龙星球 MX301 PRO V2,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,mloong_mx301pro,A8A5:2255,名龙星球 MX302,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,mloong_mx301pro,A8A5:2255,名龙星球 MX306,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,vgn_dragonfly3_master,391D:1A05,VGN 蜻蜓 3 大师版,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,vgn_dragonfly3_master,391D:102D,VGN 蜻蜓 F2 大师版 (MasterGT),ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,pulsar_sonix,3710:5402,Pulsar Fusion2 1K 接收器,Protocol::Sonix,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,pulsar_sonix,3710:5403,Pulsar Fusion2 8K 接收器,Protocol::Sonix,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,mchose_qhw,3837:1015,迈从 G98 V3,ExtraKeyboard,implemented,False,,核对产品名及配对板号；G98与K87 V3板号不可互换。
+wireless_receivers,mchose_qhw,3837:1015,迈从 K87 V3,ExtraKeyboard,implemented,False,,核对产品名及配对板号；G98与K87 V3板号不可互换。
+wireless_receivers,x23_freq,A8A5:2255,狼途 M8 无线鼠标,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,x23_freq,A8A5:2255,FREQ 2.4G 鼠标接收器,ExtraMouse,implemented,False,,共享VID/PID还须核对完整USB产品名及明确的协议变体；未知型号保持仅识别。
+wireless_receivers,aula_v9,373B:1058,狼蛛 V9 Pro,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,aula_x5,38A6:28F9,AULA 无线鼠标,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,rainy75_receiver,320F:5088,320F 无线键盘,Protocol::Rainy75,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,ikf_legacy,0D8C:0334,iKF V11 系列,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,atk_a87,373B:111E,ATK A87 Pro,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,atk_a87,373B:111F,ATK A87 Pro,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,eweadn_s9,372E:1029,前行者 S9 Pro,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,eweadn_s9,372E:1026,前行者 S9 接收器（型号待确认）,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,eweadn_s9,372E:103D,前行者 S9 接收器（型号待确认）,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,sony_h5,054C:0EBF,索尼 INZONE H5,HeadsetControl 4.1.0,extension,False,,须启用随包提供的HeadsetControl 4.1.0；默认关闭。
+wireless_receivers,valkyrie_vk75,05AC:024F,瓦尔基里 VK75,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,keycool_k19,3151:5026,共享无线键盘接收器（型号待确认）,KeyboardAdvanced,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,valkyrie_m5,374A:A329,瓦尔基里 VK M5 Pro 接收器,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,valkyrie_vk75,0C45:FEFE,X75 协议键盘,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,titan_t87,056D:C077,056D:C077 无线键盘,KeyboardAdvanced,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,vgn_neon75_air,385D:2A05,VGN Neon75 Air,ExtraKeyboard,implemented,False,,须MI1、明确col01及匹配的Feature报告。
+wireless_receivers,hecate_g3m,320F:706E,HECATE G3M Pro,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,keychron_status,3434:D028,Keychron Ultra-Link 8K（接收器，型号待确认）,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,keychron_status,3434:D048,Keychron M5,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,nzxt_telemetry,1E71:2101,NZXT Lift Elite Wireless,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,nzxt_telemetry,1E71:2129,NZXT Lift Elite（USB）,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,valkyrie_vk75,05AC:024F,瓦尔基里 VK99,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,valkyrie_m2,374A:A308,瓦尔基里 VK M2 接收器,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,rog_omni_keyboard,0B05:1AD0,ROG 8K 键盘接收器,KeyboardAdvanced,implemented,False,,须同一物理接收器的report1/report2配对接口及子键盘身份。
+wireless_receivers,valkyrie_m2,374A:A304,瓦尔基里 VK M2 有线,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,valkyrie_m2,374A:A305,瓦尔基里 VK M2 接收器,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,valkyrie_m2,374A:A307,瓦尔基里 VK M2 有线,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,valkyrie_vk99_ry,374A:A263,瓦尔基里键盘接收器,KeyboardAdvanced,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,valkyrie_vk99_ry,374A:A278,瓦尔基里键盘接收器,KeyboardAdvanced,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,valkyrie_vk99_ry,374A:A281,瓦尔基里键盘接收器,KeyboardAdvanced,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,ajazz_159p,248A:5C2E,USB 鼠标,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,ajazz_159p,248A:5D2E,USB 鼠标,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,ajazz_159p,248A:5E2E,USB 鼠标,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,valkyrie_vk75,05AC:024F,2.4G 无线键盘,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,aula_x5,38A6:2F1A,AULA 无线鼠标,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,aula_x5,38A6:28FD,AULA 无线鼠标,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,aula_x5,38A6:28E9,AULA 无线鼠标,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,dareu_a98,260D:0051,达尔优 A98（USB）,KeyboardAdvanced,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,atk_a87,373B:114D,ATK A98,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,atk_a87,373B:114E,ATK A98,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,atk_a87,373B:1151,ATK A98 Pro,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,atk_a87,373B:1152,ATK A98 Pro,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,atk_a87,373B:1231,ATK A87 Ultra,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,aula_hub_keyboard,0C45:FEFC,狼蛛 F87 Pro V2 C,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,aula_hub_keyboard,0C45:FEFE,狼蛛 F87 Pro V2 D,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,aula_hub_keyboard,0C45:FEFE,狼蛛 F87 Pro V2 Z,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,aula_hub_keyboard,0C45:FEFE,狼蛛 F108 Pro V2,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,aula_hub_keyboard,0C45:FEFC,狼蛛 F108 Pro V2 C,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,aula_hub_keyboard,0C45:FEFC,狼蛛 NOVA75 Pro,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,aula_hub_keyboard,0C45:FEFC,Epomaker × 狼蛛 F75 V2,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,aula_hub_keyboard,0C45:FEFC,狼蛛 F75 V2,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,aula_hub_keyboard,0C45:FEFC,狼蛛 NOVA98,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,aula_hub_keyboard,0C45:FEF9,狼蛛 F75 Master,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,hecate_g5max,35BB:A220,HECATE G3 无线版,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,valkyrie_m5,3151:5045,无线鼠标（5045）,ExtraMouse,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,rog_azoth_x,0B05:196B,ROG 龙骑士二代 / CLAYMORE II,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_usb,misiom,39A5:3D21,觅声 白羊座Pro,Special::OHub,implemented,False,,须用户启用厂商扩展，且对应厂商驱动已安装；不安装或启动厂商软件。
+wireless_usb,misiom,3A95:3EE3,觅声 天蝎底座版,Special::OHub,implemented,False,,须用户启用厂商扩展，且对应厂商驱动已安装；不安装或启动厂商软件。
+wireless_usb,misiom,39A5:3FF1,觅声 阿尔法Pro,Special::OHub,implemented,False,,须用户启用厂商扩展，且对应厂商驱动已安装；不安装或启动厂商软件。
+wireless_usb,misiom,3206:7015,觅声 天蝎座,Special::OHub,implemented,False,,须用户启用厂商扩展，且对应厂商驱动已安装；不安装或启动厂商软件。

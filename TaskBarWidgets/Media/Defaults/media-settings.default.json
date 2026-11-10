@@ -131,19 +131,30 @@
     "traffic",
     "device",
     "media",
-    "weather"
+    "weather",
+    "peripheralBattery"
   ],
   "QuickCardColumns": {
     "traffic": 0,
     "device": 0,
     "media": 0,
-    "weather": 1
+    "weather": 1,
+    "peripheralBattery": 1
   },
   "QuickCardEnabled": {
     "weather": true,
     "traffic": true,
     "device": true,
-    "media": true
+    "media": true,
+    "peripheralBattery": true
+  },
+  "PeripheralBattery": {
+    "Mode": "compact",
+    "HideDisconnected": false,
+    "HeadsetControlEnabled": false,
+    "VendorExtensionsEnabled": false,
+    "Order": [],
+    "CardVisibility": {}
   },
   "QuickCardResourceMode": 0,
   "QuickCardAnimationSpeedPercent": 150,

@@ -2,7 +2,9 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$ReleaseDirectory,
-    [Parameter(Mandatory = $true)][string]$ValidatorDirectory
+    [Parameter(Mandatory = $true)][string]$ValidatorDirectory,
+    [switch]$Portable,
+    [string]$LegacyJobFixture
 )
 $ErrorActionPreference = 'Stop'
 $productRoot = Split-Path -Parent $PSScriptRoot
@@ -23,15 +25,64 @@ try {
     # Load only the trusted published assembly. Never invoke App/Main, start the
     # normal product, install anything, or execute code from the downloaded ZIP.
     $assembly = [Reflection.Assembly]::LoadFrom($assemblyPath)
+    if ($LegacyJobFixture) {
+        # Inspect the released creator without invoking InstallAsync (which would
+        # launch the real application). Serialize with its actual anonymous type.
+        $creator = $assembly.GetType('TaskBarWidgets.Media.Integration.UpdateInstallBridge', $true).GetMethod('InstallAsync', [Reflection.BindingFlags]'Instance,NonPublic')
+        $attribute = $creator.GetCustomAttributesData() | Where-Object { $_.AttributeType.FullName -eq 'System.Runtime.CompilerServices.AsyncStateMachineAttribute' }
+        $machine = $attribute.ConstructorArguments[0].Value
+        $il = $machine.GetMethod('MoveNext', [Reflection.BindingFlags]'Instance,NonPublic').GetMethodBody().GetILAsByteArray()
+        $opcodes = @{}
+        foreach ($field in [Reflection.Emit.OpCodes].GetFields([Reflection.BindingFlags]'Public,Static')) {
+            $opcode = $field.GetValue($null); $opcodes[[int]($opcode.Value -band 65535)] = $opcode
+        }
+        $constructor = $null; $protocol = $null; $protocolOffset = $null
+        for ($at = 0; $at -lt $il.Length;) {
+            $offset = $at; $code = [int]$il[$at++]
+            if ($code -eq 254) { $code = 65024 + [int]$il[$at++] }
+            $opcode = $opcodes[$code]
+            if ($null -eq $opcode) { throw "Unknown IL opcode at $offset." }
+            $length = switch ($opcode.OperandType.ToString()) {
+                'InlineNone' { 0 }; 'ShortInlineBrTarget' { 1 }; 'ShortInlineI' { 1 }; 'ShortInlineVar' { 1 }
+                'InlineVar' { 2 }; 'InlineI8' { 8 }; 'InlineR' { 8 }
+                'InlineSwitch' { 4 + 4 * [BitConverter]::ToInt32($il, $at) }; default { 4 }
+            }
+            if ($opcode.Name -match '^ldc\.i4\.([0-8])$') { $protocol = [int]$Matches[1]; $protocolOffset = $offset }
+            elseif ($opcode.Name -eq 'ldc.i4') { $protocol = [BitConverter]::ToInt32($il, $at); $protocolOffset = $offset }
+            elseif ($opcode.Name -eq 'ldc.i4.s') { $protocol = [int]$il[$at]; $protocolOffset = $offset }
+            if ($opcode.Name -eq 'newobj') {
+                $candidate = $assembly.ManifestModule.ResolveMethod([BitConverter]::ToInt32($il, $at))
+                $parameters = $candidate.GetParameters()
+                if ($parameters.Count -gt 0 -and $parameters[0].Name -eq 'protocolVersion') { $constructor = $candidate; break }
+            }
+            $at += $length
+        }
+        $expected = 'protocolVersion,installRoot,stageRoot,workRoot,dataRoot,version,fileManifestSha256,requirements,nonce,nativePid,mediaPid,uiPid'
+        if ($null -eq $constructor -or $protocol -ne 2 -or ($constructor.GetParameters().Name -join ',') -cne $expected) {
+            throw 'Released Media job creator differs from the supported protocol-2 fixture; inspect its IL and data migration before testing.'
+        }
+        $fixture = Get-Content -LiteralPath $LegacyJobFixture -Raw | ConvertFrom-Json
+        $arguments = @($constructor.GetParameters() | ForEach-Object {
+            if ($_.Name -eq 'protocolVersion') { $protocol }
+            else { [Text.Json.JsonSerializer]::Deserialize(($fixture.($_.Name) | ConvertTo-Json -Depth 10 -Compress), [type]$_.ParameterType, [Text.Json.JsonSerializerOptions]::new([Text.Json.JsonSerializerDefaults]::Web)) }
+        })
+        $oldJob = $constructor.Invoke([object[]]$arguments)
+        $jobJson = [Text.Json.JsonSerializer]::Serialize($oldJob, $oldJob.GetType(), [Text.Json.JsonSerializerOptions]::new([Text.Json.JsonSerializerDefaults]::Web))
+        [IO.File]::WriteAllText([IO.Path]::GetFullPath($LegacyJobFixture), $jobJson)
+        $result['legacyJob'] = @{ protocolVersion = $protocol; protocolIlOffset = $protocolOffset; constructorIlOffset = $offset; fields = $expected; creator = $constructor.DeclaringType.Name; jobPath = [IO.Path]::GetFullPath($LegacyJobFixture) }
+        Write-Host "Released Media job creator: protocol $protocol at IL $protocolOffset; fixture serialized with its actual job type."
+    }
     $packageType = $assembly.GetType('TaskBarWidgets.Media.Updates.UpdatePackage', $true)
     $metadataType = $assembly.GetType('TaskBarWidgets.Media.Updates.UpdateMetadata', $true)
     $flags = [Reflection.BindingFlags]'Static,NonPublic'
     $parse = $packageType.GetMethod('ParseJson', $flags).MakeGenericMethod($metadataType)
-    $metadataBytes = [IO.File]::ReadAllBytes((Join-Path $release 'update.json'))
+    $metadataName = if ($Portable) { 'portable-update.json' } else { 'update.json' }
+    $metadataBytes = [IO.File]::ReadAllBytes((Join-Path $release $metadataName))
     $metadata = $parse.Invoke($null, [object[]](, $metadataBytes))
+    $suffix = if ($Portable) { '-portable' } else { '' }
     if ($metadata.ProtocolVersion -ne 1 -or $metadata.Architecture -ne 'win-x64' -or
         $metadata.Version -notmatch '^\d{6}-\d{4}$' -or
-        $metadata.AssetName -cne "TaskBarWidgets-$($metadata.Version)-win-x64.zip") {
+        $metadata.AssetName -cne "TaskBarWidgets-$($metadata.Version)-win-x64$suffix.zip") {
         throw 'Release metadata or ZIP name is inconsistent.'
     }
     $zip = Join-Path $release $metadata.AssetName
@@ -39,8 +90,10 @@ try {
     $result['package'] = $zip
     if ((Get-Item -LiteralPath $zip).Length -ne $metadata.Size) { throw 'ZIP size differs from update.json.' }
     $sha = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-    $sums = [IO.File]::ReadAllText((Join-Path $release 'SHA256SUMS.txt')).Trim()
-    if ($sha -ne $metadata.Sha256 -or $sums -cne "$sha  $($metadata.AssetName)") {
+    $sums = @([IO.File]::ReadAllLines((Join-Path $release 'SHA256SUMS.txt')) | Where-Object { $_ })
+    if (@($sums | Where-Object { $_ -cnotmatch '^[0-9a-fA-F]{64} [ *][^/\\]+$' }).Count) { throw 'Invalid checksum manifest.' }
+    $matching = @($sums | Where-Object { $_.Substring(66) -ieq $metadata.AssetName })
+    if ($sha -ne $metadata.Sha256 -or $matching.Count -ne 1 -or $matching[0] -cne "$sha  $($metadata.AssetName)") {
         throw 'ZIP hash differs from update.json or SHA256SUMS.txt.'
     }
     $result['packageSha256'] = $sha

@@ -28,6 +28,7 @@ private:
 
 private:
     vector<int> m_item_order;   //保存每个项目的顺序
+    std::vector<std::wstring> m_saved_stable_order; // Includes not-yet-registered items.
     vector<CommonDisplayItem> m_all_item_in_default_order;    //以默认顺序保存的所有显示项目
     bool m_displayed_only;
 };

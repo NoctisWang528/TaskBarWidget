@@ -1,5 +1,5 @@
 ﻿#pragma once
-// Hand-authored vector artwork, ported 1:1 from the WinUI cards so the native
+// Weather/control vector artwork, ported 1:1 from the WinUI cards so the native
 // front-end shows the same symbols and control glyphs with no packaged assets.
 //
 // Weather symbols live in a 128x128 DIP design space; control glyphs in a 20x20
@@ -47,6 +47,7 @@ namespace Cards
         Refresh,
         Check,
         Chevron,
+        Lightning,
     };
 
     struct WeatherPalette
@@ -75,4 +76,16 @@ namespace Cards
 
     // Draws a control glyph into `size` DIP at (left, top).
     void DrawGlyph(ID2D1DeviceContext* context, Glyph glyph, Color color, float left, float top, float size);
+    void DrawPeripheralIcon(ID2D1DeviceContext* context, const std::wstring& kind,
+        Color color, float left, float top, float size);
+
+    enum class PeripheralBrand { Unknown, Rog, Razer, Logitech, Xiaomi };
+    PeripheralBrand PeripheralBrandFrom(const std::wstring& name, const std::wstring& source,
+        const std::wstring& brand = {});
+    // Source-backed Simple Icons artwork; false leaves the full name width available.
+    bool DrawPeripheralBrand(ID2D1DeviceContext* context, PeripheralBrand brand,
+        Color color, float left, float top, float size);
+    // Called on the rendering thread by the shared graphics teardown, before
+    // releasing its device. Safe when unused or already cleared.
+    void ClearPeripheralBrandCache();
 }

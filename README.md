@@ -2,15 +2,16 @@
 
 # TaskBarWidgets
 
-把系统监测、歌词和音频控制放进 Windows 11 任务栏。
+把系统监测、外设电量、歌词和音频控制放进 Windows 11 任务栏。
 
-音乐播放时显示歌词，暂停后回到系统状态；单击打开流量、音频设备、媒体和可选天气卡片。通过拖动模块自定义任务栏显示内容和单／双行布局，快捷卡片可独立启停、排序。
+音乐播放时显示歌词，暂停后回到系统状态；单击打开流量、音频设备、媒体、天气和外设电量卡片。通过拖动模块自定义任务栏显示内容和单／双行布局，快捷卡片可独立启停、排序。
 
 [下载最新版本](https://github.com/NoctisWang528/TaskBarWidget/releases/latest) · [使用与构建说明](TaskBarWidgets/README.md) · [验证与已知限制](TaskBarWidgets/ACCEPTANCE.md)
 
 ## 功能
 
 - **任务栏监测**：网速、CPU、内存、GPU、温度等；电池、功耗与天气功能已内置。
+- **外设电量**：在任务栏和汇总卡片查看支持的鼠标、键盘、耳机与手柄电量；支持详细／缩略样式、品牌标志、手动分页和充电状态，逐台选择显示，卡片与任务栏分别控制。
 - **歌词与媒体**：QQ 音乐、网易云音乐播放时显示歌词，媒体卡片同步显示当前歌词；浏览器媒体显示曲目信息与控制。来源切换支持应用图标，滚轮可临时切换显示模式。
 - **可拖动布局**：模块池、单／双行组合、右侧属性抽屉和预览；双行上下共用列宽，保留对齐。
 - **音频设备**：切换输入／输出设备，分别调整音量和静音；切换时同时设置默认通信设备。
@@ -20,7 +21,7 @@
 
 ## 效果展示
 
-当前版本的桌面实机截图。Mica 色彩随壁纸和主题变化，点击图片可查看原图。
+任务栏与卡片组的桌面实机截图。Mica 色彩随壁纸和主题变化，点击图片可查看原图。
 
 <table>
   <tr>
@@ -36,7 +37,7 @@
     </td>
   </tr>
   <tr>
-    <td align="center">四张卡片按需启停、分列排列，任务栏展示监测信息。</td>
+    <td align="center">普通卡片按需启停、分列排列，任务栏展示监测信息。</td>
     <td align="center">查看播放来源与进度，控制音乐，跟随任务栏歌词。</td>
   </tr>
 </table>
@@ -49,11 +50,31 @@
 
 <p align="center">拖动模块调整单行／双行布局；设置页预览使用示例数值。</p>
 
+### 外设电量
+
+<table>
+  <tr><th align="center">缩略模式 · 浅色</th><th align="center">详细模式 · 深色</th></tr>
+  <tr>
+    <td align="center" valign="top"><img src="TaskBarWidgets/docs/images/peripheral-compact.png" width="384" alt="缩略电量卡片：设备图标、电量环、品牌名称和读取时间"></td>
+    <td align="center" valign="top"><img src="TaskBarWidgets/docs/images/peripheral-detailed.png" width="384" alt="详细电量卡片：四台设备、电量条、充电状态和读取时间"></td>
+  </tr>
+</table>
+
+两图为原生卡片渲染示例，使用示例数据，不展示桌面 Mica 背景。
+
+- 在 **设置 → 快捷卡片 → 外设电量** 选择设备、排序、切换样式，并设置断连时是否隐藏。
+- 在任务栏模块池中单独加入设备电量，可调整位置、标签和颜色；不会自动占用任务栏。
+- 鼠标、键盘、耳机等统一显示连接方式和最近成功读取时间；刷新失败保留原读数，多电池按左右耳、充电盒等分别显示。隐藏卡片不播放动画，无显示需求时停止主动查询。
+
+已读取过的实机包括 Logitech G502 X LIGHTSPEED、Razer BlackShark V2 HS、ROG 夜魔和小米耳夹式耳机。兼容性取决于具体型号、固件与连接方式，详见[外设电量说明与兼容状态](TaskBarWidgets/docs/外设电量.md)。
+
 ## 下载与运行
 
-1. 从 [Releases](https://github.com/NoctisWang528/TaskBarWidget/releases) 下载 `TaskBarWidgets-<版本>-win-x64.zip`。
+1. 手动安装从 [Releases](https://github.com/NoctisWang528/TaskBarWidget/releases) 下载 **`TaskBarWidgets-<版本>-win-x64-portable.zip`**。
 2. 完整解压到一个可写目录，保留 `Media/`、`UI/`、`language/` 和 `licenses/` 等子目录。
 3. 先退出旧版或其他占用同一任务栏区域的监测工具，再运行根目录的 `TaskBarWidgets.exe`。完整硬件监测会请求管理员权限。
+
+不带 `-portable` 的 ZIP 供应用内更新和本地推包使用，保留对旧更新器的兼容。手动安装请选择 portable 包；两种包安装后的程序功能相同。
 
 较早版本需要先手动升级到包含更新器的完整发行包，并按[数据迁移说明](TaskBarWidgets/README.md#日用迁移)保留原配置与历史。此后可在“设置 → 关于”检查、下载及安装更新；“自动检查并下载更新”默认开启，修改后立即保存。下载本身不会退出程序；点击“更新并重启”并确认后才会备份、替换当前安装目录中的程序并重启。有未应用的设置或天气操作时，先回到设置处理。
 

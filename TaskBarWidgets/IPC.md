@@ -1,5 +1,11 @@
 # Internal media protocol
 
+Peripheral battery data is a complete, revisioned `peripheralBattery` block in native card snapshots. The same `PeripheralBatterySnapshot` is sent to the native host with action `peripheralBatteries` and payload containing the snapshot. Native returns `peripheralBatteryDemand` with `{deviceIds:[stableId...]}` when taskbar selection changes and on reconnect. New modules use `builtin_peripheral_<32hexid>` and are unselected by default. Unknown/estimated/last-known values and component battery roles are preserved.
+
+Each device may include `brand` (`asusrog`, `logitech`, `razer`, `xiaomi`, or empty). This is presentation metadata, never device identity. Older snapshots fall back to known vendor/source/name hints for logos only. The native probe may provide exact `legacyIdentities` for a proven hardware identity; these are internal routing aliases and preserve existing selected public IDs. Unknown historical identities are not merged by name.
+
+Settings requests `getPeripheralBatteries` (memory only), `refreshPeripheralBatteries` (coalesced asynchronous query), `subscribePeripheralBatteries` with `{active:bool}` (temporary demand, released on page leave/disconnect), and `setPeripheralBatteryMode` with `{mode:"compact"|"detailed"}`. The native battery card can read/refresh and switch mode; only settings changes device visibility/order/extensions. Details and the bounded child-process protocol are in [外设电量](docs/外设电量.md).
+
 Transport: local named pipe `TaskBarWidgets.<native PID>`, UTF-8 JSON objects separated by LF, version 1. C# helper is a current-user-only server, native host is client. Native host launches `TaskBarWidgets.Media.exe --host-pid <PID> --pipe-name TaskBarWidgets.<PID> --data-root <安装目录>\Data` from its adjacent `Media/` directory. The data root is always the native host's `Data` directory; there is no portable/AppData mode argument or fallback. Helper exits when parent exits. Serialize writes, cap messages at 4 MiB, observe disconnects and cancellation. No remote clients.
 
 Helper to native:

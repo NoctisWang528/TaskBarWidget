@@ -3,6 +3,7 @@
 
 #include <climits>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -50,12 +51,15 @@ namespace
     // the real Graphics device, text formats and mask resources with the painters.
     Frame Render(Graphics& graphics, Kind kind, const Snapshot& snapshot, bool dark,
         float scale, D2D1_POINT_2F offset, const Paint::Interaction& interaction = {},
-        const Paint::CoverTransition& coverTransition = {}, bool transparent = false)
+        const Paint::CoverTransition& coverTransition = {}, bool transparent = false,
+        int peripheralPage = 0, bool highContrast = false, bool reducedMotion = false)
     {
         const auto label = Label(kind, scale, dark, offset);
         CardEnvironment environment;
         environment.graphics = &graphics;
         environment.dark = dark;
+        environment.highContrast = highContrast;
+        environment.reducedMotion = reducedMotion;
         const float width = Layout::WidthDip(kind);
         const float height = std::max(Layout::DefaultHeightDip(kind),
             Paint::MeasureHeight(kind, snapshot, environment, width));
@@ -91,7 +95,9 @@ namespace
             transform._11 == scale && transform._22 == scale && transform._12 == 0 && transform._21 == 0 &&
             transform.dx == offset.x && transform.dy == offset.y, label + ": Configure left stale DPI/transform");
         context->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
-        context->Clear(transparent ? D2D1::ColorF(0, 0, 0, 0) :
+        const auto system = GetSysColor(COLOR_WINDOW);
+        context->Clear(transparent ? D2D1::ColorF(0, 0, 0, 0) : highContrast ?
+            D2D1::ColorF(GetRValue(system) / 255.f, GetGValue(system) / 255.f, GetBValue(system) / 255.f) :
             dark ? D2D1::ColorF(0.12f, 0.13f, 0.14f) : D2D1::ColorF(0.94f, 0.95f, 0.96f));
         switch (kind)
         {
@@ -99,6 +105,7 @@ namespace
         case Kind::Traffic: Paint::Traffic(context.Get(), snapshot, environment, frame.regions, width, height, interaction); break;
         case Kind::Device: Paint::Device(context.Get(), snapshot, environment, frame.regions, width, height, interaction); break;
         case Kind::Media: Paint::Media(context.Get(), snapshot, coverTransition, {}, environment, frame.regions, width, height, interaction); break;
+        case Kind::PeripheralBattery: Paint::PeripheralBattery(context.Get(), snapshot, environment, frame.regions, width, height, interaction, peripheralPage); break;
         case Kind::Update: Paint::Update(context.Get(), snapshot, environment, frame.regions, width, height, interaction); break;
         }
         Check(context->EndDraw(), "EndDraw", label);
@@ -113,6 +120,33 @@ namespace
                 static_cast<UINT>(offset.x) * 4, static_cast<size_t>(frame.width) * 4);
         Check(readback->Unmap(), "Unmap", label);
         return frame;
+    }
+
+    void WritePng(Graphics& graphics, const Frame& frame, const std::filesystem::path& path, float scale)
+    {
+        const auto label = WideToUtf8(path.wstring());
+        ComPtr<IWICStream> stream;
+        Check(graphics.Wic()->CreateStream(stream.GetAddressOf()), "CreateStream", label);
+        Check(stream->InitializeFromFilename(path.c_str(), GENERIC_WRITE), "InitializeFromFilename", label);
+        ComPtr<IWICBitmapEncoder> encoder;
+        Check(graphics.Wic()->CreateEncoder(GUID_ContainerFormatPng, nullptr, encoder.GetAddressOf()), "CreateEncoder", label);
+        Check(encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache), "Initialize encoder", label);
+        ComPtr<IWICBitmapFrameEncode> output;
+        Check(encoder->CreateNewFrame(output.GetAddressOf(), nullptr), "CreateNewFrame", label);
+        Check(output->Initialize(nullptr), "Initialize frame", label);
+        Check(output->SetSize(frame.width, frame.height), "SetSize", label);
+        Check(output->SetResolution(96 * scale, 96 * scale), "SetResolution", label);
+        WICPixelFormatGUID format = GUID_WICPixelFormat32bppBGRA;
+        Check(output->SetPixelFormat(&format), "SetPixelFormat", label);
+        Require(IsEqualGUID(format, GUID_WICPixelFormat32bppBGRA), label + ": encoder changed pixel format");
+        // Render clears to an opaque theme background, so its premultiplied BGRA
+        // bytes also satisfy PNG's straight-alpha input without a conversion.
+        for (size_t i = 3; i < frame.pixels.size(); i += 4)
+            Require(frame.pixels[i] == 255, label + ": preview must be opaque");
+        Check(output->WritePixels(frame.height, frame.width * 4, static_cast<UINT>(frame.pixels.size()),
+            const_cast<BYTE*>(frame.pixels.data())), "WritePixels", label);
+        Check(output->Commit(), "Commit frame", label);
+        Check(encoder->Commit(), "Commit encoder", label);
     }
 
     bool Inside(float x, float y, const D2D1_RECT_F& bounds)
@@ -318,6 +352,20 @@ namespace
             snapshot.traffic.days.push_back(day);
         }
         snapshot.traffic.today = snapshot.traffic.selectedDate = snapshot.traffic.days.back().date;
+        const wchar_t* peripheralKinds[] = {L"mouse", L"keyboard", L"earbuds", L"headset", L"gamepad", L"pen", L"unknown"};
+        for (int i = 0; i < 7; ++i)
+        {
+            PeripheralDevice device;
+            device.id = L"peripheral-fixture-" + std::to_wstring(i);
+            device.name = L"Synthetic " + std::wstring(peripheralKinds[i]);
+            device.kind = peripheralKinds[i]; device.state = L"online"; device.connection = L"Bluetooth";
+            device.showInCard = device.canRead = true;
+            device.batteries.push_back({L"main", i == 0 ? 10 : i == 1 ? 20 : 75, L"", false, false});
+            if (i == 2) device.batteries = {{L"left", 0, L"", false, false},
+                {L"right", 85, L"", true, true}, {L"case", std::nullopt, L"Low", false, std::nullopt}};
+            snapshot.peripheralBattery.devices.push_back(std::move(device));
+        }
+        snapshot.peripheralBattery.revision = 1;
         snapshot.update.phase = L"ready";
         snapshot.update.currentVersion = L"261028-1417";
         snapshot.update.latestVersion = L"261030-1200";
@@ -475,6 +523,102 @@ namespace
         for (const auto& cover : covers) graphics.ForgetImage(cover);
     }
 
+    void CheckPeripheralValueWidth(Graphics& graphics, float width)
+    {
+        for (const auto* family : {L"Microsoft YaHei UI", L"Segoe UI"})
+        for (const auto* value : {L"右 ≈85%", L"右 ≈100%", L"左 100%", L"盒 100%", L"右 0%"})
+        {
+            // The renderer reserves ten DIP for the eight-DIP charging vector and
+            // its gap. Measure the remaining real two-column tile width in DWrite.
+            const auto layout = Paint::PeripheralValueLayout(graphics, value, family, 9, 400,
+                width, Layout::PeripheralCompactDetailHeight, DWRITE_TEXT_ALIGNMENT_CENTER);
+            Require(bool(layout), "battery component text layout");
+            DWRITE_TEXT_METRICS metrics{};
+            Check(layout->GetMetrics(&metrics), "GetMetrics", "complete component value");
+            Require(metrics.lineCount == 1 && metrics.widthIncludingTrailingWhitespace <= width &&
+                metrics.height <= Layout::PeripheralCompactDetailHeight,
+                "component value including percent must fit both dimensions");
+            DWRITE_TRIMMING trimming{};
+            ComPtr<IDWriteInlineObject> sign;
+            layout->GetTrimming(&trimming, sign.GetAddressOf());
+            DWRITE_LINE_METRICS line{};
+            UINT32 lines{};
+            Check(layout->GetLineMetrics(&line, 1, &lines), "GetLineMetrics", "complete component value");
+            Require(trimming.granularity == DWRITE_TRIMMING_GRANULARITY_NONE && !sign && lines == 1 && !line.isTrimmed &&
+                line.length == wcslen(value), "component value must never replace digits or percent with ellipsis");
+        }
+    }
+
+    void CheckPeripheralAppearance(Graphics& graphics)
+    {
+        auto snapshot = Fixture();
+        for (const auto& mode : {L"compact", L"detailed"})
+        for (bool dark : {false, true})
+        for (bool contrast : {false, true})
+        for (float scale : {1.f, 1.25f, 1.5f, 1.75f, 2.f})
+        {
+            snapshot.peripheralBattery.mode = mode;
+            const auto render = [&](const Snapshot& value, int page = 0, D2D1_POINT_2F offset = {})
+            { return Render(graphics, Kind::PeripheralBattery, value, dark, scale, offset, {}, {}, false, page, contrast); };
+            const auto label = std::string("peripheral ") + WideToUtf8(mode) + (contrast ? " high contrast" : " normal");
+            const auto baseline = render(snapshot);
+            if (snapshot.peripheralBattery.mode == L"compact")
+            {
+                const auto& tile = baseline.regions.Find(612)->bounds;
+                CheckPeripheralValueWidth(graphics, (tile.right - tile.left) / 2.f - 3 - 10);
+                Require(Layout::PeripheralCompactNameTop + Layout::PeripheralCompactNameHeight <= Layout::PeripheralCompactDetailsTop &&
+                    Layout::PeripheralCompactDetailsTop + 2 * Layout::PeripheralCompactDetailHeight <= Layout::PeripheralCompactStatusTop &&
+                    Layout::PeripheralCompactStatusTop + Layout::PeripheralCompactStatusHeight < baseline.regions.Find(602)->bounds.top &&
+                    baseline.regions.Find(602)->bounds.bottom == 184 - 8,
+                    "compact name, component lines, status and footer must not overlap; keep eight-DIP bottom inset");
+                for (const auto& sample : {std::pair{L"超长名称的真无线耳机", 12.f}, std::pair{L"连接方式未知", 9.f}})
+                {
+                    const float available = sample.second == 12 ? Layout::PeripheralCompactNameHeight : Layout::PeripheralCompactStatusHeight;
+                    const auto line = graphics.TextLayout(sample.first, L"Microsoft YaHei UI", sample.second,
+                        sample.second == 12 ? 600 : 400, 1000, 1000, false, false, false, false, 1);
+                    DWRITE_TEXT_METRICS metrics{};
+                    Require(bool(line), "compact name/status metrics");
+                    Check(line->GetMetrics(&metrics), "GetMetrics", "compact name/status");
+                    Require(metrics.height <= available, "compact title/status line height fits its separate text rectangle");
+                }
+            }
+            if (contrast)
+                Compare(baseline, Render(graphics, Kind::PeripheralBattery, snapshot, !dark, scale, {}, {}, {}, false, 0, true),
+                    scale, label + " current Windows high-contrast palette overrides app dark flag");
+            Require(baseline.width == UINT(std::ceil(384 * scale)) &&
+                baseline.height == UINT(std::ceil((snapshot.peripheralBattery.mode == L"detailed" ? 288 : 184) * scale)),
+                label + ": fixed mode dimensions");
+            Compare(baseline, render(snapshot), scale, label + " stable");
+            Compare(baseline, render(snapshot, 0, {17, 29}), scale, label + " atlas", {}, 1);
+            for (int page = 0; page < snapshot.peripheralBattery.PageCount(); ++page)
+            {
+                const auto frame = render(snapshot, page);
+                const int count = std::min(snapshot.peripheralBattery.PageSize(), 7 - page * snapshot.peripheralBattery.PageSize());
+                Require(frame.regions.All().size() == size_t(4 + count), label + ": page reading count");
+                for (const auto& region : frame.regions.All())
+                    Require(region.bounds.left >= 0 && region.bounds.top >= 0 &&
+                        region.bounds.right <= 384 && region.bounds.bottom <= (snapshot.peripheralBattery.mode == L"detailed" ? 288 : 184),
+                        label + ": fixed page geometry");
+            }
+            auto zero = snapshot; zero.peripheralBattery.devices[0].batteries[0].percentage = 0;
+            auto missing = zero; missing.peripheralBattery.devices[0].batteries[0].percentage.reset();
+            const auto region = Bounds(*baseline.regions.Find(610), 2);
+            Require(Compare(baseline, render(zero), scale, label + " low/zero", region) > 4 &&
+                Compare(render(zero), render(missing), scale, label + " zero/unknown", region) > 4,
+                label + ": zero, missing and low readings must draw distinct pixels");
+            auto independent = snapshot;
+            independent.peripheralBattery.devices[2].batteries[0].percentage = 50;
+            independent.peripheralBattery.devices[2].batteries[0].charging = true;
+            const auto details = snapshot.peripheralBattery.mode == L"detailed" ?
+                D2D1::RectF(58, 166, 272, 194) : D2D1::RectF(254, 112, 370, 139);
+            Require(Compare(baseline, render(independent), scale, label + " independent roles/vector charging", details) > 4,
+                label + ": role change must not invent an overall ring/bar percentage");
+            auto refreshing = snapshot; refreshing.peripheralBattery.refreshing = true;
+            const auto busy = render(refreshing);
+            Require(!busy.regions.Find(601)->enabled, label + ": refresh busy feedback");
+        }
+    }
+
     void CheckHalo(const Frame& zero, const Frame& half, const Frame& full,
         const Layout::Region& region, float scale, const std::string& label)
     {
@@ -498,16 +642,105 @@ namespace
     }
 }
 
+// Static product-painter images only: no card HWND, compositor animation, IPC,
+// peripheral service, device enumeration or product startup.
+void WritePeripheralPreviews(Cards::Graphics& graphics, const wchar_t* directory)
+{
+    auto snapshot = Fixture();
+    snapshot.peripheralBattery.devices.resize(4);
+    snapshot.peripheralBattery.devices[0].name = L"ROG 龙鳞 Ace · 超长名称的无线鼠标";
+    snapshot.peripheralBattery.devices[0].brand = L"asusrog";
+    snapshot.peripheralBattery.devices[0].connection = L"usb-2.4g";
+    snapshot.peripheralBattery.devices[1].name = L"Razer 黑寡妇 V4 · 无线机械键盘";
+    snapshot.peripheralBattery.devices[1].brand = L"razer";
+    snapshot.peripheralBattery.devices[1].connection = L"usb-2.4g";
+    snapshot.peripheralBattery.devices[2].name = L"小米耳夹耳机";
+    snapshot.peripheralBattery.devices[2].brand = L"xiaomi";
+    snapshot.peripheralBattery.devices[2].kind = L"earbuds";
+    snapshot.peripheralBattery.devices[2].connection = L"bluetooth";
+    snapshot.peripheralBattery.devices[3].name = L"Logitech G PRO X · 无线耳机";
+    snapshot.peripheralBattery.devices[3].brand = L"logitech";
+    snapshot.peripheralBattery.devices[0].batteries[0].percentage = 0;
+    snapshot.peripheralBattery.devices[1].batteries[0].percentage = 100;
+    snapshot.peripheralBattery.devices[1].batteries[0].charging = true;
+    snapshot.peripheralBattery.devices[2].batteries = {
+        {L"left", 10, L"", false, false}, {L"right", 85, L"", true, true},
+        {L"case", std::nullopt, L"低", false, std::nullopt}};
+    snapshot.peripheralBattery.devices[3].state = L"disconnected";
+    snapshot.peripheralBattery.devices[3].stale = true;
+    auto revised = snapshot.peripheralBattery;
+    revised.devices[0].brand = L"razer";
+    Require(!snapshot.peripheralBattery.SameAppearance(revised), "brand-only change repaints the peripheral card");
+    revised = snapshot.peripheralBattery;
+    revised.devices[0].source = L"hidpp20";
+    Require(!snapshot.peripheralBattery.SameAppearance(revised), "source-only change repaints inferred brand artwork");
+    Require(Cards::PeripheralBrandFrom(L"Renamed mouse", L"hidpp20") == Cards::PeripheralBrand::Logitech &&
+        Cards::PeripheralBrandFrom(L"小米耳夹耳机", L"bluetooth-bas") == Cards::PeripheralBrand::Xiaomi &&
+        Cards::PeripheralBrandFrom(L"Frog keyboard", L"windows-pnp") == Cards::PeripheralBrand::Unknown &&
+        Cards::PeripheralBrandFrom(L"Renamed device", L"windows-pnp", L"asusrog") == Cards::PeripheralBrand::Rog,
+        "explicit identity and legacy name/source brand inference");
+    const auto folder = std::filesystem::absolute(directory);
+    std::filesystem::create_directories(folder);
+    int written = 0;
+    for (const auto* mode : {L"compact", L"detailed"})
+    for (bool dark : {false, true})
+    for (bool contrast : {false, true})
+    for (int percent : {100, 150, 200})
+    {
+        snapshot.peripheralBattery.mode = mode;
+        const float scale = percent / 100.f;
+        const auto render = [&](bool reduced)
+        { return Render(graphics, Cards::Kind::PeripheralBattery, snapshot, dark, scale, {}, {}, {}, false, 0, contrast, reduced); };
+        const auto normal = render(false), reduced = render(true);
+        if (normal.pixels != reduced.pixels)
+        {
+            WritePng(graphics, normal, folder / L"unstable-normal.png", scale);
+            WritePng(graphics, reduced, folder / L"unstable-reduced.png", scale);
+        }
+        if (snapshot.peripheralBattery.mode == L"compact")
+        {
+            const auto& tile = normal.regions.Find(612)->bounds;
+            CheckPeripheralValueWidth(graphics, (tile.right - tile.left) / 2.f - 3 - 10);
+        }
+        Require(normal.pixels == reduced.pixels, "static battery previews must not depend on animation timing");
+        Require(normal.width == static_cast<UINT>(384 * scale) &&
+            normal.height == static_cast<UINT>((snapshot.peripheralBattery.mode == L"detailed" ? 288 : 184) * scale),
+            "battery preview fixed dimensions");
+        const std::wstring theme = contrast ? std::wstring(L"high-contrast-system-") + (dark ? L"dark-flag" : L"light-flag") :
+            (dark ? L"dark" : L"light");
+        for (bool reducedMotion : {false, true})
+        {
+            const auto path = folder / (L"peripheral-" + std::wstring(mode) + L"-" + theme + L"-" +
+                std::to_wstring(percent) + (reducedMotion ? L"-reduced-motion.png" : L"-normal-motion.png"));
+            WritePng(graphics, reducedMotion ? reduced : normal, path, scale);
+            ++written;
+        }
+    }
+    // The card STA survives on-demand idle teardown. Releasing and recreating
+    // graphics on this same thread must drop the logo cache and render again.
+    const auto beforeRelease = Render(graphics, Cards::Kind::PeripheralBattery, snapshot, true, 1, {});
+    graphics.Release();
+    graphics.Release(); // Idle teardown and destruction may both release it.
+    Require(graphics.Initialize(), "peripheral graphics reinitialization after release");
+    const auto afterRelease = Render(graphics, Cards::Kind::PeripheralBattery, snapshot, true, 1, {});
+    Require(beforeRelease.pixels == afterRelease.pixels, "brand rendering survives same-thread graphics release/recreate");
+    std::cout << "Peripheral graphics release/recreate on the same thread passed.\n";
+    std::cout << "Exported " << written << " static peripheral PNGs to " << Cards::WideToUtf8(folder.wstring())
+        << "; high contrast uses the current Windows palette for both app-theme flags."
+        << " All input is synthetic, no HWND/IPC/peripheral reads or animations.\n";
+}
+
 void TestCardRenderingStability(Cards::Graphics& graphics)
 {
     Require(graphics.Ready(), "Graphics must already be initialized in the caller's apartment");
     CheckCoverCrossfade(graphics);
+    CheckPeripheralAppearance(graphics);
     const Snapshot snapshot = Fixture();
     auto revised = snapshot;
     // Automatic snapshot delivery with unchanged visible data must be pixel-stable.
     ++revised.weather.revision; ++revised.traffic.revision; ++revised.audio.revision;
-    ++revised.media.revision; ++revised.lyrics.revision; ++revised.update.revision;
-    const Kind kinds[] = {Kind::Weather, Kind::Device, Kind::Media, Kind::Traffic, Kind::Update};
+    ++revised.media.revision; ++revised.lyrics.revision; ++revised.update.revision; ++revised.peripheralBattery.revision;
+    const Kind kinds[] = {Kind::Weather, Kind::Device, Kind::Media, Kind::Traffic, Kind::Update, Kind::PeripheralBattery};
     for (bool dark : {false, true})
     for (float dpi : {1.0f, 1.25f, 1.5f, 2.0f})
     for (float fit : {1.0f, 0.93f})
@@ -547,7 +780,7 @@ void TestCardRenderingStability(Cards::Graphics& graphics)
 
             const std::vector<int> ids = kind == Kind::Device ? std::vector<int>{200, 201, 202} :
                 kind == Kind::Media ? std::vector<int>{100} : kind == Kind::Traffic ? std::vector<int>{340} :
-                kind == Kind::Weather ? std::vector<int>{400} : std::vector<int>{500};
+                kind == Kind::Weather ? std::vector<int>{400} : kind == Kind::PeripheralBattery ? std::vector<int>{600, 601, 603} : std::vector<int>{500};
             for (int id : ids)
             {
                 const auto* region = baseline.regions.Find(id);

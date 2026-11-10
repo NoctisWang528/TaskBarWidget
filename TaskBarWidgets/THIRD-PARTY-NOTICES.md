@@ -1,5 +1,9 @@
 # Source attribution
 
+Peripheral battery acquisition uses [HIDAPI 0.15.0](https://github.com/libusb/hidapi/tree/hidapi-0.15.0), under its permitted BSD license option; see [the BSD notice](licenses/hidapi-BSD-3-Clause.txt). The native acquisition helper links this pinned source and does not load arbitrary external plugins.
+
+[HeadsetControl 4.1.0](https://github.com/Sapd/HeadsetControl/tree/4.1.0) is distributed as a separate, optional, unmodified command-line program under GPL-3.0, disabled by default. The package contains its license, upstream provenance and corresponding source archive together under `Dependencies/HeadsetControl/`. The application invokes only its audited battery query with standard text output; it does not link HeadsetControl into the product. AirVolt was consulted for feature ideas only; no AirVolt source or assets are included.
+
 TaskBarWidgets integrates source from the reference snapshot in workspace commit `a0783de5a245d11d830882ccb5b79964cf1d53af`. Modifications belong to this product directory; the reference trees remain unchanged. Original author names and license notices are preserved. This document does not relicense third-party code.
 
 | Product content | Source | Notice |
@@ -35,3 +39,5 @@ Earlier [Meteocons](https://github.com/basmilius/meteocons) SVG source remains u
 
 
 WinUI 3 settings and cards use the Microsoft.WindowsAppSDK.WinUI 2.3.9 and InteractiveExperiences 2.1.9 components (NuGet), without the AI/ML/Search/Widgets metapackage dependencies, with its [license](licenses/WindowsAppSDK-LICENSE.txt) and [third-party notices](licenses/WindowsAppSDK-NOTICE.txt) packaged alongside the product. The GUI is under `UI/`; lyrics/media services retain the source attribution above. Native VC143 and the privately bundled shared .NET runtime retain their respective Microsoft terms. Runtime/LICENSE.txt and Runtime/ThirdPartyNotices.txt accompany the private host; framework versions and file hashes are recorded in Runtime/runtime-manifest.json. Removed WPF-UI and font license texts remain for provenance.
+
+Peripheral battery ROG / Republic of Gamers, Razer and Xiaomi marks (`Native/Cards/BrandLogos.h`) are unmodified SVG artwork from [Simple Icons 15.0.0](https://github.com/simple-icons/simple-icons/tree/15.0.0), under [CC0 1.0 Universal](licenses/Simple-Icons-LICENSE.md); see [upstream sources, file hashes and trademark notice](licenses/Simple-Icons-NOTICE.md). The Logitech G HUB mark is separately redrawn from the installed G HUB Windows icon resource and is **not CC0**; see its [source, modifications and proprietary-brand notice](licenses/Logitech-GHUB-NOTICE.md). These marks identify devices and do not imply affiliation or endorsement. No runtime network assets or icon font are required.

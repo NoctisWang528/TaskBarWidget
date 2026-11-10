@@ -21,6 +21,7 @@ public:
 	~CTaskbarDefaultStyle();
 
 	void LoadConfig();
+	void RegisterPeripheralItems();
 	void SaveConfig() const;
 
 	void ApplyDefaultStyle(int index, TaskBarSettingData& data) const;		//应用一个颜色预设

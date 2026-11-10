@@ -8,6 +8,7 @@
 #include <roapi.h>
 #include "TrafficMonitor.h"
 #include "../Builtins/BuiltinFeatures.h"
+#include "../Builtins/Peripherals/PeripheralTaskbar.h"
 #include "TrafficMonitorDlg.h"
 #include "NativeMediaHost.h"
 #include "crashtool.h"
@@ -1118,7 +1119,11 @@ bool CTrafficMonitorApp::IsTaksbarItemDisplayed(CommonDisplayItem item) const
     if (item.IsPlugin())
     {
         if (item.PluginItem() != nullptr)
-            return m_taskbar_data.plugin_display_item.Contains(item.PluginItem()->GetItemId());
+        {
+            const auto id = PeripheralTaskbar::DeviceId(item.PluginItem()->GetItemId());
+            return m_taskbar_data.plugin_display_item.Contains(item.PluginItem()->GetItemId()) &&
+                (id.empty() || PeripheralTaskbar::Provider::Instance().Visible(id));
+        }
     }
     else
     {

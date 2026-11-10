@@ -2,6 +2,7 @@
 #include "TaskbarItemOrderHelper.h"
 #include "Common.h"
 #include "TrafficMonitor.h"
+#include "StableItemOrder.h"
 
 //////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////
@@ -13,11 +14,13 @@ CTaskbarItemOrderHelper::CTaskbarItemOrderHelper(bool displayed_only)
 
 void CTaskbarItemOrderHelper::Init()
 {
+    const auto saved = ToStableString();
     m_all_item_in_default_order.clear();
     for (const auto& item : theApp.m_plugins.AllDisplayItemsWithPlugins())
     {
         m_all_item_in_default_order.push_back(item);
     }
+    FromStableString(saved);
 }
 
 std::vector<CommonDisplayItem> CTaskbarItemOrderHelper::GetAllDisplayItemsWithOrder() const
@@ -40,6 +43,7 @@ std::vector<CommonDisplayItem> CTaskbarItemOrderHelper::GetAllDisplayItemsWithOr
 
 void CTaskbarItemOrderHelper::FromString(const std::wstring& str)
 {
+    m_saved_stable_order.clear();
     m_item_order.clear();
     std::vector<std::wstring> str_list;
     CCommon::StringSplit(str, L',', str_list);
@@ -55,6 +59,8 @@ void CTaskbarItemOrderHelper::FromStableString(const std::wstring& str)
     m_item_order.clear();
     std::vector<std::wstring> ids;
     CCommon::StringSplit(str, L',', ids);
+    CCommon::RemoveVectorDuplicateItem(ids);
+    m_saved_stable_order = ids;
     for (const auto& id : ids)
     {
         auto item = std::find_if(m_all_item_in_default_order.begin(), m_all_item_in_default_order.end(),
@@ -67,10 +73,14 @@ void CTaskbarItemOrderHelper::FromStableString(const std::wstring& str)
 std::wstring CTaskbarItemOrderHelper::ToStableString() const
 {
     std::wstring result;
-    for (const auto& item : GetAllDisplayItemsWithOrder())
+    std::vector<std::wstring> current;
+    for (int index : m_item_order)
+        if (index >= 0 && index < static_cast<int>(m_all_item_in_default_order.size()))
+            current.push_back(m_all_item_in_default_order[index].StableId());
+    for (const auto& id : MergeStableItemOrder(m_saved_stable_order, current))
     {
         if (!result.empty()) result += L",";
-        result += item.StableId();
+        result += id;
     }
     return result;
 }

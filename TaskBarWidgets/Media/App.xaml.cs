@@ -10,6 +10,7 @@ using TaskBarWidgets.Media.Integration;
 using TaskbarLyrics.Core.Database;
 using TaskbarLyrics.Core.Utilities;
 using TaskBarWidgets.Media.Updates;
+using TaskBarWidgets.Media.Peripherals;
 using System.Reflection;
 
 namespace TaskbarLyrics.App;
@@ -27,6 +28,8 @@ public partial class App : System.Windows.Application
     private UiHostBridge? _ui;
     private NativeCardBridge? _cards;
     private CardSnapshotBuilder? _cardSnapshot;
+    private PeripheralBatteryService? _peripherals;
+    private int _peripheralPublishPending;
     private AudioSnapshot? _lastAudio;
     private readonly SemaphoreSlim _audioRequests = new(1, 1);
     private bool _cardRefreshRunning, _cardWeatherRunning, _cardTrafficRunning, _cardWasVisible;
@@ -76,7 +79,8 @@ public partial class App : System.Windows.Application
             _media.ApplySettings(Settings);
             _media.ApplyTuning(Settings.SpectrumTuning ?? SpectrumTuningSettings.CreateDefault());
             _pipe = new MediaPipeServer(_pipeName, MediaProtocol.Initialize,
-                _media.Snapshot, (command, _) => Dispatcher.InvokeAsync(() => HandleCommandAsync(command)).Task.Unwrap());
+                _media.Snapshot, (command, _) => Dispatcher.InvokeAsync(() => HandleCommandAsync(command)).Task.Unwrap(),
+                (connected, _) => { if (connected) QueuePeripheralSnapshot(); });
             _media.FrameReady += _pipe.Publish;
             _nativeSettings = new NativeSettingsClient((message, token) => _pipe.SendCommandAsync(message, token));
             var currentVersion = typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion?.Split('+')[0] ?? "";
@@ -101,6 +105,7 @@ public partial class App : System.Windows.Application
             _ui.ConnectionClosed += generation => _ = Dispatcher.InvokeAsync(() =>
             {
                 if (_ui.ConnectionGeneration != generation + 1) return;
+                _peripherals?.SetSettingsActive(false);
                 TaskObserver.Observe(ForwardToCards("cardMicaPreview", JsonSerializer.SerializeToElement(new { enabled = false })), "reset card material");
                 TaskObserver.Observe(ForwardToCards("cardThemePreview", JsonSerializer.SerializeToElement(new { enabled = false })), "reset card theme");
             });
@@ -130,6 +135,13 @@ public partial class App : System.Windows.Application
                 if (KeepCardsWarm && _cards?.CardLyricsVisible != true) _cards?.PublishSnapshot();
             };
             _pipe.Start();
+            _peripherals = new PeripheralBatteryService(
+                [new NativePeripheralBatteryProvider(applicationRoot), new WindowsPeripheralBatteryProvider(),
+                    new HeadsetControlProvider(applicationRoot)],
+                Path.Combine(AppDataPaths.RootDirectory, "cache", "peripheral-batteries.json"));
+            _peripherals.Changed += QueuePeripheralSnapshot;
+            ApplyPeripheralDemand();
+            _peripherals.Start();
             _media.Start();
             _updates?.Start();
             _updateDebug?.Start();
@@ -158,6 +170,13 @@ public partial class App : System.Windows.Application
         if (_shutdownRequested && action != "shutdown") return;
         switch (action)
         {
+            case "peripheralBatteryDemand":
+                if (command.TryGetProperty("payload", out var demand) && demand.ValueKind == JsonValueKind.Object &&
+                    demand.TryGetProperty("deviceIds", out var deviceIds) && deviceIds.ValueKind == JsonValueKind.Array)
+                    _peripherals?.SetTaskbarDemand(deviceIds.EnumerateArray().Where(id => id.ValueKind == JsonValueKind.String)
+                        .Select(id => id.GetString()!).ToArray());
+                QueuePeripheralSnapshot();
+                break;
             case "nativeSettings": _nativeSettings?.Receive(command); break;
             case "trafficHistory": _nativeSettings?.Receive(command); break;
             case "weatherResult": _nativeSettings?.Receive(command); break;
@@ -207,7 +226,7 @@ public partial class App : System.Windows.Application
     // ---- native card channel -------------------------------------------------
 
     internal object BuildCardSnapshot() => _cardSnapshot?.Build(Settings, _media!, _lastAudio,
-        _updates?.Snapshot ?? _updateUnavailable, _cards?.Connected == true, (int)Settings.ToolWindowTheme)
+        _updates?.Snapshot ?? _updateUnavailable, _cards?.Connected == true, (int)Settings.ToolWindowTheme, _peripherals?.Snapshot)
         ?? new { connected = false };
 
     // The native card front-end only gets the actions its widgets need: audio,
@@ -226,6 +245,11 @@ public partial class App : System.Windows.Application
             ? arguments : request;
         switch (action)
         {
+            case "getPeripheralBatteries": return _peripherals?.Snapshot ?? new PeripheralBatterySnapshot();
+            case "refreshPeripheralBatteries":
+                _peripherals?.Refresh();
+                return _peripherals?.Snapshot ?? new PeripheralBatterySnapshot();
+            case "setPeripheralBatteryMode": return SetPeripheralMode(payload);
             case "cardSnapshot":
                 _cards.PublishSnapshot();
                 return new { success = true };
@@ -311,6 +335,7 @@ public partial class App : System.Windows.Application
     // pushing a captured boolean from the pipe thread, makes the last state win.
     private void ApplyCardLyricsVisibility()
     {
+        ApplyPeripheralDemand();
         _media?.SetCardVisible(_cards?.CardLyricsVisible == true || _ui?.CardLyricsVisible == true);
         var visible = _cards?.CardLyricsVisible == true;
         if (visible && !_cardWasVisible)
@@ -461,6 +486,15 @@ public partial class App : System.Windows.Application
         var payload = request.TryGetProperty("payload", out var body) ? body : default;
         switch (action)
         {
+            case "getPeripheralBatteries": return _peripherals?.Snapshot ?? new PeripheralBatterySnapshot();
+            case "refreshPeripheralBatteries":
+                _peripherals?.Refresh();
+                return _peripherals?.Snapshot ?? new PeripheralBatterySnapshot();
+            case "subscribePeripheralBatteries":
+                _peripherals?.SetSettingsActive(payload.ValueKind == JsonValueKind.Object &&
+                    payload.TryGetProperty("active", out var active) && active.ValueKind == JsonValueKind.True);
+                return _peripherals?.Snapshot ?? new PeripheralBatterySnapshot();
+            case "setPeripheralBatteryMode": return SetPeripheralMode(payload);
             case "getUpdateState": return _updates?.Snapshot ?? _updateUnavailable;
             case "getDataStatus": return _storage?.Status() ?? throw new InvalidOperationException("数据服务尚未准备好。");
             case "storageCommand":
@@ -705,12 +739,42 @@ public partial class App : System.Windows.Application
     }
 
     internal void PreviewSettings(AppSettings settings) => _media?.ApplySettings(settings);
+
+    private void ApplyPeripheralDemand() => _peripherals?.Configure(Settings.PeripheralBattery,
+        Settings.QuickCardEnabled.GetValueOrDefault("peripheralBattery"), _cards?.CardLyricsVisible == true,
+        Settings.QuickCardResourceMode == QuickCardResourceMode.Resident);
+
+    private object SetPeripheralMode(JsonElement payload)
+    {
+        var mode = payload.TryGetProperty("mode", out var selected) ? selected.GetString() : null;
+        if (mode is not ("compact" or "detailed")) throw new ArgumentException("无效的外设卡片样式。");
+        var updated = Settings.Clone(); updated.PeripheralBattery.Mode = mode;
+        if (!SaveSettings(updated)) throw new IOException("无法保存卡片样式。");
+        return _peripherals?.Snapshot ?? new PeripheralBatterySnapshot { Mode = mode };
+    }
+
+    private void QueuePeripheralSnapshot()
+    {
+        if (_shutdownRequested || Dispatcher.HasShutdownStarted || Interlocked.Exchange(ref _peripheralPublishPending, 1) != 0) return;
+        _ = Dispatcher.BeginInvoke(() =>
+        {
+            Interlocked.Exchange(ref _peripheralPublishPending, 0);
+            if (_shutdownRequested || _peripherals is null) return;
+            _cards?.PublishSnapshot();
+            if (_pipe is not null) TaskObserver.Observe(_pipe.SendCommandAsync(new
+            {
+                version = 1, type = "command", action = "peripheralBatteries", payload = _peripherals.Snapshot
+            }, _stop.Token), "peripheral snapshot");
+        });
+    }
+
     internal bool SaveSettings(AppSettings settings)
     {
         settings.UseFloatingWindow = false; settings.StartWithWindows = false; settings.AutoCheckUpdates = false;
         var updated = settings.Clone();
         if (_store?.Save(updated) != true) return false;
         Settings = updated;
+        ApplyPeripheralDemand();
         if (_updates is not null && _updates.Snapshot.AutomaticEnabled != Settings.ProductAutomaticUpdatesEnabled)
             _updates.SetAutomatic(Settings.ProductAutomaticUpdatesEnabled);
         if (_updates is null && _updateUnavailable.AutomaticEnabled != Settings.ProductAutomaticUpdatesEnabled)
@@ -752,6 +816,7 @@ public partial class App : System.Windows.Application
         _stop.Cancel();
         if (_updateDebug is not null) TaskObserver.Observe(_updateDebug.DisposeAsync().AsTask(), "update debug pipe shutdown");
         if (_updates is not null) TaskObserver.Observe(_updates.DisposeAsync().AsTask(), "update service shutdown");
+        if (_peripherals is not null) TaskObserver.Observe(_peripherals.DisposeAsync().AsTask(), "peripheral service shutdown");
         _settingsService?.Dispose();
         _audio.Dispose();
         if (_ui is not null) TaskObserver.Observe(_ui.DisposeAsync().AsTask(), "WinUI shutdown");
@@ -771,6 +836,7 @@ public partial class App : System.Windows.Application
         _stop.Cancel();
         if (_updateDebug is not null) await _updateDebug.DisposeAsync();
         if (_updates is not null) await _updates.DisposeAsync();
+        if (_peripherals is not null) await _peripherals.DisposeAsync();
         // Stop input producers before releasing the media services they call into.
         _settingsService?.Dispose();
         if (_ui is not null) await _ui.DisposeAsync();

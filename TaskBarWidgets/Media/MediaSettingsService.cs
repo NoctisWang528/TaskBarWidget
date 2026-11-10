@@ -6,6 +6,7 @@ using TaskbarLyrics.Core.Abstractions;
 using TaskbarLyrics.Core.Models;
 using TaskbarLyrics.Core.Services;
 using TaskbarLyrics.Core.Utilities;
+using TaskBarWidgets.Media.Peripherals;
 
 namespace TaskbarLyrics.App;
 
@@ -1085,6 +1086,7 @@ public sealed class MediaSettingsService : IDisposable
             EnableWordScanning = _settings.EnableWordScanning,
             ToolWindowTheme = _settings.ToolWindowTheme,
             QuickCardOrder = _settings.QuickCardOrder.ToList(),
+            PeripheralBattery = _settings.PeripheralBattery.Clone(),
             QuickCardColumns = new Dictionary<string, int>(
                 _settings.QuickCardColumns ?? [],
                 StringComparer.Ordinal),
@@ -1435,6 +1437,17 @@ public sealed class MediaSettingsService : IDisposable
             case "quickCardOrder":
                 _settings.QuickCardOrder = ReadStringList(element);
                 _settings.NormalizeQuickCards();
+                break;
+            case "peripheralBattery":
+                if (element.ValueKind == JsonValueKind.Object)
+                {
+                    var peripheral = element.Deserialize<PeripheralBatterySettings>(SettingsJsonOptions);
+                    if (peripheral is not null)
+                    {
+                        peripheral.Normalize();
+                        _settings.PeripheralBattery = peripheral;
+                    }
+                }
                 break;
             case "quickCardColumns":
                 if (element.ValueKind == JsonValueKind.Object)
@@ -2085,6 +2098,7 @@ public sealed class MediaSettingsService : IDisposable
         target.EnableWordScanning = source.EnableWordScanning;
         target.ToolWindowTheme = source.ToolWindowTheme;
         target.QuickCardOrder = source.QuickCardOrder.ToList();
+        target.PeripheralBattery = source.PeripheralBattery.Clone();
         target.QuickCardColumns = new Dictionary<string, int>(
             source.QuickCardColumns ?? [],
             StringComparer.Ordinal);
@@ -2228,6 +2242,7 @@ public sealed class MediaSettingsService : IDisposable
         public bool EnableWordScanning { get; set; }
         public ToolWindowTheme ToolWindowTheme { get; set; }
         public List<string> QuickCardOrder { get; set; } = [];
+        public PeripheralBatterySettings PeripheralBattery { get; set; } = new();
         public Dictionary<string, int> QuickCardColumns { get; set; } = new(StringComparer.Ordinal);
         public Dictionary<string, bool> QuickCardEnabled { get; set; } = new(StringComparer.Ordinal);
         public QuickCardResourceMode QuickCardResourceMode { get; set; }

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using TaskbarLyrics.App;
 using TaskBarWidgets.Media.Updates;
+using TaskBarWidgets.Media.Peripherals;
 
 namespace TaskBarWidgets.Media.Integration;
 
@@ -50,7 +51,7 @@ internal sealed class CardSnapshotBuilder
     internal void BumpConfiguration() => Interlocked.Increment(ref _configurationRevision);
 
     internal object Build(AppSettings settings, MediaCoordinator media, AudioSnapshot? audio,
-        UpdateSnapshot? update, bool connected, int theme)
+        UpdateSnapshot? update, bool connected, int theme, PeripheralBatterySnapshot? peripherals = null)
     {
         // Quick cards: the exact persisted configuration, never re-derived here.
         var quickCards = new
@@ -88,6 +89,7 @@ internal sealed class CardSnapshotBuilder
             ["traffic"] = _lastTraffic,
             ["weather"] = _lastWeather,
             ["update"] = DescribeUpdate(update),
+            ["peripheralBattery"] = peripherals ?? new PeripheralBatterySnapshot(),
         };
     }
 

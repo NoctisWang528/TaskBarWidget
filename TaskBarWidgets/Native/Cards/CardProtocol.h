@@ -53,11 +53,12 @@ namespace Cards::Protocol
         bool traffic{ false };
         bool weather{ false };
         bool update{ false };
+        bool peripheralBattery{ false };
         bool status{ false };
         bool theme{ false };
         bool Any() const
         {
-            return config || media || audio || lyrics || traffic || weather || update || status || theme;
+            return config || media || audio || lyrics || traffic || weather || update || peripheralBattery || status || theme;
         }
     };
 
@@ -79,6 +80,7 @@ namespace Cards::Protocol
     bool ApplyTrafficReply(TrafficState& target, const std::wstring& payloadJson);
     bool ApplyWeatherReply(WeatherState& target, const std::wstring& payloadJson);
     bool ApplyUpdateReply(UpdateState& target, const std::wstring& payloadJson);
+    bool ApplyPeripheralBatteryReply(PeripheralBatteryState& target, const std::wstring& payloadJson);
     bool ApplyMediaReply(MediaState& target, const std::wstring& payloadJson);
 
     // Builders for the requests the card UI issues.

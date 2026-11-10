@@ -1,6 +1,15 @@
 ﻿#include "stdafx.h"
 #include "SettingsHelper.h"
 #include "TrafficMonitor.h"
+#include "../Builtins/Peripherals/PeripheralTaskbar.h"
+
+namespace
+{
+    bool IsPeripheral(const CommonDisplayItem& item)
+    { return item.IsPlugin() && !PeripheralTaskbar::DeviceId(item.PluginItem()->GetItemId()).empty(); }
+    std::wstring PeripheralColorSection(const wchar_t* section, const wchar_t* key)
+    { return std::wstring(section) + L"_" + key + L"_peripherals"; }
+}
 
 CSettingsHelper::CSettingsHelper()
     : CIniHelper(theApp.m_config_path)
@@ -80,6 +89,14 @@ void CSettingsHelper::LoadTaskbarWndColors(const wchar_t* AppName, const wchar_t
     COLORREF default_color = _wtoi(default_str);
     for (auto iter = theApp.m_plugins.AllDisplayItemsWithPlugins().begin(); iter != theApp.m_plugins.AllDisplayItemsWithPlugins().end(); ++iter)
     {
+        if (IsPeripheral(*iter))
+        {
+            const auto section = PeripheralColorSection(AppName, KeyName);
+            const auto id = iter->StableId();
+            text_colors[*iter].label = GetInt(section.c_str(), (id + L".label").c_str(), default_color);
+            text_colors[*iter].value = GetInt(section.c_str(), (id + L".value").c_str(), default_color);
+            continue; // Dynamic discovery order must never shift legacy color slots.
+        }
         if (index < split_result.size())
             text_colors[*iter].label = _wtoi(split_result[index].c_str());
         //else if (!split_result.empty())
@@ -109,11 +126,31 @@ void CSettingsHelper::SaveTaskbarWndColors(const wchar_t* AppName, const wchar_t
     CString str;
     for (auto iter = text_colors.begin(); iter != text_colors.end(); ++iter)
     {
+        if (IsPeripheral(iter->first))
+        {
+            const auto section = PeripheralColorSection(AppName, KeyName);
+            const auto id = iter->first.StableId();
+            WriteInt(section.c_str(), (id + L".label").c_str(), iter->second.label);
+            WriteInt(section.c_str(), (id + L".value").c_str(), iter->second.value);
+            continue;
+        }
         CString tmp;
         tmp.Format(_T("%d,%d,"), iter->second.label, iter->second.value);
         str += tmp;
     }
     _WriteString(AppName, KeyName, wstring(str));
+}
+
+void CSettingsHelper::LoadPeripheralTaskbarItem(IPluginItem* item, TaskBarSettingData& data)
+{
+    const CommonDisplayItem display(item);
+    const auto section = PeripheralColorSection(L"task_bar", L"task_bar_text_color");
+    const auto id = display.StableId();
+    const auto fallback = data.text_colors.empty() ? TaskbarItemColor{static_cast<COLORREF>(data.dft_text_colors), static_cast<COLORREF>(data.dft_text_colors)}
+        : data.text_colors.begin()->second;
+    data.text_colors[display].label = GetInt(section.c_str(), (id + L".label").c_str(), fallback.label);
+    data.text_colors[display].value = GetInt(section.c_str(), (id + L".value").c_str(), fallback.value);
+    data.disp_str.Get(display) = GetString(L"plugin_display_str_taskbar_window", item->GetItemId(), item->GetItemLableText());
 }
 
 void CSettingsHelper::LoadDisplayStr(const wchar_t* AppName, DispStrings& disp_str, bool is_main_window) const

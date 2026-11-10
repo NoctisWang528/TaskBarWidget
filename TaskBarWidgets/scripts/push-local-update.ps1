@@ -55,8 +55,35 @@ if (-not (Get-ChildItem -LiteralPath $releaseRoot -File -Filter '*.zip' | Select
 
 $exe = Get-SafeLocalPath (Join-Path $installRoot 'TaskBarWidgets.exe')
 if (-not [IO.File]::Exists($exe)) { throw 'Installation does not contain TaskBarWidgets.exe.' }
+# CIM omits ExecutablePath for an elevated host when this script is not elevated.
+# Limited process-query access still lets us verify its exact installation path.
+if (-not ('TaskBarWidgetsLocalUpdateProcessPath' -as [type])) {
+    Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class TaskBarWidgetsLocalUpdateProcessPath {
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool QueryFullProcessImageName(IntPtr process, uint flags, StringBuilder value, ref uint size);
+    [DllImport("kernel32.dll")]
+    private static extern bool CloseHandle(IntPtr handle);
+    public static string Read(uint pid) {
+        var handle = OpenProcess(0x1000, false, pid);
+        if (handle == IntPtr.Zero) return null;
+        try {
+            var value = new StringBuilder(32768);
+            uint size = 32768;
+            return QueryFullProcessImageName(handle, 0, value, ref size) ? value.ToString() : null;
+        } finally { CloseHandle(handle); }
+    }
+}
+'@
+}
 $runningInstances = @(Get-CimInstance Win32_Process -Filter "Name = 'TaskBarWidgets.exe'" | Where-Object {
-    $_.ExecutablePath -and [string]::Equals([IO.Path]::GetFullPath($_.ExecutablePath), $exe, [StringComparison]::OrdinalIgnoreCase)
+    $imagePath = if ($_.ExecutablePath) { $_.ExecutablePath } else { [TaskBarWidgetsLocalUpdateProcessPath]::Read($_.ProcessId) }
+    $imagePath -and [string]::Equals([IO.Path]::GetFullPath($imagePath), $exe, [StringComparison]::OrdinalIgnoreCase)
 })
 if ($runningInstances.Count -ne 1) { throw 'Expected exactly one running TaskBarWidgets.exe at the specified installation path. No process was started or stopped.' }
 if ($EnableDebug) {
@@ -77,7 +104,12 @@ $pipeName = 'TaskBarWidgets.UpdateDebug.' + $runningInstances[0].ProcessId
 $pipe = [IO.Pipes.NamedPipeClientStream]::new('.', $pipeName, [IO.Pipes.PipeDirection]::InOut, [IO.Pipes.PipeOptions]::Asynchronous, [Security.Principal.TokenImpersonationLevel]::Identification)
 $responseBytes = [IO.MemoryStream]::new()
 try {
-    try { $pipe.Connect(10000) } catch { throw 'Cannot connect to the local debug pipe within 10 seconds. Older installations require one manual upgrade; check that Media is running.' }
+    try { $pipe.Connect(10000) } catch {
+        if ($_.Exception.GetBaseException() -is [UnauthorizedAccessException]) {
+            throw 'The running application is elevated. Run this script from an administrator PowerShell window to access its local update pipe.'
+        }
+        throw 'Cannot connect to the local debug pipe within 10 seconds. Older installations require one manual upgrade; check that Media is running.'
+    }
     $write = $pipe.WriteAsync($request, 0, $request.Length)
     if (-not $write.Wait(10000)) { throw 'Local update request write timed out.' }
     $write.GetAwaiter().GetResult()

@@ -1,9 +1,13 @@
 ﻿#include "CardPch.h"
 #include "CardIcons.h"
+#include "BrandLogos.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <cwctype>
+#include <d2d1svg.h>
+#include <tuple>
 
 using Microsoft::WRL::ComPtr;
 
@@ -12,6 +16,20 @@ namespace Cards
     namespace
     {
         constexpr float Pi = 3.14159265358979323846f;
+
+        using BrandLogoKey = std::tuple<float, float, float, float, float, float, int, int>;
+        struct LogoCache
+        {
+            ComPtr<ID2D1Device> device;
+            ComPtr<ID2D1DeviceContext> context;
+            std::pair<BrandLogoKey, ComPtr<ID2D1Bitmap1>> icons[4];
+        };
+
+        LogoCache& PeripheralBrandCache()
+        {
+            static thread_local LogoCache cache;
+            return cache;
+        }
 
         // Geometry and stroke styles must belong to the caller's D2D factory.
         ComPtr<ID2D1Factory> IconFactory(ID2D1DeviceContext* context)
@@ -452,6 +470,11 @@ namespace Cards
 
         switch (glyph)
         {
+        case Glyph::Lightning:
+            FillGeometry(context, color, MakeGeometry<ID2D1PathGeometry>(context,
+                {{11.5f, 1.5f}, {4.5f, 11.f}, {9.f, 11.f}, {8.f, 18.5f},
+                 {15.5f, 8.5f}, {11.f, 8.5f}}, true).Get());
+            break;
         case Glyph::Previous:
             FillRect(context, color, D2D1::RectF(3.4f, 3.5f, 5.6f, 16.5f), 0.0f);
             FillGeometry(context, color, MakeGeometry<ID2D1PathGeometry>(context, { { 16.8f, 3.4f }, { 16.8f, 16.6f },
@@ -552,5 +575,200 @@ namespace Cards
             break;
         }
         context->SetTransform(previous);
+    }
+}
+
+namespace Cards
+{
+    PeripheralBrand PeripheralBrandFrom(const std::wstring& name, const std::wstring& source,
+        const std::wstring& identity)
+    {
+        if (!identity.empty())
+        {
+            std::wstring brand = identity;
+            std::transform(brand.begin(), brand.end(), brand.begin(),
+                [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
+            if (brand == L"asusrog" || brand == L"rog") return PeripheralBrand::Rog;
+            if (brand == L"razer") return PeripheralBrand::Razer;
+            if (brand == L"logitech") return PeripheralBrand::Logitech;
+            if (brand == L"xiaomi") return PeripheralBrand::Xiaomi;
+            return PeripheralBrand::Unknown;
+        }
+        const auto identify = [](std::wstring value)
+        {
+            std::transform(value.begin(), value.end(), value.begin(),
+                [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
+            const auto word = [&](const std::wstring& brand)
+            {
+                // Treat punctuation/underscore as separators, but not letters or digits.
+                const auto letterOrDigit = [](wchar_t c)
+                { return (c >= L'a' && c <= L'z') || (c >= L'0' && c <= L'9'); };
+                for (size_t at = value.find(brand); at != std::wstring::npos; at = value.find(brand, at + 1))
+                    if ((at == 0 || !letterOrDigit(value[at - 1])) &&
+                        (at + brand.size() == value.size() || !letterOrDigit(value[at + brand.size()])))
+                        return true;
+                return false;
+            };
+            if (word(L"rog") || word(L"republic of gamers") || value.find(L"玩家国度") != std::wstring::npos)
+                return PeripheralBrand::Rog;
+            if (word(L"razer") || value.find(L"雷蛇") != std::wstring::npos) return PeripheralBrand::Razer;
+            if (word(L"logitech") || word(L"logi") || word(L"logicool") ||
+                value.find(L"罗技") != std::wstring::npos) return PeripheralBrand::Logitech;
+            if (word(L"xiaomi") || value.find(L"小米") != std::wstring::npos) return PeripheralBrand::Xiaomi;
+            return PeripheralBrand::Unknown;
+        };
+        const auto brand = identify(name);
+        if (brand != PeripheralBrand::Unknown) return brand;
+        // These provider IDs are Logitech HID++ protocols, not generic HID/Bluetooth.
+        if (source == L"hidpp20" || source == L"hidpp10") return PeripheralBrand::Logitech;
+        return identify(source);
+    }
+
+    void ClearPeripheralBrandCache()
+    {
+        PeripheralBrandCache() = {};
+    }
+
+    bool DrawPeripheralBrand(ID2D1DeviceContext* context, PeripheralBrand brand,
+        Color color, float left, float top, float size)
+    {
+        if (!context || size <= 0) return false;
+        const char* svg = nullptr;
+        switch (brand)
+        {
+        case PeripheralBrand::Rog: svg = BrandLogos::Rog; break;
+        case PeripheralBrand::Razer: svg = BrandLogos::Razer; break;
+        case PeripheralBrand::Logitech: svg = BrandLogos::Logitech; break;
+        case PeripheralBrand::Xiaomi: svg = BrandLogos::Xiaomi; break;
+        default: return false;
+        }
+        D2D1_MATRIX_3X2_F transform{};
+        context->GetTransform(&transform);
+        const float scale = transform._11;
+        if (scale <= 0 || transform._22 != scale || transform._12 || transform._21) return false;
+        // Like weather symbols, render near (0,0) and retain the small raster at
+        // the current DPI. This keeps repeated curve tessellation pixel-stable.
+        const double x = static_cast<double>(left) * scale, y = static_cast<double>(top) * scale;
+        const int phaseX = static_cast<int>(std::lround((x - std::floor(x)) * 256));
+        const int phaseY = static_cast<int>(std::lround((y - std::floor(y)) * 256));
+        const BrandLogoKey key{size, scale, color.r, color.g, color.b, color.a, phaseX, phaseY};
+        // At most four tiny bitmaps per card thread, cleared by Graphics::Release
+        // or device replacement; theme/DPI/subpixel changes replace that brand.
+        auto& cache = PeripheralBrandCache();
+        ComPtr<ID2D1Device> device;
+        context->GetDevice(device.GetAddressOf());
+        if (cache.device.Get() != device.Get()) { cache = {}; cache.device = device; }
+        auto& entry = cache.icons[static_cast<size_t>(brand) - 1];
+        constexpr float padding = 2;
+        if (!entry.second || entry.first != key)
+        {
+            if (!cache.context && FAILED(device->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE,
+                cache.context.GetAddressOf()))) return false;
+            ComPtr<ID2D1DeviceContext5> svgContext;
+            ComPtr<IStream> stream;
+            if (FAILED(cache.context.As(&svgContext)) ||
+                FAILED(CreateStreamOnHGlobal(nullptr, TRUE, stream.GetAddressOf()))) return false;
+            const auto length = static_cast<ULONG>(std::strlen(svg));
+            ULONG written = 0;
+            if (FAILED(stream->Write(svg, length, &written)) || written != length ||
+                FAILED(stream->Seek({}, STREAM_SEEK_SET, nullptr))) return false;
+            ComPtr<ID2D1SvgDocument> document;
+            if (FAILED(svgContext->CreateSvgDocument(stream.Get(), D2D1::SizeF(size, size),
+                document.GetAddressOf()))) return false;
+            ComPtr<ID2D1SvgElement> root;
+            ComPtr<ID2D1SvgPaint> fill;
+            document->GetRoot(root.GetAddressOf());
+            const auto ink = D2D1::ColorF(color.r, color.g, color.b, color.a);
+            if (!root || FAILED(document->CreatePaint(D2D1_SVG_PAINT_TYPE_COLOR, &ink, nullptr,
+                fill.GetAddressOf())) || FAILED(root->SetAttributeValue(L"fill", fill.Get()))) return false;
+            ComPtr<ID2D1Bitmap1> bitmap;
+            const UINT pixels = static_cast<UINT>(std::ceil(size * scale)) + 5;
+            if (FAILED(cache.context->CreateBitmap(D2D1::SizeU(pixels, pixels), nullptr, 0,
+                D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET,
+                    D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96),
+                bitmap.GetAddressOf()))) return false;
+            cache.context->SetTarget(bitmap.Get());
+            cache.context->SetDpi(96, 96);
+            cache.context->SetUnitMode(D2D1_UNIT_MODE_DIPS);
+            cache.context->SetTransform(D2D1::Matrix3x2F::Scale(scale, scale) *
+                D2D1::Matrix3x2F::Translation(padding + phaseX / 256.f, padding + phaseY / 256.f));
+            cache.context->BeginDraw();
+            cache.context->Clear(D2D1::ColorF(0, 0.f));
+            svgContext->DrawSvgDocument(document.Get());
+            const auto result = cache.context->EndDraw();
+            cache.context->SetTarget(nullptr);
+            if (FAILED(result)) return false;
+            entry = {key, bitmap};
+        }
+        const auto pixels = entry.second->GetPixelSize();
+        const float drawX = static_cast<float>(std::floor(x)) + transform.dx - padding;
+        const float drawY = static_cast<float>(std::floor(y)) + transform.dy - padding;
+        context->SetTransform(D2D1::Matrix3x2F::Identity());
+        context->DrawBitmap(entry.second.Get(), D2D1::RectF(drawX, drawY, drawX + pixels.width, drawY + pixels.height),
+            1, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+        context->SetTransform(transform);
+        return true;
+    }
+
+    void DrawPeripheralIcon(ID2D1DeviceContext* context, const std::wstring& kind,
+        Color color, float left, float top, float size)
+    {
+        if (!context) return;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brush;
+        if (FAILED(context->CreateSolidColorBrush(D2D1::ColorF(color.r, color.g, color.b, color.a), &brush))) return;
+        D2D1_MATRIX_3X2_F original{}; context->GetTransform(&original);
+        context->SetTransform(D2D1::Matrix3x2F::Scale(size / 24, size / 24) *
+            D2D1::Matrix3x2F::Translation(left, top) * original);
+        const auto line = [&](float x, float y, float x2, float y2)
+        { context->DrawLine({x, y}, {x2, y2}, brush.Get(), 1.6f); };
+        const auto box = [&](float x, float y, float x2, float y2, float radius)
+        { context->DrawRoundedRectangle(D2D1::RoundedRect({x, y, x2, y2}, radius, radius), brush.Get(), 1.6f); };
+        if (kind == L"mouse")
+        {
+            box(5, 2, 19, 22, 7); line(12, 2, 12, 10); line(5, 10, 19, 10);
+        }
+        else if (kind == L"keyboard")
+        {
+            box(1, 5, 23, 20, 2);
+            for (float y : {9.f, 13.f}) for (float x : {5.f, 9.f, 13.f, 17.f}) line(x, y, x + 1, y);
+            line(7, 17, 17, 17);
+        }
+        else if (kind == L"headset")
+        {
+            // Open headband: a closed rounded rectangle incorrectly joins the
+            // earcups under the listener's chin. Use the same 1.6-DIP stroke.
+            ComPtr<ID2D1PathGeometry> headband;
+            ComPtr<ID2D1GeometrySink> sink;
+            const auto factory = IconFactory(context);
+            if (factory && SUCCEEDED(factory->CreatePathGeometry(headband.GetAddressOf())) &&
+                SUCCEEDED(headband->Open(sink.GetAddressOf())))
+            {
+                sink->BeginFigure({3, 15}, D2D1_FIGURE_BEGIN_HOLLOW);
+                sink->AddLine({3, 11});
+                sink->AddBezier(D2D1::BezierSegment({3, 6.03f}, {7.03f, 2}, {12, 2}));
+                sink->AddBezier(D2D1::BezierSegment({16.97f, 2}, {21, 6.03f}, {21, 11}));
+                sink->AddLine({21, 15});
+                sink->EndFigure(D2D1_FIGURE_END_OPEN);
+                if (SUCCEEDED(sink->Close())) context->DrawGeometry(headband.Get(), brush.Get(), 1.6f);
+            }
+            box(2, 11, 6, 21, 2); box(18, 11, 22, 21, 2);
+        }
+        else if (kind == L"earbuds")
+        {
+            box(3, 3, 10, 11, 3); box(14, 3, 21, 11, 3);
+            line(8, 10, 8, 21); line(16, 10, 16, 21);
+        }
+        else if (kind == L"gamepad")
+        {
+            box(1, 6, 23, 20, 5); line(7, 10, 7, 16); line(4, 13, 10, 13);
+            line(16, 11, 17, 11); line(19, 14, 20, 14);
+        }
+        else if (kind == L"pen")
+        {
+            line(4, 20, 7, 13); line(7, 13, 18, 2); line(18, 2, 22, 6);
+            line(22, 6, 11, 17); line(11, 17, 4, 20); line(7, 13, 11, 17);
+        }
+        else { box(3, 6, 21, 20, 2); line(9, 3, 15, 3); line(8, 11, 16, 11); line(12, 8, 12, 15); }
+        context->SetTransform(original);
     }
 }

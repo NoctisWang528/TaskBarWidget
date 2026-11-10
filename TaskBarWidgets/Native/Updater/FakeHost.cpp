@@ -91,7 +91,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     RegisterClassW(&cls);
     auto window = CreateWindowW(cls.lpszClassName, L"Updater isolated fixture", 0, 0, 0, 0, 0, nullptr, nullptr,
                                 instance, nullptr);
-    SetTimer(window, 1, 4000, nullptr);
+    SetTimer(window, 1, 10000, nullptr);
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0)
     {

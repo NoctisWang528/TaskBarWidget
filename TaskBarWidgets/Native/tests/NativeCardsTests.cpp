@@ -318,12 +318,161 @@ struct Services : Cards::CardHostServices
 };
 
 void WriteTrafficPreviews(Cards::Graphics& graphics, const wchar_t* directory);
+void WritePeripheralPreviews(Cards::Graphics& graphics, const wchar_t* directory);
 void TestCardRenderingStability(Cards::Graphics& graphics);
 void TestMediaRedraw(Cards::CardEnvironment environment);
 void MeasureCardPerformance(const wchar_t* outputPath);
 void TestCardSurfaceIsolation(Cards::Graphics& graphics,
     winrt::Windows::UI::Composition::Compositor const& compositor,
     winrt::Windows::UI::Composition::CompositionGraphicsDevice const& device);
+
+static void CheckPeripheralBattery(Cards::CardEnvironment environment)
+{
+    using namespace Cards;
+    static_assert(static_cast<int>(Kind::Update) == 4);
+    Kind parsed{};
+    Require(KindFromId(L"peripheralBattery", parsed) && parsed == Kind::PeripheralBattery &&
+        !KindFromId(L"update", parsed), "new ordinary card preserves update identity");
+    Snapshot snapshot;
+    Protocol::Changes changes;
+    Require(Protocol::ApplySnapshot(snapshot, LR"({"peripheralBattery":{"version":1,"revision":10,"mode":"compact","devices":[
+        {"id":"mouse","name":"Synthetic mouse","kind":"mouse","state":"online","canRead":true,"showInCard":true,"batteries":[{"role":"main","percentage":0,"charging":false}]},
+        {"id":"keyboard","name":"Synthetic keyboard","kind":"keyboard","state":"sleeping","canRead":true,"showInCard":true,"batteries":[{"percentage":null,"levelText":"Low","estimated":true,"charging":null}]},
+        {"id":"earbuds","name":"Synthetic earbuds","kind":"earbuds","state":"online","canRead":true,"showInCard":true,"batteries":[{"role":"left","percentage":15},{"role":"right","percentage":80,"charging":true},{"role":"case","percentage":45}]},
+        {"id":"pen","name":"Synthetic pen","kind":"pen","state":"disconnected","canRead":true,"showInCard":true,"stale":true},
+        {"id":"hidden","canRead":true,"showInCard":false},
+        {"id":"unsupported","state":"unsupported","showInCard":true,"canRead":true},
+        {"id":"identity","compatibility":"identityOnly","showInCard":true,"canRead":true},
+        {"id":"mouse","name":"duplicate","canRead":true,"showInCard":true}
+    ]}})", changes) && changes.peripheralBattery, "parse peripheral state independently");
+    auto& state = snapshot.peripheralBattery;
+    Require(state.devices.size() == 7 && state.Selected().size() == 4 && state.Visible(),
+        "stable identity, selected eligibility and deduplication");
+    Require(state.devices[0].batteries[0].percentage == 0 && state.devices[0].batteries[0].charging == false &&
+        !state.devices[1].batteries[0].percentage && !state.devices[1].batteries[0].charging.has_value() &&
+        state.devices[1].batteries[0].levelText == L"Low" && state.devices[1].batteries[0].estimated &&
+        !state.devices[2].batteries[0].charging.has_value(), "missing/null readings differ from zero and false");
+    Require(state.PageSize() == 3 && state.PageCount() == 2 && state.ClampPage(99) == 1 && state.ClampPage(-1) == 0,
+        "compact three per page with bounded local page");
+    auto filtered = state; filtered.hideDisconnected = true;
+    Require(filtered.Selected().size() == 3 && filtered.PageCount() == 1, "hide disconnected filters only eligible selection");
+    filtered.devices.clear();
+    Require(!filtered.Visible() && filtered.PageCount() == 1, "empty selection creates no card");
+    Protocol::Changes repeated;
+    Require(Protocol::ApplySnapshot(snapshot, LR"({"peripheralBattery":{"version":1,"revision":10,"devices":[]}})", repeated) &&
+        !repeated.peripheralBattery && state.devices.size() == 7, "duplicate peripheral revision cannot repaint or clear readings");
+    Require(!Protocol::ApplyPeripheralBatteryReply(state, LR"({"version":1,"revision":9,"devices":[]})") &&
+        !Protocol::ApplyPeripheralBatteryReply(state, LR"({"version":2,"revision":11,"devices":[]})") &&
+        !Protocol::ApplyPeripheralBatteryReply(state, LR"({"version":1,"devices":[]})"), "reject stale, unsupported and missing revisions");
+    auto invalid = state;
+    Require(Protocol::ApplyPeripheralBatteryReply(invalid, LR"({"version":1,"revision":11,"devices":[{"id":"invalid","canRead":true,"showInCard":true,"batteries":[{"percentage":101},{"percentage":-1},{"percentage":1.5},{"percentage":"0"},{}]}]})"),
+        "parse invalid numeric reading fixture");
+    for (const auto& battery : invalid.devices.front().batteries)
+        Require(!battery.percentage, "invalid percentages remain unknown");
+    auto reset = snapshot; Protocol::ResetRevisions(reset);
+    Require(Protocol::ApplyPeripheralBatteryReply(reset.peripheralBattery, LR"({"version":1,"revision":0,"devices":[]})"),
+        "connection reset accepts restarted revision counter");
+    Require(Layout::WidthDip(Kind::PeripheralBattery) == 384 &&
+        Paint::MeasureHeight(Kind::PeripheralBattery, snapshot, environment, 384) == 184, "compact native shape");
+
+    Services services;
+    CardWindow card(Kind::PeripheralBattery, services);
+    Require(card.Create(environment, GetModuleHandleW(nullptr)), "create isolated peripheral fixture");
+    card.SetSnapshot(snapshot);
+    const LONG x = GetSystemMetrics(SM_XVIRTUALSCREEN) - 1000, y = GetSystemMetrics(SM_YVIRTUALSCREEN) - 1000;
+    card.Place({x, y, x + 384, y + 184}, 1);
+    card.Show(false);
+    Require(card.Regions().Find(612) && !card.Regions().Find(613) && card.Regions().Find(603)->enabled &&
+        !card.Regions().Find(602)->enabled, "compact renders exactly three devices and page actions");
+    Require(card.Regions().Find(610)->bounds.top == card.Regions().Find(611)->bounds.top &&
+        card.Regions().Find(611)->bounds.top == card.Regions().Find(612)->bounds.top &&
+        card.Regions().Find(610)->bounds.right < card.Regions().Find(611)->bounds.left &&
+        card.Regions().Find(611)->bounds.right < card.Regions().Find(612)->bounds.left,
+        "compact uses three horizontal icon-ring tiles");
+    Require(card.Regions().Find(610)->name.find(L"0%") != std::wstring::npos &&
+        card.Regions().Find(611)->name.find(L"≈Low") != std::wstring::npos &&
+        card.Regions().Find(612)->name.find(L"充电状态未知") != std::wstring::npos,
+        "accessible readings preserve percentage, level, estimate and unknown charging");
+    auto paints = card.ContentPaintCount();
+    auto next = snapshot; next.audio.revision = 100; next.media.position = 20;
+    card.SetSnapshot(next);
+    Require(card.ContentPaintCount() == paints, "global snapshot does not repaint peripheral card");
+    ++next.peripheralBattery.revision;
+    card.SetSnapshot(next);
+    Require(card.ContentPaintCount() == paints, "revision alone does not repaint peripheral card");
+    ++next.peripheralBattery.revision;
+    next.peripheralBattery.devices[0].updatedAt = L"2026-11-10T14:20:00+00:00";
+    card.SetSnapshot(next);
+    Require(card.ContentPaintCount() > paints, "successful-read timestamp refreshes its visible label");
+    paints = card.ContentPaintCount();
+    auto old = snapshot.peripheralBattery;
+    Require(!Protocol::ApplyPeripheralBatteryReply(old, LR"({"version":1,"revision":9,"devices":[]})"),
+        "older reply cannot replace a newer reading before delivery to the window");
+    ++next.peripheralBattery.revision; next.peripheralBattery.devices[3].stale = false;
+    card.SetSnapshot(next);
+    Require(card.ContentPaintCount() == paints, "off-page state changes do not repaint the current page");
+    const auto click = [&](int id)
+    {
+        const auto r = card.Regions().Find(id)->bounds;
+        const POINT point{x + (r.left + r.right) / 2, y + (r.top + r.bottom) / 2};
+        card.OnPointer(WM_LBUTTONDOWN, point, true); card.OnPointer(WM_LBUTTONUP, point, false);
+    };
+    click(610);
+    Require(services.action.empty(), "clicking a battery reading never dispatches an unsupported card action");
+    click(603);
+    Require(card.PeripheralPage() == 1 && !card.Regions().Find(611) && !card.Regions().Find(603)->enabled && services.action.empty(),
+        "page action is local and final partial page is bounded");
+    card.SetPeripheralPage(999); Require(card.PeripheralPage() == 1, "page bounds remain fixed");
+    click(601); Require(services.action == L"refreshPeripheralBatteries", "refresh uses existing command path");
+    click(600); Require(services.action == L"peripheralMode:detailed", "mode requests persisted backend readback");
+    ++next.peripheralBattery.revision; next.peripheralBattery.mode = L"detailed";
+    card.SetSnapshot(next);
+    const RECT expanded{x, y, x + 384, y + 288};
+    card.PrepareGroupReflow(expanded, 1);
+    const auto preparedPaints = card.ContentPaintCount();
+    for (LONG height : { 208L, 240L, 272L, 288L })
+    {
+        const RECT frame{x, y, x + 384, y + height};
+        SetWindowPos(card.Handle(), nullptr, x, y, 384, height, SWP_NOZORDER | SWP_NOACTIVATE);
+        card.CommitGroupBounds(frame);
+        card.Paint();
+        Require(card.ContentPaintCount() == preparedPaints && card.MeasuredHeightDip() == 288,
+            "resize frames reveal the prepared content without stretching or repainting it");
+    }
+    card.Place({x, y, x + 384, y + 288}, 1);
+    Require(card.ContentPaintCount() == preparedPaints, "settled reflow reuses its prepared content");
+    Require(card.PeripheralPage() == 0 && card.Regions().Find(613) && !card.Regions().Find(603)->enabled &&
+        Paint::MeasureHeight(Kind::PeripheralBattery, next, environment, 384) == 288, "detailed four per page resets local page");
+    for (int i = 0; i < 4; ++i)
+    {
+        const auto r = card.Regions().Find(610 + i)->bounds;
+        Require(r.left == 16 && r.right == 368 && r.top == 48 + i * 50 && r.bottom == r.top + 48,
+            "detailed uses four full-width icon/name/state/bar/percentage rows");
+    }
+    for (const auto& region : card.Regions().All())
+        Require(region.bounds.left >= 0 && region.bounds.top >= 0 && region.bounds.right <= 384 && region.bounds.bottom <= 288,
+            "all controls and readings remain within fixed shape");
+    card.Hide(false);
+    const auto hiddenPaints = card.ContentPaintCount();
+    ++next.peripheralBattery.revision; next.peripheralBattery.devices[0].batteries[0].percentage = 12;
+    card.SetSnapshot(next);
+    Require(!card.Tick() && card.ContentPaintCount() == hiddenPaints, "hidden reading changes never animate or paint");
+    card.Show(false);
+    Require(card.ContentPaintCount() > hiddenPaints && !card.Tick(), "reopen paints latest reading without continuous work");
+    environment.reducedMotion = false;
+    card.ApplyEnvironment(environment);
+    ++next.peripheralBattery.revision; next.peripheralBattery.devices[0].batteries[0].percentage = 13;
+    card.SetSnapshot(next);
+    const auto changedPaints = card.ContentPaintCount();
+    Require(PumpFor(240, card.Handle()) == 0 && card.ContentPaintCount() == changedPaints,
+        "changed battery uses finite Composition feedback without frame timers or repeated paints");
+    environment.highContrast = true;
+    card.ApplyEnvironment(environment);
+    ++next.peripheralBattery.revision; next.peripheralBattery.devices[0].batteries[0].percentage = 9;
+    card.SetSnapshot(next);
+    Require(!card.Tick(), "high contrast cancels battery motion");
+    card.Hide(false);
+}
 
 static void CheckCardMotion(Cards::CardEnvironment environment, const Cards::Snapshot& snapshot)
 {
@@ -465,15 +614,16 @@ int wmain(int argc, wchar_t** argv)
     try
     {
         winrt::init_apartment(winrt::apartment_type::single_threaded);
-        if (argc == 3 && wcscmp(argv[1], L"--traffic-preview") == 0)
+        if (argc == 3 && (wcscmp(argv[1], L"--traffic-preview") == 0 || wcscmp(argv[1], L"--peripheral-preview") == 0))
         {
             {
                 Cards::Graphics graphics;
                 Require(graphics.Initialize(), "preview graphics initialization");
-                WriteTrafficPreviews(graphics, argv[2]);
+                if (wcscmp(argv[1], L"--peripheral-preview") == 0) WritePeripheralPreviews(graphics, argv[2]);
+                else WriteTrafficPreviews(graphics, argv[2]);
             }
             winrt::uninit_apartment();
-            std::cout << "Traffic previews exported using the product painter.\n";
+            std::cout << "Static card previews exported using the product painter.\n";
             return 0;
         }
         // Match the native root: retain preflight across all card STA lifetimes.
@@ -605,6 +755,7 @@ int wmain(int argc, wchar_t** argv)
             Cards::CardEnvironment environment;
             environment.graphics = &graphics; environment.compositor = compositor; environment.device = device;
             environment.reducedMotion = true;
+            CheckPeripheralBattery(environment);
             CheckCardMotion(environment, snapshot);
             TestMediaRedraw(environment);
             TestCardRenderingStability(graphics);

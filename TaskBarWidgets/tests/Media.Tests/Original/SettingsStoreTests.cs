@@ -54,7 +54,7 @@ public sealed class SettingsStoreTests
             var loaded = store.Load();
             Assert.Equal(expectedSpeedPercent, loaded.QuickCardAnimationSpeedPercent);
             Assert.Equal(expectedFps, loaded.QuickCardAnimationFps);
-            Assert.Equal(["media", "traffic", "weather", "device"], loaded.QuickCardOrder);
+            Assert.Equal(["media", "traffic", "weather", "device", "peripheralBattery"], loaded.QuickCardOrder);
             Assert.False(loaded.QuickCardEnabled["media"]);
             Assert.True(loaded.QuickCardEnabled["weather"]);
             Assert.True(loaded.QuickCardEnabled["traffic"]);
@@ -410,7 +410,7 @@ public sealed class SettingsStoreTests
             Assert.True(loaded.QuickCardEnabled["traffic"]);
             Assert.True(loaded.QuickCardEnabled["device"]);
             Assert.True(loaded.QuickCardEnabled["media"]);
-            Assert.Equal(["weather", "device", "traffic", "media"], loaded.QuickCardOrder);
+            Assert.Equal(["weather", "device", "traffic", "media", "peripheralBattery"], loaded.QuickCardOrder);
             Assert.Equal(150, loaded.QuickCardAnimationSpeedPercent);
             Assert.Equal(0, loaded.QuickCardAnimationFps);
         }

@@ -80,6 +80,7 @@ namespace Cards
 
     void Graphics::Release()
     {
+        ClearPeripheralBrandCache();
         ReleaseMask();
         bitmaps.clear();
         formats.clear();

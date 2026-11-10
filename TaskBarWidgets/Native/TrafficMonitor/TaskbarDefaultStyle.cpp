@@ -3,6 +3,7 @@
 #include "SettingsHelper.h"
 #include "TrafficMonitor.h"
 #include "WindowsSettingHelper.h"
+#include "../Builtins/Peripherals/PeripheralTaskbar.h"
 
 CTaskbarDefaultStyle::CTaskbarDefaultStyle()
 {
@@ -80,6 +81,24 @@ void CTaskbarDefaultStyle::SaveConfig() const
         }
 	}
 	ini.Save();
+}
+
+void CTaskbarDefaultStyle::RegisterPeripheralItems()
+{
+    CSettingsHelper ini;
+    for (int i = 0; i < TASKBAR_DEFAULT_STYLE_NUM; ++i)
+    {
+        auto& preset = m_default_style[i];
+        const COLORREF fallback = preset.text_colors.empty()
+            ? (TASKBAR_DEFAULT_LIGHT_STYLE(i) ? RGB(0, 0, 0) : RGB(255, 255, 255))
+            : preset.text_colors.begin()->second.label;
+        std::map<CommonDisplayItem, TaskbarItemColor> colors;
+        const auto key = L"default" + std::to_wstring(i + 1) + L"_text_color";
+        ini.LoadTaskbarWndColors(L"taskbar_default_style", key.c_str(), colors, fallback);
+        for (const auto& [item, color] : colors)
+            if (item.IsPlugin() && !PeripheralTaskbar::DeviceId(item.PluginItem()->GetItemId()).empty())
+                preset.text_colors.try_emplace(item, color);
+    }
 }
 
 void CTaskbarDefaultStyle::ApplyDefaultStyle(int index, TaskBarSettingData & data) const

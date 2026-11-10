@@ -112,7 +112,7 @@ public sealed partial class SettingsWindow : Window
             if (page.Id == "quickCards")
             {
                 item.SelectsOnInvoked = false;
-                foreach (var child in new[] { ("quickCards", "卡片与顺序"), ("quickCardsWeather", "天气") })
+                foreach (var child in new[] { ("quickCards", "卡片与顺序"), ("quickCardsWeather", "天气"), ("peripheralBattery", "外设电量") })
                     item.MenuItems.Add(new NavigationViewItem { Content = child.Item2, Tag = child.Item1 });
             }
             _navigation.MenuItems.Add(item);
@@ -196,6 +196,7 @@ public sealed partial class SettingsWindow : Window
         Closed += (_, _) => {
             DeactivateCardMicaPreview();
             _closed = true;
+            LeavePeripheralBatteryPage();
             _cardMicaPreviewBackdrop.StatusChanged -= OnMicaStatusChanged;
             CancelWeatherPage();
             _lifetime.Cancel();
@@ -269,6 +270,7 @@ public sealed partial class SettingsWindow : Window
             LeaveOffsetsPage();
         if (page != "trackOffsets")
             CancelPendingOffsetEntry();
+        if (_currentPage != page) _peripheralPage = null;
         _currentPage = page;
         _pageGeneration++;
         RenderPage();
@@ -361,11 +363,16 @@ public sealed partial class SettingsWindow : Window
         _notice.IsOpen = false; ApplyTheme(); RenderPage(); CompletePendingOffsetsEntry(); UpdateSaveStatus();
     }
     internal void OpenModuleProperties(string id) => OpenModule(id);
-    private void OnConnectionChanged(bool connected) => DispatcherQueue.TryEnqueue(async () => {
-        if (_closed) return;
-        if (!connected) ShowError("主程序连接已断开；草稿仍保留，请恢复连接后应用。");
-        else if (!_loaded) await GuardAsync(() => ReloadAsync());
-    });
+    private void OnConnectionChanged(bool connected)
+    {
+        var version = Interlocked.Increment(ref _peripheralConnectionVersion);
+        DispatcherQueue.TryEnqueue(async () => {
+            if (_closed || version != _peripheralConnectionVersion) return;
+            PeripheralConnectionChanged(connected);
+            if (!connected) ShowError("主程序连接已断开；草稿仍保留，请恢复连接后应用。");
+            else if (!_loaded) await GuardAsync(() => ReloadAsync());
+        });
+    }
     private async Task GuardAsync(Func<Task> action)
     {
         try { await action(); }
@@ -409,17 +416,19 @@ public sealed partial class SettingsWindow : Window
             var media = await RequestAsync("getMediaSettings");
             await LoadFontsAsync();
             SetNativeReadback(native, nativeRevision); _media.Readback(MediaValues(media), mediaRevision);
+            LeavePeripheralBatteryPage();
             _loaded = true; ApplyTheme(); RefreshCardMicaAfterReadback(); RenderPage();
             CompletePendingOffsetsEntry();
             _notice.IsOpen = false;
         }
         finally { _busy = false; UpdateSaveStatus(); }
     }
-    private void SetNativeReadback(JsonObject schema, SettingsDraft.SaveSnapshot? saved = null)
+    private void SetNativeReadback(JsonObject schema, SettingsDraft.SaveSnapshot? saved = null, bool preservePending = false)
     {
         if (schema["fields"] is not JsonArray fields || schema["groups"] is not JsonArray) throw new InvalidDataException("主程序没有返回完整的监测设置。");
         _schema = schema;
-        _native.Readback(fields.OfType<JsonObject>().Select(field => new KeyValuePair<string, JsonNode?>(Text(field["key"]), field["value"])), saved);
+        _nativeSchemaVersion++;
+        _native.Readback(fields.OfType<JsonObject>().Select(field => new KeyValuePair<string, JsonNode?>(Text(field["key"]), field["value"])), saved, preservePending);
         var modules = fields.OfType<JsonObject>().Where(field => Text(field["key"]).StartsWith("items.") && Text(field["key"]).EndsWith(".label"))
             .Select(field => new DisplayModule(Text(field["itemId"], Text(field["key"]).Split('.')[1]), Text(field["itemName"], Text(field["label"])), Text(field["sampleValue"], "42"), field["doubleLineExclusive"]?.ToString() == "true")).ToList();
         _layout = new ModuleLayout(_native, modules);
@@ -632,15 +641,24 @@ public sealed partial class SettingsWindow : Window
     private void Changed() { if (_notice.Severity == InfoBarSeverity.Success) _notice.IsOpen = false; UpdateSaveStatus(); RenderPreview(); }
     private void RenderPage()
     {
+        UpdatePeripheralSampling();
+        if (_loaded && _currentPage == "peripheralBattery" && _peripheralPage is { } peripheral)
+        {
+            UpdatePeripheralControls(peripheral);
+            UpdatePeripheralRows(peripheral);
+            return;
+        }
         PageRenderCount++;
         CancelModulePointerDrag();
         if (_currentPage != "quickCardsWeather") CancelWeatherPage();
+        if (_currentPage != "peripheralBattery") _peripheralPage = null;
         _page.Children.Clear(); _preview = null; _split.IsPaneOpen = false;
         _heading.Text = NavigationPages().FirstOrDefault(item => (string)item.Tag == _currentPage)?.Content?.ToString() ?? "设置";
         UpdateCardMicaPreviewSurface();
         if (!_loaded) { _page.Children.Add(Copy("连接主程序后即可读取设置。")); return; }
         if (_currentPage == "taskbar") RenderTaskbar();
         else if (_currentPage is "quickCards" or "quickCardsWeather") RenderQuickCards();
+        else if (_currentPage == "peripheralBattery") RenderPeripheralBattery();
         else if (_currentPage is "hardware" or "general") { RenderNativeGroups(_currentPage); if (_currentPage == "general") RenderGeneral(); }
         else RenderMediaPage(_currentPage);
     }

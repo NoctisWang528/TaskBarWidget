@@ -174,16 +174,19 @@ void TestCardSurfaceIsolation(Cards::Graphics& graphics,
     environment.reducedMotion = true; // Immediate hover, while keeping the normal-color glow path.
     environment.mica.tint = environment.mica.darkTint = 1;
     environment.mica.luminosity = environment.mica.darkLuminosity = 0;
-    Cards::CardWindow traffic(Cards::Kind::Traffic, services), media(Cards::Kind::Media, services);
+    Cards::CardWindow traffic(Cards::Kind::Traffic, services), media(Cards::Kind::Media, services),
+        peripheral(Cards::Kind::PeripheralBattery, services);
     RequireIsolation(traffic.Create(environment, GetModuleHandleW(nullptr)) &&
-        media.Create(environment, GetModuleHandleW(nullptr)), "create isolation diagnostic cards");
+        media.Create(environment, GetModuleHandleW(nullptr)) && peripheral.Create(environment, GetModuleHandleW(nullptr)), "create isolation diagnostic cards");
     const LONG x = GetSystemMetrics(SM_XVIRTUALSCREEN) - 1000;
     const LONG y = GetSystemMetrics(SM_YVIRTUALSCREEN) - 1000;
     traffic.Place({x, y, x + 384, y + 284}, 1);
     media.Place({x + 400, y, x + 784, y + 248}, 1);
-    traffic.Show(false); media.Show(false); // SW_SHOWNOACTIVATE; no host, hooks, picker or user HWND.
+    peripheral.Place({x, y - 320, x + 384, y - 136}, 1);
+    traffic.Show(false); media.Show(false); peripheral.Show(false); // SW_SHOWNOACTIVATE; no host, hooks, picker or user HWND.
     const auto emptyTraffic = capture.Pixels(traffic, compositor);
     const auto emptyMedia = capture.Pixels(media, compositor);
+    const auto emptyPeripheral = capture.Pixels(peripheral, compositor);
     Cards::Snapshot snapshot;
     snapshot.media.title = L"SURFACE ISOLATION MEDIA";
     snapshot.media.artist = L"Synthetic artist";
@@ -203,10 +206,21 @@ void TestCardSurfaceIsolation(Cards::Graphics& graphics,
         snapshot.traffic.days.push_back(day);
     }
     snapshot.traffic.today = snapshot.traffic.selectedDate = snapshot.traffic.days.back().date;
-    traffic.SetSnapshot(snapshot); media.SetSnapshot(snapshot);
+    snapshot.peripheralBattery.revision = 1;
+    for (int i = 0; i < 5; ++i)
+    {
+        Cards::PeripheralDevice device;
+        device.id = L"isolated-" + std::to_wstring(i); device.name = L"Synthetic peripheral " + std::to_wstring(i);
+        device.kind = L"mouse"; device.state = L"online"; device.canRead = device.showInCard = true;
+        device.batteries.push_back({L"main", 70, L"", false, false});
+        snapshot.peripheralBattery.devices.push_back(std::move(device));
+    }
+    traffic.SetSnapshot(snapshot); media.SetSnapshot(snapshot); peripheral.SetSnapshot(snapshot);
     auto trafficPixels = capture.Pixels(traffic, compositor);
     auto mediaPixels = capture.Pixels(media, compositor);
-    RequireIsolation(ChangedPixels(emptyTraffic, trafficPixels) > 128 && ChangedPixels(emptyMedia, mediaPixels) > 128,
+    auto peripheralPixels = capture.Pixels(peripheral, compositor);
+    RequireIsolation(ChangedPixels(emptyTraffic, trafficPixels) > 128 && ChangedPixels(emptyMedia, mediaPixels) > 128 &&
+        ChangedPixels(emptyPeripheral, peripheralPixels) > 128,
         "UNSUPPORTED surface isolation: capture did not observe synthetic card content");
     RequireIsolation(ChangedPixels(trafficPixels, capture.Pixels(traffic, compositor)) == 0 &&
         ChangedPixels(mediaPixels, capture.Pixels(media, compositor)) == 0, "isolation baseline is not stable");
@@ -234,6 +248,8 @@ void TestCardSurfaceIsolation(Cards::Graphics& graphics,
         const auto updatedMedia = capture.Pixels(media, compositor);
         RequireIsolation(ChangedPixels(mediaPixels, updatedMedia) > 4, "capture missed explicit media mutation");
         mediaPixels = updatedMedia;
+        RequireIsolation(ChangedPixels(peripheralPixels, capture.Pixels(peripheral, compositor)) == 0,
+            "ISOLATION FAILURE: media mutation changed committed peripheral pixels");
         const auto* cell = traffic.Regions().Find(300 + round);
         RequireIsolation(cell && cell->enabled, "synthetic heatmap cell missing");
         const auto bounds = cell->bounds;
@@ -249,6 +265,19 @@ void TestCardSurfaceIsolation(Cards::Graphics& graphics,
         const auto updatedTraffic = capture.Pixels(traffic, compositor);
         RequireIsolation(ChangedPixels(trafficPixels, updatedTraffic) > 4, "capture missed traffic interaction");
         trafficPixels = updatedTraffic;
+        RequireIsolation(ChangedPixels(peripheralPixels, capture.Pixels(peripheral, compositor)) == 0,
+            "ISOLATION FAILURE: traffic interaction changed committed peripheral pixels");
+        ++snapshot.peripheralBattery.revision;
+        for (auto& peripheralDevice : snapshot.peripheralBattery.devices)
+            peripheralDevice.batteries.front().percentage = round % 2 ? 10 : 80;
+        peripheral.SetSnapshot(snapshot);
+        peripheral.SetPeripheralPage(round % 2);
+        RequireIsolation(ChangedPixels(trafficPixels, capture.Pixels(traffic, compositor)) == 0 &&
+            ChangedPixels(mediaPixels, capture.Pixels(media, compositor)) == 0,
+            "ISOLATION FAILURE: peripheral reading/page changed another committed card");
+        const auto updatedPeripheral = capture.Pixels(peripheral, compositor);
+        RequireIsolation(ChangedPixels(peripheralPixels, updatedPeripheral) > 4, "capture missed peripheral reading/page mutation");
+        peripheralPixels = updatedPeripheral;
         RequireIsolation(SUCCEEDED(services.failure), "diagnostic card reported a graphics failure");
     }
     std::cout << "Committed card pixel isolation passed; allocation-churn nonzero offsets=" << nonzeroOffsets

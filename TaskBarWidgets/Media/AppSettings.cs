@@ -1,4 +1,5 @@
 using TaskbarLyrics.Core.Models;
+using TaskBarWidgets.Media.Peripherals;
 
 namespace TaskbarLyrics.App;
 
@@ -59,7 +60,7 @@ public enum QuickCardResourceMode
 
 public sealed class AppSettings
 {
-    public static readonly string[] QuickCardIds = ["weather", "traffic", "device", "media"];
+    public static readonly string[] QuickCardIds = ["weather", "traffic", "device", "media", "peripheralBattery"];
     public const int MinimumPlayerLyricOffsetMilliseconds = -5000;
     public const int MaximumPlayerLyricOffsetMilliseconds = 5000;
     public const double ExtendedFontSizeMin = 6;
@@ -146,7 +147,8 @@ public sealed class AppSettings
     // Product updater only. The inherited lyrics project's updater stays disabled.
     public bool ProductAutomaticUpdatesEnabled { get; set; } = true;
 
-    public List<string> QuickCardOrder { get; set; } = ["weather", "traffic", "device", "media"];
+    public List<string> QuickCardOrder { get; set; } = ["weather", "traffic", "device", "media", "peripheralBattery"];
+    public PeripheralBatterySettings PeripheralBattery { get; set; } = new();
 
     // Free two-column card layout: 0 = left column, 1 = right column. Cards keep
     // their QuickCardOrder sequence inside the column they are assigned to.
@@ -157,7 +159,8 @@ public sealed class AppSettings
         ["weather"] = false,
         ["traffic"] = true,
         ["device"] = true,
-        ["media"] = true
+        ["media"] = true,
+        ["peripheralBattery"] = true
     };
 
     public QuickCardResourceMode QuickCardResourceMode { get; set; } = QuickCardResourceMode.Resident;
@@ -290,6 +293,7 @@ public sealed class AppSettings
         cloned.QuickCardOrder = (QuickCardOrder ?? []).ToList();
         cloned.QuickCardColumns = new Dictionary<string, int>(QuickCardColumns ?? [], StringComparer.Ordinal);
         cloned.QuickCardEnabled = new Dictionary<string, bool>(QuickCardEnabled ?? [], StringComparer.Ordinal);
+        cloned.PeripheralBattery = (PeripheralBattery ?? new()).Clone();
         return cloned;
     }
 
@@ -350,6 +354,8 @@ public sealed class AppSettings
 
     public void NormalizeQuickCards()
     {
+        PeripheralBattery ??= new();
+        PeripheralBattery.Normalize();
         var order = (QuickCardOrder ?? [])
             .Where(id => QuickCardIds.Contains(id, StringComparer.Ordinal))
             .Distinct(StringComparer.Ordinal)
@@ -360,7 +366,7 @@ public sealed class AppSettings
         QuickCardColumns ??= new Dictionary<string, int>(StringComparer.Ordinal);
         for (var index = 0; index < order.Count; index++)
             if (!QuickCardColumns.TryGetValue(order[index], out var column) || (column != 0 && column != 1))
-                QuickCardColumns[order[index]] = index % 2;
+                QuickCardColumns[order[index]] = order[index] == "peripheralBattery" ? 1 : index % 2;
         foreach (var key in QuickCardColumns.Keys.Where(key => !QuickCardIds.Contains(key, StringComparer.Ordinal)).ToArray())
             QuickCardColumns.Remove(key);
 

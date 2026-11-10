@@ -16,7 +16,7 @@ public sealed partial class SettingsWindow
         var lyricsGroup = top.Single(item => Equals(item.Tag, "lyricsGroup"));
         var quickCards = top.Single(item => Equals(item.Tag, "quickCards"));
         if (top.Length != 7 || top.Any(item => Equals(item.Tag, "audio") || Equals(item.Tag, "shortcuts")) ||
-            lyricsGroup.MenuItems.Count != 5 || quickCards.MenuItems.Count != 2)
+            lyricsGroup.MenuItems.Count != 5 || quickCards.MenuItems.Count != 3)
             throw new InvalidOperationException("Simplified settings navigation did not group lyrics or remove obsolete pages.");
         foreach (var child in lyricsGroup.MenuItems.OfType<NavigationViewItem>())
         {

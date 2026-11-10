@@ -1,5 +1,6 @@
 [CmdletBinding()]
-param([switch]$SkipBuild, [string]$PackageStage, [string]$PreviousInventory)
+param([switch]$SkipBuild, [string]$PackageStage, [string]$PreviousInventory,
+    [switch]$BridgeOnly, [string[]]$LegacyValidatorDirectory)
 $ErrorActionPreference = 'Stop'
 $productRoot = Split-Path -Parent $PSScriptRoot
 $testRoot = Join-Path $productRoot ('artifacts\updater-tests\' + [guid]::NewGuid().ToString('N'))
@@ -20,6 +21,11 @@ foreach ($fixture in @($testUpdater,$fake)) {
 }
 function Write-Json($Path, $Value) { [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 12), [Text.UTF8Encoding]::new($false)) }
 function Check($Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
+function Read-FixtureJson([string]$Path) {
+    $stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+    $reader=[IO.StreamReader]::new($stream)
+    try { return $reader.ReadToEnd()|ConvertFrom-Json } finally { $reader.Dispose() }
+}
 function New-Case([string]$Name) {
     $base = Join-Path $testRoot $Name
     $install = Join-Path $base 'install'; $stage = Join-Path $base 'stage'; $work = Join-Path $base 'jobs\test'; $data = Join-Path $install 'Data'
@@ -48,13 +54,17 @@ function New-Case([string]$Name) {
     Write-Json (Join-Path $work 'shutdown-approved.json') @{nonce=$job.nonce}
     return @{install=$install;stage=$stage;work=$work;data=$data;job=$job;path=$path}
 }
-function Invoke-Case($Case,[switch]$Recover,[scriptblock]$OnReady) {
+function Invoke-Case($Case,[switch]$Recover,[scriptblock]$OnReady,[switch]$BridgeRecovery) {
     $verb=if($Recover){'--recover'}else{'--job'}
-    $process=Start-Process -FilePath (Join-Path $Case.work 'TaskBarWidgets.Updater.exe') -ArgumentList @($verb,('"'+$Case.path+'"')) -WindowStyle Hidden -PassThru
+    $helperName=if($BridgeRecovery){'BridgeRecovery.exe'}else{'TaskBarWidgets.Updater.exe'}
+    $start=[Diagnostics.ProcessStartInfo]::new((Join-Path $Case.work $helperName))
+    $start.UseShellExecute=$false;$start.CreateNoWindow=$true;$start.WorkingDirectory=$Case.work
+    $start.ArgumentList.Add($verb);$start.ArgumentList.Add($Case.path)
+    $process=[Diagnostics.Process]::Start($start)
     if ($OnReady) {
         $deadline=[DateTime]::UtcNow.AddSeconds(10);$ready=$false
         while([DateTime]::UtcNow -lt $deadline -and -not $process.HasExited){
-            try{$snapshot=Get-Content -LiteralPath (Join-Path $Case.work 'status.json') -Raw -ErrorAction Stop|ConvertFrom-Json;if($snapshot.phase -eq 'readyToExit'){$ready=$true;break}}catch{}
+            try{$snapshot=Read-FixtureJson (Join-Path $Case.work 'status.json');if($snapshot.phase -eq 'readyToExit'){$ready=$true;break}}catch{}
             Start-Sleep -Milliseconds 25
         }
         Check $ready 'Updater did not reach isolated pre-exit readiness.'
@@ -63,7 +73,7 @@ function Invoke-Case($Case,[switch]$Recover,[scriptblock]$OnReady) {
     Check ($process.WaitForExit(15000)) 'Isolated updater test timed out.'
     $statusPath=Join-Path $Case.work 'status.json'
     Check (Test-Path -LiteralPath $statusPath) "Missing status for $($Case.work)"
-    return Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
+    return Read-FixtureJson $statusPath
 }
 function Assert-Original($Case) {
     Check (([IO.File]::ReadAllText((Join-Path $Case.install 'OpenHardwareMonitorApi.dll'))) -eq 'old program') 'Original program was not preserved/restored.'
@@ -74,6 +84,7 @@ function Assert-Original($Case) {
     Check (([IO.File]::ReadAllText((Join-Path $Case.install 'UI\my-note.txt'))) -eq 'unknown user note') 'Uninventoried UI file was deleted.'
     Check (([IO.File]::ReadAllText((Join-Path $Case.install 'Media\custom.json'))) -eq 'unknown user file') 'Uninventoried Media file was deleted.'
 }
+if (-not $BridgeOnly) {
 $case=New-Case 'three-live-processes'
 $hosts=@()
 $signal=Join-Path $case.work 'fixture-exit.signal'
@@ -199,8 +210,12 @@ try{
 Assert-Original $case
 Check ((Get-Content (Join-Path $case.work 'journal.json') -Raw|ConvertFrom-Json).phase -eq 'rolledBack') 'Intact abort journal must be terminal before old restart.'
 Write-Host 'PASS post-exit backup failure preserves state and restarts intact old host'
-$case=New-Case 'no-exit';$old=Start-Process -FilePath (Join-Path $case.install 'TaskBarWidgets.exe') -ArgumentList @('--old','2400') -WindowStyle Hidden -PassThru;$case.job.nativePid=$old.Id;Write-Json $case.path $case.job;$status=Invoke-Case $case
-Check ($status.phase -eq 'error' -and -not $old.HasExited) 'Old-process timeout did not leave process running.';Assert-Original $case;$old.WaitForExit()
+$case=New-Case 'no-exit';$signal=Join-Path $case.work 'fixture-exit.signal'
+$old=Start-Process -FilePath (Join-Path $case.install 'TaskBarWidgets.exe') -ArgumentList @('--wait-for-exit',('"'+$signal+'"')) -WindowStyle Hidden -PassThru
+try {
+    $case.job.nativePid=$old.Id;Write-Json $case.path $case.job;$status=Invoke-Case $case
+    Check ($status.phase -eq 'error' -and -not $old.HasExited) 'Old-process timeout did not leave process running.';Assert-Original $case
+} finally { [IO.File]::WriteAllText($signal,'exit');Check ($old.WaitForExit(3000)) 'Fixture failed to exit normally.';$old.Dispose() }
 Write-Host 'PASS old process exit timeout without termination'
 $case=New-Case 'no-approval';Remove-Item -LiteralPath (Join-Path $case.work 'shutdown-approved.json');$status=Invoke-Case $case
 Check ($status.phase -eq 'error') 'Exited processes without authenticated shutdown approval should not install.';Assert-Original $case
@@ -238,5 +253,191 @@ $locked=[IO.File]::Open((Join-Path $case.install 'OpenHardwareMonitorApi.dll'),[
 try{$status=Invoke-Case $case -Recover;Check ($status.phase -eq 'recoveryRequired') 'Locked recovery should retain backup and report recoveryRequired.'}finally{$locked.Dispose()}
 $status=Invoke-Case $case -Recover;Check ($status.phase -eq 'rolledBack') 'Interrupted journal recovery failed.';Assert-Original $case
 Write-Host 'PASS interrupted durable journal recovery'
+}
+
+function Write-Inventory([string]$Directory, [string]$Version) {
+    $files = @(Get-ChildItem -LiteralPath $Directory -Recurse -File | Where-Object { $_.FullName -ne (Join-Path $Directory 'app-files.json') } | Sort-Object FullName | ForEach-Object {
+        @{ path=[IO.Path]::GetRelativePath($Directory,$_.FullName).Replace('\','/'); bytes=$_.Length; sha256=(Get-FileHash -LiteralPath $_.FullName).Hash.ToLowerInvariant() }
+    })
+    Write-Json (Join-Path $Directory 'app-files.json') @{protocolVersion=1;version=$Version;architecture='win-x64';files=$files}
+}
+function New-BridgeCase([string]$Name, [string]$LegacyDirectory, [string]$Problem) {
+    $case=New-Case $Name
+    $final=Join-Path (Split-Path $case.install) 'final'
+    New-Item -ItemType Directory -Path $final -Force | Out-Null
+    foreach($name in @('TaskBarWidgets.exe','OpenHardwareMonitorApi.dll')) { Copy-Item -LiteralPath (Join-Path $case.stage $name) -Destination (Join-Path $final $name) }
+    Copy-Item -LiteralPath $testUpdater -Destination (Join-Path $final 'TaskBarWidgets.Updater.exe')
+    foreach($name in @('TaskBarWidgets.PeripheralProbe.exe','peripheral-compatibility.csv','peripheral-compatibility.json','外设电量.md','Dependencies/HeadsetControl/headsetcontrol.exe')) {
+        $path=Join-Path $final $name;New-Item -ItemType Directory -Path (Split-Path $path) -Force | Out-Null
+        [IO.File]::WriteAllText($path,'isolated fixture payload')
+    }
+    if($LegacyDirectory) {
+        # Only published program inputs, never personal data from the supplied directory.
+        foreach($name in @('Media/TaskBarWidgets.Media.runtimeconfig.json','UI/TaskBarWidgets.UI.runtimeconfig.json','UI/Microsoft.WindowsAppRuntime.Bootstrap.dll')) {
+            $path=Join-Path $final $name;New-Item -ItemType Directory -Path (Split-Path $path) -Force | Out-Null
+            Copy-Item -LiteralPath (Join-Path $LegacyDirectory $name) -Destination $path
+        }
+    }
+    Write-Inventory $final $case.job.version
+    $payload=Join-Path $case.stage 'Media/UpgradePayload'
+    New-Item -ItemType Directory -Path $payload -Force | Out-Null
+    $inner=Get-Content -LiteralPath (Join-Path $final 'app-files.json') -Raw | ConvertFrom-Json
+    foreach($file in $inner.files) {
+        $relative=if($file.path -in @('TaskBarWidgets.exe','TaskBarWidgets.PeripheralProbe.exe','peripheral-compatibility.csv','peripheral-compatibility.json','外设电量.md') -or $file.path.StartsWith('Dependencies/')) { 'Media/UpgradePayload/'+$file.sha256.Substring(0,16)+'.bin' } else { $file.path }
+        $target=Join-Path $case.stage $relative;New-Item -ItemType Directory -Path (Split-Path $target) -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $final $file.path) -Destination $target -Force
+    }
+    Copy-Item -LiteralPath $testUpdater -Destination (Join-Path $case.stage 'TaskBarWidgets.exe') -Force
+    if($Problem -eq 'protected') { $inner.files[0].path='Data/config/private.json' }
+    Write-Json (Join-Path $payload 'manifest.json') $inner
+    $innerHash=(Get-FileHash -LiteralPath (Join-Path $payload 'manifest.json')).Hash.ToLowerInvariant()
+    if($Problem -eq 'inner-hash') { $innerHash='0'*64 }
+    Write-Json (Join-Path $payload 'bridge.json') @{format='TBW_BRIDGE_V1';version=$case.job.version;fileManifestSha256=$innerHash}
+    Write-Json (Join-Path $payload 'resume.json') @{}
+    Write-Inventory $case.stage $case.job.version
+    $case.job.fileManifestSha256=(Get-FileHash -LiteralPath (Join-Path $case.stage 'app-files.json')).Hash.ToLowerInvariant()
+    Write-Json $case.path $case.job
+    $case.final=$final
+    return $case
+}
+function Wait-Bridge($Case, [string]$Expected) {
+    $deadline=[DateTime]::UtcNow.AddSeconds(25)
+    do {
+        try {
+            $status=Read-FixtureJson (Join-Path $Case.work 'status.json')
+            $journal=Read-FixtureJson (Join-Path $Case.work 'journal.json')
+            if($status.phase -eq $Expected -and $journal.phase -eq $Expected -and ($Expected -ne 'complete' -or $journal.bridge)) {
+                # The original helper may already have exited; wait for the NEW
+                # helper so a later recovery test never races its mutex.
+                try { $helper=[Diagnostics.Process]::GetProcessById([int]$status.helperPid);Check ($helper.WaitForExit(5000)) 'Bridge helper did not exit.';$helper.Dispose() } catch [ArgumentException] { }
+                return $status
+            }
+            if($status.phase -in @('rolledBack','recoveryRequired','error') -and $status.phase -ne $Expected) { break }
+        } catch [IO.IOException] { }
+        Start-Sleep -Milliseconds 50
+    } while([DateTime]::UtcNow -lt $deadline)
+    $detail=if(Test-Path -LiteralPath (Join-Path $Case.work 'bridge-error.json')) { Get-Content -LiteralPath (Join-Path $Case.work 'bridge-error.json') -Raw } else { $status|ConvertTo-Json -Compress }
+    throw "Bridge expected $Expected but did not finish: $detail; evidence $($Case.work)"
+}
+function Assert-BridgeSuccess($Case) {
+    Check ((Get-FileHash -LiteralPath (Join-Path $Case.install 'app-files.json')).Hash -eq (Get-FileHash -LiteralPath (Join-Path $Case.final 'app-files.json')).Hash) 'Installed final inventory differs from the real ROOT payload.'
+    Check (Test-Path -LiteralPath (Join-Path $Case.install 'TaskBarWidgets.PeripheralProbe.exe')) 'Peripheral probe is not at installation ROOT.'
+    Check (Test-Path -LiteralPath (Join-Path $Case.install 'Dependencies/HeadsetControl/headsetcontrol.exe')) 'Dependencies ROOT layout was not retained.'
+    Check (-not @(Get-ChildItem -LiteralPath (Join-Path $Case.install 'Media/UpgradePayload') -File).Count) 'Transport payload files survived final installation.'
+    Check (([IO.File]::ReadAllText((Join-Path $Case.work 'backup/program/OpenHardwareMonitorApi.dll'))) -eq 'old program') 'Bridge replaced the ORIGINAL backup with an intermediate version.'
+    Check (([IO.File]::ReadAllText((Join-Path $Case.data 'config/app.ini'))) -eq 'private config') 'Bridge changed personal data.'
+}
+$case=New-BridgeCase 'bridge-success' '' ''
+$null=Invoke-Case $case
+$null=Wait-Bridge $case 'complete'
+Assert-BridgeSuccess $case
+Write-Host 'PASS bridge automatically continues to ROOT layout with one original backup'
+foreach($problem in @('protected','inner-hash')) {
+    $case=New-BridgeCase ('bridge-'+$problem) '' $problem
+    $status=Invoke-Case $case
+    Check ($status.phase -eq 'rolledBack') 'Invalid inner payload must roll back the outer installation.'
+    Assert-Original $case
+    Write-Host "PASS bridge rejects $problem despite valid outer hashes"
+}
+$case=New-BridgeCase 'bridge-final-health-failure' '' ''
+[IO.File]::WriteAllText((Join-Path $case.work 'test-mode.txt'),'fail-data')
+$null=Invoke-Case $case
+$null=Wait-Bridge $case 'rolledBack'
+Assert-Original $case
+Check (-not (Test-Path -LiteralPath (Join-Path $case.install 'TaskBarWidgets.PeripheralProbe.exe'))) 'Final-only root file survived original-version rollback.'
+Write-Host 'PASS final health failure restores PRE-BRIDGE programs and original personal data'
+$case=New-BridgeCase 'bridge-interrupted' '' ''
+[IO.File]::WriteAllText((Join-Path $case.work 'test-bridge-interrupt'),'1')
+$null=Invoke-Case $case
+$null=Wait-Bridge $case 'installing'
+$status=Invoke-Case $case -Recover
+Check ($status.phase -eq 'rolledBack') 'Interrupted bridge did not restore the original transaction.'
+Assert-Original $case
+Write-Host 'PASS interrupted second stage recovers the original backup'
+
+foreach($action in @('resume','recover')) {
+    $case=New-BridgeCase ('bridge-handoff-'+$action) '' ''
+    [IO.File]::WriteAllText((Join-Path $case.work 'test-bridge-handoff-stop'),'1')
+    $null=Invoke-Case $case
+    $journal=Read-FixtureJson (Join-Path $case.work 'journal.json')
+    Check ($journal.phase -eq 'complete' -and -not $journal.bridge) 'Fault injection did not stop at the legacy handoff.'
+    try { $entry=[Diagnostics.Process]::GetProcessById([int]$journal.launchedPid);Check ($entry.WaitForExit(5000)) 'Bridge fixture failed to stop.';$entry.Dispose() } catch [ArgumentException] { }
+    if($action -eq 'resume') {
+        $start=[Diagnostics.ProcessStartInfo]::new((Join-Path $case.install 'TaskBarWidgets.exe'))
+        $start.UseShellExecute=$false;$start.CreateNoWindow=$true
+        $entry=[Diagnostics.Process]::Start($start)
+        Check ($entry.WaitForExit(5000)) 'Confirmed bridge resume did not hand off.';$entry.Dispose()
+        $null=Wait-Bridge $case 'complete'
+        Assert-BridgeSuccess $case
+    } else {
+        $status=Invoke-Case $case -Recover -BridgeRecovery
+        Check ($status.phase -eq 'rolledBack') 'Recovery mistook legacy completion for final product success.'
+        Assert-Original $case
+    }
+    Write-Host "PASS interrupted legacy handoff can $action without losing the original backup"
+}
+function Get-ProgramSections([string]$Path) {
+    $bytes=[IO.File]::ReadAllBytes($Path)
+    $pe=[BitConverter]::ToInt32($bytes,60)
+    $count=[BitConverter]::ToUInt16($bytes,$pe+6)
+    $table=$pe+24+[BitConverter]::ToUInt16($bytes,$pe+20)
+    $hashes=@(for($index=0;$index -lt $count;$index++) {
+        $at=$table+40*$index
+        $name=[Text.Encoding]::ASCII.GetString($bytes,$at,8).TrimEnd([char]0)
+        if($name -eq '.rsrc') { continue }
+        $length=[BitConverter]::ToInt32($bytes,$at+16)
+        $offset=[BitConverter]::ToInt32($bytes,$at+20)
+        $section=[byte[]]::new($length);[Array]::Copy($bytes,$offset,$section,0,$length)
+        $name+':'+[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($section))
+    })
+    return ($hashes -join ';')
+}
+foreach($legacyDirectory in $LegacyValidatorDirectory) {
+    $legacyDirectory=[IO.Path]::GetFullPath($legacyDirectory)
+    $version=(Get-Content -LiteralPath (Join-Path $legacyDirectory 'build-info.json') -Raw|ConvertFrom-Json).version
+    $case=New-BridgeCase ('legacy-'+$version) $legacyDirectory ''
+    # Exercise the legacy installed-inventory allowlist as well as its incoming
+    # envelope policy. Missing program files are intentional in this FakeHost fixture.
+    $previousInventory=Join-Path $legacyDirectory 'app-files.json'
+    Check (Test-Path -LiteralPath $previousInventory -PathType Leaf) 'Legacy program inventory is required for this compatibility fixture.'
+    Copy-Item -LiteralPath $previousInventory -Destination (Join-Path $case.install 'app-files.json')
+    $legacySource=Join-Path $legacyDirectory 'TaskBarWidgets.Updater.exe'
+    $legacyCopy=Join-Path $case.work 'TaskBarWidgets.Updater.exe'
+    Copy-Item -LiteralPath $legacySource -Destination $legacyCopy -Force
+    # Real released code, isolated copy only. Remove the elevation REQUEST from
+    # its manifest so this test never elevates; do not patch executable code.
+    $manifestPath=Join-Path (Split-Path $case.install) 'legacy-asInvoker.manifest'
+    & $manifestTool -nologo "-inputresource:$legacyCopy;#1" "-out:$manifestPath"
+    Check ($LASTEXITCODE -eq 0) 'Cannot inspect legacy helper manifest.'
+    $manifestXml=[xml](Get-Content -LiteralPath $manifestPath -Raw)
+    $manifestXml.SelectSingleNode("//*[local-name()='requestedExecutionLevel']").SetAttribute('level','asInvoker')
+    $manifestXml.Save($manifestPath)
+    & $manifestTool -nologo -manifest $manifestPath "-outputresource:$legacyCopy;#1"
+    Check ($LASTEXITCODE -eq 0) 'Cannot make isolated legacy helper non-elevating.'
+    $programSections=Get-ProgramSections $legacySource
+    Check ($programSections -ceq (Get-ProgramSections $legacyCopy)) 'Manifest patch unexpectedly changed legacy executable code/data sections.'
+    $release=Join-Path (Split-Path $case.install) 'release';New-Item -ItemType Directory -Path $release|Out-Null
+    $assetName="TaskBarWidgets-$($case.job.version)-win-x64.zip"
+    $zip=Join-Path $release $assetName
+    $archive=[IO.Compression.ZipFile]::Open($zip,[IO.Compression.ZipArchiveMode]::Create)
+    try {
+        foreach($file in Get-ChildItem -LiteralPath $case.stage -Recurse -File) {
+            $relative=[IO.Path]::GetRelativePath($case.stage,$file.FullName).Replace('\','/')
+            [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive,$file.FullName,([IO.Path]::GetFileNameWithoutExtension($assetName)+'/'+$relative))|Out-Null
+        }
+    } finally { $archive.Dispose() }
+    $sha=(Get-FileHash -LiteralPath $zip).Hash.ToLowerInvariant()
+    Write-Json (Join-Path $release 'update.json') @{protocolVersion=1;version=$case.job.version;architecture='win-x64';assetName=$assetName;size=(Get-Item -LiteralPath $zip).Length;sha256=$sha;fileManifestSha256=$case.job.fileManifestSha256;requirements=$case.job.requirements}
+    [IO.File]::WriteAllText((Join-Path $release 'SHA256SUMS.txt'),"$sha  $assetName`n")
+    & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'test-release-package.ps1') -ReleaseDirectory $release -ValidatorDirectory $legacyDirectory -LegacyJobFixture (Join-Path $case.work 'job.json')
+    Check ($LASTEXITCODE -eq 0) 'Actual legacy Media rejected the full bridge ZIP.'
+    $originalHash=(Get-FileHash -LiteralPath $legacySource).Hash
+    $fixtureHash=(Get-FileHash -LiteralPath $legacyCopy).Hash
+    $null=Invoke-Case $case
+    $null=Wait-Bridge $case 'complete'
+    Assert-BridgeSuccess $case
+    Write-Json (Join-Path (Split-Path $case.install) 'legacy-evidence.json') @{version=$version;source=$legacySource;sourceSha256=$originalHash;fixtureSha256=$fixtureHash;manifestOnlyChange='requireAdministrator -> asInvoker';nonResourceSections=$programSections;success=$true}
+    Write-Host "PASS actual $version Media ZIP validation + released native helper bridge -> final ROOT layout"
+}
 # All launched processes are short-lived purpose-built fixtures; never touch real application processes.
 Write-Host "Updater isolated checks passed. Evidence: $testRoot"

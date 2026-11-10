@@ -60,6 +60,8 @@ try {
         $nativeOutput = Join-Path $productRoot "Native\Bin\x64\$Configuration"
         $updater = & (Join-Path $PSScriptRoot 'build-updater.ps1') -OutputDirectory $nativeOutput
         Copy-Item -LiteralPath $updater -Destination $appDirectory -Force
+        $peripheralProbe = & (Join-Path $PSScriptRoot 'build-peripheral-probe.ps1') -OutputDirectory $nativeOutput
+        Copy-Item -LiteralPath $peripheralProbe -Destination $appDirectory -Force
         foreach ($file in @('TaskBarWidgets.exe', 'OpenHardwareMonitorApi.dll')) {
             Copy-Item -LiteralPath (Join-Path $nativeOutput $file) -Destination $appDirectory -Force
         }
@@ -115,9 +117,15 @@ try {
     Copy-Item -LiteralPath 'licenses' -Destination $appDirectory -Recurse -Force
     Copy-Item -LiteralPath 'THIRD-PARTY-NOTICES.md', 'ACCEPTANCE.md' -Destination $appDirectory -Force
     Copy-Item -LiteralPath 'LICENSE', 'NOTICE' -Destination $appDirectory -Force
+    $extensionDirectory = Join-Path $appDirectory 'Dependencies\HeadsetControl'
+    New-Item -ItemType Directory -Path $extensionDirectory -Force | Out-Null
+    foreach ($file in @('headsetcontrol.exe','HeadsetControl-4.1.0-source.zip','LICENSE','README.md')) {
+        Copy-Item -LiteralPath (Join-Path 'Dependencies\HeadsetControl' $file) -Destination $extensionDirectory -Force
+    }
+    Copy-Item -LiteralPath 'docs\peripheral-compatibility.csv', 'docs\peripheral-compatibility.json', 'docs\外设电量.md' -Destination $appDirectory -Force
     if ($Component -eq 'All') {
         & (Join-Path $PSScriptRoot 'check-runtime-layout.ps1') -Directory $appDirectory
-        foreach ($required in @('TaskBarWidgets.exe', 'TaskBarWidgets.Updater.exe', 'OpenHardwareMonitorApi.dll', 'LibreHardwareMonitorLib.dll', 'Media\TaskBarWidgets.Media.exe', 'UI\TaskBarWidgets.UI.exe', 'UI\TaskBarWidgets.UI.pri', 'UI\App.xbf')) {
+        foreach ($required in @('TaskBarWidgets.exe', 'TaskBarWidgets.Updater.exe', 'TaskBarWidgets.PeripheralProbe.exe', 'OpenHardwareMonitorApi.dll', 'LibreHardwareMonitorLib.dll', 'Media\TaskBarWidgets.Media.exe', 'UI\TaskBarWidgets.UI.exe', 'UI\TaskBarWidgets.UI.pri', 'UI\App.xbf')) {
             if (-not (Test-Path -LiteralPath (Join-Path $appDirectory $required))) { throw "Missing packaged file: $required" }
         }
     }
