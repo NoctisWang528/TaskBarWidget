@@ -22,7 +22,7 @@ namespace Cards
         {
             ComPtr<ID2D1Device> device;
             ComPtr<ID2D1DeviceContext> context;
-            std::pair<BrandLogoKey, ComPtr<ID2D1Bitmap1>> icons[4];
+            std::pair<BrandLogoKey, ComPtr<ID2D1Bitmap1>> icons[5];
         };
 
         LogoCache& PeripheralBrandCache()
@@ -592,6 +592,7 @@ namespace Cards
             if (brand == L"razer") return PeripheralBrand::Razer;
             if (brand == L"logitech") return PeripheralBrand::Logitech;
             if (brand == L"xiaomi") return PeripheralBrand::Xiaomi;
+            if (brand == L"apple") return PeripheralBrand::Apple;
             return PeripheralBrand::Unknown;
         }
         const auto identify = [](std::wstring value)
@@ -615,6 +616,7 @@ namespace Cards
             if (word(L"logitech") || word(L"logi") || word(L"logicool") ||
                 value.find(L"罗技") != std::wstring::npos) return PeripheralBrand::Logitech;
             if (word(L"xiaomi") || value.find(L"小米") != std::wstring::npos) return PeripheralBrand::Xiaomi;
+            if (word(L"airpods")) return PeripheralBrand::Apple;
             return PeripheralBrand::Unknown;
         };
         const auto brand = identify(name);
@@ -640,6 +642,7 @@ namespace Cards
         case PeripheralBrand::Razer: svg = BrandLogos::Razer; break;
         case PeripheralBrand::Logitech: svg = BrandLogos::Logitech; break;
         case PeripheralBrand::Xiaomi: svg = BrandLogos::Xiaomi; break;
+        case PeripheralBrand::Apple: svg = BrandLogos::Apple; break;
         default: return false;
         }
         D2D1_MATRIX_3X2_F transform{};
@@ -652,7 +655,7 @@ namespace Cards
         const int phaseX = static_cast<int>(std::lround((x - std::floor(x)) * 256));
         const int phaseY = static_cast<int>(std::lround((y - std::floor(y)) * 256));
         const BrandLogoKey key{size, scale, color.r, color.g, color.b, color.a, phaseX, phaseY};
-        // At most four tiny bitmaps per card thread, cleared by Graphics::Release
+        // At most five tiny bitmaps per card thread, cleared by Graphics::Release
         // or device replacement; theme/DPI/subpixel changes replace that brand.
         auto& cache = PeripheralBrandCache();
         ComPtr<ID2D1Device> device;

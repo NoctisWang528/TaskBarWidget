@@ -135,9 +135,10 @@ public partial class App : System.Windows.Application
                 if (KeepCardsWarm && _cards?.CardLyricsVisible != true) _cards?.PublishSnapshot();
             };
             _pipe.Start();
+            var peripheralCatalog = new WindowsPeripheralCatalog();
             _peripherals = new PeripheralBatteryService(
-                [new NativePeripheralBatteryProvider(applicationRoot), new WindowsPeripheralBatteryProvider(),
-                    new HeadsetControlProvider(applicationRoot)],
+                [new NativePeripheralBatteryProvider(applicationRoot), new WindowsPeripheralBatteryProvider(peripheralCatalog, useControllers: true),
+                    new HeadsetControlProvider(applicationRoot), new AirPodsAdvertisementProvider(peripheralCatalog)],
                 Path.Combine(AppDataPaths.RootDirectory, "cache", "peripheral-batteries.json"));
             _peripherals.Changed += QueuePeripheralSnapshot;
             ApplyPeripheralDemand();

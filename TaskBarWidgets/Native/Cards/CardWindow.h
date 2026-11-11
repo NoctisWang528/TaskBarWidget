@@ -29,7 +29,7 @@
 
 namespace Cards
 {
-    namespace Paint { struct Interaction; }
+    namespace Paint { struct Interaction; struct PeripheralName; }
     // Host services a card reports to. The host owns the pipe, the group and
     // the lifetime; a card only says what the user did.
     class CardHostServices
@@ -131,6 +131,7 @@ namespace Cards
         uint64_t StaticPaintCount() const { return staticPaintCount; }
         uint64_t DynamicPaintCount() const { return dynamicPaintCount; }
         uint64_t RegionBuildCount() const { return regionBuildCount; }
+        size_t PeripheralNameAnimationCount() const;
         Paint::Interaction CurrentInteraction() const;
 
     private:
@@ -142,6 +143,9 @@ namespace Cards
         void PaintContent(bool rebuildRegions);
         void AnimatePeripheralContent(float direction = 0);
         void ResetPeripheralAnimation();
+        bool UpdatePeripheralNames(const std::vector<Paint::PeripheralName>& names);
+        void SetPeripheralNamesRunning(bool running);
+        void ClearPeripheralNames();
         void SetHotRegion(int id);
         void PruneInteraction();
         POINT ToDip(POINT pixels) const;
@@ -177,6 +181,20 @@ namespace Cards
     // the interaction table and paints a card from the current snapshot.
     namespace Paint
     {
+        // The painter measures a clipped name once; Composition moves its small
+        // text surface independently of the battery readings and fixed logo.
+        struct PeripheralName
+        {
+            std::wstring text;
+            D2D1_RECT_F bounds{};
+            float size{}, width{};
+            bool operator==(const PeripheralName& other) const
+            {
+                return text == other.text && size == other.size && width == other.width &&
+                    bounds.left == other.bounds.left && bounds.top == other.bounds.top &&
+                    bounds.right == other.bounds.right && bounds.bottom == other.bounds.bottom;
+            }
+        };
         struct Interaction
         {
             std::map<int, float> hover;
@@ -229,7 +247,7 @@ namespace Cards
             const Interaction& interaction = {});
         void PeripheralBattery(ID2D1DeviceContext* context, const Snapshot& snapshot,
             const CardEnvironment& environment, Layout::Table& regions, float widthDip, float heightDip,
-            const Interaction& interaction = {}, int page = 0);
+            const Interaction& interaction = {}, int page = 0, std::vector<PeripheralName>* names = nullptr);
 
         // Auto-height measurement for the weather and device cards.
         float MeasureHeight(Kind kind, const Snapshot& snapshot, const CardEnvironment& environment,

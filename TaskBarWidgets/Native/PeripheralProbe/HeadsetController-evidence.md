@@ -83,3 +83,96 @@ BlackShark once-initialization path is not duplicated.
 
 No compiler, build, executable, hardware query or normal product launch was run
 by this worker. Main owns compilation and execution of the integrated offline tests.
+
+## 2026-11-11 BlackShark V2 HS powered-off receiver fix
+
+Scope: `1532:0565`, MI3, FF14:0001, Report2/64 (Feature9 retained).
+Only `HeadsetController.cpp` and this evidence record changed for this fix;
+regressions use its existing `OfflineSelfTests()` entry point.
+
+Static upstream evidence was read from MouseDock DB179 `dis_wireless_hid.txt`:
+`blackshark_pro_request/reply` (original Python lines 303-323) defines read-only
+0020 link state with zero offline / one online; `blackshark_hs_read/level`
+(lines 349-373) only queries 8021 capacity and propagates timeouts. It does not
+prove the V2 HS link envelope. That envelope is established by the following
+local hardware capture, not by assuming the V3 Pro format.
+
+With the headset powered off and its receiver still attached, three 8021 reads
+produced no input and the old probe returned `unavailable`. Three alternating
+0020 / 8021 diagnostic rounds then showed a 64-byte successful 0020 reply
+within 3-4 ms each time; 8021 remained silent over each 1500-ms observation.
+No initialization, pairing, lighting, volume, firmware or configuration commands
+were sent. Only control SET_REPORT read requests 0020 and 8021 were used.
+
+Exact 64-byte link query:
+```
+02006000000004000000200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004600
+```
+Exact 64-byte powered-off reply (identical in all three rounds):
+```
+0202600000000500800020010100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c700
+```
+V2 HS has success byte1=02, flag byte8=80, command0020, payload length1,
+payload byte13=00, and byte62=C7 = XOR(bytes1..61), excluding the report ID.
+The previously captured successful 8021 capacity76 reply also satisfies this
+checksum rule (byte62=0A). V3 Pro's length2/flag/checksum assumptions do not apply.
+
+The decoder now correlates the requested command and validates the full known
+header, route, payload length, padding and checksum. Only a successful validated
+0020 payload00 becomes `disconnected`, without a live battery. 0020 payload01
+allows capacity reads; link checks bracket each capacity round. Empty input,
+query errors, unknown enums, corrupt/foreign frames and timeouts remain unknown.
+An 8021 battery value zero remains an online zero-percent battery.
+
+Validation in isolated `artifacts/airpods-20261111/razer/`:
+- Product probe Release build and embedded offline selftests passed.
+- Existing `tests/test_wire.py` offline IPC/lifetime checks passed.
+- Production and traced probes: three consecutive real-device reads each returned `disconnected`
+  with an empty battery array.
+- New offline fixtures cover the actual offline packet, command correlation,
+  empty input, request echoes, header/checksum/padding corruption, checksummed
+  query error, truncated input, unknown link enum, synthetic link-up and zero
+  battery. The earlier real capacity76 fixture remains passing.
+
+Local raw evidence: `off-baseline-frames.log`, `off-link-frames.log`,
+`off-fixed-production-responses.jsonl`, `off-fixed-traced-frames.log` and
+`off-fixed-traced-responses.jsonl`. Final trace has only three 0020 requests and
+three explicit offline replies; no battery query is sent after link-down. Diagnostic source `query-link.cpp` uses
+existing `tests/HidTrace.h`; its only commands are 0020 and 8021. These artifacts
+are local diagnostics, not release content.
+
+Boundary: powered-on link01 and native probe recovery are now verified by the
+follow-up below. Live service/card recovery remains an integration acceptance item.
+The normal product was not started, and live card filtering/74% cached-history
+presentation is left to the main integration task. No installation or settings
+were modified. Existing shared service code can retain historical capacity;
+this fix supplies the explicit disconnected state required by HideDisconnected.
+
+### Powered-on follow-up, 2026-11-11
+
+After the user powered on the same headset, the already-built isolated production
+probe was queried once (one discover and one selected-device read). It returned
+`online`, main battery **74%**, `estimated=false`, charging unknown, error empty,
+and fresh `updatedAt=2026-11-11T00:00:21.494Z`. This establishes native probe
+recovery from the earlier explicit disconnected state on the same stable identity;
+it is not a cached capacity returned by the service. The normal read internally
+performs its existing two battery rounds with before/after link checks.
+
+A second, single-command read-only diagnostic used the existing HidTrace helper
+and sent exactly one 0020 request, with no 8021, retry or initialization. Its
+successful 64-byte reply arrived in **3 ms**:
+```
+0202600000000500800020010101000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c600
+```
+The online payload byte13=01 and checksum byte62=C6 match the new decoder.
+The off/on replies differ only at byte13 (00 -> 01) and byte62 (C7 -> C6),
+confirming the previously synthetic V2 HS link-up interpretation on hardware.
+
+Local evidence: `artifacts/airpods-20261111/razer/on-production-responses.jsonl`
+and `on-link-once-frames.log`; bounded capture source is `query-link-once.cpp`.
+Exactly two selected-device query invocations were used: one production read,
+then one single-command 0020 capture. The production request seeded
+`attemptedInitializations` to prohibit reinitialization; the returned `initialized`
+array echoes that seed, and no initialized event was emitted. No normal product,
+installation/configuration mutation or additional hardware retry was performed.
+Only this evidence document changed in tracked source during this follow-up.

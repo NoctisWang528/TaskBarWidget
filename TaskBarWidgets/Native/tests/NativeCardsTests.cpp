@@ -466,11 +466,35 @@ static void CheckPeripheralBattery(Cards::CardEnvironment environment)
     const auto changedPaints = card.ContentPaintCount();
     Require(PumpFor(240, card.Handle()) == 0 && card.ContentPaintCount() == changedPaints,
         "changed battery uses finite Composition feedback without frame timers or repeated paints");
+    next.peripheralBattery.devices[0].name = L"AirPods Pro 2 — a deliberately long device name that must scroll horizontally";
+    next.peripheralBattery.devices[0].brand = L"apple";
+    next.peripheralBattery.devices[0].batteries = {
+        {L"left", 80, L"", true, false}, {L"right", 80, L"", true, false},
+        {L"case", std::nullopt, L"", false, std::nullopt}};
+    ++next.peripheralBattery.revision;
+    card.SetSnapshot(next);
+    Require(card.PeripheralNameAnimationCount() > 0, "overflowing peripheral name has a real Composition animation controller");
+    const auto scrollingPaints = card.ContentPaintCount();
+    Require(PumpFor(1400, card.Handle()) == 0 && card.ContentPaintCount() == scrollingPaints,
+        "name scrolling adds neither card timers nor per-frame surface repaints");
+    card.Hide(false);
+    Require(card.PeripheralNameAnimationCount() == 0, "hidden peripheral names stop their animations");
+    card.Show(false);
+    Require(card.PeripheralNameAnimationCount() > 0 && card.ContentPaintCount() == scrollingPaints,
+        "reopen resumes cached names without repainting content");
+    environment.reducedMotion = true;
+    card.ApplyEnvironment(environment);
+    Require(card.PeripheralNameAnimationCount() == 0 &&
+        card.Regions().Find(610)->name.find(next.peripheralBattery.devices[0].name) != std::wstring::npos,
+        "reduced motion keeps the full accessible name without running a marquee");
+    environment.reducedMotion = false;
+    card.ApplyEnvironment(environment);
+    Require(card.PeripheralNameAnimationCount() > 0, "restoring motion rebuilds the name surface");
     environment.highContrast = true;
     card.ApplyEnvironment(environment);
     ++next.peripheralBattery.revision; next.peripheralBattery.devices[0].batteries[0].percentage = 9;
     card.SetSnapshot(next);
-    Require(!card.Tick(), "high contrast cancels battery motion");
+    Require(!card.Tick() && card.PeripheralNameAnimationCount() == 0, "high contrast cancels battery and name motion");
     card.Hide(false);
 }
 

@@ -610,7 +610,7 @@ namespace
             independent.peripheralBattery.devices[2].batteries[0].percentage = 50;
             independent.peripheralBattery.devices[2].batteries[0].charging = true;
             const auto details = snapshot.peripheralBattery.mode == L"detailed" ?
-                D2D1::RectF(58, 166, 272, 194) : D2D1::RectF(254, 112, 370, 139);
+                D2D1::RectF(262, 142, 370, 193) : D2D1::RectF(254, 112, 370, 139);
             Require(Compare(baseline, render(independent), scale, label + " independent roles/vector charging", details) > 4,
                 label + ": role change must not invent an overall ring/bar percentage");
             auto refreshing = snapshot; refreshing.peripheralBattery.refreshing = true;
@@ -654,8 +654,8 @@ void WritePeripheralPreviews(Cards::Graphics& graphics, const wchar_t* directory
     snapshot.peripheralBattery.devices[1].name = L"Razer 黑寡妇 V4 · 无线机械键盘";
     snapshot.peripheralBattery.devices[1].brand = L"razer";
     snapshot.peripheralBattery.devices[1].connection = L"usb-2.4g";
-    snapshot.peripheralBattery.devices[2].name = L"小米耳夹耳机";
-    snapshot.peripheralBattery.devices[2].brand = L"xiaomi";
+    snapshot.peripheralBattery.devices[2].name = L"AirPods Pro 2 · 耳机名称过长的示例";
+    snapshot.peripheralBattery.devices[2].brand = L"apple";
     snapshot.peripheralBattery.devices[2].kind = L"earbuds";
     snapshot.peripheralBattery.devices[2].connection = L"bluetooth";
     snapshot.peripheralBattery.devices[3].name = L"Logitech G PRO X · 无线耳机";
@@ -664,8 +664,8 @@ void WritePeripheralPreviews(Cards::Graphics& graphics, const wchar_t* directory
     snapshot.peripheralBattery.devices[1].batteries[0].percentage = 100;
     snapshot.peripheralBattery.devices[1].batteries[0].charging = true;
     snapshot.peripheralBattery.devices[2].batteries = {
-        {L"left", 10, L"", false, false}, {L"right", 85, L"", true, true},
-        {L"case", std::nullopt, L"低", false, std::nullopt}};
+        {L"left", 80, L"", true, false}, {L"right", 80, L"", true, false},
+        {L"case", std::nullopt, L"", false, std::nullopt}};
     snapshot.peripheralBattery.devices[3].state = L"disconnected";
     snapshot.peripheralBattery.devices[3].stale = true;
     auto revised = snapshot.peripheralBattery;

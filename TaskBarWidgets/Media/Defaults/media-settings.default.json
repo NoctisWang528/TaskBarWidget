@@ -153,6 +153,7 @@
     "HideDisconnected": false,
     "HeadsetControlEnabled": false,
     "VendorExtensionsEnabled": false,
+    "AirPodsAdvertisementEnabled": true,
     "Order": [],
     "CardVisibility": {}
   },

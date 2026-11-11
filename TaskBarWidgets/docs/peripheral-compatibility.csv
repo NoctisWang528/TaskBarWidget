@@ -74,7 +74,7 @@ wireless_receivers,vgn_v98pro,320F:5088,VGN S99,ExtraKeyboard,implemented,False,
 wireless_receivers,razer_keyboard,1532:025C,Razer BlackWidow V3 Pro,ExtraKeyboard,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
 wireless_receivers,blackshark2020,1532:0528,Razer BlackShark V2 Pro (2020),HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
 wireless_receivers,razer_headset,1532:0557,Razer BlackShark V2 Pro (2023),HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
-wireless_receivers,blackshark_v2_hs,1532:0565,雷蛇 旋风黑鲨 V2 极速版,HeadsetController,implemented,True,2026-11-10 BlackShark V2 HS 2.4：MI3 FF14:1，实际两次关联回复为76%；充电状态未知。,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
+wireless_receivers,blackshark_v2_hs,1532:0565,雷蛇 旋风黑鲨 V2 极速版,HeadsetController,implemented,True,2026-11-10/11 BlackShark V2 HS 2.4：MI3 FF14:1，实读76%→74%；0020明确区分耳机关机/开机，接收器保留；充电状态未知。,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
 wireless_receivers,blackshark_pa,1532:0555,Razer BlackShark V2 Pro (2023),HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
 wireless_receivers,blackshark_pa,1532:0556,Razer BlackShark V2 Pro (2023),HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。
 wireless_receivers,barracuda_pa,1532:053A,Razer Barracuda Pro,HeadsetController,implemented,False,,同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。

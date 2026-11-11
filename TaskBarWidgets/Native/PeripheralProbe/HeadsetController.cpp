@@ -262,10 +262,18 @@ std::optional<Reading> DecodeBattery(const Candidate& c,Bytes b,unsigned command
         if(b.size()!=64||!Prefix(b,{2,2,0x60})||b[6]!=4+len||b[7]||b[8]||b[9]!=(command==0x20?0:0x80)||b[10]!=command||b[11]!=1||b[12]!=len||b[62]!=Xor(b,0,62))return {};
         if(command==0x20){if(b[13]>1||b[14])return {};return b[13]?Value(1):std::optional<Reading>(State("disconnected"));}return Value(b[13]);
     }
-    // V2 HS replies differ from V3 in flags/checksum. Validate the successful
-    // battery response, not V3's unused fields (captured V2 HS Feature9 device).
-    if(p=="blackshark_v2_hs")return b.size()==64&&Prefix(b,{2,2,0x60})&&b[6]==5&&
-        b[10]==0x21&&b[11]==1&&b[12]==1?Value(b[13]):std::nullopt;
+    if(p=="blackshark_v2_hs")
+    {
+        // Captured 0565 replies: one-byte link/battery payload, flag80 at byte8,
+        // XOR excluding report ID. A successful 0020 payload00 means offline;
+        // silence, error statuses and malformed frames are never disconnects.
+        if((command!=0x20&&command!=0x21)||b.size()!=64||
+            !Prefix(b,{2,2,0x60,0,0,0,5,0,0x80})||b[9]!=(command==0x20?0:0x80)||
+            b[10]!=command||b[11]!=1||b[12]!=1||b[62]!=Xor(b,1,62)||b[63]||
+            std::any_of(b.begin()+14,b.begin()+62,[](auto v){return v!=0;}))return {};
+        if(command==0x20){if(b[13]>1)return {};return b[13]?Value(1):std::optional<Reading>(State("disconnected"));}
+        return Value(b[13]);
+    }
     if(p=="blackshark_pa"||p=="barracuda_pa")
     {bool black=p=="blackshark_pa";unsigned at=black?12:13;if(b.size()!=64||b[0]!=(black?2:1)||(!black&&(!Prefix(b,{1,0x80})||b[3]!=0x50||b[4]!=0x49||b[5]!=8))||b[at]!=0x21||b[at+1]<1||b[at+1]>(black?1:2)||b[at+2]<1||b[at+2]>32||at+3u+b[at+2]>b.size())return {};return Value(b[at+3]);}
     if(p=="cloud3")return b.size()>=5&&b.size()<=64&&b[0]==0x66&&(b[1]==0x89||b[1]==0x0d)&&(b[2]||b[3])?Value(b[4]):std::nullopt;
@@ -560,7 +568,7 @@ std::optional<Reading> Read(const Candidate& c,const std::function<void()>& prog
             if(Container(split->candidate.path)!=c.physical||Container(c.path)!=c.physical)return {};
             result=io.Exchange(6);if(!result)return {};auto charge=io.Exchange(0x48);if(!charge||!charge->percentage)return {};result->charging=*charge->percentage==1||*charge->percentage==2;
         }
-        else if(p=="moondrop_gm"||(p=="blackshark_v3_pro"&&c.pid==0x101b))
+        else if(p=="moondrop_gm"||p=="blackshark_v2_hs"||(p=="blackshark_v3_pro"&&c.pid==0x101b))
         {
             unsigned link=p=="moondrop_gm"?0x31:0x20,battery=p=="moondrop_gm"?0x27:0x21;
             auto online=io.Exchange(link);if(!online||online->state!="online")return online;
@@ -677,6 +685,26 @@ void OfflineSelfTests()
     checkValue(c,b,76,0x21); // Captured attached-device reply, including checksum.
     b[10]=0x20;check(!DecodeBattery(c,b,0x21),"BlackShark non-battery reply rejected");b[10]=0x21;
     b[1]=3;check(!DecodeBattery(c,b,0x21),"BlackShark error status rejected");
+    // 2026-11-11: powered-off 1532:0565, receiver attached. Three identical
+    // successful 0020 replies; 8021 remained silent (not offline evidence).
+    const auto hsOffline=Packet(64,{2,2,0x60,0,0,0,5,0,0x80,0,0x20,1,1,0});
+    b=hsOffline;b[62]=0xc7;
+    offline=DecodeBattery(c,b,0x20);
+    check(offline&&offline->state=="disconnected"&&!offline->percentage&&!offline->charging,"HS explicit link-down must clear live battery");
+    check(!DecodeBattery(c,b,0x21)&&!DecodeBattery(c,b),"HS reply must match requested command");
+    check(!DecodeBattery(c,{},0x20)&&!DecodeBattery(c,{},0x21),"HS timeout must remain unknown");
+    check(!DecodeBattery(c,Request(c,0x20),0x20),"HS link query echo is not offline");
+    for(unsigned at:{0u,1u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,14u,61u,62u,63u})
+    {auto corrupt=b;corrupt[at]^=1;check(!DecodeBattery(c,corrupt,0x20),"HS corrupt offline frame accepted");}
+    auto hsError=b;hsError[1]=3;hsError[62]=static_cast<unsigned char>(Xor(hsError,1,62));
+    check(!DecodeBattery(c,hsError,0x20),"HS checksummed query error is not offline");
+    auto hsUnknown=b;hsUnknown[13]=2;hsUnknown[62]=static_cast<unsigned char>(Xor(hsUnknown,1,62));
+    check(!DecodeBattery(c,hsUnknown,0x20),"HS unknown link enum is not offline");
+    auto hsTruncated=b;hsTruncated.pop_back();check(!DecodeBattery(c,hsTruncated,0x20),"HS short link frame accepted");
+    auto hsOnline=b;hsOnline[13]=1;hsOnline[62]=static_cast<unsigned char>(Xor(hsOnline,1,62));
+    auto link=DecodeBattery(c,hsOnline,0x20);check(link&&link->state=="online","HS synthetic link-up");
+    auto hsEmpty=b;hsEmpty[9]=0x80;hsEmpty[10]=0x21;hsEmpty[62]=static_cast<unsigned char>(Xor(hsEmpty,1,62));
+    checkValue(c,hsEmpty,0,0x21);check(DecodeBattery(c,hsEmpty,0x21)->state=="online","HS zero battery is not disconnected");
     c=candidate("blackshark_pa");b=Packet(64,{2});b[12]=0x21;b[13]=1;b[14]=1;b[15]=71;checkValue(c,b,71);b[14]=33;check(!DecodeBattery(c,b),"PA payload bounds ignored");
     check(Prefix(Request(c,1),{2,128,7,0,0,0x50,0x41,14,0,2,0xe1,1})&&Request(c,2)[11]==0,"PA temporary read route/restore");
     c=candidate("barracuda_pa");b=Packet(64,{1,128,0,0x50,0x49,8});b[13]=0x21;b[14]=2;b[15]=1;b[16]=59;checkValue(c,b,59);

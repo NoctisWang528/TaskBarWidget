@@ -18,6 +18,59 @@ public sealed class PeripheralBatteryServiceTests
     };
 
     [Fact]
+    public async Task PoweredOffReceiverDeviceKeepsLastBatteryAndRecoversWithoutRediscovery()
+    {
+        var clock = new ManualClock();
+        var provider = new FakeProvider
+        {
+            DiscoveryResult = Device() with { Connection = "wireless" },
+            Result = Device(74) with { Connection = "wireless", UpdatedAt = clock.Utc }
+        };
+        var settings = new PeripheralBatterySettings { HideDisconnected = true };
+        await using var service = new PeripheralBatteryService([provider], null, clock);
+        service.Configure(settings, true, true, true); service.Start();
+        await Until(() => provider.ReadCalls == 1 && !service.Snapshot.Refreshing);
+        var lastRead = service.Snapshot.Devices[0].UpdatedAt;
+        provider.Result = Device() with { Connection = "wireless", State = "disconnected", Stale = true };
+        for (var count = 2; count <= 4; count++)
+        {
+            clock.Utc += TimeSpan.FromSeconds(61);
+            service.Configure(settings, true, true, true);
+            await Until(() => provider.ReadCalls == count && !service.Snapshot.Refreshing);
+            Assert.Equal("disconnected", service.Snapshot.Devices[0].State);
+            Assert.Equal(74, service.Snapshot.Devices[0].Batteries[0].Percentage);
+            Assert.Equal(lastRead, service.Snapshot.Devices[0].UpdatedAt);
+        }
+        Assert.True(service.Snapshot.HideDisconnected);
+        provider.Result = Device(73) with { Connection = "wireless", UpdatedAt = clock.Utc.AddSeconds(61) };
+        clock.Utc += TimeSpan.FromSeconds(61);
+        service.Configure(settings, true, true, true);
+        await Until(() => provider.ReadCalls == 5 && !service.Snapshot.Refreshing);
+        Assert.Equal("online", service.Snapshot.Devices[0].State);
+        Assert.Equal(73, service.Snapshot.Devices[0].Batteries[0].Percentage);
+        Assert.Equal(1, provider.DiscoveryCalls);
+
+        provider.Present = false; provider.Notify();
+        await Until(() => provider.DiscoveryCalls == 2 && provider.Demand.Count == 0 && !service.Snapshot.Refreshing);
+        Assert.Equal("disconnected", service.Snapshot.Devices[0].State);
+        Assert.False(service.Snapshot.Devices[0].CanRead);
+        Assert.Equal(5, provider.ReadCalls);
+    }
+
+    [Fact]
+    public async Task DisconnectedBluetoothDeviceIsNotActivelyPolled()
+    {
+        var provider = new FakeProvider { DiscoveryResult = Device(82) with
+            { Connection = "bluetooth", State = "disconnected", Stale = true } };
+        await using var service = new PeripheralBatteryService([provider], null);
+        service.SetSettingsActive(true); service.Start();
+        await Until(() => provider.DiscoveryCalls > 0 && !service.Snapshot.Refreshing);
+        Assert.Empty(provider.Demand);
+        Assert.Equal(0, provider.ReadCalls);
+        Assert.Equal(82, service.Snapshot.Devices[0].Batteries[0].Percentage);
+    }
+
+    [Fact]
     public async Task ProvenLegacyIdentityRetainsTaskbarSelectionAndCardOptOut()
     {
         var provider = new FakeProvider

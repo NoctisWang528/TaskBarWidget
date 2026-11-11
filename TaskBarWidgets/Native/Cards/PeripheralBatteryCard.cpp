@@ -22,7 +22,8 @@ namespace Cards::Paint
     namespace
     {
         void DeviceName(ID2D1DeviceContext* context, Graphics& graphics, const PeripheralDevice& device,
-            const CardEnvironment& environment, Color color, D2D1_RECT_F rect, float size, bool centered)
+            const CardEnvironment& environment, Color color, D2D1_RECT_F rect, float size, bool centered,
+            std::vector<PeripheralName>* names)
         {
             const auto brand = PeripheralBrandFrom(device.name, device.source, device.brand);
             constexpr float logoSize = 16, gap = 5;
@@ -44,6 +45,21 @@ namespace Cards::Paint
                 {
                     rect.left = left + logoSize + gap;
                     centered = false;
+                }
+            }
+            if (names && !environment.reducedMotion && !environment.highContrast)
+            {
+                const auto layout = graphics.TextLayout(device.name, environment.fontFamily, size, 600,
+                    10000, rect.bottom - rect.top, false, false, false, false, 1);
+                DWRITE_TEXT_METRICS metrics{};
+                D2D1_MATRIX_3X2_F transform{};
+                context->GetTransform(&transform);
+                if (layout && SUCCEEDED(layout->GetMetrics(&metrics)) &&
+                    (std::ceil(metrics.widthIncludingTrailingWhitespace) + 1) * transform._11 <= context->GetMaximumBitmapSize() &&
+                    metrics.widthIncludingTrailingWhitespace > rect.right - rect.left + 0.5f)
+                {
+                    names->push_back({device.name, rect, size, std::ceil(metrics.widthIncludingTrailingWhitespace) + 1});
+                    return;
                 }
             }
             Draw::Text(context, graphics, device.name, environment.fontFamily, size, 600, color, rect,
@@ -177,7 +193,7 @@ namespace Cards::Paint
 
     void PeripheralBattery(ID2D1DeviceContext* context, const Snapshot& snapshot,
         const CardEnvironment& environment, Layout::Table& regions, float widthDip, float heightDip,
-        const Interaction& interaction, int page)
+        const Interaction& interaction, int page, std::vector<PeripheralName>* names)
     {
         if (!context || !environment.graphics) return;
         auto& graphics = *environment.graphics;
@@ -216,6 +232,10 @@ namespace Cards::Paint
             const float right = detailed ? widthDip - 16 : x + tileWidth;
             const auto* primary = PrimaryBattery(device);
             const bool multiple = device.batteries.size() > 1;
+            const int batteryCount = static_cast<int>(device.batteries.size());
+            const int detailColumns = (batteryCount + 2) / 3;
+            const float valuesLeft = right - std::min(208.f, 104.f * detailColumns);
+            const float nameRight = multiple ? valuesLeft - 12 : 270;
             const auto readingText = [&](const PeripheralBatteryReading& battery, D2D1_RECT_F rect,
                 float size, bool showRole, DWRITE_TEXT_ALIGNMENT align)
             {
@@ -240,17 +260,17 @@ namespace Cards::Paint
             {
                 DrawPeripheralIcon(context, device.kind, palette.primary, x, y + 8, 28);
                 DeviceName(context, graphics, device, environment, palette.primary,
-                    Draw::Rect(60, y + 1, multiple ? 198 : 270, y + 20), 13, false);
-                text(Status(device), 10, palette.secondary, multiple ? Draw::Rect(204, y + 4, right, y + 19) :
-                    Draw::Rect(60, y + 22, 270, y + 37));
-                if (primary)
-                    readingText(*primary, Draw::Rect(278, y + (multiple ? 22 : 7), right, y + (multiple ? 44 : 40)),
-                        primary->percentage && !multiple ? 24.f : 16.f, false, DWRITE_TEXT_ALIGNMENT_TRAILING);
+                    Draw::Rect(60, y + 1, nameRight, y + 20), 13, false, names);
+                text(Status(device), 10, palette.secondary, Draw::Rect(60, y + 22, nameRight, y + 37));
+                if (!multiple && primary)
+                    readingText(*primary, Draw::Rect(278, y + 7, right, y + 40),
+                        primary->percentage ? 24.f : 16.f, false, DWRITE_TEXT_ALIGNMENT_TRAILING);
                 else if (!multiple)
                     text(L"—", 24, palette.secondary, Draw::Rect(278, y + 7, right, y + 40), 600, DWRITE_TEXT_ALIGNMENT_TRAILING);
-                Draw::Progress(context, Draw::Rect(60, y + 46, 270, y + 48),
-                    primary && primary->percentage ? *primary->percentage / 100.f : 0,
-                    palette.track, primary ? BatteryColor(*primary, palette, environment) : palette.track, false);
+                if (!multiple)
+                    Draw::Progress(context, Draw::Rect(60, y + 46, 270, y + 48),
+                        primary && primary->percentage ? *primary->percentage / 100.f : 0,
+                        palette.track, primary ? BatteryColor(*primary, palette, environment) : palette.track, false);
             }
             else
             {
@@ -258,7 +278,7 @@ namespace Cards::Paint
                 DrawPeripheralIcon(context, device.kind, palette.primary, x + tileWidth / 2 - 12, 58, 24);
                 DeviceName(context, graphics, device, environment, palette.primary, Draw::Rect(x + 2, Layout::PeripheralCompactNameTop,
                     right - 2, Layout::PeripheralCompactNameTop + Layout::PeripheralCompactNameHeight),
-                    12, true);
+                    12, true, names);
                 if (!multiple)
                 {
                     if (primary) readingText(*primary, Draw::Rect(x + 16, Layout::PeripheralCompactDetailsTop,
@@ -283,16 +303,16 @@ namespace Cards::Paint
                     *battery.charging ? L", 充电中" : L", 未充电";
                 if (!multiple) continue;
                 // Each role keeps its own measured value, including the percent sign.
-                const int columns = (count + 1) / 2;
-                const float detailLeft = detailed ? 60 : x;
-                const float detailRight = detailed ? 270 : right;
+                const int columns = detailed ? detailColumns : (count + 1) / 2;
+                const float detailLeft = detailed ? valuesLeft : x;
+                const float detailRight = right;
                 const float cellWidth = (detailRight - detailLeft) / columns;
-                const float top = detailed ? y + 20 + (batteryIndex / columns) * 13.f :
+                const float top = detailed ? y + 1 + (batteryIndex / columns) * 15.f :
                     Layout::PeripheralCompactDetailsTop + (batteryIndex / columns) * Layout::PeripheralCompactDetailHeight;
                 readingText(battery, Draw::Rect(detailLeft + (batteryIndex % columns) * cellWidth,
                     top, detailLeft + (batteryIndex % columns + 1) * cellWidth - 3,
-                    top + (detailed ? 13 : Layout::PeripheralCompactDetailHeight)),
-                    detailed ? 10.f : 9.f, true, detailed ? DWRITE_TEXT_ALIGNMENT_LEADING : DWRITE_TEXT_ALIGNMENT_CENTER);
+                    top + (detailed ? 15 : Layout::PeripheralCompactDetailHeight)),
+                    detailed ? 11.5f : 9.f, true, detailed ? DWRITE_TEXT_ALIGNMENT_TRAILING : DWRITE_TEXT_ALIGNMENT_CENTER);
             }
             Layout::Region reading;
             reading.id = 610 + item; reading.type = Layout::RegionType::Text;

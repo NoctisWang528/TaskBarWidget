@@ -62,10 +62,12 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
         {
             if (_disposed) return;
             if (_settings.HeadsetControlEnabled != settings.HeadsetControlEnabled ||
-                _settings.VendorExtensionsEnabled != settings.VendorExtensionsEnabled) _discoverPending = true;
+                _settings.VendorExtensionsEnabled != settings.VendorExtensionsEnabled ||
+                _settings.AirPodsAdvertisementEnabled != settings.AirPodsAdvertisementEnabled) _discoverPending = true;
             _settings = settings.Clone(); _settings.Normalize();
             foreach (var extension in _providers.OfType<HeadsetControlProvider>()) extension.Configure(_settings);
             foreach (var native in _providers.OfType<NativePeripheralBatteryProvider>()) native.Configure(_settings);
+            foreach (var airpods in _providers.OfType<AirPodsAdvertisementProvider>()) airpods.Configure(_settings);
             _cardEnabled = cardEnabled; _cardVisible = visible; _resident = resident;
             if (!HasDemandLocked) _cycleStop?.Cancel();
             PublishLocked(Snapshot.Refreshing, Snapshot.Error);
@@ -123,6 +125,10 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
     private bool HasDemandLocked => _settingsActive || _taskbar.Count != 0 || (_cardEnabled && (_cardVisible || _resident));
     private bool WantedLocked(PeripheralDeviceSnapshot item) => _settingsActive || _taskbar.Contains(item.Id) ||
         (_cardEnabled && (_cardVisible || _resident) && _settings.CardVisibility.GetValueOrDefault(item.Id, true));
+    // A powered-off wireless peripheral can still be queried through its present
+    // USB receiver. Do not reconnect Bluetooth devices just to read battery state.
+    private static bool CanPoll(PeripheralDeviceSnapshot item) => item.CanRead &&
+        (item.State != "disconnected" || item.Connection == "wireless");
     private TimeSpan IntervalLocked(string id) => _settingsActive || _taskbar.Contains(id) || _cardVisible
         ? TimeSpan.FromSeconds(60) : TimeSpan.FromMinutes(5);
 
@@ -180,7 +186,7 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
                     else
                     {
                         var next = _nextDiscovery;
-                        foreach (var item in _devices.Values.Where(d => d.CanRead && WantedLocked(d) && d.State != "disconnected"))
+                        foreach (var item in _devices.Values.Where(d => CanPoll(d) && WantedLocked(d)))
                             if (NextAttemptLocked(item.Id) < next) next = NextAttemptLocked(item.Id);
                         wait = next - _clock.GetUtcNow();
                         if (wait < TimeSpan.FromSeconds(1)) wait = TimeSpan.FromSeconds(1);
@@ -209,7 +215,7 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
                         found = found.Select(RetainLegacySelectionLocked).ToArray();
                         var present = found.Select(d => d.Id).ToHashSet(StringComparer.Ordinal);
                         foreach (var id in _owners.Where(p => p.Value == index && !present.Contains(p.Key)).Select(p => p.Key).ToArray())
-                            _devices[id] = _devices[id] with { State = "disconnected", Stale = true };
+                            _devices[id] = _devices[id] with { State = "disconnected", Stale = true, CanRead = false };
                         foreach (var item in found.OrderBy(d => d.State == "disconnected").Take(256)) MergeLocked(item, index, discovery: true);
                         PublishLocked(true, "");
                     }
@@ -226,10 +232,10 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
             {
                 if (!HasDemandLocked) break;
                 var now = _clock.GetUtcNow();
-                wanted = _devices.Values.Where(d => _owners.GetValueOrDefault(d.Id, -1) == index && d.CanRead &&
-                    WantedLocked(d) && d.State != "disconnected").Select(d => d.Id).ToHashSet(StringComparer.Ordinal);
-                ids = _devices.Values.Where(d => _owners.GetValueOrDefault(d.Id, -1) == index && d.CanRead &&
-                    WantedLocked(d) && d.State != "disconnected" && (force || NextAttemptLocked(d.Id) <= now))
+                wanted = _devices.Values.Where(d => _owners.GetValueOrDefault(d.Id, -1) == index && CanPoll(d) &&
+                    WantedLocked(d)).Select(d => d.Id).ToHashSet(StringComparer.Ordinal);
+                ids = _devices.Values.Where(d => _owners.GetValueOrDefault(d.Id, -1) == index && CanPoll(d) &&
+                    WantedLocked(d) && (force || NextAttemptLocked(d.Id) <= now))
                     .Select(d => d.Id).ToHashSet(StringComparer.Ordinal);
                 settings = _settings.Clone();
                 if (ids.Count != 0) PublishLocked(true, "");
@@ -263,7 +269,8 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
                     var result = results.FirstOrDefault(d => d.Id == id);
                     var notified = _devices.GetValueOrDefault(id);
                     var newerNotification = notified is { State: "online", Stale: false } && notified.UpdatedAt > readStarted;
-                    var succeeded = newerNotification || result is { State: "online", Stale: false } && HasReading(result);
+                    var succeeded = newerNotification || result is { State: "online", Stale: false } && HasReading(result) ||
+                        result is { State: "disconnected", Connection: "wireless", CanRead: true };
                     var failures = succeeded ? 0 : Math.Min(4, _attempts.GetValueOrDefault(id).Failures + 1);
                     _attempts[id] = (_clock.GetUtcNow(), failures);
                     if (!newerNotification && !returned.Contains(id) && _devices.TryGetValue(id, out var existing))

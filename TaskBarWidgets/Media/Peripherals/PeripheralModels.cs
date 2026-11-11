@@ -49,6 +49,7 @@ public sealed class PeripheralBatterySettings
     public bool HideDisconnected { get; set; }
     public bool HeadsetControlEnabled { get; set; }
     public bool VendorExtensionsEnabled { get; set; }
+    public bool AirPodsAdvertisementEnabled { get; set; } = true;
     public List<string> Order { get; set; } = [];
     public Dictionary<string, bool> CardVisibility { get; set; } = new(StringComparer.Ordinal);
 
@@ -56,6 +57,7 @@ public sealed class PeripheralBatterySettings
     {
         Mode = Mode, HideDisconnected = HideDisconnected,
         HeadsetControlEnabled = HeadsetControlEnabled, VendorExtensionsEnabled = VendorExtensionsEnabled,
+        AirPodsAdvertisementEnabled = AirPodsAdvertisementEnabled,
         Order = [.. Order ?? []], CardVisibility = new(CardVisibility ?? [], StringComparer.Ordinal)
     };
 
@@ -79,6 +81,7 @@ public static class PeripheralIdentity
         if (Vendor("1532") || Name("Razer") || Name("雷蛇")) return "razer";
         if (source.StartsWith("rog", StringComparison.OrdinalIgnoreCase) || Name("ROG") || Name("夜魔")) return "asusrog";
         if (Name("Xiaomi") || Name("小米") || Name("Redmi")) return "xiaomi";
+        if (source == "apple-ble-proximity" || Name("AirPods")) return "apple";
         return "";
     }
 

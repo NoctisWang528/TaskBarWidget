@@ -2622,7 +2622,7 @@
       "nativeAdapter": "HeadsetController",
       "status": "implemented",
       "hardwareValidated": true,
-      "hardwareEvidence": "2026-11-10 BlackShark V2 HS 2.4：MI3 FF14:1，实际两次关联回复为76%；充电状态未知。",
+      "hardwareEvidence": "2026-11-10/11 BlackShark V2 HS 2.4：MI3 FF14:1，实读76%→74%；0020明确区分耳机关机/开机，接收器保留；充电状态未知。",
       "limit": "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
     },
     {
@@ -4718,6 +4718,13 @@
   ],
   "hardwareChecks": [
     {
+      "name": "AirPods Pro 2 USB-C",
+      "identity": "Bluetooth 004C:2024",
+      "source": "apple-ble-proximity",
+      "hardwareValidated": true,
+      "evidence": "2026-11-11：已配对经典蓝牙身份及型号匹配，单一邻近广播候选；左右耳约80%，盒未知。免驱估算按10%档位，不能验证广播归属；双耳非对称、充电及其他型号尚未实机验证。"
+    },
+    {
       "name": "ROG AZOTH wired + receiver",
       "identity": "0B05:1A83 / 0B05:1A85",
       "source": "rog_azoth_x",
@@ -4745,6 +4752,11 @@
     }
   ],
   "additionalProviders": [
+    {
+      "name": "AirPods proximity advertisement (driver-free estimate)",
+      "status": "implemented",
+      "limit": "型号白名单及已连接的配对设备；8秒被动窗口、至少两包，多个同型号候选暂停更新。约10%档位；随机地址按邻近和型号关联，存在误归属限制，可在设置关闭。"
+    },
     {
       "name": "Windows properties / BLE BAS / declared standard HID / Windows gamepad battery",
       "status": "implemented",

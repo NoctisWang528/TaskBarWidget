@@ -178,6 +178,17 @@ namespace Cards
         SpriteVisual wash{ nullptr };
         SpriteVisual content{ nullptr };
         DrawingSurface surface;
+        struct PeripheralNameLayer
+        {
+            Paint::PeripheralName layout;
+            DrawingSurface surface;
+            ContainerVisual viewport{ nullptr };
+            SpriteVisual text{ nullptr };
+            ScalarKeyFrameAnimation animation{ nullptr };
+            bool running{};
+        };
+        std::vector<PeripheralNameLayer> peripheralNames;
+        float peripheralNameScale{};
         SpriteVisual dynamicContent{ nullptr };
         DrawingSurface dynamicSurface;
         SurfaceHandle boundDynamicSurface{ nullptr };
@@ -346,6 +357,7 @@ namespace Cards
 
     void CardWindow::Destroy()
     {
+        ClearPeripheralNames();
         impl->transition.Detach();
         accessibility.Detach();
         if (window)
@@ -385,6 +397,7 @@ namespace Cards
 
     void CardWindow::ApplyEnvironment(const CardEnvironment& cardEnvironment)
     {
+        ClearPeripheralNames();
         environment = cardEnvironment;
         if (kind == Kind::PeripheralBattery && impl->content && (environment.reducedMotion || environment.highContrast))
             ResetPeripheralAnimation();
@@ -818,6 +831,7 @@ namespace Cards
         visible = true;
         // Placement and resident warmup already committed unchanged content.
         Paint();
+        SetPeripheralNamesRunning(true);
         impl->transition.Start(true, scale, animate && !environment.reducedMotion && !environment.highContrast,
             window, AnimationMilliseconds);
         ShowWindow(window, SW_SHOWNOACTIVATE);
@@ -830,6 +844,7 @@ namespace Cards
     void CardWindow::Hide(bool animate)
     {
         visible = false;
+        SetPeripheralNamesRunning(false);
         if (kind == Kind::PeripheralBattery && impl->content)
             ResetPeripheralAnimation();
         if (!window) return;
@@ -849,6 +864,98 @@ namespace Cards
             window, AnimationMilliseconds);
         if (!impl->transition.Running()) ShowWindow(window, SW_HIDE);
         UpdateTimer();
+    }
+
+    void CardWindow::ClearPeripheralNames()
+    {
+        SetPeripheralNamesRunning(false);
+        for (auto& name : impl->peripheralNames)
+        {
+            if (impl->content && name.viewport) impl->content.Children().Remove(name.viewport);
+            if (name.text) name.text.Brush(nullptr);
+            name.surface.Release();
+        }
+        impl->peripheralNames.clear();
+        impl->peripheralNameScale = 0;
+    }
+
+    void CardWindow::SetPeripheralNamesRunning(bool running)
+    {
+        running = running && !environment.reducedMotion && !environment.highContrast;
+        for (auto& name : impl->peripheralNames)
+        {
+            if (!name.text || !name.animation || name.running == running) continue;
+            if (running) name.text.StartAnimation(L"Offset.X", name.animation);
+            else
+            {
+                name.text.StopAnimation(L"Offset.X");
+                name.text.Offset({0, 0, 0});
+            }
+            name.running = running;
+        }
+    }
+
+    size_t CardWindow::PeripheralNameAnimationCount() const
+    {
+        return std::count_if(impl->peripheralNames.begin(), impl->peripheralNames.end(),
+            [](const auto& name) { return name.running && name.text.TryGetAnimationController(L"Offset.X"); });
+    }
+
+    bool CardWindow::UpdatePeripheralNames(const std::vector<Paint::PeripheralName>& names)
+    {
+        if (impl->peripheralNameScale == scale && names.size() == impl->peripheralNames.size() &&
+            std::equal(names.begin(), names.end(), impl->peripheralNames.begin(),
+                [](const auto& layout, const auto& layer) { return layout == layer.layout; })) return true;
+        ClearPeripheralNames();
+        for (const auto& layout : names)
+        {
+            auto& name = impl->peripheralNames.emplace_back();
+            name.layout = layout;
+            const float height = layout.bounds.bottom - layout.bounds.top;
+            const float width = layout.bounds.right - layout.bounds.left;
+            name.surface.Ensure(environment.device, static_cast<int>(std::ceil(layout.width * scale)),
+                static_cast<int>(std::ceil(height * scale)));
+            {
+                DrawScope scope(name.surface, scale);
+                if (!scope) { impl->dirty = true; host.OnGraphicsFailure(name.surface.LastResult()); return false; }
+                auto* context = scope.Get();
+                context->Clear(D2D1::ColorF(0, 0.0f));
+                const auto text = environment.graphics->TextLayout(layout.text, environment.fontFamily,
+                    layout.size, 600, layout.width, height, false, false, false, false, 1,
+                    DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+                const auto brush = environment.graphics->Brush(context, Draw::Colors(environment).primary);
+                if (text && brush) context->DrawTextLayout({0, 0}, text.Get(), brush.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            }
+            if (!name.surface.Ready()) { impl->dirty = true; host.OnGraphicsFailure(name.surface.LastResult()); return false; }
+            name.viewport = impl->compositor.CreateContainerVisual();
+            name.viewport.Size({width * scale, height * scale});
+            name.viewport.Offset({layout.bounds.left * scale, layout.bounds.top * scale, 0});
+            name.viewport.Clip(impl->compositor.CreateInsetClip());
+            name.text = impl->compositor.CreateSpriteVisual();
+            name.text.Size({static_cast<float>(name.surface.Width()), static_cast<float>(name.surface.Height())});
+            const auto brush = impl->compositor.CreateSurfaceBrush(name.surface.Handle());
+            name.text.Brush(brush);
+            name.viewport.Children().InsertAtTop(name.text);
+            impl->content.Children().InsertAtTop(name.viewport);
+
+            // Hold both ends for readability; only the prepainted name moves.
+            const float travel = (layout.width - width) / 22.f;
+            constexpr float pause = 1.2f;
+            const float duration = 2 * (travel + pause);
+            const float distance = -(layout.width - width) * scale;
+            const auto linear = impl->compositor.CreateLinearEasingFunction();
+            name.animation = impl->compositor.CreateScalarKeyFrameAnimation();
+            name.animation.Duration(std::chrono::milliseconds(static_cast<int>(duration * 1000)));
+            name.animation.IterationBehavior(AnimationIterationBehavior::Forever);
+            name.animation.InsertKeyFrame(0, 0, linear);
+            name.animation.InsertKeyFrame(pause / duration, 0, linear);
+            name.animation.InsertKeyFrame((pause + travel) / duration, distance, linear);
+            name.animation.InsertKeyFrame((2 * pause + travel) / duration, distance, linear);
+            name.animation.InsertKeyFrame(1, 0, linear);
+        }
+        impl->peripheralNameScale = scale;
+        SetPeripheralNamesRunning(visible);
+        return true;
     }
 
     void CardWindow::UpdateTimer()
@@ -941,6 +1048,7 @@ namespace Cards
         if (kind == Kind::Media) impl->dynamicSurface.Ensure(environment.device, widthPixels, heightPixels);
         if (rebuildRegions) { regions.Clear(); ++regionBuildCount; }
         const bool paintStable = kind != Kind::Media || impl->mediaStaticDirty || !impl->content.Brush();
+        std::vector<Paint::PeripheralName> peripheralNames;
         for (int layer = 0; layer < (kind == Kind::Media ? 2 : 1); ++layer)
         {
             if (layer == 0 && !paintStable) continue;
@@ -1051,7 +1159,7 @@ namespace Cards
                     Paint::Weather(context, painted, environment, regions, widthDip, heightDip, interaction);
                     break;
                 case Kind::PeripheralBattery:
-                    Paint::PeripheralBattery(context, painted, environment, regions, widthDip, heightDip, interaction, peripheralPage);
+                    Paint::PeripheralBattery(context, painted, environment, regions, widthDip, heightDip, interaction, peripheralPage, &peripheralNames);
                     break;
                 case Kind::Update:
                     Paint::Update(context, painted, environment, regions, widthDip, heightDip, interaction);
@@ -1070,6 +1178,7 @@ namespace Cards
         }
         if (!impl->surface.Ready() || (kind == Kind::Media && !impl->dynamicSurface.Ready()))
         { impl->dirty = true; host.OnGraphicsFailure(kind == Kind::Media ? impl->dynamicSurface.LastResult() : impl->surface.LastResult()); return; }
+        if (kind == Kind::PeripheralBattery && !UpdatePeripheralNames(peripheralNames)) return;
         if (rebuildRegions) PruneInteraction();
         if (impl->surface.Handle() && impl->boundSurface != impl->surface.Handle())
         {

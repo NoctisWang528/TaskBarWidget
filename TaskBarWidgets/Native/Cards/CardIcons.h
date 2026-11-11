@@ -79,7 +79,7 @@ namespace Cards
     void DrawPeripheralIcon(ID2D1DeviceContext* context, const std::wstring& kind,
         Color color, float left, float top, float size);
 
-    enum class PeripheralBrand { Unknown, Rog, Razer, Logitech, Xiaomi };
+    enum class PeripheralBrand { Unknown, Rog, Razer, Logitech, Xiaomi, Apple };
     PeripheralBrand PeripheralBrandFrom(const std::wstring& name, const std::wstring& source,
         const std::wstring& brand = {});
     // Source-backed Simple Icons artwork; false leaves the full name width available.

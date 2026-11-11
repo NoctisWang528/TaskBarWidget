@@ -93,6 +93,7 @@ public sealed partial class SettingsWindow
         AutomationProperties.SetAutomationId(page.Devices, "peripheral-battery-devices");
         devices.Children.Add(page.Devices);
         var extensions = Section("可选支持");
+        Toggle(extensions, "airPodsAdvertisementEnabled", "AirPods 广播电量（估算）", "约10%一档；附近同型号设备可能混淆。");
         Toggle(extensions, "headsetControlEnabled", "启用 HeadsetControl", "为支持的耳机读取电量。");
         Toggle(extensions, "vendorExtensionsEnabled", "使用已安装的厂商服务");
         ToolTipService.SetToolTip(page.Options["vendorExtensionsEnabled"], "读取厂商服务提供的电量。");

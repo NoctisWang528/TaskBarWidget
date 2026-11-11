@@ -70,7 +70,7 @@ limits = {
 }
 common = "同时匹配接口、Usage、报告格式及适用的子设备身份；协议已实现，待实机验证。"
 hardware_evidence = {
-    ("blackshark_v2_hs", "1532:0565"): "2026-11-10 BlackShark V2 HS 2.4：MI3 FF14:1，实际两次关联回复为76%；充电状态未知。",
+    ("blackshark_v2_hs", "1532:0565"): "2026-11-10/11 BlackShark V2 HS 2.4：MI3 FF14:1，实读76%→74%；0020明确区分耳机关机/开机，接收器保留；充电状态未知。",
     ("rog_azoth_x", "0B05:1A85"): "2026-11-10 ROG AZOTH接收器：实际100%、正在充电；稳定USB父设备序列号通过重复发现验证。",
 }
 rows = []
@@ -105,6 +105,8 @@ output = dict(schemaVersion=2, sourceDatabaseVersion=179, hardwareValidated=Fals
               receiverStatusCounts=dict(Counter(row["status"] for row in rows if row["section"] == "wireless_receivers")),
               families=families, devices=rows,
               hardwareChecks=[
+                  dict(name="AirPods Pro 2 USB-C", identity="Bluetooth 004C:2024", source="apple-ble-proximity", hardwareValidated=True,
+                       evidence="2026-11-11：已配对经典蓝牙身份及型号匹配，单一邻近广播候选；左右耳约80%，盒未知。免驱估算按10%档位，不能验证广播归属；双耳非对称、充电及其他型号尚未实机验证。"),
                   dict(name="ROG AZOTH wired + receiver", identity="0B05:1A83 / 0B05:1A85", source="rog_azoth_x", hardwareValidated=True,
                        evidence="2026-11-10：用户切到有线模式并保留接收器；唯一USB父序列号相同，仅呈现一把键盘，保留相同稳定ID；有线100%、正在充电。"),
                   dict(name="Logitech G502 X", identity="046D:C547", source="hidpp20", hardwareValidated=True,
@@ -115,6 +117,8 @@ output = dict(schemaVersion=2, sourceDatabaseVersion=179, hardwareValidated=Fals
                        evidence="2026-11-10：标准180F/2A19首次读取94%，通知订阅成功。"),
               ],
               additionalProviders=[
+                  dict(name="AirPods proximity advertisement (driver-free estimate)", status="implemented",
+                       limit="型号白名单及已连接的配对设备；8秒被动窗口、至少两包，多个同型号候选暂停更新。约10%档位；随机地址按邻近和型号关联，存在误归属限制，可在设置关闭。"),
                   dict(name="Windows properties / BLE BAS / declared standard HID / Windows gamepad battery",
                        status="implemented", limit="仅系统或协议明确的电量字段；档位、估算和多电池分量分别保留。"),
                   dict(name="HID++ / COMPX / Nordic / Razer / ROG / M HUB / Sonix", status="implemented",
