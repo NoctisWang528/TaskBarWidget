@@ -100,6 +100,12 @@ namespace Cards
         std::chrono::steady_clock::time_point lastInteraction{};
         bool resident{ true };
         bool warmupPending{};
+        bool startupWarmup{ true };
+        bool warmupConfigReady{};
+        bool warmupSnapshotReady{};
+        bool startupDataRequested{};
+        ULONGLONG startupWarmupDeadline{};
+        std::vector<std::wstring> startupRequests;
         std::unique_ptr<CardPopup> popup;
         std::wstring popupMenu;
         RECT popupAnchor{};
@@ -225,7 +231,7 @@ namespace Cards
         void DestroyIdleCards();
         void ScheduleWarmup();
         void CancelWarmup();
-        void WarmResidentCards();
+        void WarmHiddenCards();
         void UpdateIdleTimer();
         void RequestInitialState();
         void ApplyConfig(const Config& value);
@@ -606,16 +612,33 @@ namespace Cards
 
     void CardHost::Impl::ScheduleWarmup()
     {
-        if (!window || visible || !resident || shuttingDown || groupMoving || warmupPending) return;
+        if (!window || visible || (!resident && !startupWarmup) || shuttingDown || groupMoving || warmupPending) return;
+        if (!warmupConfigReady || (!diagnosticOffscreen && !warmupSnapshotReady)) return;
         // Coalesce incoming snapshots without postponing work on every update.
         // A hidden group has no animation or continuous frame timer.
         warmupPending = SetTimer(window, WarmupTimer, WarmupMilliseconds, nullptr) != 0;
     }
 
-    void CardHost::Impl::WarmResidentCards()
+    void CardHost::Impl::WarmHiddenCards()
     {
         CancelWarmup();
-        if (visible || !resident || shuttingDown || groupMoving) return;
+        if (visible || (!resident && !startupWarmup) || shuttingDown || groupMoving) return;
+        if (!warmupConfigReady || (!diagnosticOffscreen && !warmupSnapshotReady)) return;
+        if (startupWarmup && !startupDataRequested)
+        {
+            startupDataRequested = true;
+            startupWarmupDeadline = GetTickCount64() + 10000;
+            // Read-only cache preparation: never mark hidden cards visible or refresh weather.
+            if (!diagnosticOffscreen)
+            {
+                auto history = client.Request(L"getTrafficHistory", {}, L"traffic");
+                if (!history.empty()) startupRequests.push_back(std::move(history));
+                if (!resident)
+                    for (auto id : { client.Request(L"getAudio", {}, L"audio"),
+                        client.Request(L"weatherCommand", "{\"operation\":\"status\"}", L"weather") })
+                        if (!id.empty()) startupRequests.push_back(std::move(id));
+            }
+        }
         // On-demand may already have released the shared drawing resources.
         if (!graphics.Ready() && !graphics.Initialize()) return;
         if (!device) { std::wstring error; device = graphics.CreateGraphicsDevice(compositor, error); }
@@ -625,11 +648,24 @@ namespace Cards
             anchor = { entry.left + (entry.right - entry.left) / 2, entry.top };
         CreateCards();
         PlaceGroup(false, false);
+        if (startupWarmup)
+        {
+            if (startupRequests.empty() || GetTickCount64() >= startupWarmupDeadline)
+            {
+                startupWarmup = false;
+                startupRequests.clear();
+                UpdateIdleTimer();
+            }
+            else ScheduleWarmup();
+        }
     }
 
     void CardHost::Impl::DestroyIdleCards()
     {
         if (visible || resident) return;
+        startupWarmup = false;
+        startupRequests.clear();
+        CancelWarmup();
         StopGroupMotion(false);
         groupRestBounds.clear();
         for (auto& [kind, card] : cards)
@@ -645,6 +681,8 @@ namespace Cards
 
     void CardHost::Impl::ShowCards()
     {
+        startupWarmup = false;
+        startupRequests.clear();
         CancelWarmup();
         if (!graphics.Ready())
         {
@@ -670,10 +708,11 @@ namespace Cards
 
     void CardHost::Impl::ApplyConfig(const Config& value)
     {
+        warmupConfigReady = true;
         config = value;
         snapshot.config = value;
         resident = !config.OnDemand();
-        if (!resident) CancelWarmup();
+        if (!resident && !startupWarmup) CancelWarmup();
         UpdateIdleTimer();
         UpdateEnvironment(true);
         if (visible)
@@ -705,7 +744,7 @@ namespace Cards
         {
             config = snapshot.config;
             resident = !config.OnDemand();
-            if (!resident) CancelWarmup();
+            if (!resident && !startupWarmup) CancelWarmup();
             UpdateIdleTimer();
             UpdateEnvironment(true);
         }
@@ -743,6 +782,7 @@ namespace Cards
                 Protocol::Changes changes;
                 if (Protocol::ApplySnapshot(snapshot, message.payloadJson, changes))
                 {
+                    warmupSnapshotReady = true;
                     changed = true;
                     accumulated.config |= changes.config;
                     accumulated.theme |= changes.theme;
@@ -759,6 +799,7 @@ namespace Cards
             else if (message.kind == Protocol::Kind::Reply)
             {
                 const auto reply = Protocol::ParseReply(message);
+                if (std::erase(startupRequests, reply.requestId) != 0) ScheduleWarmup();
                 for (auto iter = pendingSliders.begin(); iter != pendingSliders.end();)
                 {
                     if (iter->second != reply.requestId) { ++iter; continue; }
@@ -816,6 +857,7 @@ namespace Cards
                     Protocol::Changes stateChanges;
                     if (Protocol::ApplySnapshot(snapshot, reply.payloadJson, stateChanges))
                     {
+                        warmupSnapshotReady = true;
                         accumulated.config |= stateChanges.config;
                         accumulated.theme |= stateChanges.theme;
                         accumulated.media |= stateChanges.media;
@@ -847,7 +889,7 @@ namespace Cards
                 // History belongs to the native host and needs no player or
                 // device discovery. Warm its cache once per connection so the
                 // first click can use it instead of starting from an empty grid.
-                else client.Request(L"getTrafficHistory", {}, L"traffic");
+                else if (resident && !startupWarmup) client.Request(L"getTrafficHistory", {}, L"traffic");
             }
             else if (message.kind == Protocol::Kind::Event && message.action == L"shutdown")
             {
@@ -1405,7 +1447,7 @@ namespace Cards
                 {
                     self->OnIdle();
                 }
-                else if (keys == WarmupTimer) self->WarmResidentCards();
+                else if (keys == WarmupTimer) self->WarmHiddenCards();
                 return 0;
             default:
                 return DefWindowProcW(window, message, keys, position);

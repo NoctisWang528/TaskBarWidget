@@ -298,7 +298,7 @@ public sealed partial class SettingsWindow
         motion.Children.Add(frameRate);
         motion.Children.Add(Copy("较高帧率更流畅，也会增加动画期间的资源消耗；实际帧率受屏幕和系统负载影响。系统关闭动画时仍立即显示或隐藏。"));
 
-        var performance = Section("后台资源", "常驻模式在后台准备卡片画面，数据变化时更新，打开更快；按需模式隐藏后停止绘制，10 分钟后释放窗口和绘图缓存。");
+        var performance = Section("后台资源", "程序启动后会静默预加载一次卡片。常驻模式继续在后台更新画面；按需模式完成预加载后停止隐藏绘制，闲置 10 分钟后释放窗口和绘图缓存。");
         var modes = new[] { "Resident", "OnDemand" };
         var mode = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
         mode.Items.Add("常驻（优先速度）");

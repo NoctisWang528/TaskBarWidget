@@ -169,9 +169,10 @@ struct NativeMediaHost::Impl
     bool coverDirty{ true };
     std::uint64_t coverVersion{};
     std::shared_ptr<Cards::CardHost> cards;
-    // Configuration can arrive before the first click; it is cached so the card
-    // thread and its graphics device are created only when cards are opened.
+    // Start hidden cards once configuration and a taskbar owner are available.
+    // A failed background attempt is retried only by an explicit click.
     bool cardConfigReady{};
+    bool cardStartupAttempted{};
     Cards::Config cardConfig;
 
     explicit Impl(HWND hwnd) : owner(hwnd)
@@ -1209,11 +1210,6 @@ struct NativeMediaHost::Impl
             }
             cardConfigReady = true;
             cardConfig = config;
-            if (!cards && !config.OnDemand() && owner)
-            {
-                auto candidate = std::make_shared<Cards::CardHost>();
-                if (candidate->Start(owner, AfxGetInstanceHandle())) cards = std::move(candidate);
-            }
             if (cards) cards->ApplyConfig(config);
         }
         catch (const winrt::hresult_error&) { }
@@ -1346,6 +1342,17 @@ struct NativeMediaHost::Impl
         {
             EnsureTimer(false, false);
             return;
+        }
+        if (cardConfigReady && !cards && !cardStartupAttempted)
+        {
+            cardStartupAttempted = true;
+            auto candidate = std::make_shared<Cards::CardHost>();
+            if (candidate->Start(owner, AfxGetInstanceHandle()))
+            {
+                cards = std::move(candidate);
+                cards->ApplyConfig(cardConfig);
+            }
+            else Log(L"Native card background startup failed.", E_FAIL);
         }
         renderer.SetHost(owner);
         RECT bounds{};
@@ -1596,6 +1603,7 @@ NativeMediaHost::NativeMediaHost(HWND owner)
     }
     m_impl = instance;
     m_impl->owner = owner;
+    if (m_impl->cards) m_impl->cards->SetOwner(owner);
     m_impl->wakeOwner = owner;
     // A fresh host must be able to post its first wake, even when the previous window died
     // with one still pending and the new window reused the same handle.
@@ -1626,8 +1634,7 @@ void NativeMediaHost::ToggleCards(POINT anchor)
     if (!instance) return;
     if (!instance->cards)
     {
-        // The card thread, its compositor and graphics device exist only once the
-        // user actually opens cards.
+        // An early click or a failed background startup uses the same host path.
         instance->cards = std::make_shared<Cards::CardHost>();
         if (!instance->cards->Start(instance->owner, AfxGetInstanceHandle()))
         {

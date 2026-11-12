@@ -10,6 +10,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <dbghelp.h>
+#include <winrt/Windows.Data.Json.h>
 #pragma comment(lib, "dbghelp.lib")
 
 static LONG WINAPI ReportCrash(EXCEPTION_POINTERS* exception)
@@ -116,6 +117,86 @@ static void WaitForCards(Cards::CardHost& host, int count)
         Sleep(10);
     }
     throw std::runtime_error("host toggle did not show/hide the expected offscreen windows");
+}
+
+// A process-local fake backend exercises real IPC without starting Media or the product.
+static void CheckStartupPreloadData()
+{
+    using namespace winrt::Windows::Data::Json;
+    const auto name = L"\\\\.\\pipe\\TaskBarWidgets.Cards." + std::to_wstring(GetCurrentProcessId());
+    struct Pipe
+    {
+        HANDLE handle;
+        ~Pipe() { if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle); }
+    } pipe{ CreateNamedPipeW(name.c_str(), PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_NOWAIT | PIPE_REJECT_REMOTE_CLIENTS,
+        1, 65536, 65536, 0, nullptr) };
+    Require(pipe.handle != INVALID_HANDLE_VALUE, "isolated preload pipe");
+    ConnectNamedPipe(pipe.handle, nullptr);
+    Cards::CardHost host;
+    Require(host.Start(nullptr, GetModuleHandleW(nullptr)), "hidden IPC preload host");
+    Cards::Config config;
+    config.resourceMode = L"OnDemand";
+    for (auto& [id, enabled] : config.enabled) enabled = true;
+    host.ApplyConfig(config);
+    PumpFor(350);
+    Require(ProbeWindows(L"TaskBarWidgetsCardWindow").empty(), "preload must wait for its first snapshot");
+    const auto send = [&](const JsonObject& message)
+    {
+        const auto bytes = winrt::to_string(message.Stringify()) + "\n";
+        DWORD written{};
+        Require(WriteFile(pipe.handle, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr) &&
+            written == bytes.size(), "send fake backend frame");
+    };
+    send(JsonObject::Parse(LR"({"version":1,"type":"command","action":"cardSnapshot","payload":{"quickCards":{"revision":1,"resourceMode":"OnDemand"}}})"));
+    WaitForHiddenCards(4);
+    std::map<std::wstring, std::wstring> requests;
+    std::string incoming;
+    const auto drain = [&]
+    {
+        char bytes[65536]; DWORD read{};
+        while (ReadFile(pipe.handle, bytes, sizeof(bytes), &read, nullptr) && read) incoming.append(bytes, read);
+        for (auto end = incoming.find('\n'); end != std::string::npos; end = incoming.find('\n'))
+        {
+            const auto message = JsonObject::Parse(winrt::to_hstring(incoming.substr(0, end)));
+            incoming.erase(0, end + 1);
+            const auto body = message.GetNamedObject(L"payload");
+            const std::wstring action = body.GetNamedString(L"action").c_str();
+            Require(action != L"subscribeCardLyrics", "preload must not subscribe visible lyrics");
+            if (action == L"weatherCommand")
+                Require(body.GetNamedObject(L"payload").GetNamedString(L"operation") == L"status",
+                    "preload reads weather status without forcing refresh");
+            Require(!requests.contains(action), "startup data is requested only once");
+            requests[action] = message.GetNamedString(L"requestId").c_str();
+        }
+    };
+    const auto deadline = GetTickCount64() + 3000;
+    while (GetTickCount64() < deadline &&
+        !(requests.contains(L"getAudio") && requests.contains(L"getTrafficHistory") && requests.contains(L"weatherCommand")))
+    { PumpFor(20); drain(); }
+    Require(requests.contains(L"getAudio") && requests.contains(L"getTrafficHistory") && requests.contains(L"weatherCommand"),
+        "on-demand startup prepares audio, history and weather");
+    PumpFor(400); // Delayed responses must not activate any card.
+    for (const auto* action : { L"getAudio", L"getTrafficHistory", L"weatherCommand" })
+    {
+        auto reply = JsonObject::Parse(LR"({"version":1,"type":"command","action":"cardReply","success":true,"payload":{}})");
+        reply.Insert(L"requestId", JsonValue::CreateStringValue(requests.at(action)));
+        if (std::wstring(action) == L"weatherCommand") reply.Insert(L"success", JsonValue::CreateBooleanValue(false));
+        send(reply);
+    }
+    PumpFor(350);
+    WaitForHiddenCards(4);
+    const auto hosts = ProbeWindows(L"TaskBarWidgetsCardHost");
+    Require(hosts.size() == 1, "single hidden IPC host");
+    PostMessageW(hosts.front(), WM_TIMER, 0xCD03, 0);
+    WaitForHiddenCards(0);
+    send(JsonObject::Parse(LR"({"version":1,"type":"command","action":"cardSnapshot","payload":{"statusText":"late update"}})"));
+    PumpFor(400);
+    drain();
+    WaitForHiddenCards(0);
+    Require(!host.Visible(), "late snapshots cannot reopen released on-demand cards");
+    host.Stop();
+    std::cout << "Startup preload waits for snapshots, reads data once and stays hidden on late/error replies.\n";
 }
 
 using GroupBounds = std::map<HWND, RECT>;
@@ -1054,6 +1135,7 @@ int wmain(int argc, wchar_t** argv)
                 }
             }
         }
+        CheckStartupPreloadData();
         {
             Cards::CardHost host;
             std::cout << "Checking the card host toggle path...\n";
@@ -1062,8 +1144,19 @@ int wmain(int argc, wchar_t** argv)
             config.resourceMode = L"OnDemand";
             for (auto& [id, enabled] : config.enabled) enabled = true;
             host.ApplyConfig(config);
-            PumpFor(300);
-            Require(ProbeWindows(L"TaskBarWidgetsCardWindow").empty(), "on-demand must not pre-create hidden cards");
+            const auto foreground = GetForegroundWindow();
+            WaitForHiddenCards(4);
+            Require(!host.Visible() && GetForegroundWindow() == foreground, "startup warmup must stay hidden without activation");
+            auto preparedWindows = ProbeWindows(L"TaskBarWidgetsCardWindow");
+            const POINT firstAnchor{ GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN) };
+            host.Toggle(firstAnchor);
+            WaitForCards(host, 4);
+            auto shownWindows = ProbeWindows(L"TaskBarWidgetsCardWindow");
+            std::sort(preparedWindows.begin(), preparedWindows.end());
+            std::sort(shownWindows.begin(), shownWindows.end());
+            Require(preparedWindows == shownWindows, "first open must reuse startup windows");
+            host.Hide(L"preload-test");
+            WaitForCards(host, 0);
             config.resourceMode = L"Resident";
             host.ApplyConfig(config);
             WaitForHiddenCards(4);
@@ -1075,6 +1168,11 @@ int wmain(int argc, wchar_t** argv)
             Require(PostMessageW(hostWindows.front(), WM_TIMER, 0xCD03, 0) != FALSE,
                 "queue idle expiry after the resource-mode command");
             WaitForHiddenCards(0);
+            host.ApplyConfig(config);
+            host.Refresh();
+            PumpFor(400);
+            WaitForHiddenCards(0);
+            Require(!host.Visible(), "on-demand must not repeat startup preload after idle release");
             config.resourceMode = L"Resident";
             host.ApplyConfig(config);
             WaitForHiddenCards(4);
@@ -1095,6 +1193,20 @@ int wmain(int argc, wchar_t** argv)
             reopenedHost.Toggle(anchor);
             WaitForCards(reopenedHost, 4);
             reopenedHost.Stop();
+
+            Cards::CardHost cancelledHost;
+            Require(cancelledHost.Start(nullptr, GetModuleHandleW(nullptr), true), "cancelled preload host bootstrap");
+            config.resourceMode = L"OnDemand";
+            config.enabled[L"weather"] = false;
+            cancelledHost.ApplyConfig(config);
+            WaitForHiddenCards(3);
+            cancelledHost.Stop();
+            Require(ProbeWindows(L"TaskBarWidgetsCardWindow").empty(), "preload shutdown releases hidden windows");
+            Cards::CardHost pendingHost;
+            Require(pendingHost.Start(nullptr, GetModuleHandleW(nullptr), true), "pending preload host bootstrap");
+            pendingHost.ApplyConfig(config);
+            pendingHost.Stop();
+            Require(ProbeWindows(L"TaskBarWidgetsCardWindow").empty(), "shutdown cancels pending warmup timer");
         }
         appRuntime.Reset();
         winrt::uninit_apartment();
