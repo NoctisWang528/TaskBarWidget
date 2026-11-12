@@ -40,6 +40,16 @@ Detach D2D targets before resizing swap chains even when caches retain the conte
 
 ## Builds and validation
 
+### Local delivery through the updater / 本地推包
+
+The entry point is [`scripts/push-local-update.ps1`](scripts/push-local-update.ps1); the command guide and troubleshooting live in [本地调试包推送](docs/更新协议.md#本地调试包推送默认关闭). Read that section when a user asks for 本地更新、传包、推包 or 更新器预留接口. Paths here are relative to the product directory; prepend `TaskBarWidgets/` when working from the repository root.
+
+Use `package-release.ps1` on the intended complete All/Release build, then pass its attachments directory to `push-local-update.ps1 -InstallationDirectory <path> -ReleaseDirectory <path> -EnableDebug`. For an authorized local working-tree candidate, use `-AllowDirtyLocal` during packaging; this grants no commit/push/Release authority. Reuse an already validated build only when its product source still matches. Do not select an unrelated session's build from `artifacts/latest-build.txt`.
+
+The push script resolves the exact running Native process and uses `TaskBarWidgets.UpdateDebug.<native PID>`; it does not install or restart. A `ready` response must not be reported as an installed update. Complete installation through the existing update UI/updater and check the final job state and installed version. Do not use the peer-protected UI pipe from PowerShell, invent a direct-install parameter, force-close the host, or copy over the installation as a routine substitute. Elevation failures require the original user's administrator PowerShell, not relaxed ACLs. `-DisableDebug` disables imports; it is not an undo/install command.
+
+### Build and validation requirements
+
 Use `scripts/build.ps1` for complete hardware Release builds, not Lite-only validation. Run independent .NET builds serially to avoid generated-output races. Default output is `artifacts/builds/yyyyMMdd-HHmmss/`; refuse default-directory collisions. Release versions use the build time as `yymmdd-hhmm`; do not hardcode a past candidate version. Successful packages include build-info.json; only complete successful builds update artifacts/latest-build.txt.
 
 Publish Media/ and UI/ beside the main executable. Media/UI use system-installed x64 .NET 8 Desktop/Core with LatestPatch roll-forward, and shared Windows App Runtime 2.5.1 or compatible later 2.x. Do not bundle Runtime/ or WinUI native framework DLLs. Keep the small bootstrapper, managed projections and VC143 CRT app-local. Native preflight must validate hostfxr framework resolution and actual WinUI bootstrap before normal startup, showing actionable download links without auto-installation. Never modify global environment variables. Product PRI/XBF remain explicit publish inputs, present and hash-identical to generated resources. Validate the actual published product probe rather than a separate resource host.

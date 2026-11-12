@@ -12,6 +12,15 @@ Use `TaskBarWidgets/scripts/build.ps1` for Windows integration builds. Preserve 
 
 Never replace the user's daily installation, change startup registration, or start the normal product without applicable authorization. Keep user configuration and history out of Git and Release packages. Preserve attribution and all upstream licensing requirements.
 
+## Local updates / 本地更新入口
+
+For an authorized local update, start with [本地调试包推送](TaskBarWidgets/docs/更新协议.md#本地调试包推送默认关闭). The existing entry point is **`TaskBarWidgets/scripts/push-local-update.ps1`**, relative to this repository root. Do not rediscover the interface or write a replacement installer when opening a new session.
+
+- Package a complete All/Release build with `TaskBarWidgets/scripts/package-release.ps1`; local uncommitted delivery uses `-AllowDirtyLocal`. Keep the candidate under `TaskBarWidgets/artifacts/`.
+- Push with `-InstallationDirectory <running installation> -ReleaseDirectory <packaged attachments directory> -EnableDebug`. Later pushes can omit `-EnableDebug` while the marker exists. The release directory contains `update.json`, `SHA256SUMS.txt` and the standard compatibility ZIP, not just a build directory or portable ZIP.
+- Match the exact running installation; use PowerShell with the same administrator permissions when the product is elevated. Import success means **verified and ready**, not installed. Installation continues through the existing update UI and updater, including confirmation, normal shutdown, backup and health checks.
+- Prefer this interface for local delivery. Do not use ad hoc file-copy helpers, fabricate updater jobs or bypass IPC checks as the normal update path. Diagnose failures using the linked guide; any manual recovery/replacement must have applicable authorization.
+
 ## Git and releases
 
 The authorized remote is `NoctisWang528/TaskBarWidget`. On 2026-10-16 the user authorized updating documentation, untracking the three original reference trees while keeping local copies, committing/pushing accumulated product changes, generating a product icon, and publishing the first ZIP Release. The user subsequently authorized committing/pushing the weather configuration fix and publishing its new ZIP Release using the build-time version. These requests are not standing authorization for later pushes/releases or changes to repository visibility.

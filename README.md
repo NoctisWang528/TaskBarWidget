@@ -124,6 +124,7 @@ cd TaskBarWidget
 
 - [界面规范](TaskBarWidgets/docs/界面统一方案.md)
 - [进程通信协议](TaskBarWidgets/IPC.md)
+- [本地推包更新：入口、命令与排错](TaskBarWidgets/docs/更新协议.md#本地调试包推送默认关闭)
 - [开发规范](AGENTS.md)
 
 ## 许可证
