@@ -7,7 +7,7 @@ bool BridgePending(const Job &j)
 {
     auto path = j.work / L"bridge-pending.json";
     Safe(path);
-    if (!fs::exists(path))
+    if (!fs::exists(FileApiPath(path)))
         return false;
     auto d = Parse(path, 4096);
     auto v = yyjson_doc_get_root(d.get());
@@ -42,7 +42,7 @@ Job PrepareBridgeStage(const Job &outer)
     Require(sources.count("TaskBarWidgets.exe") && sources.count("TaskBarWidgets.Updater.exe") &&
         sources.at("TaskBarWidgets.exe").hash == sources.at("TaskBarWidgets.Updater.exe").hash,
         "Bridge entry must be the packaged updater");
-    fs::create_directories(next.stage);
+    fs::create_directories(FileApiPath(next.stage));
     for (const auto &file : files)
     {
         Require(LowerA(file.path).rfind("media/upgradepayload/", 0) != 0, "Nested bridge payload is forbidden");
@@ -153,7 +153,7 @@ int BridgeEntry(int count, LPWSTR *argv)
                 ",\"version\":" + Quote(j.version) + "}");
             Require(WaitForSingleObject(oldHelper.h, 30000) == WAIT_OBJECT_0, "Original updater did not finish bridge handoff");
 #ifdef TBW_UPDATER_TEST
-            if (fs::exists(j.work / L"test-bridge-handoff-stop"))
+            if (fs::exists(FileApiPath(j.work / L"test-bridge-handoff-stop")))
                 return 0;
 #endif
         }
@@ -232,7 +232,7 @@ int ContinueBridge(Job j, DWORD bridgePid)
         VerifyStage(next, files);
         Status(j.work, "installing");
         Apply(next, files, t);
-        Require(DeleteFileW((j.work / L"health.json").c_str()), "Cannot clear bridge health state");
+        Require(DeleteFileW(FileApiPath(j.work / L"health.json").c_str()), "Cannot clear bridge health state");
         Status(j.work, "starting");
         auto process = Launch(next, true, &t.launched);
         t.phase = "starting";

@@ -556,7 +556,7 @@ public partial class App : System.Windows.Application
                 _artwork.RetainIcons((state.Sources ?? []).Select(source => source.Id));
                 var sourceItems = (state.Sources ?? []).Select(source =>
                 {
-                    var label = source.Name switch { "QQMusic" => "QQ 音乐", "Netease" => "网易云音乐", "Kugou" => "酷狗音乐", "Douyin" => "抖音", "Browser" => BrowserSourceName(source.Id), _ => source.Name };
+                    var label = MediaSourcePresentation.Label(source);
                     var icon = _media.SourceIcon(source) ?? string.Empty;
                     var item = new Dictionary<string, object?> { ["id"] = source.Id, ["label"] = label };
                     textBytes += Encoding.UTF8.GetByteCount(label);
@@ -622,8 +622,6 @@ public partial class App : System.Windows.Application
             default: throw new ArgumentException("不支持的界面操作。");
         }
     }
-    private static string BrowserSourceName(string id) => id.Contains("msedge", StringComparison.OrdinalIgnoreCase) ? "Microsoft Edge" :
-        id.Contains("chrome", StringComparison.OrdinalIgnoreCase) ? "Google Chrome" : id.Contains("firefox", StringComparison.OrdinalIgnoreCase) ? "Firefox" : "浏览器";
 
     private static bool TryNumber(JsonElement value, string name, out double number)
     {

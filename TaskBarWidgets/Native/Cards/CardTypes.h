@@ -4,6 +4,7 @@
 // the UI thread replaces a whole field and never mutates state another thread
 // still holds.
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -254,6 +255,14 @@ namespace Cards
         bool hasData{ false };
         bool forecastView{ false };
         int forecastOffset{ 0 };
+        int PageSize() const { return forecastView ? 5 : 6; }
+        int PageItemCount() const { return forecastView ? static_cast<int>(forecast.size()) :
+            (std::min)(24, static_cast<int>(hourly.size())); }
+        int ClampOffset(int offset) const
+        {
+            const int last = PageItemCount() ? (PageItemCount() - 1) / PageSize() * PageSize() : 0;
+            return std::clamp(offset / PageSize() * PageSize(), 0, last);
+        }
         std::vector<WeatherHour> hourly;
         std::vector<WeatherForecastDay> forecast;
         std::vector<WeatherAlert> alerts;

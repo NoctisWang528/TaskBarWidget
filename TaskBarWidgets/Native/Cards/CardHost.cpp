@@ -14,6 +14,7 @@ namespace Cards
 {
     namespace
     {
+        constexpr UINT WM_CARD_WHEEL = WM_APP + 0x218;
         constexpr UINT WM_CARD_TASK = WM_APP + 0x211;
         constexpr UINT_PTR IdleTimer = 0xCD03;
         constexpr UINT_PTR WarmupTimer = 0xCD04;
@@ -80,6 +81,8 @@ namespace Cards
         bool started{ false };
         bool diagnosticOffscreen{ false };
         HHOOK mouseHook{};
+        Layout::PageWheel pageWheel;
+        HWND observedWheelTarget{};
         HHOOK keyboardHook{};
         bool shuttingDown{ false };
         bool dark{ true };
@@ -152,6 +155,7 @@ namespace Cards
         void OnHideCards(const std::wstring& reason) override;
         void OnOpenSettings() override;
         void OnLayoutInvalidated() override;
+        void OnPageLayoutChanged() override { if (visible) PlaceGroup(false, false, true); }
         void OnGraphicsFailure(HRESULT result) override
         {
             if (result != D2DERR_RECREATE_TARGET && result != DXGI_ERROR_DEVICE_REMOVED &&
@@ -182,6 +186,50 @@ namespace Cards
         {
             if (!popup || !popup->Visible()) return false;
             popup->Wheel(delta);
+            return true;
+        }
+
+        HWND WheelTarget(POINT point) const
+        {
+            if (!visible) return nullptr;
+            // Do not act through another topmost window that obscures a card.
+            const auto hit = WindowFromPoint(point);
+            if (popup && popup->Contains(point))
+            {
+                DWORD process{};
+                GetWindowThreadProcessId(hit, &process);
+                return process == GetCurrentProcessId() ? window.load() : nullptr;
+            }
+            for (const auto& [kind, card] : cards)
+                if (card->Visible() && hit == card->Handle() &&
+                    (kind == Kind::Weather || kind == Kind::PeripheralBattery)) return hit;
+            return nullptr;
+        }
+
+        void RouteWheel(HWND target, int delta)
+        {
+            if (!visible) { pageWheel.Reset(); return; }
+            const int pages = pageWheel.Consume(target, delta);
+            if (!pages) return;
+            if (target == window.load())
+            {
+                if (!popup || !popup->Visible()) { pageWheel.Reset(); return; }
+                for (int i = 0; i < std::abs(pages); ++i) popup->Wheel(pages > 0 ? -WHEEL_DELTA : WHEEL_DELTA);
+                return;
+            }
+            for (const auto& [kind, card] : cards)
+                if (card->Visible() && card->Handle() == target)
+                {
+                    card->TurnPage(pages);
+                    break;
+                }
+        }
+
+        bool OnWheel(POINT point, int delta) override
+        {
+            // With the scoped hook installed, its posted event is the sole dispatcher.
+            // Native wheel delivery may target the focused HWND instead of the hovered one.
+            if (!mouseHook) RouteWheel(WheelTarget(point), delta);
             return true;
         }
 
@@ -497,7 +545,7 @@ namespace Cards
         for (const auto& [kind, card] : cards)
         {
             if (Layout::AutoHeight(kind))
-                heights[kind] = Paint::MeasureHeight(kind, snapshot, environment, Layout::WidthDip(kind));
+                heights[kind] = Paint::MeasureHeight(kind, snapshot, environment, Layout::WidthDip(kind), card->PeripheralPage());
         }
         const bool updateVisible = snapshot.update.Visible();
         auto visibleConfig = config;
@@ -729,7 +777,8 @@ namespace Cards
         const auto* peripheral = Card(Kind::PeripheralBattery);
         const bool peripheralLayout = changes.peripheralBattery &&
             ((peripheral != nullptr) != (config.IsEnabled(Kind::PeripheralBattery) && snapshot.peripheralBattery.Visible()) ||
-                (peripheral && peripheral->CurrentSnapshot().peripheralBattery.mode != snapshot.peripheralBattery.mode));
+                (peripheral && (peripheral->CurrentSnapshot().peripheralBattery.mode != snapshot.peripheralBattery.mode ||
+                    peripheral->CurrentSnapshot().peripheralBattery.Selected().size() != snapshot.peripheralBattery.Selected().size())));
         for (auto& [kind, card] : cards)
         {
             const bool changed = changes.config || changes.theme || changes.status ||
@@ -1004,6 +1053,22 @@ namespace Cards
         Impl::activeHook = this;
         mouseHook = SetWindowsHookExW(WH_MOUSE_LL, [](int code, WPARAM keys, LPARAM data) -> LRESULT
         {
+            if (code == HC_ACTION && (keys == WM_MOUSEWHEEL || keys == WM_MOUSEMOVE))
+            {
+                auto* self = Impl::activeHook.load();
+                const auto* info = reinterpret_cast<MSLLHOOKSTRUCT*>(data);
+                if (self && self->visible)
+                {
+                    const auto target = self->WheelTarget(info->pt);
+                    if (keys == WM_MOUSEWHEEL || target != self->observedWheelTarget)
+                    {
+                        self->observedWheelTarget = target;
+                        PostMessageW(self->window, WM_CARD_WHEEL,
+                            keys == WM_MOUSEWHEEL ? info->mouseData : 0,
+                            reinterpret_cast<LPARAM>(target));
+                    }
+                }
+            }
             if (code == HC_ACTION && (keys == WM_LBUTTONDOWN || keys == WM_RBUTTONDOWN))
             {
                 auto* self = Impl::activeHook.load();
@@ -1033,6 +1098,8 @@ namespace Cards
     void CardHost::Impl::UninstallHooks()
     {
         Impl::activeHook = nullptr;
+        pageWheel.Reset();
+        observedWheelTarget = nullptr;
         if (mouseHook) { UnhookWindowsHookEx(mouseHook); mouseHook = nullptr; }
         if (keyboardHook) { UnhookWindowsHookEx(keyboardHook); keyboardHook = nullptr; }
     }
@@ -1095,12 +1162,8 @@ namespace Cards
                 if (action.starts_with(L"weatherView:")) { forecast = action == L"weatherView:forecast"; offset = 0; }
                 else
                 {
-                    const int count = static_cast<int>(forecast ? weather.forecast.size() : weather.hourly.size());
-                    const int page = forecast ? 5 : 6;
-                    const int last = count ? ((count - 1) / page) * page : 0;
-                    offset = std::clamp(offset / page * page, 0, last);
-                    offset = std::clamp(offset + (action == L"weatherPage:next" ? page : -page),
-                        0, last);
+                    offset = weather.ClampOffset(weather.ClampOffset(offset) +
+                        (action == L"weatherPage:next" ? weather.PageSize() : -weather.PageSize()));
                 }
                 card->SetWeatherView(forecast, offset);
             }
@@ -1338,6 +1401,7 @@ namespace Cards
             popup.reset();
             return;
         }
+        popup->SetWheelHandler([this](POINT point, int delta) { return OnWheel(point, delta); });
         popup->SetActivation([this]
         {
             auto command = std::make_unique<Command>();
@@ -1427,6 +1491,9 @@ namespace Cards
             {
             case WM_CARD_PIPE_WAKE:
                 self->OnPipeMessages();
+                return 0;
+            case WM_CARD_WHEEL:
+                self->RouteWheel(reinterpret_cast<HWND>(position), GET_WHEEL_DELTA_WPARAM(keys));
                 return 0;
             case WM_CARD_TASK:
                 self->OnTask();

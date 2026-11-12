@@ -83,15 +83,17 @@ void TestMediaRedraw(Cards::CardEnvironment environment)
     {
         MediaServices weatherServices;
         CardWindow weather(Kind::Weather, weatherServices);
-        weather.SetWeatherView(true, 2);
         Snapshot update;
         update.weather.city = L"Fixture city";
+        update.weather.forecast.resize(7);
         weather.SetSnapshot(update);
-        Require(weather.CurrentSnapshot().weather.forecastView && weather.CurrentSnapshot().weather.forecastOffset == 2,
+        weather.SetWeatherView(true, 5);
+        weather.SetSnapshot(update);
+        Require(weather.CurrentSnapshot().weather.forecastView && weather.CurrentSnapshot().weather.forecastOffset == 5,
             "weather updates preserve the selected view and page");
         weather.SetWeatherView(false);
         Require(!weather.CurrentSnapshot().weather.forecastView && weather.CurrentSnapshot().weather.forecastOffset == 0,
-            "today view resets the forecast page");
+            "hourly view resets the forecast page");
     }
     environment.reducedMotion = false;
     environment.highContrast = false;

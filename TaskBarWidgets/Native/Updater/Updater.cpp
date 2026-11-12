@@ -71,11 +71,19 @@ bool Under(const fs::path &child, const fs::path &root)
         r += L'\\';
     return Lower(child.wstring()).rfind(r, 0) == 0;
 }
+std::wstring FileApiPath(const fs::path &p)
+{
+    // Keep ordinary paths in validation/journals; only Win32 file APIs need the
+    // extended spelling. Do not depend on the machine's long-path policy.
+    Require(p.is_absolute() && p.root_name().wstring().size() == 2,
+        "Only local absolute paths are allowed");
+    return L"\\\\?\\" + p.lexically_normal().make_preferred().wstring();
+}
 void Safe(const fs::path &p)
 {
     for (auto q = p; !q.empty(); q = q.parent_path())
     {
-        DWORD a = GetFileAttributesW(q.c_str());
+        DWORD a = GetFileAttributesW(FileApiPath(q).c_str());
         if (a == INVALID_FILE_ATTRIBUTES)
             Require(GetLastError() == ERROR_FILE_NOT_FOUND || GetLastError() == ERROR_PATH_NOT_FOUND,
                     "Cannot inspect filesystem path");
@@ -230,7 +238,7 @@ std::string Read(const fs::path &p, size_t max = 4 * 1024 * 1024)
     Safe(p);
     // Readers of atomic journal/status snapshots must allow rename while holding
     // the old file open. A bridge polls the legacy helper's journal during launch.
-    Handle f(CreateFileW(p.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
+    Handle f(CreateFileW(FileApiPath(p).c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
     Require(f.h != INVALID_HANDLE_VALUE, "Cannot read JSON");
     LARGE_INTEGER size{};
@@ -274,7 +282,7 @@ bool HashString(const std::string &s)
 std::string Sha(const fs::path &p)
 {
     Safe(p);
-    Handle f(CreateFileW(p.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN,
+    Handle f(CreateFileW(FileApiPath(p).c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN,
                          nullptr));
     Require(f.h != INVALID_HANDLE_VALUE, "Cannot hash file");
     BCRYPT_ALG_HANDLE alg{};
@@ -324,7 +332,7 @@ bool CommitRename(const fs::path &source, const fs::path &target)
     // only sharing/lock errors, bounded to one second; never force a file closed.
     for (unsigned attempt = 0; ; ++attempt)
     {
-        if (MoveFileExW(source.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        if (MoveFileExW(FileApiPath(source).c_str(), FileApiPath(target).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
             return true;
         auto error = GetLastError();
         if (attempt == 40 || (error != ERROR_SHARING_VIOLATION && error != ERROR_LOCK_VIOLATION && error != ERROR_ACCESS_DENIED))
@@ -341,7 +349,7 @@ void Atomic(const fs::path &path, const std::string &data)
     auto temp = path;
     temp += L".tmp";
     Safe(temp);
-    Handle h(CreateFileW(temp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
+    Handle h(CreateFileW(FileApiPath(temp).c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
     Require(h.h != INVALID_HANDLE_VALUE, "Cannot write transaction state");
     DWORD n = 0;
     Require(WriteFile(h.h, data.data(), (DWORD)data.size(), &n, nullptr) && n == data.size() && FlushFileBuffers(h.h),
@@ -403,7 +411,7 @@ Job LoadJob(const fs::path &p, bool bridgeEntry = false)
     j.work = Absolute(String(v, "workRoot"));
     j.data = Absolute(String(v, "dataRoot"));
     Require(Equal(p.parent_path(), j.work), "Job directory must equal workRoot");
-    Require(fs::is_directory(j.install) && fs::is_directory(j.stage) && fs::is_directory(j.work),
+    Require(fs::is_directory(FileApiPath(j.install)) && fs::is_directory(FileApiPath(j.stage)) && fs::is_directory(FileApiPath(j.work)),
             "Missing transaction directory");
     Require(!Equal(j.install, j.stage) && !Under(j.stage, j.install) && !Under(j.install, j.stage) &&
                 !Equal(j.install, j.work) && !Under(j.work, j.install) && !Under(j.install, j.work) &&
@@ -498,14 +506,14 @@ void VerifyStage(const Job &j, const std::vector<File> &files)
     for (auto &f : files)
     {
         auto p = Child(j.stage, f.path, true);
-        Require(fs::is_regular_file(p) && fs::file_size(p) == f.bytes && Sha(p) == f.hash,
+        Require(fs::is_regular_file(FileApiPath(p)) && fs::file_size(FileApiPath(p)) == f.bytes && Sha(p) == f.hash,
                 "Staged file hash/size mismatch");
         listed.insert(Lower(Wide(f.path)));
     }
     for (auto &e : fs::recursive_directory_iterator(j.stage))
     {
         Safe(e.path());
-        if (e.is_regular_file())
+        if (fs::is_regular_file(FileApiPath(e.path())))
             Require(listed.count(Lower(e.path().lexically_relative(j.stage).generic_wstring())) != 0,
                     "Unlisted staged file");
         else
@@ -530,7 +538,7 @@ void Dependencies(const Job &j)
     {
         bool compatible = false;
         auto root = SystemDotnetRoot() / L"shared" / framework;
-        Require(fs::is_directory(root), "Shared .NET framework missing");
+        Require(fs::is_directory(FileApiPath(root)), "Shared .NET framework missing");
         for (auto &entry : fs::directory_iterator(root))
         {
             auto version = ParseVersion(entry.path().filename().wstring());
@@ -622,7 +630,7 @@ void NotCancelled(const Job &j)
 {
     auto request = j.work / L"cancel.request";
     Safe(request);
-    Require(!fs::exists(request), "Update was cancelled before installation");
+    Require(!fs::exists(FileApiPath(request)), "Update was cancelled before installation");
 }
 bool ApprovedExit(const Job &j, std::vector<Handle> &old)
 {
@@ -632,7 +640,7 @@ bool ApprovedExit(const Job &j, std::vector<Handle> &old)
         NotCancelled(j);
         auto signal = j.work / L"shutdown-approved.json";
         Safe(signal);
-        if (fs::exists(signal))
+        if (fs::exists(FileApiPath(signal)))
         {
             try
             {
@@ -675,9 +683,9 @@ std::vector<Handle> Running(const Job &j)
 void ProbeWrite(const fs::path &root)
 {
     Safe(root);
-    fs::create_directories(root);
+    fs::create_directories(FileApiPath(root));
     auto p = root / L".tbw-update-write-probe";
-    Handle h(CreateFileW(p.c_str(), GENERIC_WRITE | DELETE, 0, nullptr, CREATE_NEW,
+    Handle h(CreateFileW(FileApiPath(p).c_str(), GENERIC_WRITE | DELETE, 0, nullptr, CREATE_NEW,
                          FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, nullptr));
     Require(h.h != INVALID_HANDLE_VALUE, "Directory is not writable");
 }
@@ -685,9 +693,14 @@ void Copy(const fs::path &source, const fs::path &target)
 {
     Safe(source);
     Safe(target);
-    fs::create_directories(target.parent_path());
-    Require(CopyFileW(source.c_str(), target.c_str(), FALSE), "Cannot copy backup/program file");
-    Handle h(CreateFileW(target.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
+    fs::create_directories(FileApiPath(target.parent_path()));
+    if (!CopyFileW(FileApiPath(source).c_str(), FileApiPath(target).c_str(), FALSE))
+    {
+        const auto error = GetLastError();
+        throw Failure("Cannot copy backup/program file " + Utf8(target.filename().wstring()) +
+            " (Win32 " + std::to_string(error) + ")");
+    }
+    Handle h(CreateFileW(FileApiPath(target).c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
                          nullptr));
     Require(h.h != INVALID_HANDLE_VALUE && FlushFileBuffers(h.h), "Cannot flush backup/program file");
 }
@@ -695,13 +708,13 @@ void Replace(const fs::path &source, const fs::path &target, const std::string &
 {
     auto temp = target;
     temp += L".tbw-update-tmp";
-    Require(!fs::exists(temp), "Pending replacement file exists");
+    Require(!fs::exists(FileApiPath(temp)), "Pending replacement file exists");
     Copy(source, temp);
     Require(Sha(temp) == LowerA(expectedHash), "Replacement changed after verification");
     if (!CommitRename(temp, target))
     {
         const auto error = GetLastError();
-        DeleteFileW(temp.c_str());
+        DeleteFileW(FileApiPath(temp).c_str());
         throw Failure("Cannot atomically replace program file " + Utf8(target.filename().wstring()) +
             " (Win32 " + std::to_string(error) + ")");
     }
@@ -731,14 +744,14 @@ bool MediaPersonal(const std::string &rel)
 std::vector<std::string> DataFiles(const fs::path &root, bool media)
 {
     std::vector<std::string> out;
-    if (!fs::exists(root))
+    if (!fs::exists(FileApiPath(root)))
         return out;
     Safe(root);
     for (auto &e : fs::recursive_directory_iterator(root))
     {
         Safe(e.path());
         auto rel = Utf8(e.path().lexically_relative(root).generic_wstring());
-        if (e.is_regular_file() && (media ? MediaPersonal(rel) : NativePersonal(rel)))
+        if (fs::is_regular_file(FileApiPath(e.path())) && (media ? MediaPersonal(rel) : NativePersonal(rel)))
         {
             Relative(rel);
             Require(out.size() < 8192, "Too many personal files");
@@ -845,10 +858,10 @@ void Snapshot(const Job &j, Journal &t, const std::string &group, const std::str
     Saved s{group, rel, "", false};
     ValidSaved(s);
     auto from = Child(Base(j, group), rel);
-    s.existed = fs::exists(from);
+    s.existed = fs::exists(FileApiPath(from));
     if (s.existed)
     {
-        Require(fs::is_regular_file(from), "Backup source is not a file");
+        Require(fs::is_regular_file(FileApiPath(from)), "Backup source is not a file");
         auto to = Child(j.work / L"backup" / Wide(group), rel);
         Copy(from, to);
         s.hash = Sha(to);
@@ -861,7 +874,7 @@ std::map<std::wstring, std::string> ProgramPaths(const Job &j, const std::vector
 {
     std::map<std::wstring, std::string> paths = {{L"app-files.json", "app-files.json"}};
     auto add = [&](const std::string &path) { paths.emplace(Lower(Wide(path)), path); };
-    if (fs::exists(j.install / L"app-files.json"))
+    if (fs::exists(FileApiPath(j.install / L"app-files.json")))
     {
         for (auto &f : Manifest(j.install / L"app-files.json"))
             add(f.path);
@@ -874,7 +887,7 @@ std::map<std::wstring, std::string> ProgramPaths(const Job &j, const std::vector
 }
 Journal Backup(const Job &j, const std::vector<File> &next)
 {
-    Require(!fs::exists(j.work / L"journal.json") && !fs::exists(j.work / L"backup"),
+    Require(!fs::exists(FileApiPath(j.work / L"journal.json")) && !fs::exists(FileApiPath(j.work / L"backup")),
             "Existing transaction requires recovery");
     auto paths = ProgramPaths(j, next);
     Journal t;
@@ -898,10 +911,10 @@ void SpaceAndPermissions(const Job &j, const std::vector<File> &files)
     for (auto &entry : ProgramPaths(j, files))
     {
         auto file = Child(j.install, entry.second);
-        if (fs::exists(file))
+        if (fs::exists(FileApiPath(file)))
         {
-            Require(fs::is_regular_file(file), "Managed backup source is not a file");
-            auto bytes = fs::file_size(file);
+            Require(fs::is_regular_file(FileApiPath(file)), "Managed backup source is not a file");
+            auto bytes = fs::file_size(FileApiPath(file));
             Require(bytes <= 2ull * 1024 * 1024 * 1024 && need <= UINT64_MAX - bytes,
                     "Managed backup exceeds limits");
             need += bytes;
@@ -909,7 +922,7 @@ void SpaceAndPermissions(const Job &j, const std::vector<File> &files)
     }
     for (auto pair : {std::make_pair(j.data, false), std::make_pair(j.data, true)})
         for (auto &p : DataFiles(pair.first, pair.second))
-            need += fs::file_size(Child(pair.first, p));
+            need += fs::file_size(FileApiPath(Child(pair.first, p)));
     ULARGE_INTEGER avail{};
     Require(GetDiskFreeSpaceExW(j.work.c_str(), &avail, nullptr, nullptr) && avail.QuadPart > need,
             "Insufficient backup space");
@@ -924,9 +937,9 @@ void UnlockedTargets(const Job &j, const Journal &t)
     for (auto &s : t.saved)
     {
         auto p = Child(Base(j, s.group), s.path);
-        if (fs::exists(p))
+        if (fs::exists(FileApiPath(p)))
         {
-            Handle h(CreateFileW(p.c_str(), GENERIC_READ | DELETE,
+            Handle h(CreateFileW(FileApiPath(p).c_str(), GENERIC_READ | DELETE,
                                  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
                                  FILE_ATTRIBUTE_NORMAL, nullptr));
             Require(h.h != INVALID_HANDLE_VALUE, "A transaction file is locked");
@@ -944,8 +957,8 @@ void Apply(const Job &j, const std::vector<File> &files, Journal &t)
         if (s.group == "program" && s.path != "app-files.json" && !next.count(Lower(Wide(s.path))))
         {
             auto p = Child(j.install, s.path, true);
-            if (fs::exists(p))
-                Require(DeleteFileW(p.c_str()), "Cannot remove retired program file");
+            if (fs::exists(FileApiPath(p)))
+                Require(DeleteFileW(FileApiPath(p).c_str()), "Cannot remove retired program file");
             SaveJournal(j, t);
         }
     for (auto &f : files)
@@ -954,7 +967,7 @@ void Apply(const Job &j, const std::vector<File> &files, Journal &t)
             Replace(Child(j.stage, f.path, true), Child(j.install, f.path, true), f.hash);
             SaveJournal(j, t);
 #ifdef TBW_UPDATER_TEST
-            if (fs::exists(j.work / L"test-interrupt") || (t.bridge && fs::exists(j.work / L"test-bridge-interrupt")))
+            if (fs::exists(FileApiPath(j.work / L"test-interrupt")) || (t.bridge && fs::exists(FileApiPath(j.work / L"test-bridge-interrupt"))))
                 ExitProcess(91);
 #endif
         }
@@ -993,7 +1006,7 @@ bool Healthy(const Job &j, HANDLE process)
     {
         if (WaitForSingleObject(process, 0) == WAIT_OBJECT_0)
             return false;
-        if (fs::exists(j.work / L"health.json"))
+        if (fs::exists(FileApiPath(j.work / L"health.json")))
         {
             try
             {
@@ -1047,8 +1060,8 @@ void Rollback(const Job &j, Journal &t)
         auto temp = Child(Base(j, s.group), s.path);
         temp += L".tbw-update-tmp";
         Safe(temp);
-        if (fs::exists(temp))
-            Require(fs::is_regular_file(temp) && DeleteFileW(temp.c_str()),
+        if (fs::exists(FileApiPath(temp)))
+            Require(fs::is_regular_file(FileApiPath(temp)) && DeleteFileW(FileApiPath(temp).c_str()),
                     "Cannot clear interrupted temporary replacement");
     }
     // Remove newly created settings and database sidecars, then restore the frozen snapshot.
@@ -1058,7 +1071,7 @@ void Rollback(const Job &j, Journal &t)
             auto it = std::find_if(t.saved.begin(), t.saved.end(),
                                    [&](auto &s) { return s.group == group && s.path == rel; });
             if (it == t.saved.end())
-                Require(DeleteFileW(Child(Base(j, group), rel).c_str()), "Cannot remove new user data during rollback");
+                Require(DeleteFileW(FileApiPath(Child(Base(j, group), rel)).c_str()), "Cannot remove new user data during rollback");
         }
     for (auto &s : t.saved)
     {
@@ -1067,8 +1080,8 @@ void Rollback(const Job &j, Journal &t)
         auto target = Child(Base(j, s.group), s.path);
         if (s.existed)
             Replace(Child(j.work / L"backup" / Wide(s.group), s.path), target, s.hash);
-        else if (fs::exists(target))
-            Require(DeleteFileW(target.c_str()), "Cannot remove newly installed file");
+        else if (fs::exists(FileApiPath(target)))
+            Require(DeleteFileW(FileApiPath(target).c_str()), "Cannot remove newly installed file");
         SaveJournal(j, t);
     }
     for (auto &s : t.saved)
@@ -1090,7 +1103,7 @@ void RestartOld(const Job &j, Handle &lock)
 }
 void FinishIntactTransaction(const Job &j)
 {
-    if (!fs::exists(j.work / L"journal.json"))
+    if (!fs::exists(FileApiPath(j.work / L"journal.json")))
         return;
     auto journal = ReadJournal(j);
     Require(journal.phase == "backingUp" || journal.phase == "prepared", "Transaction already changed the application");
@@ -1143,7 +1156,7 @@ void RotateOlderBackups(const Job &j)
                 continue;
             auto backup = entry.path() / L"backup";
             Safe(backup);
-            if (!fs::is_directory(backup))
+            if (!fs::is_directory(FileApiPath(backup)))
                 continue;
             std::set<std::wstring> allowed;
             for (auto &saved : journal.saved)
@@ -1222,7 +1235,7 @@ int Run(const Job &j, bool recover)
         }
     }
     auto old = OldProcesses(j);
-    Require(!fs::exists(j.work / L"journal.json"), "Transaction already exists; use recovery");
+    Require(!fs::exists(FileApiPath(j.work / L"journal.json")), "Transaction already exists; use recovery");
     NotCancelled(j);
     auto files = Manifest(j.stage / L"app-files.json", j.version);
     VerifyStage(j, files);
@@ -1249,8 +1262,8 @@ int Run(const Job &j, bool recover)
         Status(j.work, "installing");
         Apply(j, files, t);
         Status(j.work, "starting");
-        if (fs::exists(j.work / L"health.json"))
-            Require(DeleteFileW((j.work / L"health.json").c_str()), "Cannot clear stale health state");
+        if (fs::exists(FileApiPath(j.work / L"health.json")))
+            Require(DeleteFileW(FileApiPath((j.work / L"health.json")).c_str()), "Cannot clear stale health state");
         auto next = Launch(j, true, &t.launched);
         t.phase = "starting";
         SaveJournal(j, t);

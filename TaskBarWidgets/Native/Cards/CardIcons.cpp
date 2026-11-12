@@ -31,6 +31,94 @@ namespace Cards
             return cache;
         }
 
+        struct SystemGlyph
+        {
+            ComPtr<IDWriteFontFace> face;
+            UINT16 index{};
+            DWRITE_GLYPH_METRICS metrics{};
+            UINT16 unitsPerEm{};
+        };
+
+        struct SystemGlyphCache
+        {
+            bool initialized{};
+            ComPtr<IDWriteFactory> factory;
+            SystemGlyph glyphs[5];
+        };
+
+        SystemGlyphCache& ControlGlyphCache()
+        {
+            static thread_local SystemGlyphCache cache;
+            return cache;
+        }
+
+        const SystemGlyph* FindSystemGlyph(Glyph glyph)
+        {
+            int slot;
+            switch (glyph)
+            {
+            case Glyph::Speaker: slot = 0; break;
+            case Glyph::SpeakerMuted: slot = 1; break;
+            case Glyph::Microphone: slot = 2; break;
+            case Glyph::MicrophoneMuted: slot = 3; break;
+            case Glyph::Settings: slot = 4; break;
+            default: return nullptr;
+            }
+
+            auto& cache = ControlGlyphCache();
+            if (!cache.initialized)
+            {
+                // Resolve installed faces explicitly; never substitute a text font.
+                // Cache missing glyphs too, until shared graphics teardown.
+                cache.initialized = true;
+                ComPtr<IDWriteFontCollection> collection;
+                if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+                    reinterpret_cast<IUnknown**>(cache.factory.GetAddressOf()))) ||
+                    FAILED(cache.factory->GetSystemFontCollection(collection.GetAddressOf())))
+                    return nullptr;
+
+                // Microsoft Fluent/MDL2 tables: Volume, Mute, Microphone, MicOff, Settings.
+                const UINT32 codePoints[] = { 0xE767, 0xE74F, 0xE720, 0xEC54, 0xE713 };
+                for (const auto familyName : { L"Segoe Fluent Icons", L"Segoe MDL2 Assets" })
+                {
+                    UINT32 familyIndex{};
+                    BOOL exists{};
+                    ComPtr<IDWriteFontFamily> family;
+                    ComPtr<IDWriteFont> font;
+                    ComPtr<IDWriteFontFace> face;
+                    if (FAILED(collection->FindFamilyName(familyName, &familyIndex, &exists)) || !exists ||
+                        FAILED(collection->GetFontFamily(familyIndex, family.GetAddressOf())) ||
+                        FAILED(family->GetFirstMatchingFont(DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+                            DWRITE_FONT_STYLE_NORMAL, font.GetAddressOf())) ||
+                        FAILED(font->CreateFontFace(face.GetAddressOf())))
+                        continue;
+                    DWRITE_FONT_METRICS fontMetrics{};
+                    face->GetMetrics(&fontMetrics);
+                    if (!fontMetrics.designUnitsPerEm) continue;
+                    for (int index = 0; index < 5; ++index)
+                    {
+                        auto& entry = cache.glyphs[index];
+                        if (entry.face) continue;
+                        UINT16 glyphIndex{};
+                        DWRITE_GLYPH_METRICS metrics{};
+                        if (FAILED(face->GetGlyphIndices(&codePoints[index], 1, &glyphIndex)) || !glyphIndex ||
+                            FAILED(face->GetDesignGlyphMetrics(&glyphIndex, 1, &metrics)) ||
+                            static_cast<INT64>(metrics.advanceWidth) <=
+                                static_cast<INT64>(metrics.leftSideBearing) + metrics.rightSideBearing ||
+                            static_cast<INT64>(metrics.advanceHeight) <=
+                                static_cast<INT64>(metrics.topSideBearing) + metrics.bottomSideBearing)
+                            continue;
+                        entry.face = face;
+                        entry.index = glyphIndex;
+                        entry.metrics = metrics;
+                        entry.unitsPerEm = fontMetrics.designUnitsPerEm;
+                    }
+                }
+            }
+            const auto& entry = cache.glyphs[slot];
+            return entry.face ? &entry : nullptr;
+        }
+
         // Geometry and stroke styles must belong to the caller's D2D factory.
         ComPtr<ID2D1Factory> IconFactory(ID2D1DeviceContext* context)
         {
@@ -463,6 +551,26 @@ namespace Cards
     void DrawGlyph(ID2D1DeviceContext* context, Glyph glyph, Color color, float left, float top, float size)
     {
         if (!context || size <= 0.0f) return;
+        if (const auto systemGlyph = FindSystemGlyph(glyph))
+        {
+            const auto brush = Solid(context, color);
+            if (!brush) return;
+            const auto& metrics = systemGlyph->metrics;
+            const float xMin = static_cast<float>(metrics.leftSideBearing);
+            const float xMax = static_cast<float>(metrics.advanceWidth) - metrics.rightSideBearing;
+            const float yMin = static_cast<float>(metrics.topSideBearing) - metrics.verticalOriginY;
+            const float yMax = static_cast<float>(metrics.advanceHeight) - metrics.bottomSideBearing - metrics.verticalOriginY;
+            const float scale = size / (std::max)(static_cast<float>(systemGlyph->unitsPerEm),
+                (std::max)(xMax - xMin, yMax - yMin));
+            const float advance = metrics.advanceWidth * scale;
+            const DWRITE_GLYPH_OFFSET offset{};
+            const DWRITE_GLYPH_RUN run{ systemGlyph->face.Get(), systemGlyph->unitsPerEm * scale,
+                1, &systemGlyph->index, &advance, &offset, FALSE, 0 };
+            // Center visible ink rather than the asymmetric font baseline box.
+            context->DrawGlyphRun(D2D1::Point2F(left + size * 0.5f - (xMin + xMax) * scale * 0.5f,
+                top + size * 0.5f - (yMin + yMax) * scale * 0.5f), &run, brush.Get(), DWRITE_MEASURING_MODE_NATURAL);
+            return;
+        }
         D2D1_MATRIX_3X2_F previous{};
         context->GetTransform(&previous);
         const float scale = size / 20.0f;
@@ -629,6 +737,7 @@ namespace Cards
     void ClearPeripheralBrandCache()
     {
         PeripheralBrandCache() = {};
+        ControlGlyphCache() = {};
     }
 
     bool DrawPeripheralBrand(ID2D1DeviceContext* context, PeripheralBrand brand,

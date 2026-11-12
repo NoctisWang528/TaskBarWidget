@@ -7,6 +7,14 @@ namespace TaskbarLyrics.App;
 
 internal static class AppIconExtractor
 {
+    private static readonly Lazy<string> DefaultIcon = new(() =>
+    {
+        using var bitmap = SystemIcons.Application.ToBitmap();
+        return TryEncodePng(bitmap) is { } png ? CustomPlayerIcon.ToPngDataUrl(png) : string.Empty;
+    });
+
+    internal static string DefaultApplicationDataUrl => DefaultIcon.Value;
+
     internal static readonly int[] CandidateSizes = [512, 256, 192, 128, 96, 72, 64, 48, 32, 24, 16];
 
     private static readonly int[] ShellItemImageFlags =

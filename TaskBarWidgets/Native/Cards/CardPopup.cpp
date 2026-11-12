@@ -45,6 +45,7 @@ namespace Cards
         CardEnvironment environment{};
         std::wstring menu;
         std::function<void()> activate;
+        std::function<bool(POINT, int)> wheelHandler;
         std::vector<Layout::Region> items;
         int selected{ -1 };
         int hot{ -1 };
@@ -300,6 +301,8 @@ namespace Cards
                 if (message == WM_CANCELMODE && GetCapture() == window) ReleaseCapture();
                 return 0;
             case WM_MOUSEWHEEL:
+                if (self->wheelHandler && self->wheelHandler({GET_X_LPARAM(position), GET_Y_LPARAM(position)},
+                    GET_WHEEL_DELTA_WPARAM(keys))) return 0;
                 self->firstVisible = (std::max)(0, (std::min)(
                     static_cast<int>(self->items.size()) - self->VisibleRows(),
                     self->firstVisible + (GET_WHEEL_DELTA_WPARAM(keys) > 0 ? -1 : 1)));
@@ -512,6 +515,7 @@ namespace Cards
     const std::vector<Layout::Region>& CardPopup::Items() const { return impl->items; }
 
     void CardPopup::SetActivation(std::function<void()> callback) { impl->activate = std::move(callback); }
+    void CardPopup::SetWheelHandler(std::function<bool(POINT, int)> callback) { impl->wheelHandler = std::move(callback); }
 
     void CardPopup::Wheel(int delta)
     {

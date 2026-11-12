@@ -36,6 +36,23 @@ namespace Cards
         constexpr float CornerRadius{ 8.0f };
         constexpr float EdgeReserve{ 20.0f };
 
+        // Each hovered surface owns its partial wheel detent; leaving it drops the remainder.
+        struct PageWheel
+        {
+            HWND target{};
+            int remainder{};
+            int Consume(HWND hovered, int delta)
+            {
+                if (target != hovered) { target = hovered; remainder = 0; }
+                if (!target) return 0;
+                remainder += delta;
+                const int pages = remainder / WHEEL_DELTA;
+                remainder %= WHEEL_DELTA;
+                return -pages;
+            }
+            void Reset() { target = nullptr; remainder = 0; }
+        };
+
         float DefaultHeightDip(Kind kind);
         bool AutoHeight(Kind kind);
         float WidthDip(Kind kind);

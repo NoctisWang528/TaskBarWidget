@@ -57,6 +57,7 @@ namespace Cards
         // Invoked when the user clicks an item; the host reads Selected() and
         // turns it into a command.
         void SetActivation(std::function<void()> callback);
+        void SetWheelHandler(std::function<bool(POINT, int)> callback);
 
     private:
         struct Impl;

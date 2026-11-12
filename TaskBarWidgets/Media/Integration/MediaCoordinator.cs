@@ -27,7 +27,7 @@ internal sealed class MediaCoordinator : IDisposable
     private readonly CancellationTokenSource _stop = new();
     private readonly MediaPresentationState _presentation = new();
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
-    private readonly ConcurrentDictionary<string, Task<string>> _sourceIcons =
+    private readonly ConcurrentDictionary<string, (Task<string> Icon, DateTimeOffset RetryAfter)> _sourceIcons =
         new(StringComparer.OrdinalIgnoreCase);
 
     private LocalMediaCoverProvider? _localCover;
@@ -170,30 +170,30 @@ internal sealed class MediaCoordinator : IDisposable
 
     internal string SourceIcon(MediaSourceChoice source)
     {
-        if (!_sourceIcons.TryGetValue(source.Id, out var pending))
+        if (!_sourceIcons.TryGetValue(source.Id, out var entry) ||
+            (entry.Icon.IsCompleted && (!entry.Icon.IsCompletedSuccessfully || entry.Icon.Result.Length == 0) &&
+             _utcNow() >= entry.RetryAfter))
         {
             if (_sourceIcons.Count >= 64) _sourceIcons.Clear();
-            var settings = _settings.Clone();
-            pending = Task.Run(() =>
+            var pending = Task.Run(() =>
             {
                 try
                 {
-                    // Never borrow the icon of a different, currently audible application.
-                    var icon = PlayerIconResolver.ResolveDataUrl(
-                        source.Id,
-                        allowActiveSessionFallback: false);
-                    return icon.Length > 0
-                        ? icon
-                        : PlayerSourceBadgeResolver.Resolve(source.Name, settings).IconDataUri;
+                    // Resolve only this source; another audible app or a browser page
+                    // title must never supply its icon.
+                    return PlayerIconResolver.ResolveDataUrl(source.Id, allowActiveSessionFallback: false);
                 }
-                catch
-                {
-                    return "";
-                }
+                catch { return string.Empty; }
             });
-            _sourceIcons[source.Id] = pending;
+            entry = (pending, _utcNow().AddSeconds(30));
+            _sourceIcons[source.Id] = entry;
+            _ = pending.ContinueWith(_ =>
+            {
+                OnProviderInvalidated();
+            }, CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default);
         }
-        return pending.IsCompletedSuccessfully ? pending.Result : "";
+        return entry.Icon.IsCompletedSuccessfully && entry.Icon.Result.Length > 0
+            ? entry.Icon.Result : AppIconExtractor.DefaultApplicationDataUrl;
     }
 
     internal static bool IsBrowser(TrackInfo? track) =>
@@ -512,9 +512,14 @@ internal sealed class MediaCoordinator : IDisposable
             lyricsService.CurrentLyricAcquisition);
         var capabilities = Provider.GetControlCapabilities();
         var sources = Provider.GetSourceChoices();
+        var source = sources.FirstOrDefault(item => string.Equals(item.Id, snapshot.SourceAppUserModelId,
+            StringComparison.OrdinalIgnoreCase)) ?? new MediaSourceChoice(snapshot.SourceAppUserModelId,
+                NonLyricsMediaPolicy.IsDouyin(snapshot) ? "抖音" : snapshot.Track?.SourceApp ?? "");
+        var displayArtist = snapshot.Track is null ? ""
+            : MediaSourcePresentation.Artist(snapshot.Track.Artist, source);
         ControlState = new MediaControlState(
             snapshot.Track?.Title ?? "没有媒体",
-            snapshot.Track?.Artist ?? "",
+            displayArtist,
             NonLyricsMediaPolicy.IsDouyin(snapshot)
                 ? "抖音"
                 : snapshot.Track?.SourceApp ?? "",
@@ -536,7 +541,7 @@ internal sealed class MediaCoordinator : IDisposable
         var browser = new MediaBrowserFrame(
             isBrowser,
             snapshot.Track?.Title ?? "",
-            snapshot.Track?.Artist ?? "",
+            displayArtist,
             NonLyricsMediaPolicy.IsDouyin(snapshot)
                 ? "抖音"
                 : snapshot.SourceAppUserModelId,
@@ -868,7 +873,7 @@ internal sealed class MediaCoordinator : IDisposable
         if (_disposed) return;
         _disposed = true;
         Provider.Invalidated -= OnProviderInvalidated;
-        foreach (var sourceIcon in _sourceIcons.Values.Where(task => !task.IsCompleted))
+        foreach (var sourceIcon in _sourceIcons.Values.Select(entry => entry.Icon).Where(task => !task.IsCompleted))
         {
             _ = sourceIcon.ContinueWith(
                 static task => _ = task.Exception,

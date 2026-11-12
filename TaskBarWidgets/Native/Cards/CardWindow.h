@@ -44,6 +44,8 @@ namespace Cards
         virtual bool IsMenuExpanded(const std::wstring&) const { return false; }
         virtual bool OnMenuKey(UINT) { return false; }
         virtual bool OnMenuWheel(int) { return false; }
+        virtual bool OnWheel(POINT, int) { return false; }
+        virtual void OnPageLayoutChanged() { OnLayoutInvalidated(); }
     };
 
     struct CardEnvironment
@@ -84,6 +86,8 @@ namespace Cards
         void CommitGroupBounds(const RECT& bounds);
         void SetWeatherView(bool forecast, int offset = 0);
         void SetPeripheralPage(int page);
+        void TurnPage(int direction);
+        bool PageTransitionRunning() const;
         int PeripheralPage() const { return peripheralPage; }
         void Show(bool animate);
         void Hide(bool animate);
@@ -119,6 +123,7 @@ namespace Cards
         // Advances dynamic content/hover; show/hide runs on the compositor.
         bool Tick();
         void OnMotionCompleted(UINT_PTR generation);
+        void OnPageMotionCompleted(UINT_PTR generation);
 
         const Snapshot& CurrentSnapshot() const { return snapshot; }
         const CardEnvironment& Environment() const { return environment; }
@@ -141,8 +146,11 @@ namespace Cards
         void BuildVisualTree(HINSTANCE instance);
         void UpdateTimer();
         void PaintContent(bool rebuildRegions);
-        void AnimatePeripheralContent(float direction = 0);
-        void ResetPeripheralAnimation();
+        bool HasPageContent() const;
+        D2D1_RECT_F PageContentBounds() const;
+        void CapturePage();
+        void AnimatePageContent(float direction);
+        void ResetPageAnimation();
         bool UpdatePeripheralNames(const std::vector<Paint::PeripheralName>& names);
         void SetPeripheralNamesRunning(bool running);
         void ClearPeripheralNames();
@@ -251,6 +259,6 @@ namespace Cards
 
         // Auto-height measurement for the weather and device cards.
         float MeasureHeight(Kind kind, const Snapshot& snapshot, const CardEnvironment& environment,
-            float widthDip);
+            float widthDip, int peripheralPage = 0);
     }
 }

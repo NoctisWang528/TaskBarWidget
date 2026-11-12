@@ -407,6 +407,94 @@ void TestCardSurfaceIsolation(Cards::Graphics& graphics,
     winrt::Windows::UI::Composition::Compositor const& compositor,
     winrt::Windows::UI::Composition::CompositionGraphicsDevice const& device);
 
+static void CheckCardPaging(Cards::CardEnvironment environment)
+{
+    using namespace Cards;
+    const auto first = reinterpret_cast<HWND>(1), second = reinterpret_cast<HWND>(2);
+    Layout::PageWheel wheel;
+    Require(wheel.Consume(first, -40) == 0 && wheel.Consume(first, -40) == 0 &&
+        wheel.Consume(first, -40) == 1, "high resolution wheel accumulates one page per detent");
+    Require(wheel.Consume(first, -60) == 0 && wheel.Consume(second, -60) == 0 &&
+        wheel.Consume(second, -60) == 1, "wheel remainder never leaks across hovered cards");
+    wheel.Consume(second, -60); wheel.Consume(nullptr, 0);
+    Require(wheel.Consume(second, -60) == 0, "leaving a card resets partial detents");
+    wheel.Reset();
+    Require(wheel.Consume(first, 240) == -2, "wheel direction and multiple detents");
+
+    Snapshot fixture;
+    fixture.peripheralBattery.mode = L"detailed";
+    for (int count = 1; count <= 5; ++count)
+    {
+        PeripheralDevice device;
+        device.id = std::to_wstring(count); device.name = L"Synthetic device " + device.id;
+        device.kind = L"mouse"; device.state = L"online"; device.canRead = device.showInCard = true;
+        device.batteries.push_back({L"main", count * 10, L"", false, false});
+        fixture.peripheralBattery.devices.push_back(device);
+        Require(Paint::MeasureHeight(Kind::PeripheralBattery, fixture, environment, 384) ==
+            88 + std::min(count, 4) * 50, "detailed height follows visible row count");
+    }
+    Require(Paint::MeasureHeight(Kind::PeripheralBattery, fixture, environment, 384, 1) == 138,
+        "five-device last page has no three-row blank space");
+    struct PageServices : Services
+    {
+        CardWindow* card{};
+        void OnPageLayoutChanged() override
+        {
+            auto bounds = card->Bounds();
+            bounds.bottom = bounds.top + static_cast<LONG>(Paint::MeasureHeight(card->CardKind(),
+                card->CurrentSnapshot(), card->Environment(), 384, card->PeripheralPage()));
+            card->PrepareGroupReflow(bounds, 1);
+            card->CommitGroupBounds(bounds);
+            card->Place(bounds, 1);
+        }
+    } services;
+    environment.reducedMotion = false; environment.highContrast = false;
+    const LONG x = GetSystemMetrics(SM_XVIRTUALSCREEN) - 1200;
+    const LONG y = GetSystemMetrics(SM_YVIRTUALSCREEN) - 1200;
+    CardWindow peripheral(Kind::PeripheralBattery, services); services.card = &peripheral;
+    Require(peripheral.Create(environment, GetModuleHandleW(nullptr)), "create paging peripheral");
+    peripheral.SetSnapshot(fixture); peripheral.Place({x, y, x + 384, y + 288}, 1); peripheral.Show(false);
+    peripheral.TurnPage(1);
+    Require(peripheral.PeripheralPage() == 1 && peripheral.MeasuredHeightDip() == 138 &&
+        peripheral.PageTransitionRunning(), "tail page resizes and starts Composition transition");
+    for (const auto& region : peripheral.Regions().All())
+        Require(region.bounds.bottom <= 138, "tail-page controls stay inside compact height");
+    peripheral.TurnPage(-1); peripheral.TurnPage(1);
+    const auto paints = peripheral.ContentPaintCount();
+    Require(PumpFor(260, peripheral.Handle()) == 0 && !peripheral.PageTransitionRunning() &&
+        peripheral.ContentPaintCount() == paints, "rapid reverse paging completes without frame repaint timers");
+    peripheral.TurnPage(1);
+    Require(!peripheral.PageTransitionRunning(), "last-page wheel is a no-op");
+    fixture.peripheralBattery.devices.resize(2); peripheral.SetSnapshot(fixture); services.OnPageLayoutChanged();
+    Require(peripheral.PeripheralPage() == 0 && peripheral.MeasuredHeightDip() == 188,
+        "removing tail devices clamps page and height");
+    peripheral.Hide(false);
+
+    fixture.weather.city = L"Test city"; fixture.weather.temperature = L"23"; fixture.weather.hasData = true;
+    fixture.weather.hourly.resize(30); fixture.weather.forecast.resize(7);
+    CardWindow weather(Kind::Weather, services); services.card = &weather;
+    Require(weather.Create(environment, GetModuleHandleW(nullptr)), "create paging weather");
+    weather.SetSnapshot(fixture); weather.Place({x, y, x + 384, y + 388}, 1); weather.Show(false);
+    Require(weather.Regions().Find(404)->name == L"小时" && weather.Regions().Find(405)->name == L"多日",
+        "weather tabs expose the updated accessible labels");
+    weather.TurnPage(99);
+    Require(weather.CurrentSnapshot().weather.forecastOffset == 18 && !weather.Regions().Find(407)->enabled,
+        "hourly paging shares the 24-hour painter limit");
+    weather.SetWeatherView(true);
+    Require(weather.PageTransitionRunning() && weather.CurrentSnapshot().weather.forecastOffset == 0,
+        "view change starts animation at first page");
+    weather.TurnPage(1);
+    Require(weather.CurrentSnapshot().weather.forecastOffset == 5, "daily pages contain five days");
+    fixture.weather.forecast.resize(1); weather.SetSnapshot(fixture);
+    Require(weather.CurrentSnapshot().weather.forecastOffset == 0, "weather refresh clamps page to available data");
+    environment.reducedMotion = true; weather.ApplyEnvironment(environment); weather.SetWeatherView(false);
+    Require(!weather.PageTransitionRunning(), "reduced motion disables page transitions");
+    environment.reducedMotion = false; weather.ApplyEnvironment(environment); weather.TurnPage(1);
+    weather.Hide(false);
+    Require(!weather.PageTransitionRunning(), "hide releases outgoing page animation");
+    std::cout << "Card page layout, wheel detents, weather limits and interruptible transitions passed.\n";
+}
+
 static void CheckPeripheralBattery(Cards::CardEnvironment environment)
 {
     using namespace Cards;
@@ -860,6 +948,7 @@ int wmain(int argc, wchar_t** argv)
             Cards::CardEnvironment environment;
             environment.graphics = &graphics; environment.compositor = compositor; environment.device = device;
             environment.reducedMotion = true;
+            CheckCardPaging(environment);
             CheckPeripheralBattery(environment);
             CheckCardMotion(environment, snapshot);
             TestMediaRedraw(environment);

@@ -6,6 +6,8 @@
 #include <winrt/Windows.Graphics.Capture.h>
 #include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 
@@ -149,6 +151,26 @@ namespace
         return changed;
     }
 
+    void SavePagePreview(Cards::CardWindow& card, const std::vector<uint8_t>& pixels, const wchar_t* name)
+    {
+        const auto bounds = card.Bounds();
+        const LONG width = bounds.right - bounds.left - 24, height = bounds.bottom - bounds.top - 24;
+        const auto folder = std::filesystem::current_path().parent_path().parent_path() / L"previews" /
+            (L"paging-" + std::filesystem::current_path().filename().wstring());
+        std::filesystem::create_directories(folder);
+        BITMAPFILEHEADER file{};
+        file.bfType = 0x4D42; file.bfOffBits = sizeof(file) + sizeof(BITMAPINFOHEADER);
+        file.bfSize = file.bfOffBits + static_cast<DWORD>(pixels.size());
+        BITMAPINFOHEADER info{};
+        info.biSize = sizeof(info); info.biWidth = width; info.biHeight = -height;
+        info.biPlanes = 1; info.biBitCount = 32; info.biCompression = BI_RGB;
+        std::ofstream output(folder / name, std::ios::binary);
+        output.write(reinterpret_cast<const char*>(&file), sizeof(file));
+        output.write(reinterpret_cast<const char*>(&info), sizeof(info));
+        output.write(reinterpret_cast<const char*>(pixels.data()), pixels.size());
+        RequireIsolation(bool(output), "save committed page preview");
+    }
+
     struct IsolationServices : Cards::CardHostServices
     {
         HRESULT failure{ S_OK };
@@ -280,6 +302,25 @@ void TestCardSurfaceIsolation(Cards::Graphics& graphics,
         peripheralPixels = updatedPeripheral;
         RequireIsolation(SUCCEEDED(services.failure), "diagnostic card reported a graphics failure");
     }
+    environment.reducedMotion = false;
+    peripheral.ApplyEnvironment(environment);
+    peripheral.SetPeripheralPage(0);
+    WaitIsolation([&] { return !peripheral.PageTransitionRunning(); }, "initial page transition did not complete");
+    const auto beforePage = capture.Pixels(peripheral, compositor);
+    peripheral.TurnPage(1);
+    RequireIsolation(peripheral.PageTransitionRunning(), "paging did not start a compositor transition");
+    WaitIsolation([&] { return !peripheral.PageTransitionRunning(); }, "page transition did not complete");
+    const auto afterPage = capture.Pixels(peripheral, compositor);
+    RequireIsolation(ChangedPixels(beforePage, afterPage) > 128, "committed page body did not change");
+    RequireIsolation(std::memcmp(beforePage.data(), afterPage.data(), size_t(384 - 24) * (44 - 12) * 4) == 0,
+        "paging changed stationary header pixels");
+    SavePagePreview(peripheral, afterPage, L"peripheral-compact-tail.bmp");
+    snapshot.peripheralBattery.mode = L"detailed";
+    peripheral.SetSnapshot(snapshot); peripheral.SetPeripheralPage(1);
+    peripheral.Place({x, y - 320, x + 384, y - 182}, 1);
+    WaitIsolation([&] { return !peripheral.PageTransitionRunning(); }, "tail resize transition did not complete");
+    SavePagePreview(peripheral, capture.Pixels(peripheral, compositor), L"peripheral-one-row.bmp");
+    std::cout << "Committed paging changes list pixels while retaining the header; isolated previews exported.\n";
     std::cout << "Committed card pixel isolation passed; allocation-churn nonzero offsets=" << nonzeroOffsets
         << " (does not prove the two card surfaces shared an atlas texture).\n";
 }

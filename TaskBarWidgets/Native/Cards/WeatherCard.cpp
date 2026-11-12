@@ -297,10 +297,10 @@ namespace Cards::Paint
         button(401, cityRect, L"openWeatherSettings", L"打开天气设置", true);
         text(HasValue(ShownCity(weather)) ? ShownCity(weather) : L"设置天气城市", left, 20,
             cityRect.right - left - 4, 24, 14, 600, palette.primary);
-        button(404, Draw::Rect(tabsLeft, 16, tabsLeft + 44, 44), L"weatherView:today", L"今天", true, !weather.forecastView);
-        button(405, Draw::Rect(tabsLeft + 44, 16, tabsLeft + 88, 44), L"weatherView:forecast", L"预报", true, weather.forecastView);
-        text(L"今天", tabsLeft, 22, 44, 18, 11, 600, palette.primary, DWRITE_TEXT_ALIGNMENT_CENTER);
-        text(L"预报", tabsLeft + 44, 22, 44, 18, 11, 600, palette.primary, DWRITE_TEXT_ALIGNMENT_CENTER);
+        button(404, Draw::Rect(tabsLeft, 16, tabsLeft + 44, 44), L"weatherView:today", L"小时", true, !weather.forecastView);
+        button(405, Draw::Rect(tabsLeft + 44, 16, tabsLeft + 88, 44), L"weatherView:forecast", L"多日", true, weather.forecastView);
+        text(L"小时", tabsLeft, 22, 44, 18, 11, 600, palette.primary, DWRITE_TEXT_ALIGNMENT_CENTER);
+        text(L"多日", tabsLeft + 44, 22, 44, 18, 11, 600, palette.primary, DWRITE_TEXT_ALIGNMENT_CENTER);
         const auto refreshRect = Draw::Rect(right - 28, 16, right, 44);
         button(400, refreshRect, L"refreshWeather", L"刷新天气", !weather.updating);
         DrawGlyph(context, Glyph::Refresh, WithAlpha(palette.primary, weather.updating ? 0.4f : 0.9f),
@@ -406,8 +406,8 @@ namespace Cards::Paint
             DWRITE_TEXT_ALIGNMENT_CENTER);
 
         // The lower panel reserves the same geometry in both views, on every page.
-        const size_t pageSize = weather.forecastView ? DayPageSize : HourPageSize;
-        const size_t count = weather.forecastView ? weather.forecast.size() : std::min<size_t>(24, weather.hourly.size());
+        const size_t pageSize = weather.PageSize();
+        const size_t count = weather.PageItemCount();
         const size_t start = PageStart(weather.forecastOffset, count, pageSize);
         const auto page = count ? std::to_wstring(start / pageSize + 1) + L" / " +
             std::to_wstring((count + pageSize - 1) / pageSize) : L"";

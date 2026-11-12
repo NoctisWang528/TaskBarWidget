@@ -132,24 +132,12 @@ internal sealed class CardSnapshotBuilder
             ["sources"] = (state.Sources ?? []).Select(source => new Dictionary<string, object?>
             {
                 ["id"] = source.Id,
-                ["label"] = Label(source),
+                ["label"] = MediaSourcePresentation.Label(source),
                 ["iconDataUrl"] = media.SourceIcon(source),
             }).ToArray(),
             ["selectedSourceId"] = state.SelectedSourceId,
         };
     }
-
-    private static string Label(MediaSourceChoice source) => source.Name switch
-    {
-        "QQMusic" => "QQ 音乐",
-        "Netease" => "网易云音乐",
-        "Kugou" => "酷狗音乐",
-        "Douyin" => "抖音",
-        "Browser" => source.Id.Contains("msedge", StringComparison.OrdinalIgnoreCase) ? "Microsoft Edge"
-            : source.Id.Contains("chrome", StringComparison.OrdinalIgnoreCase) ? "Google Chrome"
-            : source.Id.Contains("firefox", StringComparison.OrdinalIgnoreCase) ? "Firefox" : "浏览器",
-        _ => source.Name,
-    };
 
     // The card front-end consumes the same renderVersion 2 frame the WinUI card
     // did; it never re-queries or re-matches lyrics.

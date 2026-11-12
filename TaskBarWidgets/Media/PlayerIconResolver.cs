@@ -39,10 +39,9 @@ internal static class PlayerIconResolver
     internal static string ToShellItemPath(string userModelId) => ShellAppsFolderPrefix + userModelId.Trim();
 
     private static string TryResolveDataUrl(string userModelId) =>
-        TryResolvePackagedIcon(userModelId)
-        ?? TryResolveRunningProcessIcon(userModelId)
+        TryResolveRunningProcessIcon(userModelId)
+        ?? TryResolveShellIcon(userModelId)
         ?? TryResolveRegisteredAppIcon(userModelId)
-        ?? TryResolveWindowTitleIcon(userModelId)
         ?? string.Empty;
 
     private static string? TryResolveActiveAudioSessionIcon()
@@ -55,13 +54,8 @@ internal static class PlayerIconResolver
         return AppIconExtractor.ExtractExecutablePng(executablePath) is { } png ? CustomPlayerIcon.ToPngDataUrl(png) : null;
     }
 
-    private static string? TryResolvePackagedIcon(string userModelId)
+    private static string? TryResolveShellIcon(string userModelId)
     {
-        if (!IsPackagedUserModelId(userModelId))
-        {
-            return null;
-        }
-
         return AppIconExtractor.ExtractShellItemPng(ToShellItemPath(userModelId)) is { } png ? CustomPlayerIcon.ToPngDataUrl(png) : null;
     }
 
@@ -86,13 +80,4 @@ internal static class PlayerIconResolver
         return AppIconExtractor.ExtractShellItemPng(ToShellItemPath(registeredUserModelId)) is { } png ? CustomPlayerIcon.ToPngDataUrl(png) : null;
     }
 
-    private static string? TryResolveWindowTitleIcon(string userModelId)
-    {
-        if (ProcessExecutablePathResolver.TryResolveByWindowTitle(userModelId) is not { } executablePath)
-        {
-            return null;
-        }
-
-        return AppIconExtractor.ExtractExecutablePng(executablePath) is { } png ? CustomPlayerIcon.ToPngDataUrl(png) : null;
-    }
 }

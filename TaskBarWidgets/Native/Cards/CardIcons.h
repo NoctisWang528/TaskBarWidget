@@ -1,6 +1,6 @@
 ﻿#pragma once
-// Weather/control vector artwork, ported 1:1 from the WinUI cards so the native
-// front-end shows the same symbols and control glyphs with no packaged assets.
+// Weather/control artwork with system-font audio/settings icons and vector
+// fallbacks. No fonts or artwork are packaged for these symbols.
 //
 // Weather symbols live in a 128x128 DIP design space; control glyphs in a 20x20
 // space that is scaled into a 16 DIP box. Nothing here animates: state is only
@@ -74,7 +74,8 @@ namespace Cards
     void DrawWeatherSymbol(ID2D1DeviceContext* context, Symbol symbol, bool night,
         const WeatherPalette& palette, float left, float top, float size);
 
-    // Draws a control glyph into `size` DIP at (left, top).
+    // Draws a control glyph into `size` DIP at (left, top). Audio/settings prefer
+    // installed Segoe Fluent Icons, then Segoe MDL2 Assets, then vector artwork.
     void DrawGlyph(ID2D1DeviceContext* context, Glyph glyph, Color color, float left, float top, float size);
     void DrawPeripheralIcon(ID2D1DeviceContext* context, const std::wstring& kind,
         Color color, float left, float top, float size);
@@ -86,6 +87,7 @@ namespace Cards
     bool DrawPeripheralBrand(ID2D1DeviceContext* context, PeripheralBrand brand,
         Color color, float left, float top, float size);
     // Called on the rendering thread by the shared graphics teardown, before
-    // releasing its device. Safe when unused or already cleared.
+    // releasing its device. Also clears the thread-local system glyph/font cache.
+    // Safe when unused or already cleared.
     void ClearPeripheralBrandCache();
 }

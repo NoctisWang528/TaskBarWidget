@@ -54,6 +54,13 @@ function New-Case([string]$Name) {
     Write-Json (Join-Path $work 'shutdown-approved.json') @{nonce=$job.nonce}
     return @{install=$install;stage=$stage;work=$work;data=$data;job=$job;path=$path}
 }
+function Start-FixtureHost([string]$Executable, [string]$Signal) {
+    # Fixtures are asInvoker: never let ShellExecute request elevation.
+    $start=[Diagnostics.ProcessStartInfo]::new($Executable)
+    $start.UseShellExecute=$false;$start.CreateNoWindow=$true
+    $start.ArgumentList.Add('--wait-for-exit');$start.ArgumentList.Add($Signal)
+    return [Diagnostics.Process]::Start($start)
+}
 function Invoke-Case($Case,[switch]$Recover,[scriptblock]$OnReady,[switch]$BridgeRecovery) {
     $verb=if($Recover){'--recover'}else{'--job'}
     $helperName=if($BridgeRecovery){'BridgeRecovery.exe'}else{'TaskBarWidgets.Updater.exe'}
@@ -92,7 +99,7 @@ try {
     foreach($entry in @(@('nativePid','TaskBarWidgets.exe'),@('mediaPid','Media/TaskBarWidgets.Media.exe'),@('uiPid','UI/TaskBarWidgets.UI.exe'))) {
         $target=Join-Path $case.install $entry[1]
         if($entry[0] -ne 'nativePid') { Copy-Item -LiteralPath $fake -Destination $target }
-        $hostProcess=Start-Process -FilePath $target -ArgumentList @('--wait-for-exit',('"'+$signal+'"')) -WindowStyle Hidden -PassThru
+        $hostProcess=Start-FixtureHost $target $signal
         $hosts+=$hostProcess
         $case.job[$entry[0]]=$hostProcess.Id
     }
@@ -110,7 +117,7 @@ New-Item -ItemType Directory -Path $foreignRoot -Force|Out-Null
 $foreignExe=Join-Path $foreignRoot 'TaskBarWidgets.Media.exe'
 Copy-Item -LiteralPath $fake -Destination $foreignExe
 $signal=Join-Path $case.work 'foreign-exit.signal'
-$foreign=Start-Process -FilePath $foreignExe -ArgumentList @('--wait-for-exit',('"'+$signal+'"')) -WindowStyle Hidden -PassThru
+$foreign=Start-FixtureHost $foreignExe $signal
 try {
     $case.job.mediaPid=$foreign.Id;Write-Json $case.path $case.job
     $status=Invoke-Case $case
@@ -211,7 +218,7 @@ Assert-Original $case
 Check ((Get-Content (Join-Path $case.work 'journal.json') -Raw|ConvertFrom-Json).phase -eq 'rolledBack') 'Intact abort journal must be terminal before old restart.'
 Write-Host 'PASS post-exit backup failure preserves state and restarts intact old host'
 $case=New-Case 'no-exit';$signal=Join-Path $case.work 'fixture-exit.signal'
-$old=Start-Process -FilePath (Join-Path $case.install 'TaskBarWidgets.exe') -ArgumentList @('--wait-for-exit',('"'+$signal+'"')) -WindowStyle Hidden -PassThru
+$old=Start-FixtureHost (Join-Path $case.install 'TaskBarWidgets.exe') $signal
 try {
     $case.job.nativePid=$old.Id;Write-Json $case.path $case.job;$status=Invoke-Case $case
     Check ($status.phase -eq 'error' -and -not $old.HasExited) 'Old-process timeout did not leave process running.';Assert-Original $case
@@ -261,8 +268,8 @@ function Write-Inventory([string]$Directory, [string]$Version) {
     })
     Write-Json (Join-Path $Directory 'app-files.json') @{protocolVersion=1;version=$Version;architecture='win-x64';files=$files}
 }
-function New-BridgeCase([string]$Name, [string]$LegacyDirectory, [string]$Problem) {
-    $case=New-Case $Name
+function New-BridgeCase([string]$CaseName, [string]$LegacyDirectory, [string]$Problem) {
+    $case=New-Case $CaseName
     $final=Join-Path (Split-Path $case.install) 'final'
     New-Item -ItemType Directory -Path $final -Force | Out-Null
     foreach($name in @('TaskBarWidgets.exe','OpenHardwareMonitorApi.dll')) { Copy-Item -LiteralPath (Join-Path $case.stage $name) -Destination (Join-Path $final $name) }
@@ -277,6 +284,12 @@ function New-BridgeCase([string]$Name, [string]$LegacyDirectory, [string]$Proble
             $path=Join-Path $final $name;New-Item -ItemType Directory -Path (Split-Path $path) -Force | Out-Null
             Copy-Item -LiteralPath (Join-Path $LegacyDirectory $name) -Destination $path
         }
+    }
+    if ($CaseName.StartsWith('bridge-long-cache-path')) {
+        $license = Join-Path $final ('licenses/managed/' + ('long-license-' * 8) + 'NOTICE.txt')
+        New-Item -ItemType Directory -Path (Split-Path $license) -Force | Out-Null
+        [IO.File]::WriteAllText($license, 'long path license fixture')
+        Check (($license + '.tbw-update-tmp').Length -gt 260) 'Long-path fixture must exceed MAX_PATH.'
     }
     Write-Inventory $final $case.job.version
     $payload=Join-Path $case.stage 'Media/UpgradePayload'
@@ -332,6 +345,21 @@ $null=Invoke-Case $case
 $null=Wait-Bridge $case 'complete'
 Assert-BridgeSuccess $case
 Write-Host 'PASS bridge automatically continues to ROOT layout with one original backup'
+$case=New-BridgeCase 'bridge-long-cache-path' '' ''
+$null=Invoke-Case $case
+$null=Wait-Bridge $case 'complete'
+Assert-BridgeSuccess $case
+$license=Get-ChildItem (Join-Path $case.final 'licenses/managed') -File | Select-Object -First 1
+$installedLicense=Join-Path $case.install ('licenses/managed/' + $license.Name)
+Check ((Get-FileHash -LiteralPath $installedLicense).Hash -eq (Get-FileHash -LiteralPath $license.FullName).Hash) 'Long-path license was not installed intact.'
+Write-Host 'PASS bridge installs long cache paths beyond MAX_PATH'
+$case=New-BridgeCase 'bridge-long-cache-path-rollback' '' ''
+[IO.File]::WriteAllText((Join-Path $case.work 'test-mode.txt'),'fail-data')
+$null=Invoke-Case $case
+$null=Wait-Bridge $case 'rolledBack'
+Assert-Original $case
+Check (-not (Test-Path -LiteralPath (Join-Path $case.install ('licenses/managed/' + $license.Name)))) 'Long-path license survived rollback.'
+Write-Host 'PASS long-path bridge rollback removes newly installed files'
 foreach($problem in @('protected','inner-hash')) {
     $case=New-BridgeCase ('bridge-'+$problem) '' $problem
     $status=Invoke-Case $case

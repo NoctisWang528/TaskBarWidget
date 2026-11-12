@@ -61,8 +61,7 @@ namespace
         environment.highContrast = highContrast;
         environment.reducedMotion = reducedMotion;
         const float width = Layout::WidthDip(kind);
-        const float height = std::max(Layout::DefaultHeightDip(kind),
-            Paint::MeasureHeight(kind, snapshot, environment, width));
+        const float height = Paint::MeasureHeight(kind, snapshot, environment, width, peripheralPage);
         Frame frame;
         frame.kind = kind;
         frame.width = static_cast<UINT>(std::ceil(width * scale));
@@ -595,9 +594,11 @@ namespace
                 const auto frame = render(snapshot, page);
                 const int count = std::min(snapshot.peripheralBattery.PageSize(), 7 - page * snapshot.peripheralBattery.PageSize());
                 Require(frame.regions.All().size() == size_t(4 + count), label + ": page reading count");
+                const float pageHeight = snapshot.peripheralBattery.mode == L"detailed" ? 88.f + count * 50 : 184.f;
+                Require(frame.height == UINT(std::ceil(pageHeight * scale)), label + ": tail page shrinks to actual rows");
                 for (const auto& region : frame.regions.All())
                     Require(region.bounds.left >= 0 && region.bounds.top >= 0 &&
-                        region.bounds.right <= 384 && region.bounds.bottom <= (snapshot.peripheralBattery.mode == L"detailed" ? 288 : 184),
+                        region.bounds.right <= 384 && region.bounds.bottom <= pageHeight,
                         label + ": fixed page geometry");
             }
             auto zero = snapshot; zero.peripheralBattery.devices[0].batteries[0].percentage = 0;
@@ -714,6 +715,42 @@ void WritePeripheralPreviews(Cards::Graphics& graphics, const wchar_t* directory
                 std::to_wstring(percent) + (reducedMotion ? L"-reduced-motion.png" : L"-normal-motion.png"));
             WritePng(graphics, reducedMotion ? reduced : normal, path, scale);
             ++written;
+        }
+    }
+    for (bool dark : {false, true})
+    {
+        const std::wstring theme = dark ? L"dark" : L"light";
+        auto rows = snapshot;
+        rows.peripheralBattery.mode = L"detailed";
+        for (int count = 4; count >= 1; --count)
+        {
+            rows.peripheralBattery.devices.resize(count);
+            const auto frame = Render(graphics, Kind::PeripheralBattery, rows, dark, 1, {});
+            Require(frame.height == 88 + count * 50, "preview height follows actual device rows");
+            WritePng(graphics, frame, folder / (L"rows-" + std::to_wstring(count) + L"-" + theme + L".png"), 1);
+        }
+        auto controls = Fixture();
+        controls.weather.forecastView = false;
+        for (int hour = 12; hour < 18; ++hour)
+            controls.weather.hourly.push_back({L"2026-11-12T" + std::to_wstring(hour) + L":00:00+08:00",
+                std::to_wstring(hour + 10), L"cloudy", L"0", L"10"});
+        for (Kind kind : {Kind::Weather, Kind::Device, Kind::Media})
+        {
+            WritePng(graphics, Render(graphics, kind, controls, dark, 1.5f, {}),
+                folder / (std::wstring(IdOf(kind)) + L"-" + theme + L".png"), 1.5f);
+            if (kind == Kind::Device)
+            {
+                for (auto& endpoint : controls.audio.inputs) endpoint.isMuted = true;
+                for (auto& endpoint : controls.audio.outputs) endpoint.isMuted = true;
+                WritePng(graphics, Render(graphics, kind, controls, dark, 1.5f, {}),
+                    folder / (L"device-muted-" + theme + L".png"), 1.5f);
+            }
+            if (kind == Kind::Weather)
+            {
+                controls.weather.forecastView = true;
+                WritePng(graphics, Render(graphics, kind, controls, dark, 1.5f, {}),
+                    folder / (L"weather-multiday-" + theme + L".png"), 1.5f);
+            }
         }
     }
     // The card STA survives on-demand idle teardown. Releasing and recreating

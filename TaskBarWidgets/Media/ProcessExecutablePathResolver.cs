@@ -47,13 +47,21 @@ internal static class ProcessExecutablePathResolver
     internal static string? GetProcessNameCandidate(string? userModelId)
     {
         var value = userModelId?.Trim();
-        if (string.IsNullOrEmpty(value) || !value.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
+        if (string.IsNullOrEmpty(value) || value.Contains('!')) return null;
 
-        var name = Path.GetFileNameWithoutExtension(value);
-        return string.IsNullOrEmpty(name) ? null : name;
+        // Desktop SMTC IDs can be bare process names or include a profile suffix.
+        if (value.Equals("抖音", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("com.bytedance.douyin", StringComparison.OrdinalIgnoreCase)) return "douyin";
+        if (value.Equals("MicrosoftEdge", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("Microsoft.MicrosoftEdge", StringComparison.OrdinalIgnoreCase) ||
+            value.StartsWith("Microsoft.MicrosoftEdge.", StringComparison.OrdinalIgnoreCase)) return "msedge";
+        value = Path.GetFileName(value);
+        var executableEnd = value.IndexOf(".exe", StringComparison.OrdinalIgnoreCase);
+        if (executableEnd >= 0 && (executableEnd + 4 == value.Length || value[executableEnd + 4] is '.' or '_'))
+            value = value[..(executableEnd + 4)];
+        var name = Path.GetFileName(value);
+        if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) name = name[..^4];
+        return string.IsNullOrWhiteSpace(name) || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ? null : name;
     }
 
     internal static bool WindowTitleMatches(string? userModelId, string? windowTitle)

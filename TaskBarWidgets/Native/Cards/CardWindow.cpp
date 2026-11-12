@@ -16,6 +16,8 @@ namespace Cards
         constexpr wchar_t ClassName[] = L"TaskBarWidgetsCardWindow";
         constexpr int AnimationMilliseconds = 150;
         constexpr UINT_PTR AnimationTimer = 0xCD01;
+        constexpr UINT PageMotionCompleted = WM_APP + 0x217;
+        std::atomic<UINT_PTR> pageGeneration{};
         constexpr UINT BackdropChanged = WM_APP + 0x215;
         constexpr ULONGLONG CoverFadeMilliseconds = 200;
         constexpr ULONGLONG LyricWrapMilliseconds = 180;
@@ -55,6 +57,9 @@ namespace Cards
             if (!card) return DefWindowProcW(window, message, keys, position);
             switch (message)
             {
+            case PageMotionCompleted:
+                card->OnPageMotionCompleted(keys);
+                return 0;
             case MotionCompleted:
                 card->OnMotionCompleted(keys);
                 return 0;
@@ -92,7 +97,8 @@ namespace Cards
                 card->OnMouseLeave();
                 return 0;
             case WM_MOUSEWHEEL:
-                if (card->Host() && card->Host()->OnMenuWheel(GET_WHEEL_DELTA_WPARAM(keys))) return 0;
+                if (card->Host() && card->Host()->OnWheel(
+                    { GET_X_LPARAM(position), GET_Y_LPARAM(position) }, GET_WHEEL_DELTA_WPARAM(keys))) return 0;
                 break;
             case WM_CAPTURECHANGED:
             case WM_CANCELMODE:
@@ -188,9 +194,16 @@ namespace Cards
             bool running{};
         };
         std::vector<PeripheralNameLayer> peripheralNames;
+        std::vector<PeripheralNameLayer> outgoingNames;
         float peripheralNameScale{};
         SpriteVisual dynamicContent{ nullptr };
         DrawingSurface dynamicSurface;
+        ContainerVisual pageViewport{ nullptr };
+        SpriteVisual outgoingPage{ nullptr };
+        DrawingSurface outgoingSurface;
+        CompositionScopedBatch pageBatch{ nullptr };
+        winrt::event_token pageCompleted{};
+        UINT_PTR pageToken{};
         SurfaceHandle boundDynamicSurface{ nullptr };
         bool mediaStaticDirty{ true };
         bool mediaRegionsDirty{ true };
@@ -338,10 +351,19 @@ namespace Cards
             impl->wash = MakeLayer(impl->compositor);
             impl->content = MakeLayer(impl->compositor);
             impl->motion.Children().InsertAtTop(impl->wash);
-            if (kind == Kind::Media)
+            if (kind == Kind::Media || HasPageContent())
             {
                 impl->dynamicContent = MakeLayer(impl->compositor);
-                impl->motion.Children().InsertAtTop(impl->dynamicContent);
+                if (HasPageContent())
+                {
+                    impl->pageViewport = impl->compositor.CreateContainerVisual();
+                    impl->pageViewport.RelativeSizeAdjustment({1, 1});
+                    impl->outgoingPage = impl->compositor.CreateSpriteVisual();
+                    impl->pageViewport.Children().InsertAtTop(impl->outgoingPage);
+                    impl->pageViewport.Children().InsertAtTop(impl->dynamicContent);
+                    impl->motion.Children().InsertAtTop(impl->pageViewport);
+                }
+                else impl->motion.Children().InsertAtTop(impl->dynamicContent);
             }
             // Transport stays above rolling lyrics where their viewports meet.
             impl->motion.Children().InsertAtTop(impl->content);
@@ -357,6 +379,7 @@ namespace Cards
 
     void CardWindow::Destroy()
     {
+        ResetPageAnimation();
         ClearPeripheralNames();
         impl->transition.Detach();
         accessibility.Detach();
@@ -378,6 +401,8 @@ namespace Cards
         impl->boundDynamicSurface = nullptr;
         if (impl->dynamicContent) impl->dynamicContent.Brush(nullptr);
         impl->dynamicContent = nullptr;
+        impl->outgoingPage = nullptr;
+        impl->pageViewport = nullptr;
         impl->surface.Release();
         impl->boundSurface = nullptr;
         if (impl->content) impl->content.Brush(nullptr);
@@ -399,8 +424,7 @@ namespace Cards
     {
         ClearPeripheralNames();
         environment = cardEnvironment;
-        if (kind == Kind::PeripheralBattery && impl->content && (environment.reducedMotion || environment.highContrast))
-            ResetPeripheralAnimation();
+        ResetPageAnimation();
         if (environment.reducedMotion || environment.highContrast)
         {
             impl->hover.clear();
@@ -506,22 +530,23 @@ namespace Cards
             // A 400-ms global media snapshot must not repaint this independent card.
             // Revision ordering belongs to Protocol, including reconnect counter resets.
             const bool changed = !previous.SameAppearance(incoming, peripheralPage);
+            const bool modeChanged = incoming.mode != previous.mode;
             bool valuesChanged = false;
-            if (changed && previous.mode == incoming.mode)
+            if (changed && !modeChanged)
             {
                 const auto a = previous.Selected(), b = incoming.Selected();
                 const int first = peripheralPage * previous.PageSize();
                 for (int i = first; i < first + previous.PageSize() && i < static_cast<int>(a.size()) && i < static_cast<int>(b.size()); ++i)
                     if (a[i]->id == b[i]->id && a[i]->batteries != b[i]->batteries) valuesChanged = true;
             }
-            const bool modeChanged = incoming.mode != previous.mode;
+            if (modeChanged || valuesChanged) CapturePage();
+            else if (changed) ResetPageAnimation();
             const bool statusChanged = snapshot.statusText != value.statusText;
             snapshot = value;
             peripheralPage = snapshot.peripheralBattery.ClampPage(modeChanged ? 0 : peripheralPage);
-            if (modeChanged) ResetPeripheralAnimation();
             impl->dirty |= changed || statusChanged;
             if (visible) Paint();
-            if (modeChanged || valuesChanged) AnimatePeripheralContent();
+            if (modeChanged || valuesChanged) AnimatePageContent(0);
             return;
         }
         const auto now = GetTickCount64();
@@ -638,7 +663,7 @@ namespace Cards
             const int offset = snapshot.weather.forecastOffset;
             snapshot = value;
             snapshot.weather.forecastView = forecast;
-            snapshot.weather.forecastOffset = offset;
+            snapshot.weather.forecastOffset = snapshot.weather.ClampOffset(offset);
         }
         else snapshot = value;
         if (forwardScan) snapshot.lyrics.wordScan = std::max(snapshot.lyrics.wordScan, previousPaintedScan);
@@ -701,6 +726,7 @@ namespace Cards
         }
         if (scale != targetScale)
         {
+            ResetPageAnimation();
             impl->transition.Set(visible, targetScale);
             if (!visible && window) ShowWindow(window, SW_HIDE);
         }
@@ -740,6 +766,7 @@ namespace Cards
 
     void CardWindow::PrepareGroupReflow(const RECT& targetBounds, float targetScale)
     {
+        if (scale != targetScale) ResetPageAnimation();
         const auto actualBounds = bounds;
         const bool contentChanged = scale != targetScale ||
             bounds.right - bounds.left != targetBounds.right - targetBounds.left ||
@@ -767,12 +794,18 @@ namespace Cards
     void CardWindow::SetWeatherView(bool forecast, int offset)
     {
         if (kind != Kind::Weather) return;
-        offset = std::max(0, offset);
+        auto target = snapshot.weather;
+        target.forecastView = forecast;
+        offset = target.ClampOffset(offset);
         if (snapshot.weather.forecastView == forecast && snapshot.weather.forecastOffset == offset) return;
+        const float direction = forecast != snapshot.weather.forecastView ? (forecast ? 1.f : -1.f) :
+            (offset > snapshot.weather.forecastOffset ? 1.f : -1.f);
+        CapturePage();
         snapshot.weather.forecastView = forecast;
         snapshot.weather.forecastOffset = offset;
         impl->dirty = true;
         if (visible) Paint();
+        AnimatePageContent(direction);
     }
 
     void CardWindow::SetPeripheralPage(int page)
@@ -781,40 +814,134 @@ namespace Cards
         page = snapshot.peripheralBattery.ClampPage(page);
         if (page == peripheralPage) return;
         const float direction = page > peripheralPage ? 1.f : -1.f;
+        CapturePage();
         peripheralPage = page;
         impl->dirty = true;
+        host.OnPageLayoutChanged();
         if (visible) Paint();
-        AnimatePeripheralContent(direction);
+        AnimatePageContent(direction);
     }
 
-    void CardWindow::ResetPeripheralAnimation()
+    void CardWindow::TurnPage(int direction)
     {
-        if (!impl->content) return;
-        impl->content.StopAnimation(L"Opacity");
-        impl->content.StopAnimation(L"Offset.X");
-        impl->content.Opacity(1);
-        impl->content.Offset({ 0, 0, 0 });
+        if (kind == Kind::PeripheralBattery) SetPeripheralPage(peripheralPage + direction);
+        else if (kind == Kind::Weather)
+            SetWeatherView(snapshot.weather.forecastView,
+                snapshot.weather.ClampOffset(snapshot.weather.forecastOffset) + direction * snapshot.weather.PageSize());
     }
 
-    void CardWindow::AnimatePeripheralContent(float direction)
+    bool CardWindow::HasPageContent() const { return kind == Kind::Weather || kind == Kind::PeripheralBattery; }
+
+    D2D1_RECT_F CardWindow::PageContentBounds() const
     {
-        ResetPeripheralAnimation();
-        if (!visible || environment.reducedMotion || environment.highContrast || !impl->content) return;
-        // Composition owns the short transition; hidden cards need no animation timer.
-        const auto ease = impl->compositor.CreateCubicBezierEasingFunction({ 0.2f, 0 }, { 0, 1 });
-        auto fade = impl->compositor.CreateScalarKeyFrameAnimation();
-        fade.Duration(std::chrono::milliseconds(180));
-        fade.InsertKeyFrame(0, direction == 0 ? 0.7f : 0.35f);
-        fade.InsertKeyFrame(1, 1.f, ease);
-        impl->content.StartAnimation(L"Opacity", fade);
-        if (direction != 0)
+        return kind == Kind::Weather ? Draw::Rect(0, 212, ContentWidthDip(), 324) :
+            Draw::Rect(0, 44, ContentWidthDip(), ContentHeightDip() - 24 - Layout::PeripheralFooterBottomGap);
+    }
+
+    bool CardWindow::PageTransitionRunning() const { return impl->pageBatch != nullptr; }
+
+    void CardWindow::ResetPageAnimation()
+    {
+        impl->pageToken = ++pageGeneration;
+        if (impl->pageBatch) { impl->pageBatch.Completed(impl->pageCompleted); impl->pageBatch = nullptr; }
+        if (!HasPageContent()) return;
+        for (auto visual : {impl->dynamicContent, impl->outgoingPage})
         {
-            auto slide = impl->compositor.CreateScalarKeyFrameAnimation();
-            slide.Duration(std::chrono::milliseconds(180));
-            slide.InsertKeyFrame(0, direction * 12.f * scale);
-            slide.InsertKeyFrame(1, 0.f, ease);
-            impl->content.StartAnimation(L"Offset.X", slide);
+            if (!visual) continue;
+            visual.StopAnimation(L"Opacity");
+            visual.StopAnimation(L"Offset.X");
+            visual.Opacity(1);
+            visual.Offset({0, 0, 0});
         }
+        for (auto& name : impl->outgoingNames)
+        {
+            if (name.text) { name.text.StopAnimation(L"Offset.X"); name.text.Brush(nullptr); }
+            if (impl->outgoingPage && name.viewport) impl->outgoingPage.Children().Remove(name.viewport);
+            name.surface.Release();
+        }
+        impl->outgoingNames.clear();
+        if (impl->outgoingPage) impl->outgoingPage.Brush(nullptr);
+        impl->outgoingSurface.Release();
+    }
+
+    void CardWindow::CapturePage()
+    {
+        ResetPageAnimation();
+        if (!visible || environment.reducedMotion || environment.highContrast || !impl->pageViewport) return;
+        const int width = std::max(1, static_cast<int>(std::ceil(ContentWidthDip() * scale)));
+        const int height = std::max(1, static_cast<int>(std::ceil(ContentHeightDip() * scale)));
+        impl->outgoingSurface.Ensure(environment.device, width, height);
+        {
+            DrawScope scope(impl->outgoingSurface, scale);
+            if (!scope) { host.OnGraphicsFailure(impl->outgoingSurface.LastResult()); return; }
+            auto* context = scope.Get();
+            context->Clear(D2D1::ColorF(0, 0.f));
+            context->PushAxisAlignedClip(PageContentBounds(), D2D1_ANTIALIAS_MODE_ALIASED);
+            Layout::Table unused;
+            if (kind == Kind::Weather)
+                Paint::Weather(context, snapshot, environment, unused, ContentWidthDip(), ContentHeightDip());
+            else
+            {
+                std::vector<Paint::PeripheralName> names;
+                Paint::PeripheralBattery(context, snapshot, environment, unused, ContentWidthDip(), ContentHeightDip(),
+                    {}, peripheralPage, &names);
+            }
+            context->PopAxisAlignedClip();
+        }
+        if (!impl->outgoingSurface.Ready() || FAILED(impl->outgoingSurface.LastResult()))
+        {
+            host.OnGraphicsFailure(impl->outgoingSurface.LastResult());
+            ResetPageAnimation();
+            return;
+        }
+        // Transfer the existing name visuals so a scrolling name retains its actual
+        // compositor offset while the outgoing page fades, instead of snapping to its start.
+        for (auto& name : impl->peripheralNames)
+        {
+            impl->dynamicContent.Children().Remove(name.viewport);
+            impl->outgoingPage.Children().InsertAtTop(name.viewport);
+        }
+        impl->outgoingNames = std::move(impl->peripheralNames);
+        impl->peripheralNames.clear();
+        impl->peripheralNameScale = 0;
+        impl->outgoingPage.Size({static_cast<float>(width), static_cast<float>(height)});
+        impl->outgoingPage.Brush(impl->compositor.CreateSurfaceBrush(impl->outgoingSurface.Handle()));
+    }
+
+    void CardWindow::AnimatePageContent(float direction)
+    {
+        if (!visible || environment.reducedMotion || environment.highContrast || !impl->outgoingPage ||
+            !impl->outgoingPage.Brush()) { ResetPageAnimation(); return; }
+        try
+        {
+            const auto ease = impl->compositor.CreateCubicBezierEasingFunction({0.2f, 0}, {0, 1});
+            impl->pageBatch = impl->compositor.CreateScopedBatch(CompositionBatchTypes::Animation);
+            const auto token = impl->pageToken;
+            const auto handle = window;
+            impl->pageCompleted = impl->pageBatch.Completed([handle, token](auto const&, auto const&)
+                { PostMessageW(handle, PageMotionCompleted, token, 0); });
+            for (bool incoming : {false, true})
+            {
+                auto visual = incoming ? impl->dynamicContent : impl->outgoingPage;
+                auto fade = impl->compositor.CreateScalarKeyFrameAnimation();
+                fade.Duration(std::chrono::milliseconds(180));
+                fade.InsertKeyFrame(0, incoming ? 0.f : 1.f);
+                fade.InsertKeyFrame(1, incoming ? 1.f : 0.f, ease);
+                auto slide = impl->compositor.CreateScalarKeyFrameAnimation();
+                slide.Duration(std::chrono::milliseconds(180));
+                slide.InsertKeyFrame(0, incoming ? direction * 12.f * scale : 0.f);
+                slide.InsertKeyFrame(1, incoming ? 0.f : -direction * 12.f * scale, ease);
+                visual.StartAnimation(L"Opacity", fade);
+                visual.StartAnimation(L"Offset.X", slide);
+            }
+            impl->pageBatch.End();
+        }
+        catch (winrt::hresult_error const&) { ResetPageAnimation(); }
+    }
+
+    void CardWindow::OnPageMotionCompleted(UINT_PTR generation)
+    {
+        if (generation == impl->pageToken) ResetPageAnimation();
     }
 
     void CardWindow::OnMotionCompleted(UINT_PTR generation)
@@ -845,8 +972,7 @@ namespace Cards
     {
         visible = false;
         SetPeripheralNamesRunning(false);
-        if (kind == Kind::PeripheralBattery && impl->content)
-            ResetPeripheralAnimation();
+        ResetPageAnimation();
         if (!window) return;
         CancelPointer();
         const bool hadFeedback = impl->hotRegion || !impl->hover.empty();
@@ -871,7 +997,7 @@ namespace Cards
         SetPeripheralNamesRunning(false);
         for (auto& name : impl->peripheralNames)
         {
-            if (impl->content && name.viewport) impl->content.Children().Remove(name.viewport);
+            if (impl->dynamicContent && name.viewport) impl->dynamicContent.Children().Remove(name.viewport);
             if (name.text) name.text.Brush(nullptr);
             name.surface.Release();
         }
@@ -936,7 +1062,7 @@ namespace Cards
             const auto brush = impl->compositor.CreateSurfaceBrush(name.surface.Handle());
             name.text.Brush(brush);
             name.viewport.Children().InsertAtTop(name.text);
-            impl->content.Children().InsertAtTop(name.viewport);
+            impl->dynamicContent.Children().InsertAtTop(name.viewport);
 
             // Hold both ends for readability; only the prepainted name moves.
             const float travel = (layout.width - width) / 22.f;
@@ -1045,11 +1171,11 @@ namespace Cards
         impl->surface.Ensure(environment.device, widthPixels, heightPixels);
         if (!impl->surface.Ready()) return;
 
-        if (kind == Kind::Media) impl->dynamicSurface.Ensure(environment.device, widthPixels, heightPixels);
+        if (kind == Kind::Media || HasPageContent()) impl->dynamicSurface.Ensure(environment.device, widthPixels, heightPixels);
         if (rebuildRegions) { regions.Clear(); ++regionBuildCount; }
         const bool paintStable = kind != Kind::Media || impl->mediaStaticDirty || !impl->content.Brush();
         std::vector<Paint::PeripheralName> peripheralNames;
-        for (int layer = 0; layer < (kind == Kind::Media ? 2 : 1); ++layer)
+        for (int layer = 0; layer < (kind == Kind::Media || HasPageContent() ? 2 : 1); ++layer)
         {
             if (layer == 0 && !paintStable) continue;
             auto& surface = layer == 0 ? impl->surface : impl->dynamicSurface;
@@ -1142,6 +1268,10 @@ namespace Cards
                     }
                 }
                 const auto interaction = CurrentInteraction();
+                Layout::Table discardedRegions;
+                auto& layerRegions = HasPageContent() && layer == 1 ? discardedRegions : regions;
+                if (HasPageContent() && layer == 1)
+                    context->PushAxisAlignedClip(PageContentBounds(), D2D1_ANTIALIAS_MODE_ALIASED);
                 switch (kind)
                 {
                 case Kind::Media:
@@ -1156,16 +1286,26 @@ namespace Cards
                     Paint::Traffic(context, painted, environment, regions, widthDip, heightDip, interaction);
                     break;
                 case Kind::Weather:
-                    Paint::Weather(context, painted, environment, regions, widthDip, heightDip, interaction);
+                    Paint::Weather(context, painted, environment, layerRegions, widthDip, heightDip, interaction);
                     break;
                 case Kind::PeripheralBattery:
-                    Paint::PeripheralBattery(context, painted, environment, regions, widthDip, heightDip, interaction, peripheralPage, &peripheralNames);
+                    Paint::PeripheralBattery(context, painted, environment, layerRegions, widthDip, heightDip, interaction, peripheralPage, layer == 1 ? &peripheralNames : nullptr);
                     break;
                 case Kind::Update:
                     Paint::Update(context, painted, environment, regions, widthDip, heightDip, interaction);
                     break;
                 }
-                if (!snapshot.statusText.empty() && (kind != Kind::Media || layer == 1))
+                if (HasPageContent())
+                {
+                    if (layer == 0)
+                    {
+                        // Keep the controls stationary; only the list lives on the second surface.
+                        context->PushAxisAlignedClip(PageContentBounds(), D2D1_ANTIALIAS_MODE_ALIASED);
+                        context->Clear(D2D1::ColorF(0, 0.f));
+                    }
+                    context->PopAxisAlignedClip();
+                }
+                if (!snapshot.statusText.empty() && (HasPageContent() ? layer == 0 : kind != Kind::Media || layer == 1))
                 {
                     const auto area = Draw::Rect(8, heightDip - 25, widthDip - 8, heightDip - 3);
                     Draw::FillRound(context, area, 4, environment.dark ? Color{0.15f, 0.1f, 0.1f, 1} : Color{1, 0.94f, 0.92f, 1});
@@ -1176,8 +1316,8 @@ namespace Cards
             if (!surface.Ready()) { impl->dirty = true; host.OnGraphicsFailure(surface.LastResult()); return; }
             if (layer == 0) ++staticPaintCount; else ++dynamicPaintCount;
         }
-        if (!impl->surface.Ready() || (kind == Kind::Media && !impl->dynamicSurface.Ready()))
-        { impl->dirty = true; host.OnGraphicsFailure(kind == Kind::Media ? impl->dynamicSurface.LastResult() : impl->surface.LastResult()); return; }
+        if (!impl->surface.Ready() || ((kind == Kind::Media || HasPageContent()) && !impl->dynamicSurface.Ready()))
+        { impl->dirty = true; host.OnGraphicsFailure(kind == Kind::Media || HasPageContent() ? impl->dynamicSurface.LastResult() : impl->surface.LastResult()); return; }
         if (kind == Kind::PeripheralBattery && !UpdatePeripheralNames(peripheralNames)) return;
         if (rebuildRegions) PruneInteraction();
         if (impl->surface.Handle() && impl->boundSurface != impl->surface.Handle())
@@ -1187,12 +1327,21 @@ namespace Cards
             impl->content.Brush(brush);
             impl->boundSurface = impl->surface.Handle();
         }
-        if (kind == Kind::Media && impl->boundDynamicSurface != impl->dynamicSurface.Handle())
+        if ((kind == Kind::Media || HasPageContent()) && impl->boundDynamicSurface != impl->dynamicSurface.Handle())
         {
             auto brush = impl->compositor.CreateSurfaceBrush(impl->dynamicSurface.Handle());
             brush.Stretch(CompositionStretch::Fill);
             impl->dynamicContent.Brush(brush);
             impl->boundDynamicSurface = impl->dynamicSurface.Handle();
+        }
+        if (HasPageContent())
+        {
+            const auto area = PageContentBounds();
+            auto clip = impl->compositor.CreateInsetClip(0, area.top * scale, 0,
+                std::max(0.f, heightPixels - area.bottom * scale));
+            impl->pageViewport.Size({static_cast<float>(widthPixels), static_cast<float>(heightPixels)});
+            impl->pageViewport.RelativeSizeAdjustment({0, 0});
+            impl->pageViewport.Clip(clip);
         }
         impl->dirty = false;
         impl->mediaStaticDirty = false;
@@ -1210,7 +1359,7 @@ namespace Cards
     bool CardWindow::HasRenderedContent() const
     {
         return impl->surface.Ready() && impl->content && impl->content.Brush() && !impl->dirty &&
-            (kind != Kind::Media || (impl->dynamicSurface.Ready() && impl->dynamicContent && impl->dynamicContent.Brush()));
+            ((kind != Kind::Media && !HasPageContent()) || (impl->dynamicSurface.Ready() && impl->dynamicContent && impl->dynamicContent.Brush()));
     }
 
     CompositionBrush CardWindow::ContentBrush() const
