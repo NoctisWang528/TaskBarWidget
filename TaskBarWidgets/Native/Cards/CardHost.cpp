@@ -143,7 +143,12 @@ namespace Cards
         std::chrono::steady_clock::time_point controlGlassRefreshed{};
         float groupOffset{}, groupFrom{}, groupTo{}, groupDistance{};
         int groupDuration{240};
-        std::chrono::steady_clock::time_point groupStarted, groupNextFrame;
+        // Animation time advances from the first rendered frame, at most a few
+        // intervals per frame, so one-off work (capture start, first lens
+        // effects) delays the motion instead of skipping it.
+        std::chrono::steady_clock::time_point groupLastFrame, groupNextFrame;
+        float groupElapsed{};
+        bool groupFirstFrame{};
         std::chrono::nanoseconds groupFrameInterval{};
         POINT anchor{};
         std::wstring lastError;
@@ -653,6 +658,7 @@ namespace Cards
             // about a millisecond, so the entrance refracts from its first
             // visible frame. Only an uncached cross-adapter device is deferred
             // until the motion ends; the cards keep the blur meanwhile.
+            const auto startBegan = std::chrono::steady_clock::now();
             if (!backdrop.Start(graphics.DxgiDevice(), graphics.ResourceContext(), monitor, !groupMoving))
             {
                 if (backdrop.LastResult() == E_PENDING)
@@ -665,7 +671,12 @@ namespace Cards
                 FailBackdrop(backdrop.Diagnostic(), backdrop.LastResult());
                 return;
             }
-            UpdateBackdropDiagnostics(backdrop.Diagnostic());
+            // The start runs synchronously on the card thread; its duration is
+            // logged so an entrance hitch can be attributed.
+            const auto startMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - startBegan).count();
+            UpdateBackdropDiagnostics((std::wstring(backdrop.Diagnostic()) + L" start=" +
+                std::to_wstring(startMs) + L"ms").c_str());
             UpdateBackdropDiagnostics(L"waiting-first-frame");
         }
         if (scheduleTick && !backdropTimerArmed && !ArmBackdropTimer(1))
@@ -842,7 +853,9 @@ namespace Cards
         groupFrameInterval = std::chrono::nanoseconds(1'000'000'000 / std::clamp(fps > 0 ? fps : 60, 30, 240));
         if (!groupTimer) groupTimer = CreateWaitableTimerExW(nullptr, nullptr,
             CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_MODIFY_STATE | SYNCHRONIZE);
-        groupStarted = groupNextFrame = std::chrono::steady_clock::now();
+        groupLastFrame = groupNextFrame = std::chrono::steady_clock::now();
+        groupElapsed = 0;
+        groupFirstFrame = true;
         groupMoving = true;
         LARGE_INTEGER due{}; due.QuadPart = -1;
         if (!groupTimer || !SetWaitableTimer(groupTimer, &due, 0, nullptr, nullptr, FALSE)) StopGroupMotion(true);
@@ -851,9 +864,23 @@ namespace Cards
     void CardHost::Impl::GroupFrame()
     {
         if (!groupMoving) return;
-        const float elapsed = std::chrono::duration<float, std::milli>(
-            std::chrono::steady_clock::now() - groupStarted).count();
-        const float t = std::clamp(elapsed / groupDuration, 0.0f, 1.0f);
+        const auto frameStarted = std::chrono::steady_clock::now();
+        if (groupFirstFrame)
+        {
+            // Setup between StartGroupTimer and here (synchronous capture
+            // start on the same thread) must not consume the animation.
+            groupFirstFrame = false;
+            groupNextFrame = frameStarted;
+        }
+        else
+        {
+            const float maxStep = std::max(34.0f,
+                2.0f * std::chrono::duration<float, std::milli>(groupFrameInterval).count());
+            groupElapsed += std::min(maxStep,
+                std::chrono::duration<float, std::milli>(frameStarted - groupLastFrame).count());
+        }
+        groupLastFrame = frameStarted;
+        const float t = std::clamp(groupElapsed / groupDuration, 0.0f, 1.0f);
         const float remaining = 1 - t;
         const float progress = visible ? 1 - remaining * remaining * remaining : t * t;
         groupReflowProgress = progress;

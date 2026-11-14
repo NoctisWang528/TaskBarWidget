@@ -134,6 +134,10 @@ namespace Cards
         ComPtr<ID3D11Device> cachedOutputDevice;
         ComPtr<ID3D11DeviceContext> cachedOutputContext;
         LUID cachedOutputLuid{};
+        // A monitor whose duplication format was rejected goes straight to WGC
+        // on later starts; probing DXGI again only delays the entrance.
+        HMONITOR duplicationRejected{};
+        std::wstring duplicationRejectedStage;
         capture::GraphicsCaptureItem captureItem{nullptr};
         capture::Direct3D11CaptureFramePool framePool{nullptr};
         capture::GraphicsCaptureSession captureSession{nullptr};
@@ -545,15 +549,22 @@ namespace Cards
     {
         impl->Clear();
         impl->startupDiagnostic.clear();
-        HRESULT result = impl->Start(renderDevice, renderContext, monitor, allowSlowDevice);
+        const bool skipDuplication = monitor && monitor == impl->duplicationRejected;
+        HRESULT result = skipDuplication ? DXGI_ERROR_UNSUPPORTED :
+            impl->Start(renderDevice, renderContext, monitor, allowSlowDevice);
         if (result == DXGI_ERROR_UNSUPPORTED)
         {
-            const auto* unsupportedStage = impl->stage;
+            if (!skipDuplication)
+            {
+                impl->duplicationRejected = monitor;
+                impl->duplicationRejectedStage = impl->stage;
+            }
             impl->Clear();
             result = impl->StartWindowsCapture(renderDevice, renderContext, monitor);
-            impl->startupDiagnostic = std::wstring(impl->stage) + L" (after " + unsupportedStage + L")";
+            impl->startupDiagnostic = std::wstring(impl->stage) + L" (after " + impl->duplicationRejectedStage + L")";
         }
-        if (FAILED(result)) return impl->Fail(result);
+        // A failed fallback may mean the display changed; probe DXGI again next time.
+        if (FAILED(result)) { impl->duplicationRejected = nullptr; return impl->Fail(result); }
         impl->lastResult = S_OK;
         return true;
     }
