@@ -161,6 +161,8 @@
   "QuickCardAnimationSpeedPercent": 150,
   "QuickCardAnimationFps": 0,
   "CardFontFamily": "Microsoft YaHei UI",
+  "CardMaterial": "Mica",
+  "CardGlassBlur": 0.35,
   "CardMicaVivid": true,
   "CardMicaTintOpacity": 0.1,
   "CardMicaLuminosityOpacity": 0.85,

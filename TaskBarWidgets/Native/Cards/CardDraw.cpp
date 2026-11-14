@@ -33,6 +33,13 @@ namespace Cards::Draw
         palette.panel = ParseColor(dark ? L"#1FFFFFFF" : L"#0F000000", Color{});
         palette.track = ParseColor(dark ? L"#33FFFFFF" : L"#33000000", Color{});
         palette.fill = ParseColor(dark ? L"#14FFFFFF" : L"#0A000000", Color{});
+        if (environment.material.kind == MaterialKind::LiquidGlass)
+        {
+            // Translucent desktop content needs opaque text. Keep hierarchy in
+            // size/weight rather than allowing the backdrop through glyphs.
+            palette.primary = dark ? Color{1, 1, 1, 1} : Color{.07f, .07f, .07f, 1};
+            palette.secondary = dark ? Color{.94f, .94f, .94f, 1} : Color{.14f, .14f, .14f, 1};
+        }
         return palette;
     }
 
@@ -66,10 +73,94 @@ namespace Cards::Draw
         brush->Release();
     }
 
+    namespace
+    {
+        float GlassHover(const Paint::Interaction& interaction, int id)
+        {
+            const float value = interaction.Hover(id);
+            const float hover = std::isfinite(value) ? std::clamp(value, 0.0f, 1.0f) : 0.0f;
+            return interaction.reducedMotion ? (hover > 0.0f ? 1.0f : 0.0f) : hover;
+        }
+
+        // Reflections use a small clipped gradient; no effects, backdrop
+        // sampling, wall-clock animation or foreground blur belong in painters.
+        void GlassSheen(ID2D1DeviceContext* context, D2D1_RECT_F rect, float radius,
+            float opacity, bool pressed)
+        {
+            if (!context || opacity <= 0.0f || rect.right <= rect.left || rect.bottom <= rect.top) return;
+            const D2D1_GRADIENT_STOP stops[] = {
+                { 0.0f, D2D1::ColorF(1, 1, 1, opacity) },
+                { 0.45f, D2D1::ColorF(1, 1, 1, opacity * 0.22f) },
+                { 1.0f, D2D1::ColorF(1, 1, 1, 0) },
+            };
+            ComPtr<ID2D1GradientStopCollection> collection;
+            if (FAILED(context->CreateGradientStopCollection(stops, 3, D2D1_GAMMA_2_2,
+                D2D1_EXTEND_MODE_CLAMP, collection.GetAddressOf()))) return;
+            ComPtr<ID2D1LinearGradientBrush> brush;
+            const auto from = D2D1::Point2F(rect.left, pressed ? rect.bottom : rect.top);
+            const auto to = D2D1::Point2F(rect.right, pressed ? rect.top : rect.bottom);
+            if (SUCCEEDED(context->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(from, to),
+                collection.Get(), brush.GetAddressOf())))
+                context->FillRoundedRectangle(D2D1::RoundedRect(rect, radius, radius), brush.Get());
+        }
+    }
+
     void ControlBackground(ID2D1DeviceContext* context, D2D1_RECT_F rect, float radius,
         Color base, Color accent, const Paint::Interaction& interaction, int id, bool enabled)
     {
-        if (base.a > 0.0f) FillRound(context, rect, radius, base);
+        if (interaction.glass)
+        {
+            const float width = rect.right - rect.left, height = rect.bottom - rect.top;
+            if (width <= 0.0f || height <= 0.0f) return;
+            const float diameter = std::min(width, height);
+            // Normalize the visual only; callers retain their original input bounds.
+            if (std::max(width, height) <= 40.0f && std::max(width, height) <= diameter * 1.25f)
+            {
+                const float x = (rect.left + rect.right) / 2, y = (rect.top + rect.bottom) / 2;
+                rect = Rect(x - diameter / 2, y - diameter / 2, x + diameter / 2, y + diameter / 2);
+            }
+            radius = diameter / 2;
+        }
+        if (interaction.glass && interaction.compositedGlass)
+        {
+            if (interaction.glassControls)
+            {
+                GlassControl control;
+                control.id = id; control.bounds = rect; control.radius = radius;
+                control.enabled = enabled;
+                control.hover = enabled ? GlassHover(interaction, id) : 0.0f;
+                control.pressed = enabled && interaction.pressed == id;
+                control.focused = enabled && interaction.focused == id; control.ink = accent;
+                interaction.glassControls->push_back(control);
+            }
+            return;
+        }
+        if (base.a > 0.0f) FillRound(context, rect, radius,
+            interaction.glass && !enabled ? WithAlpha(base, base.a * 0.55f) : base);
+        if (interaction.glass)
+        {
+            const float hover = enabled ? GlassHover(interaction, id) : 0.0f;
+            const bool pressed = enabled && interaction.pressed == id;
+            const bool focused = enabled && interaction.focused == id;
+            const float emphasis = enabled ? 1.0f : 0.55f;
+            // Keep the reflection and lift inside the original control bounds.
+            const float inset = pressed ? 1.5f : 1.0f;
+            const float lift = interaction.reducedMotion || pressed ? 0.0f : hover * 0.65f;
+            const auto surface = Rect(rect.left + inset, rect.top + inset - lift,
+                rect.right - inset, rect.bottom - inset - lift);
+            const float corner = std::max(0.0f, radius - inset);
+            FillRound(context, surface, corner, WithAlpha(accent,
+                (pressed ? 0.24f : 0.04f + hover * 0.10f) * emphasis));
+            if (pressed) FillRound(context, surface, corner,
+                Color{ 0, 0, 0, interaction.dark ? 0.18f : 0.09f });
+            const float activity = pressed ? 1.0f : std::max(hover, focused ? 0.65f : 0.0f);
+            GlassSheen(context, surface, corner,
+                (interaction.dark ? 0.22f : 0.34f) * std::max(activity, 0.18f) * emphasis, pressed);
+            StrokeRound(context, surface, corner, Color{ 1, 1, 1,
+                ((interaction.dark ? 0.13f : 0.24f) + activity * 0.24f) * emphasis }, 1.0f);
+            if (focused) StrokeRound(context, rect, radius, accent, 1.5f);
+            return;
+        }
         if (!enabled) return;
         const float opacity = interaction.pressed == id ? 0.18f : 0.10f * interaction.Hover(id);
         if (opacity > 0.0f) FillRound(context, rect, radius, WithAlpha(accent, opacity));
@@ -160,9 +251,32 @@ namespace Cards::Draw
     }
 
     void Progress(ID2D1DeviceContext* context, D2D1_RECT_F rect, float ratio, Color track,
-        Color fill, bool knob, bool focused, Color focusColor)
+        Color fill, bool knob, bool focused, Color focusColor,
+        const Paint::Interaction* interaction, int id)
     {
         ratio = std::clamp(ratio, 0.0f, 1.0f);
+        if (knob && interaction && interaction->glass)
+        {
+            const float y = (rect.top + rect.bottom) / 2;
+            rect.top = y - 2.0f; rect.bottom = y + 2.0f;
+        }
+        if (knob && interaction && interaction->glass && interaction->compositedGlass)
+        {
+            if (interaction->glassControls)
+            {
+                const float x = rect.left + (rect.right - rect.left) * ratio;
+                const float y = (rect.top + rect.bottom) / 2;
+                GlassControl control;
+                control.id = id; control.kind = GlassControl::Kind::Thumb;
+                control.bounds = Rect(x - 10, y - 7, x + 10, y + 7); control.radius = 7;
+                control.track = rect;
+                control.ratio = ratio; control.trackColor = track; control.fillColor = fill;
+                control.hover = GlassHover(*interaction, id); control.pressed = interaction->pressed == id;
+                control.focused = focused; control.ink = focusColor;
+                interaction->glassControls->push_back(control);
+            }
+            return;
+        }
         FillRound(context, rect, (rect.bottom - rect.top) / 2.0f, track);
         const float width = (rect.right - rect.left) * ratio;
         if (width > 0.5f)
@@ -176,6 +290,24 @@ namespace Cards::Draw
         {
             const float centerX = rect.left + width;
             const float centerY = (rect.top + rect.bottom) / 2.0f;
+            if (interaction && interaction->glass)
+            {
+                const float hover = GlassHover(*interaction, id);
+                const bool pressed = interaction->pressed == id;
+                const float activity = pressed ? 1.0f : std::max(hover, focused ? 0.65f : 0.0f);
+                const float radius = 7.0f;
+                const auto bounds = Rect(centerX - 10, centerY - 7, centerX + 10, centerY + 7);
+                // Rim/shadow and a brighter crown distinguish drag from hover.
+                FillRound(context, Rect(bounds.left, bounds.top + 1.0f, bounds.right, bounds.bottom + 1.0f),
+                    radius, Color{ 0, 0, 0, interaction->dark ? 0.32f : 0.18f });
+                FillRound(context, bounds, radius, Mix(fill, Color{ 1, 1, 1, 1 }, pressed ? 0.22f : 0.12f));
+                GlassSheen(context, bounds, radius, activity * 0.60f, pressed);
+                StrokeRound(context, bounds, radius, Color{ 1, 1, 1, 0.55f + activity * 0.35f }, 1.0f);
+                if (activity > 0.0f) StrokeRound(context,
+                    Rect(bounds.left - 1.5f, bounds.top - 1.5f, bounds.right + 1.5f, bounds.bottom + 1.5f),
+                    radius + 1.5f, WithAlpha(focusColor, 0.20f + activity * 0.45f), 1.0f);
+                return;
+            }
             const auto brush = Brush(context, fill);
             if (brush)
             {

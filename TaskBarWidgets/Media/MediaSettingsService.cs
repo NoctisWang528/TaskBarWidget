@@ -1097,6 +1097,8 @@ public sealed class MediaSettingsService : IDisposable
             QuickCardAnimationSpeedPercent = _settings.QuickCardAnimationSpeedPercent,
             QuickCardAnimationFps = _settings.QuickCardAnimationFps,
             CardFontFamily = _settings.CardFontFamily,
+            CardMaterial = _settings.CardMaterial,
+            CardGlassBlur = _settings.CardGlassBlur,
             CardMicaVivid = _settings.CardMicaVivid,
             CardMicaTintOpacity = _settings.CardMicaTintOpacity,
             CardMicaLuminosityOpacity = _settings.CardMicaLuminosityOpacity,
@@ -1503,6 +1505,12 @@ public sealed class MediaSettingsService : IDisposable
                     ReadDouble(element, _settings.CardMicaTintOpacity),
                     AppSettings.MinimumCardMicaTintOpacity,
                     AppSettings.MaximumCardMicaTintOpacity);
+                break;
+            case "cardMaterial":
+                _settings.CardMaterial = AppSettings.NormalizeCardMaterial(ReadString(element, "Mica"));
+                break;
+            case "cardGlassBlur":
+                _settings.CardGlassBlur = AppSettings.NormalizeCardGlassBlur(ReadDouble(element, 0.35));
                 break;
             case "cardMicaVivid":
                 _settings.CardMicaVivid = ReadBool(element, _settings.CardMicaVivid);
@@ -2109,6 +2117,8 @@ public sealed class MediaSettingsService : IDisposable
         target.QuickCardAnimationSpeedPercent = source.QuickCardAnimationSpeedPercent;
         target.QuickCardAnimationFps = source.QuickCardAnimationFps;
         target.CardFontFamily = source.CardFontFamily;
+        target.CardMaterial = source.CardMaterial;
+        target.CardGlassBlur = source.CardGlassBlur;
         target.CardMicaVivid = source.CardMicaVivid;
         target.CardMicaTintOpacity = source.CardMicaTintOpacity;
         target.CardMicaLuminosityOpacity = source.CardMicaLuminosityOpacity;
@@ -2249,6 +2259,8 @@ public sealed class MediaSettingsService : IDisposable
         public int QuickCardAnimationSpeedPercent { get; set; } = 150;
         public int QuickCardAnimationFps { get; set; } = 0;
         public string CardFontFamily { get; set; } = AppSettings.DefaultFontFamily;
+        public string CardMaterial { get; set; } = "Mica";
+        public double CardGlassBlur { get; set; } = 0.35;
         public bool CardMicaVivid { get; set; } = AppSettings.DefaultCardMicaVivid;
         public double CardMicaTintOpacity { get; set; } = AppSettings.DefaultCardMicaTintOpacity;
         public double CardMicaLuminosityOpacity { get; set; } = AppSettings.DefaultCardMicaLuminosityOpacity;

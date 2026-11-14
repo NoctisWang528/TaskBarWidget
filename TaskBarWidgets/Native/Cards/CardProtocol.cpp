@@ -122,6 +122,8 @@ namespace Cards::Protocol
             const auto font = Text(quickCards, L"font");
             if (!font.empty()) config.font = font;
             MicaTuningFrom(quickCards, config.mica);
+            config.material.Set(Text(quickCards, L"material"),
+                Number(quickCards, L"glassBlur", 0.35));
             config.revision = revision >= 0 ? revision : config.revision + 1;
             return true;
         }

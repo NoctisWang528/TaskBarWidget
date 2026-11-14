@@ -20,14 +20,21 @@ public sealed partial class SettingsWindow
         ("media", "媒体", "\uE8D6"),
         ("peripheralBattery", "外设电量", "\uE996")
     ];
+    private static readonly (string Id, string Label)[] CardMaterials = [("LiquidGlass", "液态玻璃"), ("Mica", "Mica"), ("Solid", "纯色")];
     private readonly List<(Border Cell, int Column, int Slot)> _cardOrderCells = [];
     private TextBlock? _micaStatus;
     private void UpdateMicaStatus()
     {
         if (_currentPage != "quickCards" || _micaStatus is null) return;
         var theme = _root.ActualTheme == ElementTheme.Dark ? "深色" : "浅色";
+        if (DraftCardMaterial != "Mica")
+        {
+            _micaStatus.Text = CardHighContrast ? "高对比度使用系统纯色背景，材质参数保留。"
+                : $"卡片预览：{theme}模式。请打开快捷卡片查看材质；设置窗口背景保持 Mica。";
+            return;
+        }
         var state = _cardMicaPreviewBackdrop.Diagnostics;
-        var detail = _accessibility.HighContrast ? "高对比度使用系统纯色背景。"
+        var detail = CardHighContrast ? "高对比度使用系统纯色背景。"
             : !VividMicaBackdrop.IsSupported ? "当前系统不支持 Mica，使用纯色背景。"
             : _cardMicaPreviewBackdrop.NeedsSolidFallback ? "材质连接失败，暂用纯色背景；调节值仍保留。"
             : !state.Connected ? "正在连接材质；当前尚不能预览。"
@@ -133,99 +140,123 @@ public sealed partial class SettingsWindow
         appearance.Children.Add(font);
         appearance.Children.Add(Copy("字体列表不可用时仍可输入系统已安装字体名称。"));
 
-        var material = Section("卡片材质", "Mica 使用桌面壁纸的颜色，不透出后方窗口。中性色遮罩越高，浅色／深色覆盖越强；降低通常更能保留壁纸颜色。明暗调和控制主题明暗对材质的调和，不代表透明度。点击“应用更改”后保存。");
+        var material = Section("卡片材质", "材质支持浅色与深色主题，点击“应用更改”后保存。");
+        var materialPicker = new ComboBox { Header = "材质", HorizontalAlignment = HorizontalAlignment.Stretch };
+        foreach (var option in CardMaterials) materialPicker.Items.Add(new ComboBoxItem { Content = option.Label, Tag = option.Id });
+        materialPicker.SelectedItem = materialPicker.Items.OfType<ComboBoxItem>().First(item => (string)item.Tag == DraftCardMaterial);
+        AutomationProperties.SetName(materialPicker, "卡片材质");
+        AutomationProperties.SetAutomationId(materialPicker, "setting-cardMaterial");
+        materialPicker.SelectionChanged += (_, _) => {
+            if (materialPicker.SelectedItem is ComboBoxItem item) { _media.Set("cardMaterial", (string)item.Tag); Changed(); RenderPage(); }
+        };
+        material.Children.Add(materialPicker);
+        if (DraftCardMaterial == "LiquidGlass")
+        {
+            var blur = new Slider { Header = "透明 — 模糊", Minimum = 0, Maximum = 100, StepFrequency = 1, Value = DraftCardGlassBlur * 100, HorizontalAlignment = HorizontalAlignment.Stretch };
+            AutomationProperties.SetName(blur, "液态玻璃透明到模糊");
+            AutomationProperties.SetAutomationId(blur, "setting-cardGlassBlur");
+            blur.ValueChanged += (_, _) => { _media.Set("cardGlassBlur", blur.Value / 100); Changed(); PreviewCardMica(DraftCardMicaTuning); };
+            material.Children.Add(blur);
+            material.Children.Add(Copy("两种主题共用此调节。打开快捷卡片查看真实材质；设置窗口背景保持 Mica。"));
+            material.Children.Add(Copy("实时折射启用时，玻璃卡片及其菜单不会出现在系统截图和录屏中。需要录制卡片时可切换为 Mica 或纯色。"));
+        }
         AutomationProperties.SetAutomationId(material, "section-cardMica");
-        var canPreview = CanPreviewCardMica;
+        var canPreview = CanPreviewCardMaterial;
         if (canPreview) ActivateCardMicaPreview(DraftCardMicaTuning);
         _micaStatus = Copy("");
         AutomationProperties.SetAutomationId(_micaStatus, "cardMicaStatus");
         material.Children.Add(_micaStatus);
         UpdateMicaStatus();
-        var initialMica = DraftCardMicaTuning;
-        var initialVivid = DraftCardMicaVivid;
-        var vivid = SettingsToggle.Row("自定义 Mica", "关闭后卡片改用系统默认 Mica 材质，下面四项调节暂不生效，原参数仍会保留。",
-            initialVivid, "自定义 Mica", "setting-cardMicaVivid",
-            value => { _media.Set("cardMicaVivid", value); Changed(); RenderPage(); });
-        material.Children.Add(vivid);
-        Slider MicaSlider(string name, string automationId, double value)
+        if (DraftCardMaterial == "Mica")
         {
-            var slider = new Slider
+            material.Children.Add(Copy("Mica 使用壁纸颜色，不透出后方窗口。中性色遮罩和明暗调和不代表透明度。"));
+            var initialMica = DraftCardMicaTuning;
+            var initialVivid = DraftCardMicaVivid;
+            var vivid = SettingsToggle.Row("自定义 Mica", "关闭后卡片改用系统默认 Mica 材质，下面四项调节暂不生效，原参数仍会保留。",
+                initialVivid, "自定义 Mica", "setting-cardMicaVivid",
+                value => { _media.Set("cardMicaVivid", value); Changed(); RenderPage(); });
+            material.Children.Add(vivid);
+            Slider MicaSlider(string name, string automationId, double value)
             {
-                Minimum = 0,
-                Maximum = 100,
-                StepFrequency = 1,
-                SnapsTo = SliderSnapsTo.StepValues,
-                IsThumbToolTipEnabled = true,
-                IsEnabled = canPreview && initialVivid,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                Value = Math.Round(value)
-            };
-            AutomationProperties.SetName(slider, name);
-            AutomationProperties.SetAutomationId(slider, automationId);
-            return slider;
-        }
+                var slider = new Slider
+                {
+                    Minimum = 0,
+                    Maximum = 100,
+                    StepFrequency = 1,
+                    SnapsTo = SliderSnapsTo.StepValues,
+                    IsThumbToolTipEnabled = true,
+                    IsEnabled = !CardHighContrast && VividMicaBackdrop.IsSupported && initialVivid,
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    Value = Math.Round(value)
+                };
+                AutomationProperties.SetName(slider, name);
+                AutomationProperties.SetAutomationId(slider, automationId);
+                return slider;
+            }
 
-        var lightTint = MicaSlider("浅色模式卡片 Mica 中性色遮罩", "setting-cardMicaTintOpacity", initialMica.LightTintOpacity * 100);
-        var lightLuminosity = MicaSlider("浅色模式卡片 Mica 明暗调和", "setting-cardMicaLuminosityOpacity", initialMica.LightLuminosityOpacity * 100);
-        var darkTint = MicaSlider("深色模式卡片 Mica 中性色遮罩", "setting-cardMicaDarkTintOpacity", initialMica.DarkTintOpacity * 100);
-        var darkLuminosity = MicaSlider("深色模式卡片 Mica 明暗调和", "setting-cardMicaDarkLuminosityOpacity", initialMica.DarkLuminosityOpacity * 100);
+            var lightTint = MicaSlider("浅色模式卡片 Mica 中性色遮罩", "setting-cardMicaTintOpacity", initialMica.LightTintOpacity * 100);
+            var lightLuminosity = MicaSlider("浅色模式卡片 Mica 明暗调和", "setting-cardMicaLuminosityOpacity", initialMica.LightLuminosityOpacity * 100);
+            var darkTint = MicaSlider("深色模式卡片 Mica 中性色遮罩", "setting-cardMicaDarkTintOpacity", initialMica.DarkTintOpacity * 100);
+            var darkLuminosity = MicaSlider("深色模式卡片 Mica 明暗调和", "setting-cardMicaDarkLuminosityOpacity", initialMica.DarkLuminosityOpacity * 100);
 
-        var suppressMicaEvents = false;
-        void UpdateMicaLabels()
-        {
-            lightTint.Header = $"中性色遮罩 · {lightTint.Value:0}%";
-            lightLuminosity.Header = $"明暗调和 · {lightLuminosity.Value:0}%";
-            darkTint.Header = $"中性色遮罩 · {darkTint.Value:0}%";
-            darkLuminosity.Header = $"明暗调和 · {darkLuminosity.Value:0}%";
-        }
-        void BindMicaSlider(Slider slider, string key)
-        {
-            slider.ValueChanged += (_, _) =>
+            var suppressMicaEvents = false;
+            void UpdateMicaLabels()
             {
-                if (suppressMicaEvents) return;
-                UpdateMicaLabels();
-                // Only the edited value changes. Other theme values can have
-                // finer precision than the integer slider and must survive.
-                _media.Set(key, slider.Value / 100);
-                Changed();
-                PreviewCardMica(DraftCardMicaTuning);
-            };
-        }
-
-        suppressMicaEvents = true;
-        lightTint.Value = Math.Round(initialMica.LightTintOpacity * 100);
-        lightLuminosity.Value = Math.Round(initialMica.LightLuminosityOpacity * 100);
-        darkTint.Value = Math.Round(initialMica.DarkTintOpacity * 100);
-        darkLuminosity.Value = Math.Round(initialMica.DarkLuminosityOpacity * 100);
-        suppressMicaEvents = false;
-        UpdateMicaLabels();
-        BindMicaSlider(lightTint, "cardMicaTintOpacity");
-        BindMicaSlider(lightLuminosity, "cardMicaLuminosityOpacity");
-        BindMicaSlider(darkTint, "cardMicaDarkTintOpacity");
-        BindMicaSlider(darkLuminosity, "cardMicaDarkLuminosityOpacity");
-
-        var lightGroup = new StackPanel { Spacing = 8 };
-        lightGroup.Children.Add(new TextBlock { Text = "浅色模式", FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        lightGroup.Children.Add(lightTint);
-        lightGroup.Children.Add(lightLuminosity);
-        material.Children.Add(lightGroup);
-        var darkGroup = new StackPanel { Spacing = 8 };
-        darkGroup.Children.Add(new TextBlock { Text = "深色模式", FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        darkGroup.Children.Add(darkTint);
-        darkGroup.Children.Add(darkLuminosity);
-        material.Children.Add(darkGroup);
-        if (!canPreview)
-        {
-            material.Children.Add(new InfoBar
+                lightTint.Header = $"中性色遮罩 · {lightTint.Value:0}%";
+                lightLuminosity.Header = $"明暗调和 · {lightLuminosity.Value:0}%";
+                darkTint.Header = $"中性色遮罩 · {darkTint.Value:0}%";
+                darkLuminosity.Header = $"明暗调和 · {darkLuminosity.Value:0}%";
+            }
+            void BindMicaSlider(Slider slider, string key)
             {
-                Severity = InfoBarSeverity.Informational,
-                IsOpen = true,
-                IsClosable = false,
-                Title = _accessibility.HighContrast ? "高对比度模式已启用" : "当前系统不支持 Mica",
-                Message = "材质调节暂不可用；卡片会继续使用系统回退色，文字和控件保持可读。"
-            });
+                slider.ValueChanged += (_, _) =>
+                {
+                    if (suppressMicaEvents) return;
+                    UpdateMicaLabels();
+                    // Only the edited value changes. Other theme values can have
+                    // finer precision than the integer slider and must survive.
+                    _media.Set(key, slider.Value / 100);
+                    Changed();
+                    PreviewCardMica(DraftCardMicaTuning);
+                };
+            }
+
+            suppressMicaEvents = true;
+            lightTint.Value = Math.Round(initialMica.LightTintOpacity * 100);
+            lightLuminosity.Value = Math.Round(initialMica.LightLuminosityOpacity * 100);
+            darkTint.Value = Math.Round(initialMica.DarkTintOpacity * 100);
+            darkLuminosity.Value = Math.Round(initialMica.DarkLuminosityOpacity * 100);
+            suppressMicaEvents = false;
+            UpdateMicaLabels();
+            BindMicaSlider(lightTint, "cardMicaTintOpacity");
+            BindMicaSlider(lightLuminosity, "cardMicaLuminosityOpacity");
+            BindMicaSlider(darkTint, "cardMicaDarkTintOpacity");
+            BindMicaSlider(darkLuminosity, "cardMicaDarkLuminosityOpacity");
+
+            var lightGroup = new StackPanel { Spacing = 8 };
+            lightGroup.Children.Add(new TextBlock { Text = "浅色模式", FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+            lightGroup.Children.Add(lightTint);
+            lightGroup.Children.Add(lightLuminosity);
+            material.Children.Add(lightGroup);
+            var darkGroup = new StackPanel { Spacing = 8 };
+            darkGroup.Children.Add(new TextBlock { Text = "深色模式", FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+            darkGroup.Children.Add(darkTint);
+            darkGroup.Children.Add(darkLuminosity);
+            material.Children.Add(darkGroup);
+            if (CardHighContrast || !VividMicaBackdrop.IsSupported)
+            {
+                material.Children.Add(new InfoBar
+                {
+                    Severity = InfoBarSeverity.Informational,
+                    IsOpen = true,
+                    IsClosable = false,
+                    Title = CardHighContrast ? "高对比度模式已启用" : "当前系统不支持 Mica",
+                    Message = "材质调节暂不可用；卡片会继续使用系统回退色，文字和控件保持可读。"
+                });
+            }
+            material.Children.Add(Copy("设置窗口背景实时预览当前主题；打开快捷卡片时会继承本页草稿。离开本页恢复已保存值，再次进入可继续预览草稿。"));
+
         }
-        material.Children.Add(Copy("设置窗口背景实时预览当前主题；打开快捷卡片时会继承本页草稿。离开本页恢复已保存值，再次进入可继续预览草稿。"));
 
         var section = Section("卡片与顺序", "卡片可独立启用。拖动手柄把卡片放进左/右任意一列的任意位置，每列数量不限；关闭的卡片仍保留。");
         _cardOrderCells.Clear();

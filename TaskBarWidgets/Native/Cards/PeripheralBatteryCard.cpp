@@ -203,8 +203,10 @@ namespace Cards::Paint
         const auto selected = state.Selected();
         page = state.ClampPage(page);
         const auto text = [&](const std::wstring& value, float size, Color color, D2D1_RECT_F rect,
-            int weight = 400, DWRITE_TEXT_ALIGNMENT align = DWRITE_TEXT_ALIGNMENT_LEADING)
-        { Draw::Text(context, graphics, value, environment.fontFamily, size, weight, color, rect, align); };
+            int weight = 400, DWRITE_TEXT_ALIGNMENT align = DWRITE_TEXT_ALIGNMENT_LEADING,
+            DWRITE_PARAGRAPH_ALIGNMENT vertical = DWRITE_PARAGRAPH_ALIGNMENT_NEAR)
+        { Draw::Text(context, graphics, value, environment.fontFamily, size, weight, color, rect, align,
+            false, false, false, vertical); };
         text(L"外设电量", 14, palette.primary, Draw::Rect(16, 17, 200, 38), 600);
         const auto button = [&](int id, D2D1_RECT_F rect, const std::wstring& action,
             const std::wstring& label, bool enabled = true)
@@ -216,11 +218,13 @@ namespace Cards::Paint
         button(600, mode, detailed ? L"peripheralMode:compact" : L"peripheralMode:detailed",
             detailed ? L"切换为缩略模式" : L"切换为详细模式");
         text(detailed ? L"缩略" : L"详细", 12, palette.primary,
-            Draw::Rect(mode.left, 18, mode.right, 36), 400, DWRITE_TEXT_ALIGNMENT_CENTER);
+            mode, 400, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         const auto refresh = Draw::Rect(widthDip - 44, 12, widthDip - 16, 40);
         button(601, refresh, L"refreshPeripheralBatteries", state.refreshing ? L"正在刷新" : L"刷新", !state.refreshing);
-        DrawGlyph(context, Glyph::Refresh, state.refreshing ? palette.secondary : palette.primary,
-            refresh.left + 6, refresh.top + 6, 16);
+        DrawGlyph(context, Glyph::Refresh, interaction.glass
+            ? WithAlpha(palette.primary, state.refreshing ? 0.4f : 0.9f)
+            : state.refreshing ? palette.secondary : palette.primary,
+            (refresh.left + refresh.right - 16) / 2, (refresh.top + refresh.bottom - 16) / 2, 16);
 
         const int first = page * state.PageSize();
         for (int item = 0; item < state.PageSize() && first + item < static_cast<int>(selected.size()); ++item)
@@ -325,12 +329,15 @@ namespace Cards::Paint
         const float footer = heightDip - 24 - Layout::PeripheralFooterBottomGap;
         text(state.refreshing ? L"正在刷新…" : L"",
             10, palette.secondary, Draw::Rect(16, footer + 4, 220, footer + 22));
-        button(602, Draw::Rect(widthDip - 156, footer, widthDip - 128, footer + 24),
-            L"peripheralPage:previous", L"上一页", page > 0);
-        button(603, Draw::Rect(widthDip - 44, footer, widthDip - 16, footer + 24),
-            L"peripheralPage:next", L"下一页", page + 1 < state.PageCount());
-        text(L"‹", 16, palette.secondary, Draw::Rect(widthDip - 156, footer, widthDip - 128, footer + 24), 400, DWRITE_TEXT_ALIGNMENT_CENTER);
-        text(L"›", 16, palette.secondary, Draw::Rect(widthDip - 44, footer, widthDip - 16, footer + 24), 400, DWRITE_TEXT_ALIGNMENT_CENTER);
+        const auto previous = Draw::Rect(widthDip - 156, footer, widthDip - 128, footer + 24);
+        const auto next = Draw::Rect(widthDip - 44, footer, widthDip - 16, footer + 24);
+        const bool canPrevious = page > 0, canNext = page + 1 < state.PageCount();
+        button(602, previous, L"peripheralPage:previous", L"上一页", canPrevious);
+        button(603, next, L"peripheralPage:next", L"下一页", canNext);
+        text(L"‹", 16, interaction.glass ? WithAlpha(palette.primary, canPrevious ? 0.9f : 0.3f) : palette.secondary, previous,
+            400, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        text(L"›", 16, interaction.glass ? WithAlpha(palette.primary, canNext ? 0.9f : 0.3f) : palette.secondary, next,
+            400, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         text(std::to_wstring(page + 1) + L" / " + std::to_wstring(state.PageCount()), 11, palette.secondary,
             Draw::Rect(widthDip - 124, footer + 4, widthDip - 48, footer + 22), 400, DWRITE_TEXT_ALIGNMENT_CENTER);
     }

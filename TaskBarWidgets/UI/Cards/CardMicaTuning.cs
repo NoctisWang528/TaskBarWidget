@@ -109,7 +109,7 @@ internal readonly record struct CardMicaTuning(
             : fallback;
 }
 
-internal readonly record struct CardMicaAppearance(bool Vivid, CardMicaTuning Tuning)
+internal readonly record struct CardMicaAppearance(bool Vivid, CardMicaTuning Tuning, string Material = "Mica", double GlassBlur = 0.35)
 {
     internal static CardMicaAppearance Default => new(CardMicaTuning.DefaultVivid, CardMicaTuning.Default);
 }

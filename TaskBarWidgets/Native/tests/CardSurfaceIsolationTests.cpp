@@ -1,6 +1,7 @@
 #include "CardPch.h"
 #include "CardWindow.h"
 #include "CardDraw.h"
+#include "CardMaterial.h"
 #include <windows.graphics.capture.interop.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
 #include <winrt/Windows.Graphics.Capture.h>
@@ -61,13 +62,17 @@ namespace
         }
 
         std::vector<uint8_t> Pixels(Cards::CardWindow& card,
+            winrt::Windows::UI::Composition::Compositor const& compositor)
+        { return Pixels(card.Handle(), compositor); }
+
+        std::vector<uint8_t> Pixels(HWND window,
             winrt::Windows::UI::Composition::Compositor const& compositor) try
         {
             DWORD process{};
-            GetWindowThreadProcessId(card.Handle(), &process);
+            GetWindowThreadProcessId(window, &process);
             RECT bounds{};
-            GetWindowRect(card.Handle(), &bounds);
-            RequireIsolation(process == GetCurrentProcessId() && IsWindowVisible(card.Handle()) &&
+            GetWindowRect(window, &bounds);
+            RequireIsolation(process == GetCurrentProcessId() && IsWindowVisible(window) &&
                 bounds.right < GetSystemMetrics(SM_XVIRTUALSCREEN) &&
                 bounds.bottom < GetSystemMetrics(SM_YVIRTUALSCREEN),
                 "surface isolation may capture only its own visible offscreen diagnostic HWND");
@@ -77,7 +82,7 @@ namespace
             commit.GetResults();
             auto factory = winrt::get_activation_factory<Capture::GraphicsCaptureItem, IGraphicsCaptureItemInterop>();
             Capture::GraphicsCaptureItem item{ nullptr };
-            winrt::check_hresult(factory->CreateForWindow(card.Handle(),
+            winrt::check_hresult(factory->CreateForWindow(window,
                 winrt::guid_of<Capture::GraphicsCaptureItem>(), winrt::put_abi(item)));
             const auto size = item.Size();
             RequireIsolation(size.Width == bounds.right - bounds.left && size.Height == bounds.bottom - bounds.top,
@@ -180,6 +185,167 @@ namespace
         void OnLayoutInvalidated() override {}
         void OnGraphicsFailure(HRESULT result) override { if (FAILED(result)) failure = result; }
     };
+}
+
+// Verify actual committed Composition pixels using ONLY a synthetic backdrop in
+// an offscreen diagnostic HWND. This does not read or capture the user's desktop.
+void TestLiquidGlassRendering(Cards::Graphics& graphics,
+    winrt::Windows::UI::Composition::Compositor const& compositor,
+    winrt::Windows::UI::Composition::CompositionGraphicsDevice const& device)
+{
+    using namespace winrt::Windows::UI::Composition;
+    constexpr int width = 440, height = 290, cardWidth = 384, cardHeight = 234;
+    WNDCLASSW wc{};
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpfnWndProc = DefWindowProcW;
+    wc.lpszClassName = L"TaskBarWidgetsGlassRenderProbe";
+    RegisterClassW(&wc);
+    struct WindowLifetime
+    {
+        HWND value{};
+        ~WindowLifetime() { if (value) DestroyWindow(value); }
+    } window;
+    window.value = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP,
+        wc.lpszClassName, L"", WS_POPUP, GetSystemMetrics(SM_XVIRTUALSCREEN) - 1000,
+        GetSystemMetrics(SM_YVIRTUALSCREEN) - 1000, width, height, nullptr, nullptr, wc.hInstance, nullptr);
+    RequireIsolation(window.value != nullptr, "glass rendering diagnostic HWND");
+    const auto desktop = compositor.as<ABI::Windows::UI::Composition::Desktop::ICompositorDesktopInterop>();
+    winrt::com_ptr<::IUnknown> created;
+    winrt::check_hresult(desktop->CreateDesktopWindowTarget(window.value, TRUE,
+        reinterpret_cast<ABI::Windows::UI::Composition::Desktop::IDesktopWindowTarget**>(created.put())));
+    auto target = created.as<winrt::Windows::UI::Composition::Desktop::DesktopWindowTarget>();
+    auto root = compositor.CreateContainerVisual();
+    root.Size({width, height});
+    target.Root(root);
+    Cards::DrawingSurface background;
+    background.Ensure(device, width, height);
+    auto paintBackground = [&](bool alternate)
+    {
+        Cards::DrawScope draw(background);
+        RequireIsolation(bool(draw), "glass fixture background BeginDraw");
+        draw->Clear(D2D1::ColorF(.9f, .9f, .9f));
+        for (int x = 0; x < width; x += 8)
+        {
+            const bool stripe = (x / 8) % 2 != 0;
+            auto color = graphics.Brush(draw.Get(), alternate ? Cards::Color{.55f, .95f, .55f, 1}
+                : stripe ? Cards::Color{.08f, .28f, .92f, 1} : Cards::Color{.98f, .68f, .12f, 1});
+            draw->FillRectangle(D2D1::RectF(static_cast<float>(x), 0, static_cast<float>(x + 8), height), color.Get());
+        }
+    };
+    paintBackground(false);
+    auto backdrop = compositor.CreateSpriteVisual();
+    backdrop.Size({width, height});
+    backdrop.Brush(compositor.CreateSurfaceBrush(background.Handle()));
+    root.Children().InsertAtTop(backdrop);
+    auto glass = compositor.CreateContainerVisual();
+    glass.Size({cardWidth, cardHeight}); glass.Offset({28, 28, 0});
+    auto corner = compositor.CreateRoundedRectangleGeometry();
+    corner.Size({cardWidth, cardHeight}); corner.CornerRadius({Cards::Layout::CornerRadius, Cards::Layout::CornerRadius});
+    glass.Clip(compositor.CreateGeometricClip(corner));
+    root.Children().InsertAtTop(glass);
+    auto rim = compositor.CreateSpriteVisual();
+    rim.Size({cardWidth, cardHeight}); rim.Offset({28, 28, 0});
+    root.Children().InsertAtTop(rim);
+    Cards::LiquidGlassBrush material;
+    CaptureIsolation capture;
+    ShowWindow(window.value, SW_SHOWNOACTIVATE);
+    std::array<std::vector<uint8_t>, 6> frames;
+    int index = 0;
+    for (bool dark : {false, true})
+        for (double amount : {0., .35, 1.})
+        {
+            if (!material.Update(graphics, compositor, device, cardWidth, cardHeight, 1, amount, dark))
+                winrt::throw_hresult(material.LastResult());
+            if (glass.Children().Count() == 0) glass.Children().InsertAtTop(material.Visual());
+            rim.Brush(material.Rim());
+            frames[index++] = capture.Pixels(window.value, compositor);
+        }
+    auto variation = [](const std::vector<uint8_t>& frame)
+    {
+        double sum = 0;
+        // Interior, away from rounded bands and rim; no text is present.
+        for (int y = 65; y < 190; ++y)
+            for (int x = 65; x < 330; ++x)
+            {
+                const auto i = (y * (width - 24) + x) * 4;
+                sum += std::abs(int(frame[i]) - int(frame[i - 4]));
+            }
+        return sum;
+    };
+    RequireIsolation(variation(frames[0]) > 10000 && variation(frames[2]) < variation(frames[0]) * .25,
+        "glass transparent endpoint retains sharp backdrop and blur endpoint filters it");
+    RequireIsolation(variation(frames[3]) > 10000 && variation(frames[5]) < variation(frames[3]) * .25,
+        "dark glass endpoint has real adjustable blur");
+    RequireIsolation(ChangedPixels(frames[0], frames[3]) > 20000, "glass theme changes committed tint");
+    paintBackground(true);
+    auto changed = capture.Pixels(window.value, compositor);
+    int changedInterior = 0;
+    for (int y = 65; y < 190; ++y)
+        for (int x = 65; x < 330; ++x)
+        {
+            const auto i = (y * (width - 24) + x) * 4;
+            if (std::abs(int(frames[5][i + 1]) - int(changed[i + 1])) > 8) ++changedInterior;
+        }
+    RequireIsolation(changedInterior > 20000, "glass interior follows live background without repainting material");
+
+    // Isolate geometry from tint/blur: the old tiny centered rim passed the
+    // interior blur checks above. Compare rim on/off over a uniform background.
+    rim.Opacity(0);
+    const auto withoutRim = capture.Pixels(window.value, compositor);
+    rim.Opacity(1);
+    const auto withRim = capture.Pixels(window.value, compositor);
+    const auto different = [](const auto& a, const auto& b, int x, int y)
+    {
+        const auto offset = (y * (width - 24) + x) * 4;
+        return std::abs(int(a[offset]) - int(b[offset])) +
+            std::abs(int(a[offset + 1]) - int(b[offset + 1])) +
+            std::abs(int(a[offset + 2]) - int(b[offset + 2])) > 6;
+    };
+    // Capture helper removes 12 pixels from each HWND edge: card origin is 16,16.
+    std::array<int, 4> edgeChanges{};
+    for (int x = 40; x < 376; ++x)
+        for (int d = 0; d < 3; ++d)
+        {
+            edgeChanges[0] += different(withRim, withoutRim, x, 16 + d);
+            edgeChanges[1] += different(withRim, withoutRim, x, 16 + cardHeight - 1 - d);
+        }
+    for (int y = 40; y < 226; ++y)
+        for (int d = 0; d < 3; ++d)
+        {
+            edgeChanges[2] += different(withRim, withoutRim, 16 + d, y);
+            edgeChanges[3] += different(withRim, withoutRim, 16 + cardWidth - 1 - d, y);
+        }
+    RequireIsolation(std::all_of(edgeChanges.begin(), edgeChanges.end(), [](int count) { return count > 80; }),
+        "rim must reach all four full-card edges, not form a small centered box");
+    int centerRim = 0;
+    for (int y = 105; y < 160; ++y)
+        for (int x = 175; x < 240; ++x) centerRim += different(withRim, withoutRim, x, y);
+    RequireIsolation(centerRim < 8, "rim must not leave a source-size artifact in the center");
+
+    // A compact six-panel visual review, with clear / default / blurred columns
+    // and light / dark rows, is saved beside the other isolated probe artifacts.
+    constexpr UINT tileW = width - 24, tileH = height - 24, outputW = tileW * 3, outputH = tileH * 2;
+    std::vector<uint8_t> montage(static_cast<size_t>(outputW) * outputH * 4);
+    for (int tile = 0; tile < 6; ++tile)
+        for (UINT y = 0; y < tileH; ++y)
+            std::memcpy(montage.data() + ((tile / 3 * tileH + y) * outputW + tile % 3 * tileW) * 4,
+                frames[tile].data() + y * tileW * 4, tileW * 4);
+    Microsoft::WRL::ComPtr<IWICStream> stream;
+    Microsoft::WRL::ComPtr<IWICBitmapEncoder> encoder;
+    Microsoft::WRL::ComPtr<IWICBitmapFrameEncode> frame;
+    winrt::check_hresult(graphics.Wic()->CreateStream(&stream));
+    const auto file = std::filesystem::current_path() / L"liquid-glass-preview.png";
+    winrt::check_hresult(stream->InitializeFromFilename(file.c_str(), GENERIC_WRITE));
+    winrt::check_hresult(graphics.Wic()->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder));
+    winrt::check_hresult(encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache));
+    winrt::check_hresult(encoder->CreateNewFrame(&frame, nullptr));
+    winrt::check_hresult(frame->Initialize(nullptr));
+    winrt::check_hresult(frame->SetSize(outputW, outputH));
+    WICPixelFormatGUID format = GUID_WICPixelFormat32bppBGRA;
+    winrt::check_hresult(frame->SetPixelFormat(&format));
+    winrt::check_hresult(frame->WritePixels(outputH, outputW * 4, static_cast<UINT>(montage.size()), montage.data()));
+    winrt::check_hresult(frame->Commit()); winrt::check_hresult(encoder->Commit());
+    std::cout << "Liquid glass real Composition pixels: clear/default/blur, light/dark, live source verified.\n";
 }
 
 // Call on the initialized card STA, before other diagnostic cards are created.

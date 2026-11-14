@@ -30,12 +30,16 @@ public sealed class WinUiServiceAdapterTests
             var payload = service.ReadServiceSettings(new AppSettings
             {
                 ShowLyricTranslation = true,
+                CardMaterial = "LiquidGlass",
+                CardGlassBlur = 0.62,
                 CardMicaVivid = false,
                 CardMicaTintOpacity = 0.08,
                 CardMicaLuminosityOpacity = 0.30,
                 CardMicaDarkTintOpacity = 0.06,
                 CardMicaDarkLuminosityOpacity = 0.28
             });
+            Assert.Equal("LiquidGlass", payload.GetProperty("cardMaterial").GetString());
+            Assert.Equal(0.62, payload.GetProperty("cardGlassBlur").GetDouble());
             Assert.True(payload.GetProperty("showLyricTranslation").GetBoolean());
             Assert.False(payload.GetProperty("cardMicaVivid").GetBoolean());
             Assert.Equal(0.08, payload.GetProperty("cardMicaTintOpacity").GetDouble());
@@ -51,17 +55,23 @@ public sealed class WinUiServiceAdapterTests
             var patch = JsonSerializer.SerializeToElement(new
             {
                 showLyricTranslation = true,
+                cardMaterial = "Solid",
+                cardGlassBlur = 0.78,
                 cardMicaVivid = false,
                 cardMicaTintOpacity = 0.12,
                 cardMicaLuminosityOpacity = 0.34
             });
             var applied = service.ApplyServiceSettings(new AppSettings(), patch);
+            Assert.Equal("Solid", applied.GetProperty("cardMaterial").GetString());
+            Assert.Equal(0.78, applied.GetProperty("cardGlassBlur").GetDouble());
             Assert.False(applied.GetProperty("cardMicaVivid").GetBoolean());
             Assert.Equal(0.12, applied.GetProperty("cardMicaTintOpacity").GetDouble());
             Assert.Equal(0.34, applied.GetProperty("cardMicaLuminosityOpacity").GetDouble());
 
             var saved = new SettingsStore(settingsPath).Load();
             Assert.True(saved.ShowLyricTranslation);
+            Assert.Equal("Solid", saved.CardMaterial);
+            Assert.Equal(0.78, saved.CardGlassBlur);
             Assert.False(saved.CardMicaVivid);
             Assert.Equal(0.12, saved.CardMicaTintOpacity, 6);
             Assert.Equal(0.34, saved.CardMicaLuminosityOpacity, 6);

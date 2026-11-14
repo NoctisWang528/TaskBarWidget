@@ -1,8 +1,10 @@
 #include "CardPch.h"
+#include "CardBackdropCapture.h"
 #include "CardWindow.h"
 #include "CardDraw.h"
 #include "CardText.h"
 #include "CardMotion.h"
+#include "CardMaterial.h"
 #include <dwmapi.h>
 #include <tuple>
 
@@ -182,6 +184,14 @@ namespace Cards
         ContainerVisual motion{ nullptr };
         CardMotion transition;
         SpriteVisual wash{ nullptr };
+        SpriteVisual rim{ nullptr };
+        LiquidGlassBrush glass;
+        CaptureExclusion captureExclusion;
+        GlassControls glassControls;
+        std::array<std::vector<GlassControl>, 2> controlDescriptions;
+        bool glassControlsAttached{}, glassControlsFailed{};
+        bool glassActive{};
+        bool effectsAllowed{ true };
         SpriteVisual content{ nullptr };
         DrawingSurface surface;
         struct PeripheralNameLayer
@@ -230,6 +240,7 @@ namespace Cards
         };
         std::map<int, HoverFade> hover;
         int focusedRegion{ 0 };
+        bool keyboardFocus{};
         int capturedRegion{ 0 };
         bool trackingLeave{ false };
         bool dragging{ false };
@@ -238,6 +249,7 @@ namespace Cards
         int sliderId{};
         std::wstring sliderAction;
         float sliderRatio{};
+        float sliderPointerOffset{};
         bool sliderSeeking{};
         ULONGLONG lastSliderSent{};
         ULONGLONG sliderPendingUntil{};
@@ -278,6 +290,7 @@ namespace Cards
     bool CardWindow::Create(const CardEnvironment& cardEnvironment, HINSTANCE instance)
     {
         environment = cardEnvironment;
+        impl->glassControlsFailed = false;
         EnsureClass(instance);
         const DWORD style = WS_POPUP;
         const DWORD extended = WS_EX_TOOLWINDOW | WS_EX_TOPMOST |
@@ -311,6 +324,7 @@ namespace Cards
             [this](int id)
             {
                 impl->focusedRegion = id;
+                impl->keyboardFocus = true;
                 SetFocus(window);
                 impl->dirty = true;
                 impl->mediaStaticDirty = true;
@@ -349,8 +363,10 @@ namespace Cards
             impl->root.Children().InsertAtTop(impl->motion);
 
             impl->wash = MakeLayer(impl->compositor);
+            impl->rim = MakeLayer(impl->compositor);
             impl->content = MakeLayer(impl->compositor);
             impl->motion.Children().InsertAtTop(impl->wash);
+            impl->motion.Children().InsertAtTop(impl->rim);
             if (kind == Kind::Media || HasPageContent())
             {
                 impl->dynamicContent = MakeLayer(impl->compositor);
@@ -407,6 +423,14 @@ namespace Cards
         impl->boundSurface = nullptr;
         if (impl->content) impl->content.Brush(nullptr);
         impl->content = nullptr;
+        if (impl->wash) { impl->wash.Brush(nullptr); impl->wash.Children().RemoveAll(); }
+        if (impl->rim) impl->rim.Brush(nullptr);
+        impl->captureExclusion.Restore();
+        impl->glass.Release();
+        impl->glassControls.Release();
+        impl->glassControlsAttached = false;
+        impl->glassActive = false;
+        impl->rim = nullptr;
         impl->wash = nullptr;
         impl->motion = nullptr;
         impl->root = nullptr;
@@ -424,6 +448,7 @@ namespace Cards
     {
         ClearPeripheralNames();
         environment = cardEnvironment;
+        impl->glassControlsFailed = false;
         ResetPageAnimation();
         if (environment.reducedMotion || environment.highContrast)
         {
@@ -438,8 +463,18 @@ namespace Cards
             impl->previousCoverData.clear();
         }
 
+        impl->effectsAllowed = !environment.highContrast && LiquidGlassBrush::EffectsEnabled();
+        const bool useMica = environment.material.kind == MaterialKind::Mica && impl->effectsAllowed;
+        if (!useMica && impl->mica)
+        {
+            try { impl->mica.RemoveAllSystemBackdropTargets(); } catch (...) { }
+            try { impl->mica.Close(); } catch (...) { }
+            impl->mica = nullptr;
+            impl->micaConfiguration = nullptr;
+            impl->micaReady = false;
+        }
         // One controller per window: a theme or tuning change only reconfigures it.
-        if (!impl->mica && window && impl->target)
+        if (useMica && !impl->mica && window && impl->target)
         {
             try
             {
@@ -504,21 +539,68 @@ namespace Cards
             }
         }
 
-        // The wash keeps content readable when Mica is unavailable, transparency
-        // is off, or high contrast is on.
-        if (impl->wash && impl->compositor)
-        {
-            const COLORREF system = GetSysColor(COLOR_WINDOW);
-            const auto color = environment.highContrast
-                ? winrt::Windows::UI::Color{255, GetRValue(system), GetGValue(system), GetBValue(system)}
-                : impl->micaReady ? winrt::Windows::UI::Color{10, 255, 255, 255} : FallbackColor(environment.dark);
-            impl->wash.Brush(impl->compositor.CreateColorBrush(color));
-        }
+        UpdateMaterial();
         impl->dirty = true;
         impl->mediaStaticDirty = true;
         impl->mediaRegionsDirty = true;
         UpdateTimer();
         if (visible) Paint();
+    }
+
+    void CardWindow::UpdateMaterial()
+    {
+        if (!impl->wash || !impl->compositor) return;
+        // Create the material only once final placement/DPI are known. Create()
+        // has not populated bounds yet and would otherwise build it twice.
+        impl->glassActive = environment.material.kind == MaterialKind::LiquidGlass && impl->effectsAllowed &&
+            bounds.right > bounds.left && bounds.bottom > bounds.top &&
+            environment.graphics && environment.device && impl->glass.Update(*environment.graphics,
+                impl->compositor, environment.device, static_cast<float>(bounds.right - bounds.left),
+                static_cast<float>(bounds.bottom - bounds.top), scale, environment.material.glassBlur, environment.dark);
+        if (impl->glassActive)
+        {
+            impl->wash.Brush(nullptr);
+            if (!impl->wash.Children().Count()) impl->wash.Children().InsertAtTop(impl->glass.Visual());
+            impl->rim.Brush(impl->glass.Rim());
+            return;
+        }
+        impl->rim.Brush(nullptr);
+        EnableLiveBackdrop(false);
+        impl->wash.Children().RemoveAll();
+        impl->glass.Release();
+        const COLORREF system = GetSysColor(COLOR_WINDOW);
+        const auto color = environment.highContrast
+            ? winrt::Windows::UI::Color{255, GetRValue(system), GetGValue(system), GetBValue(system)}
+            : impl->micaReady ? winrt::Windows::UI::Color{10, 255, 255, 255} : FallbackColor(environment.dark);
+        impl->wash.Brush(impl->compositor.CreateColorBrush(color));
+    }
+
+    HRESULT CardWindow::MaterialResult() const { return impl->glass.LastResult(); }
+    const std::wstring& CardWindow::MaterialDiagnostic() const { return impl->glass.Diagnostic(); }
+    bool CardWindow::HasLiquidGlass() const { return impl->glassActive; }
+    bool CardWindow::LiveBackdropActive() const { return impl->glassActive && impl->glass.LiveActive(); }
+    uint64_t CardWindow::BackdropFrameCount() const { return impl->glass.RenderedFrames(); }
+
+    bool CardWindow::EnableLiveBackdrop(bool enabled)
+    {
+        if (enabled && impl->glassActive && environment.allowLiveCapture)
+            return impl->captureExclusion.Enable(window);
+        impl->glassControls.ClearBackdrop();
+        impl->glass.ClearBackdrop();
+        impl->captureExclusion.Restore();
+        return !enabled;
+    }
+
+    bool CardWindow::RenderBackdrop(const BackdropFrame& frame)
+    {
+        if (!impl->glassActive || !impl->captureExclusion.Active()) return false;
+        try
+        {
+            if (!impl->glass.RenderBackdrop(*environment.graphics, impl->compositor, environment.device, frame, bounds)) return false;
+            return impl->glassControlsFailed || impl->glassControls.RenderBackdrop(*environment.graphics, impl->compositor,
+                environment.device, impl->glass.Scene(), impl->glass.SceneRevision());
+        }
+        catch (...) { return false; }
     }
 
     void CardWindow::SetSnapshot(const Snapshot& value)
@@ -750,6 +832,7 @@ namespace Cards
         impl->dirty |= contentChanged;
         impl->mediaStaticDirty |= contentChanged;
         impl->mediaRegionsDirty |= contentChanged;
+        UpdateMaterial();
         // Resident prewarm must produce actual pixels before the first show.
         Paint();
     }
@@ -762,6 +845,7 @@ namespace Cards
         if (resized && impl->corner)
             impl->corner.Size({ static_cast<float>(bounds.right - bounds.left),
                 static_cast<float>(bounds.bottom - bounds.top) });
+        if (resized) UpdateMaterial();
     }
 
     void CardWindow::PrepareGroupReflow(const RECT& targetBounds, float targetScale)
@@ -959,6 +1043,7 @@ namespace Cards
         // Placement and resident warmup already committed unchanged content.
         Paint();
         SetPeripheralNamesRunning(true);
+        EnableLiveBackdrop(environment.allowLiveCapture && impl->glassActive);
         impl->transition.Start(true, scale, animate && !environment.reducedMotion && !environment.highContrast,
             window, AnimationMilliseconds);
         ShowWindow(window, SW_SHOWNOACTIVATE);
@@ -1178,6 +1263,7 @@ namespace Cards
         for (int layer = 0; layer < (kind == Kind::Media || HasPageContent() ? 2 : 1); ++layer)
         {
             if (layer == 0 && !paintStable) continue;
+            impl->controlDescriptions[layer].clear();
             auto& surface = layer == 0 ? impl->surface : impl->dynamicSurface;
             {
                 DrawScope scope(surface, scale);
@@ -1267,7 +1353,10 @@ namespace Cards
                         impl->coverFadeStart = 0;
                     }
                 }
-                const auto interaction = CurrentInteraction();
+                auto interaction = CurrentInteraction();
+                interaction.compositedGlass = impl->glassActive && !impl->glassControlsFailed;
+                if (!HasPageContent() || layer == 0)
+                    interaction.glassControls = &impl->controlDescriptions[layer];
                 Layout::Table discardedRegions;
                 auto& layerRegions = HasPageContent() && layer == 1 ? discardedRegions : regions;
                 if (HasPageContent() && layer == 1)
@@ -1319,6 +1408,44 @@ namespace Cards
         if (!impl->surface.Ready() || ((kind == Kind::Media || HasPageContent()) && !impl->dynamicSurface.Ready()))
         { impl->dirty = true; host.OnGraphicsFailure(kind == Kind::Media || HasPageContent() ? impl->dynamicSurface.LastResult() : impl->surface.LastResult()); return; }
         if (kind == Kind::PeripheralBattery && !UpdatePeripheralNames(peripheralNames)) return;
+        if (impl->glassActive && !impl->glassControlsFailed)
+        {
+            auto descriptions = impl->controlDescriptions[0];
+            descriptions.insert(descriptions.end(), impl->controlDescriptions[1].begin(), impl->controlDescriptions[1].end());
+            try
+            {
+                impl->glassControls.Update(*environment.graphics, impl->compositor, environment.device,
+                    descriptions, scale, environment.dark, environment.reducedMotion);
+                if (impl->glass.Scene() && environment.allowLiveCapture && impl->captureExclusion.Active())
+                    impl->glassControls.RenderBackdrop(*environment.graphics, impl->compositor,
+                        environment.device, impl->glass.Scene(), impl->glass.SceneRevision());
+                if (!impl->glassControlsAttached)
+                {
+                    impl->motion.Children().InsertAbove(impl->glassControls.Visual(), impl->rim);
+                    impl->glassControlsAttached = true;
+                }
+            }
+            catch (const winrt::hresult_error& error)
+            {
+                // No exception may cross the Win32 callback. Repaint controls
+                // through the ordinary painter so a failed graph leaves no holes.
+                if (impl->glassControlsAttached)
+                    try { impl->motion.Children().Remove(impl->glassControls.Visual()); } catch (...) {}
+                impl->glassControlsAttached = false;
+                impl->glassControls.Release();
+                impl->glassControlsFailed = true;
+                impl->mediaStaticDirty = true;
+                host.OnGraphicsFailure(error.code());
+                PaintContent(rebuildRegions);
+                return;
+            }
+        }
+        else if (impl->glassControlsAttached)
+        {
+            impl->motion.Children().Remove(impl->glassControls.Visual());
+            impl->glassControls.Release();
+            impl->glassControlsAttached = false;
+        }
         if (rebuildRegions) PruneInteraction();
         if (impl->surface.Handle() && impl->boundSurface != impl->surface.Handle())
         {
@@ -1414,8 +1541,11 @@ namespace Cards
     Paint::Interaction CardWindow::CurrentInteraction() const
     {
         Paint::Interaction interaction;
+        interaction.glass = impl->glassActive && !environment.highContrast;
+        interaction.dark = environment.dark;
+        interaction.reducedMotion = environment.reducedMotion;
         interaction.pressed = impl->dragging || impl->hotRegion == impl->capturedRegion ? impl->capturedRegion : 0;
-        interaction.focused = impl->focusedRegion;
+        interaction.focused = impl->keyboardFocus ? impl->focusedRegion : 0;
         const auto now = GetTickCount64();
         for (const auto& [id, fade] : impl->hover) interaction.hover.emplace(id, fade.Value(now));
         return interaction;
@@ -1459,6 +1589,18 @@ namespace Cards
             TrackMouseEvent(&event); impl->trackingLeave = true;
         }
         const auto* hit = regions.Hit(dip);
+        const GlassControl* thumbHit = nullptr;
+        if (impl->glassActive && !impl->glassControlsFailed)
+            for (const auto& layer : impl->controlDescriptions)
+                for (const auto& control : layer)
+                {
+                    if (control.kind != GlassControl::Kind::Thumb) continue;
+                    const auto& b = control.bounds;
+                    if (dip.x < b.left || dip.x > b.right || dip.y < b.top || dip.y > b.bottom) continue;
+                    const auto* slider = regions.Find(control.id);
+                    if (!slider || !slider->enabled) continue;
+                    hit = slider; thumbHit = &control;
+                }
         const int id = hit ? hit->id : 0;
         const bool actionable = hit && hit->enabled && hit->type != Layout::RegionType::Text;
         SetHotRegion(actionable ? id : 0);
@@ -1469,11 +1611,13 @@ namespace Cards
             SetFocus(window); SetCapture(window);
             impl->capturedRegion = region.id;
             impl->focusedRegion = region.id;
+            impl->keyboardFocus = false;
             accessibility.NotifyFocus(&region);
             if (region.type == Layout::RegionType::Slider)
             {
                 impl->dragging = true;
-                const float ratio = std::clamp((dip.x - region.bounds.left) /
+                impl->sliderPointerOffset = thumbHit ? dip.x - (thumbHit->bounds.left + thumbHit->bounds.right) / 2 : 0;
+                const float ratio = std::clamp((dip.x - impl->sliderPointerOffset - region.bounds.left) /
                     std::max(1.0f, static_cast<float>(region.bounds.right - region.bounds.left)), 0.0f, 1.0f);
                 UpdateSlider(region, ratio);
             }
@@ -1487,7 +1631,7 @@ namespace Cards
             if (const auto* found = regions.Find(impl->capturedRegion))
             {
                 const auto region = *found;
-                const float ratio = std::clamp((dip.x - region.bounds.left) /
+                const float ratio = std::clamp((dip.x - impl->sliderPointerOffset - region.bounds.left) /
                     std::max(1.0f, static_cast<float>(region.bounds.right - region.bounds.left)), 0.0f, 1.0f);
                 UpdateSlider(region, ratio);
             }
@@ -1575,6 +1719,7 @@ namespace Cards
         }
         if (virtualKey == VK_TAB)
         {
+            impl->keyboardFocus = true;
             const auto* current = regions.Find(impl->focusedRegion);
             const auto* next = regions.NextFocus(current, (GetKeyState(VK_SHIFT) & 0x8000) ? -1 : 1);
             impl->focusedRegion = next ? next->id : 0;

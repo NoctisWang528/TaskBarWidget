@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using TaskBarWidgets.UI.Settings;
+using TaskBarWidgets.UI.Cards;
 
 namespace TaskBarWidgets.UI;
 
@@ -81,6 +82,120 @@ public sealed partial class SettingsWindow
             window._split.IsPaneOpen = false;
         }
         return new { checks, systemThemeModified = false, previewUserColorsUntouched = true };
+    }
+
+    internal static async Task<object> ProbeCardMaterialControlsAsync(SettingsWindow window)
+    {
+        var originalMaterial = window._media.Get("cardMaterial")?.DeepClone();
+        var originalBlur = window._media.Get("cardGlassBlur")?.DeepClone();
+        var originalPage = window._currentPage;
+        var originalHighContrast = window._probeCardHighContrast;
+        var originalTheme = window._media.Get("toolWindowTheme")?.DeepClone();
+        ElementTheme? lastTheme = null;
+        void OnTheme(ElementTheme theme) => lastTheme = theme;
+        window.ThemePreviewChanged += OnTheme;
+        CardMicaPreviewState? lastPreview = null;
+        void OnPreview(CardMicaPreviewState state) => lastPreview = state;
+        window.MicaPreviewChanged += OnPreview;
+        T? Find<T>(string id) where T : FrameworkElement => WalkTheme(window._page).OfType<T>()
+            .SingleOrDefault(element => Microsoft.UI.Xaml.Automation.AutomationProperties.GetAutomationId(element) == id);
+        try
+        {
+            window.NavigateTo("quickCards");
+            foreach (var id in new[] { "LiquidGlass", "Solid", "Mica" })
+            {
+                var picker = Find<ComboBox>("setting-cardMaterial") ?? throw new InvalidOperationException("Material picker missing.");
+                picker.SelectedItem = picker.Items.OfType<ComboBoxItem>().Single(item => Equals(item.Tag, id));
+                window._root.UpdateLayout();
+                var glass = Find<Slider>("setting-cardGlassBlur");
+                var mica = Find<Slider>("setting-cardMicaTintOpacity");
+                if ((glass is not null) != (id == "LiquidGlass") || (mica is not null) != (id == "Mica"))
+                    throw new InvalidOperationException("Material-specific controls were not disclosed correctly.");
+                if (glass is not null)
+                {
+                    glass.Value = 72;
+                    await DrainDispatcherAsync();
+                    if (window.DraftCardGlassBlur != 0.72 ||
+                        lastPreview?.Preview is not { Material: "LiquidGlass", GlassBlur: 0.72 })
+                        throw new InvalidOperationException("Glass slider did not reach native preview state.");
+                }
+                if (lastPreview?.Preview?.Material != id)
+                    throw new InvalidOperationException("Material selection did not reach native preview state.");
+            }
+            // Exercise the same dispatched accessibility callback without changing
+            // the user's OS setting. Native owns the actual visual fallback.
+            window._probeCardHighContrast = true;
+            window.OnSettingsHighContrastChanged(window._accessibility, new object());
+            await DrainDispatcherAsync();
+            window._root.UpdateLayout();
+            foreach (var key in new[] { "cardMicaTintOpacity", "cardMicaLuminosityOpacity", "cardMicaDarkTintOpacity", "cardMicaDarkLuminosityOpacity" })
+                if (Find<Slider>("setting-" + key) is not { IsEnabled: false })
+                    throw new InvalidOperationException("High contrast did not disable Mica tuning.");
+            foreach (var id in new[] { "Solid", "LiquidGlass" })
+            {
+                var picker = Find<ComboBox>("setting-cardMaterial")!;
+                picker.SelectedItem = picker.Items.OfType<ComboBoxItem>().Single(item => Equals(item.Tag, id));
+                window._root.UpdateLayout();
+                if (lastPreview?.Preview?.Material != id)
+                    throw new InvalidOperationException("High contrast suppressed material draft preview.");
+            }
+            var blurInContrast = Find<Slider>("setting-cardGlassBlur")!;
+            if (!blurInContrast.IsEnabled) throw new InvalidOperationException("High contrast disabled glass draft editing.");
+            blurInContrast.Value = 63;
+            await DrainDispatcherAsync();
+            if (lastPreview?.Preview is not { Material: "LiquidGlass", GlassBlur: 0.63 })
+                throw new InvalidOperationException("High contrast suppressed glass adjustment preview.");
+
+            window._media.Set("toolWindowTheme", "Dark");
+            window.ApplyTheme();
+            window.OnConnectionChanged(false);
+            await DrainDispatcherAsync();
+            // Simulate Media discarding previews on connection close.
+            lastPreview = null;
+            lastTheme = null;
+            window.OnConnectionChanged(true);
+            await DrainDispatcherAsync();
+            if (lastPreview?.Preview is not { Material: "LiquidGlass", GlassBlur: 0.63 } || lastTheme != ElementTheme.Dark ||
+                window.DraftCardMaterial != "LiquidGlass" || window.DraftCardGlassBlur != 0.63)
+                throw new InvalidOperationException("Reconnect did not restore current material and theme drafts.");
+
+            window.NavigateTo("general");
+            if (lastPreview?.Preview is not null)
+                throw new InvalidOperationException("Leaving material settings did not reset native preview.");
+            lastPreview = null;
+            window.OnConnectionChanged(true);
+            await DrainDispatcherAsync();
+            if (lastPreview?.Preview is not null || window.ActiveMicaPreview is not null)
+                throw new InvalidOperationException("Reconnect outside card settings activated material preview.");
+            window.NavigateTo("quickCards");
+            if (window.DraftCardGlassBlur != 0.63)
+                throw new InvalidOperationException("Switching materials lost the glass draft.");
+        }
+        finally
+        {
+            window._probeCardHighContrast = originalHighContrast;
+            window._media.SetNode("cardMaterial", originalMaterial);
+            window._media.SetNode("cardGlassBlur", originalBlur);
+            window._media.SetNode("toolWindowTheme", originalTheme);
+            window.ApplyTheme();
+            window.NavigateTo(originalPage);
+            window.MicaPreviewChanged -= OnPreview;
+            window.ThemePreviewChanged -= OnTheme;
+        }
+
+        return new { materialSpecificControls = true, glassAdjustmentPreview = true,
+            highContrastDraftPreview = true, highContrastMicaDisabled = true,
+            reconnectRestoresDraftAndTheme = true, leaveResetsPreview = true,
+            reconnectOutsidePageDoesNotActivate = true, draftPreserved = true,
+            systemHighContrastModified = false };
+
+        Task DrainDispatcherAsync()
+        {
+            var completion = new TaskCompletionSource<bool>();
+            if (!window.DispatcherQueue.TryEnqueue(() => completion.SetResult(true)))
+                throw new InvalidOperationException("Probe dispatcher is unavailable.");
+            return completion.Task;
+        }
     }
 
     private static IEnumerable<DependencyObject> WalkTheme(DependencyObject parent)

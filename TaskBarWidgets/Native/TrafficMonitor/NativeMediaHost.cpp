@@ -1208,6 +1208,8 @@ struct NativeMediaHost::Impl
                 config.mica.darkTint = number(L"darkTintOpacity", config.mica.darkTint);
                 config.mica.darkLuminosity = number(L"darkLuminosityOpacity", config.mica.darkLuminosity);
             }
+            config.material.Set(quick.GetNamedString(L"material", L"Mica").c_str(),
+                quick.GetNamedNumber(L"glassBlur", 0.35));
             cardConfigReady = true;
             cardConfig = config;
             if (cards) cards->ApplyConfig(config);
@@ -1220,6 +1222,7 @@ struct NativeMediaHost::Impl
     void ApplyCardMicaPreview(const winrt::Windows::Data::Json::JsonObject& message)
     {
         if (!cards) return;
+        Cards::MaterialSettings material = cardConfig.material;
         Cards::MicaTuning tuning;
         tuning.tint = cardConfig.mica.tint;
         tuning.luminosity = cardConfig.mica.luminosity;
@@ -1240,6 +1243,8 @@ struct NativeMediaHost::Impl
                     {
                         return body.HasKey(key) ? body.GetNamedNumber(key) : fallback;
                     };
+                    material.Set(body.GetNamedString(L"material", Cards::IdOf(material.kind)).c_str(),
+                        number(L"glassBlur", material.glassBlur));
                     tuning.tint = number(L"tintOpacity", tuning.tint);
                     tuning.luminosity = number(L"luminosityOpacity", tuning.luminosity);
                     tuning.darkTint = number(L"darkTintOpacity", tuning.darkTint);
@@ -1248,7 +1253,7 @@ struct NativeMediaHost::Impl
             }
         }
         catch (const winrt::hresult_error&) { return; }
-        if (enabled) cards->PreviewMica(vivid, tuning);
+        if (enabled) cards->PreviewMica(vivid, tuning, material);
         else cards->ClearPreview();
     }
 

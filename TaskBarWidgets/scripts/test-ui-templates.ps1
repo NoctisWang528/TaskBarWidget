@@ -46,6 +46,19 @@ if (-not $result.reorderControls.sameColumn -or -not $result.reorderControls.cro
     -not $result.reorderControls.dropCommitsOnce) {
     throw 'Reorder interaction checks did not complete.'
 }
+if (@($result.themeControls.checks).Count -ne 4 -or
+    $result.themeControls.systemThemeModified -ne $false -or
+    $result.themeControls.previewUserColorsUntouched -ne $true) {
+    throw 'Theme control propagation and isolation checks did not complete.'
+}
+foreach ($check in @('materialSpecificControls','glassAdjustmentPreview','highContrastDraftPreview',
+    'highContrastMicaDisabled','reconnectRestoresDraftAndTheme','leaveResetsPreview',
+    'reconnectOutsidePageDoesNotActivate','draftPreserved')) {
+    if ($result.materialControls.$check -ne $true) { throw "Material settings check failed: $check" }
+}
+if ($result.materialControls.systemHighContrastModified -ne $false) {
+    throw 'Material settings probe did not confirm system high-contrast isolation.'
+}
 $peripheral = $result.peripheralSettings
 foreach ($check in @('taskbarDemandScoped','sharedPageDemand','snapshotPolling','schemaChangesOnly','modes',
     'perDeviceVisibility','reorder','draftPreservation','globalApply','newerEditPreserved','noPollingRebuild',

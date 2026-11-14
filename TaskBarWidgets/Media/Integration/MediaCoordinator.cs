@@ -520,9 +520,7 @@ internal sealed class MediaCoordinator : IDisposable
         ControlState = new MediaControlState(
             snapshot.Track?.Title ?? "没有媒体",
             displayArtist,
-            NonLyricsMediaPolicy.IsDouyin(snapshot)
-                ? "抖音"
-                : snapshot.Track?.SourceApp ?? "",
+            MediaSourcePresentation.Label(source),
             snapshot.Position.TotalSeconds,
             snapshot.Track?.Duration.TotalSeconds ?? 0,
             snapshot.IsPlaying,
@@ -542,9 +540,7 @@ internal sealed class MediaCoordinator : IDisposable
             isBrowser,
             snapshot.Track?.Title ?? "",
             displayArtist,
-            NonLyricsMediaPolicy.IsDouyin(snapshot)
-                ? "抖音"
-                : snapshot.SourceAppUserModelId,
+            MediaSourcePresentation.Label(source),
             snapshot.IsPlaying,
             capabilities.Previous,
             capabilities.Next,

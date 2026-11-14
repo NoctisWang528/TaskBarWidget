@@ -169,6 +169,12 @@ public sealed class AppSettings
 
     public string CardFontFamily { get; set; } = DefaultFontFamily;
 
+    public string CardMaterial { get; set; } = "Mica";
+    public double CardGlassBlur { get; set; } = 0.35;
+
+    public static string NormalizeCardMaterial(string? value) => value is "LiquidGlass" or "Solid" ? value : "Mica";
+    public static double NormalizeCardGlassBlur(double value) => double.IsFinite(value) ? Math.Clamp(value, 0, 1) : 0.35;
+
     public bool CardMicaVivid { get; set; } = DefaultCardMicaVivid;
 
     public double CardMicaTintOpacity { get; set; } = DefaultCardMicaTintOpacity;
@@ -388,6 +394,8 @@ public sealed class AppSettings
             QuickCardAnimationFps = 0;
 
         CardFontFamily = NormalizeFontFamily(CardFontFamily);
+        CardMaterial = NormalizeCardMaterial(CardMaterial);
+        CardGlassBlur = NormalizeCardGlassBlur(CardGlassBlur);
         CardMicaTintOpacity = NormalizeMicaOpacity(
             CardMicaTintOpacity,
             DefaultCardMicaTintOpacity,

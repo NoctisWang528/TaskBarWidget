@@ -121,6 +121,8 @@ void MeasureCardPerformance(const wchar_t* outputPath)
     const auto started = Clock::now();
     const auto baseline = ReadSample();
     uint64_t totalPaints{};
+    bool glassMeasurement = false;
+    double cardPreparationMs{};
     {
         Cards::Runtime runtime;
         winrt::check_hresult(runtime.Initialize());
@@ -137,6 +139,15 @@ void MeasureCardPerformance(const wchar_t* outputPath)
         environment.dark = true;
         environment.reducedMotion = false;
         environment.highContrast = false;
+        // Opt-in diagnostic only; no settings/protocol mutation. This reports
+        // process CPU/visibility timing, not DWM GPU time or presented frames.
+        wchar_t materialMode[32]{};
+        if (GetEnvironmentVariableW(L"TASKBARWIDGETS_PROBE_MATERIAL", materialMode, ARRAYSIZE(materialMode)) &&
+            wcscmp(materialMode, L"LiquidGlass") == 0)
+        {
+            environment.material.Set(L"LiquidGlass", .35);
+            glassMeasurement = true;
+        }
         Services services;
         Cards::Snapshot snapshot;
         snapshot.media.title = L"Deterministic card measurement";
@@ -175,6 +186,7 @@ void MeasureCardPerformance(const wchar_t* outputPath)
         // Keep every HWND above and left of the entire virtual desktop.
         const LONG x = GetSystemMetrics(SM_XVIRTUALSCREEN) - 4096;
         const LONG y = GetSystemMetrics(SM_YVIRTUALSCREEN) - 4096;
+        const auto preparationStarted = Clock::now();
         for (auto kind : {Cards::Kind::Weather, Cards::Kind::Traffic, Cards::Kind::Device, Cards::Kind::Media})
         {
             auto card = std::make_unique<Cards::CardWindow>(kind, services);
@@ -187,6 +199,7 @@ void MeasureCardPerformance(const wchar_t* outputPath)
             Require(!IsWindowVisible(card->Handle()), "Measurement card must begin hidden");
             cards.push_back(std::move(card));
         }
+        cardPreparationMs = Milliseconds(preparationStarted);
         bool first = true;
         const auto stage = [&](const char* name, auto action) {
             const auto before = ReadSample();
@@ -242,6 +255,8 @@ void MeasureCardPerformance(const wchar_t* outputPath)
         << "\"timingScope\":\"HWND visibility only; not animation completion or presented frames\","
         << "\"dwellMs\":2000,\"toggleCount\":20,\"toggleIntervalMs\":80,"
         << "\"scale\":1,\"dark\":true,\"reducedMotion\":false,\"highContrast\":false,"
+        << "\"material\":\"" << (glassMeasurement ? "LiquidGlass" : "Mica") << "\","
+        << "\"cardPreparationMs\":" << cardPreparationMs << ','
         << "\"elapsedMs\":" << elapsed << ",\"baseline\":";
     WriteSample(output, baseline);
     output << ",\"final\":";

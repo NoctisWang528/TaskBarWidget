@@ -244,8 +244,10 @@ namespace Cards::Paint
                 {
                     const auto rect = Draw::Rect(left + width - 112 + i * 60, rowTop,
                         left + width - 64 + i * 60, rowTop + 18);
+                    auto linkInteraction = interaction;
+                    linkInteraction.glass = false;
                     Draw::ControlBackground(context, rect, 3, WithAlpha(palette.accent, 0), palette.accent,
-                        interaction, 402 + i);
+                        linkInteraction, 402 + i);
                     Draw::Text(context, graphics, i ? L"数据来源" : L"和风天气", environment.fontFamily, 10, 400,
                         environment.highContrast ? palette.primary : palette.accent, rect,
                         DWRITE_TEXT_ALIGNMENT_LEADING, false, true);
@@ -281,26 +283,51 @@ namespace Cards::Paint
         const auto button = [&](int id, D2D1_RECT_F rect, const std::wstring& action,
             const std::wstring& label, bool enabled, bool selected = false)
         {
-            Draw::ControlBackground(context, rect, 6, selected ? palette.fill : WithAlpha(palette.fill, 0),
-                palette.accent, interaction, id, enabled);
+            auto buttonInteraction = interaction;
+            if (id == 401) buttonInteraction.glass = false;
+            if (id != 404 && id != 405)
+                Draw::ControlBackground(context, rect, id == 400 ? 14.f : 6.f, WithAlpha(palette.fill, 0),
+                    palette.accent, buttonInteraction, id, enabled);
+            else if (interaction.focused == id)
+                Draw::StrokeRound(context, rect, 14, palette.accent, 1.5f);
             Layout::Region region;
             region.id = id; region.bounds = RECT{ static_cast<LONG>(rect.left), static_cast<LONG>(rect.top),
                 static_cast<LONG>(rect.right), static_cast<LONG>(rect.bottom) };
             region.action = action; region.name = label; region.enabled = enabled; region.selected = selected;
             regions.Add(std::move(region));
-            if (selected)
-                Draw::FillRound(context, Draw::Rect(rect.left + 12, rect.bottom - 3, rect.right - 12, rect.bottom - 1),
-                    1, palette.accent);
         };
         const float tabsLeft = right - 130;
         const auto cityRect = Draw::Rect(left - 4, 16, tabsLeft - 8, 44);
         button(401, cityRect, L"openWeatherSettings", L"打开天气设置", true);
-        text(HasValue(ShownCity(weather)) ? ShownCity(weather) : L"设置天气城市", left, 20,
-            cityRect.right - left - 4, 24, 14, 600, palette.primary);
+        Draw::Text(context, graphics, HasValue(ShownCity(weather)) ? ShownCity(weather) : L"设置天气城市",
+            environment.fontFamily, 14, 600, palette.primary, Draw::Rect(left, 16, cityRect.right - 4, 44),
+            DWRITE_TEXT_ALIGNMENT_LEADING, false, false, false, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        const auto tabs = Draw::Rect(tabsLeft - 2, 16, tabsLeft + 90, 44);
+        // Decorative visuals must not reuse the paging input IDs 406/407.
+        Draw::ControlBackground(context, tabs, 14, WithAlpha(palette.primary, .06f), palette.accent, interaction, 4406);
+        const float selectedLeft = tabsLeft + (weather.forecastView ? 44.f : 0.f);
+        const auto selection = Draw::Rect(selectedLeft, 18, selectedLeft + 44, 42);
+        if (interaction.glass && interaction.compositedGlass)
+        {
+            if (interaction.glassControls)
+            {
+                GlassControl control;
+                control.id = 4407; control.kind = GlassControl::Kind::Segment;
+                control.bounds = selection; control.radius = 12; control.on = true;
+                control.hover = std::max(interaction.Hover(404), interaction.Hover(405));
+                control.pressed = interaction.pressed == 404 || interaction.pressed == 405;
+                control.ink = palette.accent;
+                interaction.glassControls->push_back(control);
+            }
+        }
+        else Draw::FillRound(context, selection, 12, WithAlpha(palette.primary, environment.dark ? .16f : .12f));
         button(404, Draw::Rect(tabsLeft, 16, tabsLeft + 44, 44), L"weatherView:today", L"小时", true, !weather.forecastView);
         button(405, Draw::Rect(tabsLeft + 44, 16, tabsLeft + 88, 44), L"weatherView:forecast", L"多日", true, weather.forecastView);
-        text(L"小时", tabsLeft, 22, 44, 18, 11, 600, palette.primary, DWRITE_TEXT_ALIGNMENT_CENTER);
-        text(L"多日", tabsLeft + 44, 22, 44, 18, 11, 600, palette.primary, DWRITE_TEXT_ALIGNMENT_CENTER);
+        for (int tab = 0; tab < 2; ++tab)
+            Draw::Text(context, graphics, tab ? L"多日" : L"小时", environment.fontFamily, 11, 600,
+                (tab == 1) == weather.forecastView ? palette.primary : palette.secondary,
+                Draw::Rect(tabsLeft + tab * 44, 16, tabsLeft + (tab + 1) * 44, 44),
+                DWRITE_TEXT_ALIGNMENT_CENTER, false, false, false, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         const auto refreshRect = Draw::Rect(right - 28, 16, right, 44);
         button(400, refreshRect, L"refreshWeather", L"刷新天气", !weather.updating);
         DrawGlyph(context, Glyph::Refresh, WithAlpha(palette.primary, weather.updating ? 0.4f : 0.9f),

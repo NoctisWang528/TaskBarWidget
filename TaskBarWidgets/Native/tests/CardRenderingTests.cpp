@@ -58,6 +58,7 @@ namespace
         CardEnvironment environment;
         environment.graphics = &graphics;
         environment.dark = dark;
+        if (interaction.glass) environment.material.kind = MaterialKind::LiquidGlass;
         environment.highContrast = highContrast;
         environment.reducedMotion = reducedMotion;
         const float width = Layout::WidthDip(kind);
@@ -620,6 +621,117 @@ namespace
         }
     }
 
+    // Product D2D painters only. These images do not contain the Composition
+    // desktop backdrop/lens graph and cannot establish its visual correctness.
+    void CheckGlassControls(Graphics& graphics, const std::filesystem::path& folder = {})
+    {
+        auto snapshot = Fixture();
+        snapshot.media.sources.push_back({ L"glass-fixture", L"Synthetic source", L"" });
+        snapshot.media.selectedSourceId = L"glass-fixture";
+        for (bool dark : {false, true})
+        for (float scale : {1.0f, 1.5f})
+        for (Kind kind : {Kind::Device, Kind::Media})
+        {
+            Paint::Interaction idle;
+            idle.glass = true;
+            idle.dark = dark;
+            const auto render = [&](const Snapshot& data, const Paint::Interaction& state)
+            { return Render(graphics, kind, data, dark, scale, {}, state); };
+            const auto baseline = render(snapshot, idle);
+            const auto label = Label(kind, scale, dark, {}) + " glass-controls";
+            const auto exportFrame = [&](const Frame& frame, const std::wstring& state)
+            {
+                if (folder.empty()) return;
+                const auto name = std::wstring(L"glass-controls-") + IdOf(kind) + (dark ? L"-dark-" : L"-light-") +
+                    std::to_wstring(static_cast<int>(scale * 100)) + L"-" + state + L".png";
+                WritePng(graphics, frame, folder / name, scale);
+            };
+            exportFrame(baseline, L"idle");
+            Compare(baseline, render(snapshot, idle), scale, label + " idle-repeat");
+            const std::vector<int> ids = kind == Kind::Device ? std::vector<int>{200, 201, 202}
+                : std::vector<int>{2, 100, 4};
+            for (int id : ids)
+            {
+                const auto* region = baseline.regions.Find(id);
+                const auto control = label + " id=" + std::to_string(id);
+                Require(region && region->enabled, control + ": enabled fixture missing");
+                // Slider paint may extend beyond rail endpoints, as before; its
+                // actual hit rectangle and action must remain exactly unchanged.
+                const auto allowed = Bounds(*region, region->type == Layout::RegionType::Slider ? 10.0f : 2.0f);
+                auto hover = idle; hover.hover[id] = 1.0f;
+                auto press = hover; press.pressed = id;
+                auto focus = idle; focus.focused = id;
+                const auto hovered = render(snapshot, hover);
+                const auto pressed = render(snapshot, press);
+                const auto focused = render(snapshot, focus);
+                exportFrame(hovered, std::to_wstring(id) + L"-hover");
+                exportFrame(pressed, std::to_wstring(id) + L"-pressed");
+                exportFrame(focused, std::to_wstring(id) + L"-focus");
+                Require(Compare(baseline, hovered, scale, control + " hover", allowed) > 8,
+                    control + ": glass hover produced no measurable control feedback");
+                Require(Compare(hovered, pressed, scale, control + " press", allowed) > 8,
+                    control + ": press is indistinguishable from hover");
+                Require(Compare(baseline, focused, scale, control + " focus", allowed) > 8,
+                    control + ": keyboard focus is not visible");
+                Compare(baseline, render(snapshot, idle), scale, control + " leave clears feedback");
+                for (const auto& actual : pressed.regions.All())
+                {
+                    const auto* original = baseline.regions.Find(actual.id);
+                    Require(original && original->action == actual.action && original->type == actual.type,
+                        control + ": interaction changed hit action/type");
+                }
+                if (region->type == Layout::RegionType::Slider)
+                {
+                    const float ratio = kind == Kind::Device ? 0.55f : 75.0f / 240.0f;
+                    const float cx = region->bounds.left + (region->bounds.right - region->bounds.left) * ratio;
+                    const float cy = (region->bounds.top + region->bounds.bottom) / 2.0f;
+                    size_t outerThumbPixels = 0;
+                    for (UINT y = 0; y < baseline.height; ++y)
+                    for (UINT x = 0; x < baseline.width; ++x)
+                    {
+                        const float dx = (x + .5f) / scale - cx, dy = (y + .5f) / scale - cy;
+                        if (std::abs(dx) < 9.5f && std::abs(dy) > 6.0f && std::abs(dy) < 9.5f &&
+                            std::memcmp(baseline.Pixel(x, y), pressed.Pixel(x, y), 4) != 0) ++outerThumbPixels;
+                    }
+                    Require(outerThumbPixels > 4, control + ": drag did not expand/highlight the thumb beyond its idle radius");
+                }
+                auto reduced = hover; reduced.reducedMotion = true;
+                const auto reducedHover = render(snapshot, reduced);
+                exportFrame(reducedHover, std::to_wstring(id) + L"-reduced-hover");
+                Compare(reducedHover, render(snapshot, reduced), scale, control + " reduced repeat");
+                Require(Compare(baseline, reducedHover, scale, control + " reduced hover", allowed) > 8,
+                    control + ": reduced motion removed interaction feedback");
+                if (region->type == Layout::RegionType::Button)
+                {
+                    reduced.hover[id] = .25f;
+                    Compare(reducedHover, render(snapshot, reduced), scale, control + " reduced hover snaps without lift");
+                }
+                auto disabled = snapshot;
+                if (kind == Kind::Device)
+                {
+                    if (id == 200) disabled.audio.outputs.clear();
+                    else disabled.audio.outputs.front().canControl = false;
+                }
+                else if (id == 2) disabled.media.sources.clear();
+                else if (id == 100) disabled.media.canPlayPause = false;
+                else disabled.media.canSeek = false;
+                const auto disabledIdle = render(disabled, idle);
+                const auto disabledPress = render(disabled, press);
+                exportFrame(disabledPress, std::to_wstring(id) + L"-disabled");
+                Require(disabledIdle.regions.Find(id) && !disabledIdle.regions.Find(id)->enabled,
+                    control + ": disabled fixture is still interactive");
+                Compare(disabledIdle, disabledPress, scale, control + " disabled ignores hover/press");
+            }
+            // Theme/reduced-motion metadata must not select glass when glass=false.
+            auto legacy = idle; legacy.glass = false;
+            const auto legacyIdle = render(snapshot, legacy);
+            legacy.dark = !dark; legacy.reducedMotion = true;
+            Compare(legacyIdle, render(snapshot, legacy), scale, label + " legacy flags preserve old output");
+        }
+        std::cout << "Glass control D2D comparisons passed: light/dark, 100/150% DPI, selector/button/slider, "
+            "hover/press/focus/disabled, stable hit geometry and reduced motion. Not Composition backdrop acceptance.\n";
+    }
+
     void CheckHalo(const Frame& zero, const Frame& half, const Frame& full,
         const Layout::Region& region, float scale, const std::string& label)
     {
@@ -682,6 +794,7 @@ void WritePeripheralPreviews(Cards::Graphics& graphics, const wchar_t* directory
         "explicit identity and legacy name/source brand inference");
     const auto folder = std::filesystem::absolute(directory);
     std::filesystem::create_directories(folder);
+    CheckGlassControls(graphics, folder);
     int written = 0;
     for (const auto* mode : {L"compact", L"detailed"})
     for (bool dark : {false, true})
@@ -770,6 +883,7 @@ void WritePeripheralPreviews(Cards::Graphics& graphics, const wchar_t* directory
 void TestCardRenderingStability(Cards::Graphics& graphics)
 {
     Require(graphics.Ready(), "Graphics must already be initialized in the caller's apartment");
+    CheckGlassControls(graphics);
     CheckCoverCrossfade(graphics);
     CheckPeripheralAppearance(graphics);
     const Snapshot snapshot = Fixture();

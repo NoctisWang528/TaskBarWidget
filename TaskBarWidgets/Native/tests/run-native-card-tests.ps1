@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory)][string]$BuildDirectory,
-    [ValidateSet('Regression', 'Measure', 'SurfaceIsolation')][string]$Mode = 'Regression'
+    [ValidateSet('Regression', 'Measure', 'SurfaceIsolation', 'LiquidGlass')][string]$Mode = 'Regression'
 )
 $ErrorActionPreference = 'Stop'
 $source = [IO.Path]::GetFullPath($BuildDirectory)
@@ -38,6 +38,8 @@ if ($Mode -eq 'Measure') {
     Write-Host "Isolated synthetic card measurements: $measurement"
 } elseif ($Mode -eq 'SurfaceIsolation') {
     $launch.ArgumentList = @('--surface-isolation')
+} elseif ($Mode -eq 'LiquidGlass') {
+    $launch.ArgumentList = @('--liquid-glass')
 }
 $process = Start-Process @launch
 if (-not $process.WaitForExit(45000)) { Stop-Process -Id $process.Id; throw 'Isolated card probe did not exit in 45 seconds.' }

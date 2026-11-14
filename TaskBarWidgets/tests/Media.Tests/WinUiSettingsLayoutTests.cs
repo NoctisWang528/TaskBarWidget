@@ -7,6 +7,28 @@ namespace TaskBarWidgets.Media.Tests;
 public sealed class WinUiSettingsLayoutTests
 {
     [Fact]
+    public void MaterialReadbackKeepsNewerGlassAndThemeDrafts()
+    {
+        var state = new SettingsDraft();
+        state.Readback(new JsonObject { ["cardMaterial"] = "Mica", ["cardGlassBlur"] = 0.35, ["toolWindowTheme"] = "System" });
+        state.Set("cardMaterial", "LiquidGlass");
+        state.Set("cardGlassBlur", 0.55);
+        var submitted = state.Capture();
+        state.Set("cardMaterial", "Solid");
+        state.Set("cardGlassBlur", 0.72);
+        state.Set("toolWindowTheme", "Dark");
+        state.Readback(new JsonObject { ["cardMaterial"] = "LiquidGlass", ["cardGlassBlur"] = 0.55, ["toolWindowTheme"] = "System" }, submitted);
+        Assert.Equal("Solid", state.Text("cardMaterial"));
+        Assert.Equal(0.72, state.Number("cardGlassBlur"));
+        Assert.Equal("Dark", state.Text("toolWindowTheme"));
+        Assert.Equal("LiquidGlass", state.GetSaved("cardMaterial")!.ToString());
+        Assert.Equal(0.55, state.SavedNumber("cardGlassBlur"));
+        Assert.Equal(3, state.Pending.Count);
+        state.Readback(new JsonObject { ["cardMaterial"] = "Solid", ["cardGlassBlur"] = 0.72, ["toolWindowTheme"] = "Dark" }, state.Capture());
+        Assert.Empty(state.Pending);
+    }
+
+    [Fact]
     public void PoolAndIndependentRowsKeepConfigurationAndSubmitWholeLayout()
     {
         var state = new SettingsDraft();

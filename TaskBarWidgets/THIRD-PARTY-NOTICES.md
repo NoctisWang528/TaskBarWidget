@@ -1,5 +1,7 @@
 # Source attribution
 
+Quick-card liquid glass adapts the circular lens and rounded-edge highlight profiles from [Kyant0/AndroidLiquidGlass](https://github.com/Kyant0/AndroidLiquidGlass/tree/eb4a0ea2e17542ea28c2e71088f7dd9acf77aad5), Copyright 2025 Kyant, under [Apache-2.0](licenses/AndroidLiquidGlass-LICENSE). See [source and modification notices](licenses/AndroidLiquidGlass-NOTICE.md). The native Windows renderer does not bundle Compose or Android binaries.
+
 Peripheral battery acquisition uses [HIDAPI 0.15.0](https://github.com/libusb/hidapi/tree/hidapi-0.15.0), under its permitted BSD license option; see [the BSD notice](licenses/hidapi-BSD-3-Clause.txt). The native acquisition helper links this pinned source and does not load arbitrary external plugins.
 
 [HeadsetControl 4.1.0](https://github.com/Sapd/HeadsetControl/tree/4.1.0) is distributed as a separate, optional, unmodified command-line program under GPL-3.0, disabled by default. The package contains its license, upstream provenance and corresponding source archive together under `Dependencies/HeadsetControl/`. The application invokes only its audited battery query with standard text output; it does not link HeadsetControl into the product. AirVolt was consulted for feature ideas only; no AirVolt source or assets are included.

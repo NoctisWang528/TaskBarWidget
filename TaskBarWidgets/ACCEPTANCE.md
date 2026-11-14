@@ -809,3 +809,89 @@ All/Release完整构建、127项定向托管检查（最终发布程序集）、
 08:27本地交付：两种ZIP均通过完整解包/清单校验；正常退出并备份核对362个个人文件，仅替换171个portable清单程序文件，个人数据未变化。安装版本261111-0820及全部程序哈希复核通过，原生与Media进程已恢复。备份为artifacts/personal-backups/TaskBarWidgets-before-261111-0820-20261111-082719，结果在artifacts/peripheral-layout-20261111/replacement-result.json。本次仅本地更新。
 
 用户随后授权提交、推送并发布261111-0820，明确要求上传后直接发布、不再下载附件校验。本轮复用已验收的08:20完整构建；与本地候选记录的1215个来源文件核对，程序源码一致，仅README和验收说明发生文档变更。正式包使用干净提交重新生成，保留本地清单/解包校验及双ZIP更新兼容布局；发布说明加入AirPods布局渲染示例。
+
+
+## 2026-11-12 卡片液态玻璃与材质选择（261112-2058）
+
+新增 LiquidGlass / Mica / Solid 稳定材质 ID；玻璃只保留透明到模糊一个参数，深浅主题共用。旧配置继续使用 Mica，保存、草稿预览、页面退出和后端重连贯通。参考 AndroidLiquidGlass 的圆弧折射与圆角方向反光，Windows 原生分带近似和平台限制记录于 [卡片材质](docs/2026-11-12-卡片材质.md)，Apache 2.0 许可和来源记录随产品保留。
+
+完整 All/Release 构建 261112-2058、产品边界和出厂默认检查通过。MakePri 最初因本机临时目录访问拒绝失败；最终构建使用项目缓存的原工具，只为当前构建进程把 TEMP/TMP 指向 artifacts 下的可写临时目录，未改工具链或全局设置。发布版 WinUI 模板探针通过，报告明确包含材质显隐、玻璃滑块预览、高对比度草稿、Mica 禁用、重连恢复主题/草稿、离页撤销和草稿保留。
+
+23 项相关托管测试方法与断言通过同进程隔离检查器执行。标准 VSTest 被 testhost 读取父进程的权限错误中止，不记为标准测试运行通过。原生真实效果图创建/复用、六类卡片主题/DPI/材质/高对比切换和空闲计时器检查曾完整通过；一次完整 Regression 亦通过。后续完整回归受外部 GamePP 注入崩溃或超时中断，Windows Application 1000 记录 GPP64.dll，不能把末次运行计为通过；未更改外部软件、叠加层或驱动设置。
+
+独立 LiquidGlass 像素探针对本进程的屏外合成窗口捕获被系统以“没有权限捕获给定窗口”拒绝，未生成可验收的玻璃像素预览。真实桌面透射、细线背景边缘连续性、动态背景、多卡及 200% DPI 的 GPU 开销均待验收；当前原生适配含中央背景和十二个透镜带的模糊节点，不宣称零 GPU 开销或与 Apple 私有实现逐像素一致。WinUI 合成鼠标消息未被提升为真实 PointerPressed，真实指针拖动亦不记为通过。
+
+本地证据：artifacts/builds/liquid-glass-dev/build-info.json、ui-template-check.json、native-card-LiquidGlass-error.log，以及 artifacts/logs/liquid-glass-*.log。候选只作开发构建；未启动正常产品、替换日常安装、提交、推送或发布。
+
+## 2026-11-12 玻璃方框、控件反馈与初始化开销修复（261112-2134）
+
+用户实屏反馈显示 2058 的反光贴图停留在卡片中央，旧效果图创建成功未证明正确呈现。九宫格源改为 Fill；背景改为底层可调模糊、外到内的十二个透镜视觉层、染色、反光和正文。透镜固定零半径采样后做仿射与 AlphaMask，避免 Windows 拒绝直接变换 backdrop，也避免效果画刷嵌套输入。每卡效果工厂由十七个降为两个，取消十二份重复的可调模糊；首次创建等待真实尺寸和 DPI。按钮／选择框及可拖动滑块新增反光、悬停、按压／拖动反馈，使用既有悬停计时器，命中与动作不变。
+
+All/Release 261112-2134 构建通过，目录 artifacts/builds/liquid-glass-corrected。完整原生回归重跑通过，覆盖六类卡片、材质／主题／DPI／高对比切换、资源复用、空闲计时器、绘制稳定性、命中、预热、反复打开和 STA 释放。新增真实 D2D 控件像素比较通过，覆盖深浅色、100/150% DPI、悬停／按压／焦点／禁用与减少动态效果；PNG 位于 artifacts/previews/liquid-glass-fix，仅证明前景控件，不是玻璃背景实屏图。独立审查未发现新的具体生命周期或图层顺序问题。
+
+隔离四卡 LiquidGlass 测量：cardPreparationMs=32.703，首次 HWND 可见状态到位=11.021 ms，20 次连续切换通过；静止显示阶段无正文重绘。该准备时间不含共享 Graphics／Compositor 初始化，可见状态时间不等于动画完成或 GPU 首帧。证据为 artifacts/measurements/liquid-glass-fix.json。
+
+期间一次窗口回归在 ntdll.dll 中发生 0xc0000005，伴随 GamePP IPC 错误日志，不能据此确定其根因；随后同一源码完整回归通过。此前 2118 是不兼容直接 backdrop 变换的中间产物，已在其目录标记 NOT-FOR-DELIVERY，不作为交付包。当前原生探针证据保留于 artifacts/builds/liquid-glass-fix/native-card-Regression-recheck.log、glass-controls.log 和 glass-measure.log；该目录的产品 EXE 是旧中间产物，探针为后续修复源码构建。
+
+自有合成窗口的 WGC 捕获仍被系统以“没有权限捕获给定窗口”拒绝。已补充整卡四边反光、中央无源尺寸伪影、边缘折射及清晰／模糊端点的像素断言，但本机此次未执行到这些断言，不能记为通过。真实桌面折射、边缘连续性、混合 DPI、动态背景和 GPU 帧时仍待实屏验收。此次未启动正常产品、替换日用安装或更改外部叠加层设置。
+
+最终 2134 构建的 WinUI 模板探针通过。通过 package-release.ps1 -AllowDirtyLocal 生成 artifacts/candidates/local-update-261112-2134；便携 ZIP 的 173 个文件、兼容更新 ZIP 的 178 个文件均完成解压、持久化清单与 SHA-256 校验，update.json 指向兼容更新 ZIP。此为本地候选包，尚未导入正在运行的安装；未提交、推送或发布远程 Release。
+
+
+## 2026-11-12 玻璃故障后的修正候选
+
+可见玻璃探针运行后出现重复 DWM 故障（dwmcore.dll，0x8000000B），导致用户会话关闭并重启。独立探针进程并不隔离桌面合成器，具体根因未证实。本轮移除所有 backdrop 仿射变换及零半径采样绕过，停用 --glass-preview。卡片背景保留一次标准模糊、主题染色和边缘高光；控件改用普通颜色图层，缩放只作用于自身轨道。真实桌面折射尚未实现。
+
+修正天气分段胶囊、城市／来源的多余框、鼠标焦点框、胶囊滑块／静音开关与抓取范围；修正 Unknown Artist 等占位艺术家回退为具体应用名称，媒体来源不再用“浏览器”覆盖实际应用名。帧调度移除超时后额外等待一帧的延迟。以上为实现状态，不能代替实测帧率或视觉验收。
+
+按用户要求减少测试，本次不再启动可见探针或图形回归，仅进行静态检查、完整构建与打包校验；构建和本地更新结果随后记录。
+
+
+最终完整 All/Release 构建为 261112-2253（artifacts/builds/glass-controls-final）。构建及静态 diff 检查通过；package-release.ps1 -AllowDirtyLocal 对便携包与兼容更新包完成解包、清单和哈希校验，候选为 artifacts/candidates/local-update-261112-2253。最终构建修复天气装饰胶囊与翻页按钮复用 406/407 的编号冲突；2245 中间候选标记为不可交付。
+
+最终包通过现有 push-local-update.ps1、同一用户的管理员 PowerShell 导入成功。用户在应用内确认更新后，台北时间 2026-11-12 22:59:40 更新作业完成，journal 为 phase=complete、bridge=true。23:00 只读复核：安装 build-info 与 Native／Media／UI 版本均为 261112-2253，三个关键程序文件 SHA-256 与最终构建一致，Native 和 Media 已重启运行。正常更新器完成备份和健康流程；未复制覆盖安装、未修改启动注册、未提交／推送／发布。真实玻璃外观和帧率仍由用户验收，不把安装健康检查视为图形稳定性或桌面折射验收。
+
+## 2026-11-13 实时折射候选（261113-1121）
+
+用户接受必要时使玻璃卡片／菜单不出现在截图和录屏中，优先实时背景。新增 Desktop Duplication 捕获、应用私有 Direct2D 圆角位移与模糊，再交给 Composition 普通 surface；没有恢复 backdrop 仿射或零半径绕过。捕获只在正常可见卡片期间运行，首次初始化延后至展开动画结束；隐藏、材质退出和失败时释放图像并恢复窗口捕获标记。跨 GPU 使用非阻塞双暂存；失败最多三次尝试。设置页说明截图限制。
+
+滑块头改为 20×14 DIP，小按钮圆形、大按钮胶囊形；电量翻页按钮包括禁用状态也使用玻璃外观，天气选中胶囊加入 280 ms 放大回弹。现有媒体艺术家／来源名、材质 ID、单一模糊滑块和主题规则保留。
+
+静态审查与 git diff --check 通过。独立审查发现 GetWindowDisplayAffinity 的 layered-window 前置条件不适合作为本进程 Composition HWND 的 setter 门槛；按官方文档取消该门槛，仍以 SetWindowDisplayAffinity 的成功返回决定是否开始捕获。完整 All/Release 261113-1121 构建通过，位于 artifacts/builds/glass-live-refraction-final。兼容包和 portable 包的完整解包、清单／哈希校验通过（178／173 文件），候选位于 artifacts/candidates/local-update-261113-1121。261113-1116 为修正该前置条件之前的中间构建，不用于交付。
+
+遵照用户减少测试的要求，未运行图形探针、图形回归、自动桌面捕获或正常产品预览。真实截图排除、背景扭曲、呈现帧率、跨 GPU、旋转屏、混合 DPI 和设备丢失行为仍由用户验收；构建成功不证明这些硬件行为。仅授权通过现有本地更新入口交付，不包含提交、推送或远程发布。
+
+台北时间 11:28，通过同等管理员权限的既有 push-local-update.ps1 导入成功，返回 verified and ready；日志和状态位于 artifacts/checks/local-update-261113-1121。已请求用户在设置／关于页确认“更新并重启”。暂存不等于安装，安装结果待现有更新流程完成后记录。
+
+用户确认更新并重启后，只读核对安装 build-info 与 Native／Media／UI 版本均为 261113-1121，三个关键程序文件 SHA-256 与最终构建一致。更新作业 dcfcb76917934be48192811e3bdb9fe5 为 phase=complete、bridge=true，Native PID 77268 与 Media PID 34856 已于台北时间 12:13 重启运行。证据为 artifacts/checks/local-update-261113-1121/installation-result.json。安装已确认完成；实际折射外观、截图排除和帧率仍由用户验收，本次核对没有启动图形探针或自动截图。
+
+## 2026-11-15 折射回退与黑底修正（261115-0032）
+
+只读核对上一版 261115-0015 已安装：主程序 SHA-256 与交付构建一致，更新作业 complete、bridge=true，Native／Media 已重启。用户报告仍无折射或色散并存在黑底。
+
+源码确认 Direct2D Saturation 属性只接受 0–1，原管线却传入 1.5；改用 ColorMatrix 实现 1.5 倍饱和度。移除固定 42% 深色／48% 浅色覆盖，改为深色 2.5%／浅色 6% 白色提亮；控件输入边界外清为透明。保留私有 HLSL 七次光谱采样、捕获与回退结构。新阶段日志限约 64 KiB，仅含 PID、时间、阶段、HRESULT 与帧计数，不含图像或个人内容。
+
+Heisenberg（gpt-6.1-sol）完成捕获／诊断的静态检查并实现 CardHost 日志，主智能体复核实际代码并连接具体折射失败阶段。FXC ps_4_0 /O3 纯 CPU 编译通过；git diff --check 与完整 All/Release 构建通过（00:32:35–00:34:07，artifacts/builds/refraction-fallback-fixed-20261115）。没有运行图形探针、自动抓屏、图形回归或产品预览。旧版本没有持久阶段日志，因此不能排除用户机器上更早的捕获失败；实际运行与视觉效果待更新后核对。打包、本地暂存及安装结果另行记录。
+
+261115-0032 已通过本地接口暂存并由用户确认安装。只读核对 Native/Media/UI 三个关键文件哈希均匹配，journal 2ed54e2e862644e5843a53803cffce2a 为 complete、bridge=true。用户打开卡片后，新增日志明确显示 capture start=0x887A0004（DXGI_ERROR_UNSUPPORTED）、成功帧数为0；确认存在饱和度之前的捕获阻断。
+
+## 2026-11-15 捕获兼容后备（261115-0047）
+
+保留 Desktop Duplication 优先路径，遇到 DXGI_ERROR_UNSUPPORTED 时使用 Windows Graphics Capture 指定显示器的两帧池；沿用窗口捕获排除、非阻塞轮询和私有 GPU 图像，不恢复 Composition backdrop 变换。共享设备启用 D3D 多线程保护，复制到自有纹理后关闭借用帧，停止时关闭会话和帧池；首次三秒无帧走有界重试。未声明的 DDA 旋转使用输出旋转或无旋转。日志保留后备前的具体失败阶段。
+
+Heisenberg 静态复核未发现所有权或生命周期阻断，提出保留原始失败阶段的诊断建议，已落实。完整 All/Release 261115-0047 构建通过（00:47:07–00:48:23，artifacts/builds/refraction-capture-final-20261115）；0043 是补充诊断前的中间构建，不交付。git diff --check 通过。未运行图形探针、自动抓屏或图形回归。WGC 系统捕获边框可能保留，HDR/混合DPI/跨显卡和真实外观尚待用户验收；不调用边框权限弹窗。最终包与安装结果另记。
+
+261115-0047 便携包173文件、兼容包178文件的解包／清单／哈希验证通过，候选为 artifacts/candidates/local-update-261115-0047。已通过既有本地更新接口暂存并返回 verified and ready，等待用户应用内确认后核对安装及实时诊断。
+随后只读核对确认 0047 已完成安装：job 31574857188941758610af9a506c68f7 为 complete、bridge=true，Native PID26192；Native/Media/UI 三个关键文件与构建哈希一致。用户选择稍后更新，但安装已于 00:50:26 完成，以实际日志为准。用户打开卡片产生的日志显示原 DDA 阻断位于 duplication-format，WGC 成功启动并向渲染送入背景，接下来在 refraction/create-lens 报 0x80070490。它尚未进入 live-refraction，不能把捕获成功当作视觉效果成功。
+
+自定义透镜延迟注册只处理 D2DERR_EFFECT_IS_NOT_REGISTERED，漏掉 CreateEffect 同样支持返回的 ERROR_NOT_FOUND。已在锁前／锁内两处识别这两个返回值，并细分编译、注册、实例化诊断阶段。只进行静态检查、构建与打包；不运行图形探针。新候选先暂存，尊重用户稍后安装的选择。
+
+修正版 261115-0054 完整 All/Release 构建通过（artifacts/builds/refraction-registration-fixed-20261115）；便携173文件与兼容178文件的解包／清单／哈希验证通过。候选 artifacts/candidates/local-update-261115-0054 已经既有接口 verified and ready（管理员 helper exit0），未自动安装。用户选择稍后安装，不再次催促确认。当前核实安装为0047；0054的透镜注册和实际视觉效果仍待用户更新后手动展开验证。
+
+## 2026-11-15 实时折射安装确认与提交（261115-0054）
+
+用户确认已更新并展开卡片，反馈“还不错”，授权本轮累计改动提交并推送，明确暂不发布 Release。只读核对安装版本为 261115-0054，Native/Media/UI 三个关键文件 SHA-256 均与最终构建一致；作业 234f21e8c6444b3abe998901f89e01c6 于台北时间 00:57:20 完成，phase=complete、bridge=true，Native PID195704。证据存于 artifacts/checks/local-update-261115-0054/installation-result.json。
+
+用户打开卡片留下的日志已进入 live-refraction，HRESULT=0，累计成功处理2047帧；多次关闭／展开后都恢复实时路径。说明 WGC 后备、透镜注册及绘制链路已在当前安装运行。该计数不是屏幕呈现帧率，也不代表跨显卡、HDR、旋转屏或混合DPI均已验收。保留截图／录屏排除和可能出现系统捕获边框的限制。此次只读核验未运行图形探针、自动截图或额外图形回归。
+
+提交前核对产品源文件在最终构建开始后没有变化；新增改动仅为验收和来源说明。复用0054完整构建、包校验与用户试用证据，不重复构建；提交排除构建产物、日志、个人配置和本地参考仓库。

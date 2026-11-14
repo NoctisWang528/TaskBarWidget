@@ -7,13 +7,47 @@
 #include "CardProtocol.h"
 #include "CardWindow.h"
 #include "CardRuntime.h"
+#include "CardBackdropCapture.h"
 
 #include <future>
+#include <cwchar>
+#include <filesystem>
+#include <fstream>
+#include <shlobj.h>
 
 namespace Cards
 {
     namespace
     {
+        void AppendBackdropLog(const wchar_t* message) noexcept
+        {
+            struct LastError { DWORD value{ GetLastError() }; ~LastError() { SetLastError(value); } } lastError;
+            try
+            {
+                PWSTR rawPath{};
+                const HRESULT result = SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_DEFAULT, nullptr, &rawPath);
+                std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> folder(rawPath, &CoTaskMemFree);
+                if (FAILED(result) || !folder) return;
+                const auto directory = std::filesystem::path(folder.get()) / L"TaskBarWidgets" / L"Logs";
+                std::error_code error;
+                std::filesystem::create_directories(directory, error);
+                if (error) return;
+                const auto path = directory / L"card-backdrop.log";
+                const auto size = std::filesystem::file_size(path, error);
+                const auto mode = !error && size >= 64 * 1024 ? std::ios::trunc : std::ios::app;
+                std::ofstream log(path, std::ios::binary | mode);
+                if (!log) return;
+                SYSTEMTIME now{};
+                GetLocalTime(&now);
+                char prefix[96]{};
+                sprintf_s(prefix, "%04u-%02u-%02u %02u:%02u:%02u.%03u pid=%lu ",
+                    now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond,
+                    now.wMilliseconds, GetCurrentProcessId());
+                log << prefix << WideToUtf8(message);
+            }
+            catch (...) {} // Diagnostics must never interrupt card lifecycle or rendering.
+        }
+
         constexpr UINT WM_CARD_WHEEL = WM_APP + 0x218;
         constexpr UINT WM_CARD_TASK = WM_APP + 0x211;
         constexpr UINT_PTR IdleTimer = 0xCD03;
@@ -49,6 +83,7 @@ namespace Cards
             bool previewVivid{};
             bool previewDark{};
             MicaTuning previewTuning{};
+            MaterialSettings previewMaterial{};
             std::wstring menu;
             std::vector<Layout::Region> items;
             RECT menuAnchor{};
@@ -92,6 +127,18 @@ namespace Cards
         std::map<Kind, RECT> groupReflowFrom;
         float groupReflowProgress{1};
         HANDLE groupTimer{};
+        DesktopBackdrop backdrop;
+        HANDLE backdropTimer{};
+        bool backdropTimerArmed{};
+        HMONITOR backdropMonitor{};
+        ULONGLONG backdropRetryAt{};
+        unsigned backdropRetries{};
+        bool backdropBlocked{};
+        mutable std::mutex backdropMutex;
+        BackdropDiagnostics backdropDiagnostics;
+        uint64_t backdropRenderedFrames{};
+        std::wstring backdropStage{ L"inactive" };
+        HRESULT backdropLastResult{ S_OK };
         bool groupMoving{};
         float groupOffset{}, groupFrom{}, groupTo{}, groupDistance{};
         int groupDuration{240};
@@ -118,6 +165,7 @@ namespace Cards
         bool previewMica{ false };
         bool previewVivid{ true };
         MicaTuning previewTuning{};
+        MaterialSettings previewMaterial{};
         bool previewTheme{ false };
         bool previewDark{ false };
 
@@ -268,6 +316,14 @@ namespace Cards
         void StartGroupTimer();
         void StopGroupMotion(bool settle);
         void GroupFrame();
+        void RestoreBackdropWindows();
+        void StopBackdrop(bool resetRetry = false, bool preserveDiagnostic = false);
+        bool ArmBackdropTimer(LONGLONG delay);
+        void UpdateBackdropDiagnostics(const wchar_t* stage, HRESULT result = S_OK);
+        void RecordBackdropFailure(const wchar_t* operation, HRESULT result);
+        void FailBackdrop(const wchar_t* operation, HRESULT result);
+        void ConfigureBackdrop(bool scheduleTick = true);
+        void BackdropTick();
         void UpdateEnvironment(bool force);
         void RefreshSnapshot(const Protocol::Changes& changes);
         void OnTask();
@@ -332,6 +388,7 @@ namespace Cards
         if (popup && popup->Visible() && !config.IsEnabled(popupMenu == L"sources" ? Kind::Media : Kind::Device))
             CloseMenu();
         CardEnvironment environment;
+        environment.allowLiveCapture = !diagnosticOffscreen;
         environment.graphics = &graphics;
         environment.compositor = compositor;
         environment.device = device;
@@ -339,6 +396,7 @@ namespace Cards
         environment.highContrast = highContrast;
         environment.reducedMotion = reducedMotion;
         environment.mica = previewMica ? previewTuning : config.mica;
+        environment.material = previewMica ? previewMaterial : config.material;
         if (previewMica) environment.mica.vivid = previewVivid;
         environment.fontFamily = config.font.empty() ? L"Microsoft YaHei UI" : config.font;
         for (Kind kind : { Kind::Weather, Kind::Traffic, Kind::Device, Kind::Media, Kind::Update, Kind::PeripheralBattery })
@@ -385,6 +443,7 @@ namespace Cards
     {
         if ((reducedMotion || highContrast) && groupMoving) StopGroupMotion(true);
         CardEnvironment environment;
+        environment.allowLiveCapture = !diagnosticOffscreen;
         environment.graphics = &graphics;
         environment.compositor = compositor;
         environment.device = device;
@@ -392,6 +451,7 @@ namespace Cards
         environment.highContrast = highContrast;
         environment.reducedMotion = reducedMotion;
         environment.mica = previewMica ? previewTuning : config.mica;
+        environment.material = previewMica ? previewMaterial : config.material;
         if (previewMica) environment.mica.vivid = previewVivid;
         environment.fontFamily = config.font.empty() ? L"Microsoft YaHei UI" : config.font;
         for (auto& [kind, card] : cards)
@@ -401,6 +461,250 @@ namespace Cards
             if (force) card->SetSnapshot(snapshot);
         }
         if (popup) popup->ApplyEnvironment(environment);
+        // Appearance changes invalidate renderer caches, not a healthy desktop
+        // duplication session. A new environment may retry a blocked session.
+        backdropRetries = 0;
+        backdropBlocked = false;
+        if (!backdrop.Running()) StopBackdrop();
+        ConfigureBackdrop();
+    }
+
+    void CardHost::Impl::RestoreBackdropWindows()
+    {
+        for (auto& [kind, card] : cards) card->EnableLiveBackdrop(false);
+        if (popup) popup->EnableLiveBackdrop(false);
+    }
+
+    void CardHost::Impl::StopBackdrop(bool resetRetry, bool preserveDiagnostic)
+    {
+        if (backdropTimer) CancelWaitableTimer(backdropTimer);
+        backdropTimerArmed = false;
+        backdropRetryAt = 0;
+        // Stop acquiring before restoring any HWND to the captured desktop.
+        backdrop.Stop();
+        RestoreBackdropWindows();
+        if (resetRetry)
+        {
+            backdropMonitor = nullptr;
+            backdropRetries = 0;
+            backdropBlocked = false;
+        }
+        if (!preserveDiagnostic) UpdateBackdropDiagnostics(L"inactive");
+    }
+
+    bool CardHost::Impl::ArmBackdropTimer(LONGLONG delay)
+    {
+        if (!backdropTimer)
+        {
+            backdropTimer = CreateWaitableTimerExW(nullptr, nullptr,
+                CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_MODIFY_STATE | SYNCHRONIZE);
+            if (!backdropTimer) backdropTimer = CreateWaitableTimerExW(nullptr, nullptr,
+                0, TIMER_MODIFY_STATE | SYNCHRONIZE);
+        }
+        LARGE_INTEGER due{}; due.QuadPart = -std::max(1LL, delay);
+        backdropTimerArmed = backdropTimer &&
+            SetWaitableTimer(backdropTimer, &due, 0, nullptr, nullptr, FALSE);
+        return backdropTimerArmed;
+    }
+
+    void CardHost::Impl::UpdateBackdropDiagnostics(const wchar_t* stage, HRESULT result)
+    {
+        const bool stageChanged = stage && backdropStage != stage;
+        const bool errorChanged = FAILED(result) && backdropLastResult != result;
+        if (stage) backdropStage = stage;
+        backdropLastResult = result;
+        if (stageChanged || errorChanged)
+        {
+            wchar_t message[256]{};
+            swprintf_s(message, L"TaskBarWidgets backdrop: stage=%ls hr=0x%08X frames=%llu blocked=%d running=%d\n",
+                backdropStage.c_str(), static_cast<unsigned>(backdropLastResult),
+                static_cast<unsigned long long>(backdropRenderedFrames),
+                backdropBlocked ? 1 : 0, backdrop.Running() ? 1 : 0);
+            OutputDebugStringW(message);
+            if (!diagnosticOffscreen) AppendBackdropLog(message);
+        }
+        std::lock_guard lock(backdropMutex);
+        backdropDiagnostics.stage = backdropStage;
+        backdropDiagnostics.lastResult = backdropLastResult;
+        backdropDiagnostics.renderedFrames = backdropRenderedFrames;
+        backdropDiagnostics.blocked = backdropBlocked;
+        backdropDiagnostics.running = backdrop.Running();
+    }
+
+    void CardHost::Impl::RecordBackdropFailure(const wchar_t* operation, HRESULT result)
+    {
+        // Boolean-only render APIs may not expose a more specific HRESULT.
+        if (SUCCEEDED(result)) result = E_FAIL;
+        wchar_t diagnostic[128]{};
+        swprintf_s(diagnostic, L"live backdrop %ls failed (HRESULT 0x%08X)",
+            operation, static_cast<unsigned>(result));
+        lastError = diagnostic;
+        UpdateBackdropDiagnostics(operation, result);
+    }
+
+    void CardHost::Impl::FailBackdrop(const wchar_t* operation, HRESULT result)
+    {
+        RecordBackdropFailure(operation, result);
+        StopBackdrop(false, true);
+        // At most three attempts (initial plus two delayed retries) per open,
+        // environment or display generation, even after a brief successful retry.
+        if (backdropRetries >= 2)
+        {
+            backdropBlocked = true;
+            UpdateBackdropDiagnostics(L"fallback-blocked", backdropLastResult);
+            return;
+        }
+        ++backdropRetries;
+        backdropRetryAt = GetTickCount64() + 1000;
+        if (!ArmBackdropTimer(10'000'000))
+        {
+            RecordBackdropFailure(L"retry timer", HRESULT_FROM_WIN32(GetLastError()));
+            backdropRetryAt = 0;
+            backdropBlocked = true;
+            UpdateBackdropDiagnostics(L"fallback-blocked", backdropLastResult);
+            return;
+        }
+        UpdateBackdropDiagnostics(L"retry-backoff", backdropLastResult);
+    }
+
+    void CardHost::Impl::ConfigureBackdrop(bool scheduleTick)
+    {
+        const bool popupGlass = popup && IsWindowVisible(popup->Handle()) && popup->HasLiquidGlass();
+        const bool cardGlass = std::any_of(cards.begin(), cards.end(), [](const auto& entry) {
+            return entry.second->Visible() && entry.second->HasLiquidGlass();
+        });
+        if (!visible || diagnosticOffscreen || highContrast || shuttingDown ||
+            !graphics.Ready() || !device || (!cardGlass && !popupGlass))
+        {
+            StopBackdrop();
+            return;
+        }
+
+        // Entrance HWNDs may be temporarily below the monitor. Choose the final
+        // layout instead, falling back to the taskbar entry's anchor.
+        RECT restBounds{};
+        for (const auto& [kind, bounds] : groupRestBounds) UnionRect(&restBounds, &restBounds, &bounds);
+        const HMONITOR monitor = IsRectEmpty(&restBounds)
+            ? MonitorFromPoint(anchor, MONITOR_DEFAULTTONEAREST)
+            : MonitorFromRect(&restBounds, MONITOR_DEFAULTTONEAREST);
+        if (monitor != backdropMonitor)
+        {
+            StopBackdrop(true);
+            backdropMonitor = monitor;
+        }
+        if (backdropBlocked)
+        {
+            // Show() may have excluded a newly opened HWND during fallback.
+            RestoreBackdropWindows();
+            UpdateBackdropDiagnostics(L"fallback-blocked", backdropLastResult);
+            return;
+        }
+        const ULONGLONG now = GetTickCount64();
+        if (backdropRetryAt && now < backdropRetryAt)
+        {
+            RestoreBackdropWindows();
+            UpdateBackdropDiagnostics(L"retry-backoff", backdropLastResult);
+            if (!ArmBackdropTimer(static_cast<LONGLONG>(backdropRetryAt - now) * 10000))
+            {
+                RecordBackdropFailure(L"retry timer", HRESULT_FROM_WIN32(GetLastError()));
+                backdropRetryAt = 0;
+                backdropBlocked = true;
+                UpdateBackdropDiagnostics(L"fallback-blocked", backdropLastResult);
+            }
+            return;
+        }
+        backdropRetryAt = 0;
+
+        // All desired windows must be excluded before the first acquisition,
+        // including a popup whose logical Visible() is false during its exit.
+        HRESULT exclusionResult = S_OK;
+        const auto enable = [&exclusionResult](auto& surface, bool desired)
+        {
+            if (!desired) { surface.EnableLiveBackdrop(false); return; }
+            SetLastError(ERROR_SUCCESS);
+            if (!surface.EnableLiveBackdrop(true))
+            {
+                const DWORD error = GetLastError();
+                if (SUCCEEDED(exclusionResult)) exclusionResult = error ? HRESULT_FROM_WIN32(error) : E_FAIL;
+            }
+        };
+        for (auto& [kind, card] : cards)
+        {
+            const bool desired = card->Visible() && card->HasLiquidGlass();
+            enable(*card, desired);
+        }
+        if (popup) enable(*popup, popupGlass);
+        if (FAILED(exclusionResult)) { FailBackdrop(L"capture exclusion", exclusionResult); return; }
+        // Output duplication/device initialization can take time in the driver.
+        // Keep the entrance on the existing blur until its motion finishes.
+        if (!backdrop.Running() && groupMoving)
+        {
+            UpdateBackdropDiagnostics(L"entrance-delay");
+            if (!backdropTimerArmed && !ArmBackdropTimer(166'667))
+                FailBackdrop(L"startup timer", HRESULT_FROM_WIN32(GetLastError()));
+            return;
+        }
+        if (!backdrop.Running())
+        {
+            if (!backdrop.Start(graphics.DxgiDevice(), graphics.ResourceContext(), monitor))
+            {
+                FailBackdrop(backdrop.Diagnostic(), backdrop.LastResult());
+                return;
+            }
+            UpdateBackdropDiagnostics(backdrop.Diagnostic());
+            UpdateBackdropDiagnostics(L"waiting-first-frame");
+        }
+        if (scheduleTick && !backdropTimerArmed && !ArmBackdropTimer(1))
+            FailBackdrop(L"timer", HRESULT_FROM_WIN32(GetLastError()));
+    }
+
+    void CardHost::Impl::BackdropTick()
+    {
+        if (!backdropTimerArmed) return;
+        // The one-shot signal was consumed by the wait. In particular, a retry
+        // that starts successfully but has no frame yet must arm its next tick.
+        backdropTimerArmed = false;
+        const auto tickStarted = std::chrono::steady_clock::now();
+        // Reconcile popup animation completion and any changed glass eligibility
+        // without querying settings or repainting foreground content.
+        ConfigureBackdrop(false);
+        if (!backdrop.Running()) return;
+        const auto interval = std::chrono::nanoseconds(1'000'000'000 / (backdrop.CrossAdapter() ? 30 : 60));
+        const auto next = tickStarted + interval;
+        backdrop.Poll();
+        if (!backdrop.Running()) { FailBackdrop(backdrop.Diagnostic(), backdrop.LastResult()); return; }
+        const auto& frame = backdrop.Frame();
+        if (frame.bitmap)
+        {
+            for (auto& [kind, card] : cards)
+                if (card->Visible() && card->HasLiquidGlass() && !card->RenderBackdrop(frame))
+                {
+                    FailBackdrop(FAILED(card->MaterialResult()) ? card->MaterialDiagnostic().c_str() : L"card controls",
+                        card->MaterialResult());
+                    return;
+                }
+            if (popup && IsWindowVisible(popup->Handle()) && popup->HasLiquidGlass() &&
+                !popup->RenderBackdrop(frame))
+            {
+                FailBackdrop(FAILED(popup->MaterialResult()) ? popup->MaterialDiagnostic().c_str() : L"popup controls",
+                    popup->MaterialResult());
+                return;
+            }
+            ++backdropRenderedFrames;
+            UpdateBackdropDiagnostics(L"live-refraction");
+        }
+        else
+        {
+            UpdateBackdropDiagnostics(L"waiting-first-frame", backdrop.LastResult());
+        }
+        // Render the cached frame even without a new desktop present: bounds,
+        // control hover and popup animation can change independently of pixels.
+        const auto now = std::chrono::steady_clock::now();
+        // Recover late frames after at least 1 ms, without adding another full
+        // interval after the work or spinning on an immediately signaled timer.
+        const LONGLONG delay = std::max(10'000LL,
+            std::chrono::duration_cast<std::chrono::nanoseconds>(next - now).count() / 100);
+        if (!ArmBackdropTimer(delay)) FailBackdrop(L"timer", HRESULT_FROM_WIN32(GetLastError()));
     }
 
     void CardHost::Impl::StopGroupMotion(bool settle)
@@ -519,7 +823,9 @@ namespace Cards
         if (t >= 1) { StopGroupMotion(true); return; }
         const auto now = std::chrono::steady_clock::now();
         groupNextFrame += groupFrameInterval;
-        if (groupNextFrame <= now) groupNextFrame = now + groupFrameInterval;
+        // A late frame has already consumed its budget. Waiting a full interval
+        // again halves the cadence around a refresh boundary (e.g. 120 -> 60).
+        if (groupNextFrame < now) groupNextFrame = now;
         LARGE_INTEGER due{};
         due.QuadPart = -std::max(1LL, std::chrono::duration_cast<std::chrono::nanoseconds>(groupNextFrame - now).count() / 100);
         if (!SetWaitableTimer(groupTimer, &due, 0, nullptr, nullptr, FALSE)) StopGroupMotion(true);
@@ -531,6 +837,7 @@ namespace Cards
         StopGroupMotion(false);
         const bool resize = reflow && visible && !animate && !continuing && !reducedMotion && !highContrast;
         CardEnvironment environment;
+        environment.allowLiveCapture = !diagnosticOffscreen;
         environment.graphics = &graphics;
         environment.compositor = compositor;
         environment.device = device;
@@ -538,6 +845,7 @@ namespace Cards
         environment.highContrast = highContrast;
         environment.reducedMotion = reducedMotion;
         environment.mica = previewMica ? previewTuning : config.mica;
+        environment.material = previewMica ? previewMaterial : config.material;
         if (previewMica) environment.mica.vivid = previewVivid;
         environment.fontFamily = config.font.empty() ? L"Microsoft YaHei UI" : config.font;
 
@@ -624,13 +932,15 @@ namespace Cards
             StartGroupTimer();
         }
         else if (animate || continuing) AnimateGroup(visible, true);
+        ConfigureBackdrop();
     }
 
     void CardHost::Impl::HideAll(const std::wstring& reason, bool animate)
     {
         UNREFERENCED_PARAMETER(reason);
-        CloseMenu(animate);
         visible = false;
+        StopBackdrop();
+        CloseMenu(animate);
         UninstallHooks();
         for (auto& [kind, card] : cards)
         {
@@ -715,6 +1025,7 @@ namespace Cards
         startupRequests.clear();
         CancelWarmup();
         StopGroupMotion(false);
+        StopBackdrop();
         groupRestBounds.clear();
         for (auto& [kind, card] : cards)
         {
@@ -729,6 +1040,7 @@ namespace Cards
 
     void CardHost::Impl::ShowCards()
     {
+        if (!visible) StopBackdrop(true);
         startupWarmup = false;
         startupRequests.clear();
         CancelWarmup();
@@ -747,7 +1059,7 @@ namespace Cards
         CreateCards();
         PlaceGroup(true, true);
         visible = std::any_of(cards.begin(), cards.end(), [](const auto& entry) { return entry.second->Visible(); });
-        if (!visible) return;
+        if (!visible) { StopBackdrop(); return; }
         if (!diagnosticOffscreen)
             if (auto* card = Card(Kind::Media); card && card->Visible()) SetForegroundWindow(card->Handle());
         InstallHooks();
@@ -993,9 +1305,9 @@ namespace Cards
                 if (command->previewMica)
                 {
                     previewMica = true;
-                    // A non-vivid preview is the committed fallback: Mica off.
                     previewVivid = command->previewVivid;
                     previewTuning = command->previewTuning;
+                    previewMaterial = command->previewMaterial;
                 }
                 if (command->setTheme)
                 {
@@ -1387,6 +1699,7 @@ namespace Cards
         if (items.empty()) return;
         if (!popup) popup = std::make_unique<CardPopup>();
         CardEnvironment environment;
+        environment.allowLiveCapture = !diagnosticOffscreen;
         environment.graphics = &graphics;
         environment.compositor = compositor;
         environment.device = device;
@@ -1394,6 +1707,7 @@ namespace Cards
         environment.highContrast = highContrast;
         environment.reducedMotion = reducedMotion;
         environment.mica = previewMica ? previewTuning : config.mica;
+        environment.material = previewMica ? previewMaterial : config.material;
         if (previewMica) environment.mica.vivid = previewVivid;
         environment.fontFamily = config.font.empty() ? L"Microsoft YaHei UI" : config.font;
         if (!popup->Create(instance, environment))
@@ -1411,6 +1725,7 @@ namespace Cards
         popupMenu = menu;
         popupAnchor = anchor;
         popup->Show(menu, items, anchor, diagnosticOffscreen);
+        ConfigureBackdrop();
     }
 
     void CardHost::Impl::ActivateMenu()
@@ -1429,6 +1744,7 @@ namespace Cards
     {
         if (popup) popup->Hide(animate);
         popupMenu.clear();
+        ConfigureBackdrop();
     }
 
     bool CardHost::Impl::MenuContains(POINT point) const
@@ -1506,6 +1822,7 @@ namespace Cards
                 else self->ScheduleWarmup();
                 return 0;
             case WM_DISPLAYCHANGE:
+                self->StopBackdrop(true);
                 if (self->visible) self->PlaceGroup(false, false);
                 else self->ScheduleWarmup();
                 return 0;
@@ -1566,19 +1883,32 @@ namespace Cards
         MSG message{};
         for (;;)
         {
-            const DWORD result = MsgWaitForMultipleObjectsEx(groupMoving ? 1 : 0,
-                groupMoving ? &groupTimer : nullptr, INFINITE, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+            HANDLE timers[2]{};
+            DWORD count = 0, groupIndex = MAXIMUM_WAIT_OBJECTS, backdropIndex = MAXIMUM_WAIT_OBJECTS;
+            if (groupMoving && groupTimer) { groupIndex = count; timers[count++] = groupTimer; }
+            if (backdropTimerArmed && backdropTimer) { backdropIndex = count; timers[count++] = backdropTimer; }
+            const DWORD result = MsgWaitForMultipleObjectsEx(count, timers,
+                INFINITE, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
             if (result == WAIT_FAILED) break;
-            if (groupMoving && result == WAIT_OBJECT_0) { GroupFrame(); continue; }
-            if (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE))
+            // Bound message draining so both timers progress under input, while
+            // servicing input first even when a timer is continuously ready.
+            bool quit = false;
+            for (int dispatched = 0; dispatched < 16 && PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE); ++dispatched)
             {
-                if (message.message == WM_QUIT) break;
+                if (message.message == WM_QUIT) { quit = true; break; }
                 TranslateMessage(&message);
                 DispatchMessageW(&message);
             }
+            if (quit) break;
+            if (groupMoving && (result == WAIT_OBJECT_0 + groupIndex ||
+                WaitForSingleObject(groupTimer, 0) == WAIT_OBJECT_0)) GroupFrame();
+            if (backdropTimerArmed && (result == WAIT_OBJECT_0 + backdropIndex ||
+                WaitForSingleObject(backdropTimer, 0) == WAIT_OBJECT_0)) BackdropTick();
         }
 
         // Teardown: stop producers first, then release device-bound resources.
+        StopBackdrop(true);
+        if (backdropTimer) { CloseHandle(backdropTimer); backdropTimer = nullptr; }
         CancelWarmup();
         StopGroupMotion(false);
         if (groupTimer) { CloseHandle(groupTimer); groupTimer = nullptr; }
@@ -1641,6 +1971,12 @@ namespace Cards
 
     bool CardHost::Visible() const { return impl->visible; }
 
+    BackdropDiagnostics CardHost::BackdropStatus() const
+    {
+        std::lock_guard lock(impl->backdropMutex);
+        return impl->backdropDiagnostics;
+    }
+
     void CardHost::ApplyConfig(const Config& config)
     {
         auto command = std::make_unique<Command>();
@@ -1649,12 +1985,13 @@ namespace Cards
         impl->Post(std::move(command));
     }
 
-    void CardHost::PreviewMica(bool vivid, const MicaTuning& tuning)
+    void CardHost::PreviewMica(bool vivid, const MicaTuning& tuning, const MaterialSettings& material)
     {
         auto command = std::make_unique<Command>();
         command->kind = COMMAND_PREVIEW;
         command->previewMica = true;
         command->previewTuning = tuning;
+        command->previewMaterial = material;
         command->previewVivid = vivid;
         impl->Post(std::move(command));
     }

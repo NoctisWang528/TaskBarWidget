@@ -21,6 +21,7 @@
 namespace Cards
 {
     struct CardEnvironment;
+    struct BackdropFrame;
 
     class CardPopup
     {
@@ -42,6 +43,14 @@ namespace Cards
             bool diagnosticOffscreen = false);
         void Hide(bool animate = true);
         bool Visible() const;
+        HWND Handle() const;
+        bool HasLiquidGlass() const;
+        bool EnableLiveBackdrop(bool enabled);
+        bool RenderBackdrop(const BackdropFrame& frame);
+        HRESULT MaterialResult() const;
+        const std::wstring& MaterialDiagnostic() const;
+        bool LiveBackdropActive() const;
+        uint64_t BackdropFrameCount() const;
         const std::wstring& Menu() const;
         RECT Bounds() const;
 

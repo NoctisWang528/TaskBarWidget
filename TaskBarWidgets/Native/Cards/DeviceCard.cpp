@@ -49,21 +49,43 @@ namespace Cards::Paint
             top += SelectorHeight + 4.0f;
 
             const float muteSize = 32.0f;
-            const D2D1_RECT_F mute = Draw::Rect(left, top, left + muteSize, top + muteSize);
+            const float muteWidth = 46.f;
+            const D2D1_RECT_F mute = Draw::Rect(left, top, left + muteWidth, top + muteSize);
             const bool muted = current && current->isMuted;
             const bool controllable = current && current->canControl;
-            Draw::ControlBackground(context, mute, muteSize / 2.0f,
-                WithAlpha(palette.primary, muted ? 0.18f : 0.06f), palette.accent,
-                interaction, baseId + 1, controllable && !busy);
             const bool input = flow == L"input";
-            DrawGlyph(context, input ? (muted ? Glyph::MicrophoneMuted : Glyph::Microphone)
-                : (muted ? Glyph::SpeakerMuted : Glyph::Speaker),
-                WithAlpha(palette.primary, controllable ? 0.9f : 0.4f),
-                mute.left + 8.0f, mute.top + 8.0f, 16.0f);
+            const auto glyph = input ? (muted ? Glyph::MicrophoneMuted : Glyph::Microphone)
+                : (muted ? Glyph::SpeakerMuted : Glyph::Speaker);
+            if (interaction.glass && interaction.compositedGlass)
+            {
+                if (interaction.glassControls)
+                {
+                    GlassControl control;
+                    control.id = baseId + 1; control.kind = GlassControl::Kind::Toggle;
+                    const float x = left + (muted ? 13.f : 33.f);
+                    control.bounds = Draw::Rect(x - 13, top + 3, x + 13, top + 29);
+                    control.radius = 13; control.track = Draw::Rect(left, top + 4, left + 46, top + 28);
+                    control.trackColor = palette.track; control.fillColor = palette.accent; control.ratio = muted ? 0.f : 1.f;
+                    control.enabled = controllable && !busy;
+                    control.hover = control.enabled ? interaction.Hover(baseId + 1) : 0.0f;
+                    control.pressed = control.enabled && interaction.pressed == baseId + 1;
+                    control.focused = control.enabled && interaction.focused == baseId + 1; control.ink = palette.accent;
+                    control.glyph = static_cast<int>(glyph);
+                    interaction.glassControls->push_back(control);
+                }
+            }
+            else
+            {
+                Draw::ControlBackground(context, mute, muteSize / 2.0f,
+                    WithAlpha(palette.primary, muted ? 0.18f : 0.06f), palette.accent,
+                    interaction, baseId + 1, controllable && !busy);
+                DrawGlyph(context, glyph, WithAlpha(palette.primary, controllable ? 0.9f : 0.4f),
+                    mute.left + (muteWidth - 16) / 2, mute.top + 8, 16);
+            }
             Draw::AddButton(regions, baseId + 1, mute, L"toggleMute:" + flow,
                 title + (muted ? L"取消静音" : L"静音"), controllable && !busy);
 
-            const float sliderLeft = left + muteSize + 8.0f;
+            const float sliderLeft = left + muteWidth + 16.0f;
             const float sliderRight = left + width - 34.0f;
             const float railTop = top + muteSize / 2.0f - 1.5f;
             const float ratio = controllable ? static_cast<float>(current->volume) : 0.0f;
@@ -71,7 +93,8 @@ namespace Cards::Paint
                 : interaction.pressed == baseId + 2 ? 0.18f : 0.10f * interaction.Hover(baseId + 2);
             Draw::Progress(context, Draw::Rect(sliderLeft, railTop, sliderRight, railTop + 3.0f), ratio,
                 Mix(palette.track, palette.accent, feedback), Mix(palette.accent, palette.primary, feedback),
-                true, controllable && !busy && interaction.focused == baseId + 2, palette.accent);
+                true, controllable && !busy && interaction.focused == baseId + 2, palette.accent,
+                controllable && !busy ? &interaction : nullptr, baseId + 2);
             Draw::AddSlider(regions, baseId + 2,
                 Draw::Rect(sliderLeft, railTop - 9.0f, sliderRight, railTop + 12.0f),
                 L"setVolume:" + flow, title + L"音量", controllable && !busy);

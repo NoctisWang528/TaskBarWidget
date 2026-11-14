@@ -687,6 +687,7 @@ public partial class App : System.Windows.Application
     private object QuickCards() => new { order = Settings.QuickCardOrder, columns = Settings.QuickCardColumns, enabled = Settings.QuickCardEnabled,
         resourceMode = Settings.QuickCardResourceMode.ToString(), font = Settings.CardFontFamily,
         animationSpeedPercent = Settings.QuickCardAnimationSpeedPercent, animationFps = Settings.QuickCardAnimationFps,
+        material = Settings.CardMaterial, glassBlur = Settings.CardGlassBlur,
         mica = new
         {
             vivid = Settings.CardMicaVivid,
@@ -715,6 +716,8 @@ public partial class App : System.Windows.Application
             animationSpeedPercent = Settings.QuickCardAnimationSpeedPercent,
             animationFps = Settings.QuickCardAnimationFps,
             font = Settings.CardFontFamily,
+            material = Settings.CardMaterial,
+            glassBlur = Settings.CardGlassBlur,
             mica = new
             {
                 vivid = Settings.CardMicaVivid,

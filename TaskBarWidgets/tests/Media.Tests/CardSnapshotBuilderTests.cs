@@ -7,6 +7,22 @@ namespace TaskBarWidgets.Media.Tests;
 public sealed class CardSnapshotBuilderTests
 {
     [Fact]
+    public void MaterialConfigurationPreservesMicaAndRevision()
+    {
+        var settings = new TaskbarLyrics.App.AppSettings { CardMaterial = "LiquidGlass", CardGlassBlur = 0.72, CardMicaTintOpacity = 0.23 };
+        var builder = new CardSnapshotBuilder();
+        var first = JsonSerializer.SerializeToElement(builder.DescribeConfiguration(settings));
+        Assert.Equal("LiquidGlass", first.GetProperty("material").GetString());
+        Assert.Equal(0.72, first.GetProperty("glassBlur").GetDouble());
+        Assert.Equal(0.23, first.GetProperty("mica").GetProperty("tintOpacity").GetDouble());
+        settings.CardMaterial = "Solid";
+        builder.BumpConfiguration();
+        var next = JsonSerializer.SerializeToElement(builder.DescribeConfiguration(settings));
+        Assert.Equal("Solid", next.GetProperty("material").GetString());
+        Assert.Equal(first.GetProperty("revision").GetInt64() + 1, next.GetProperty("revision").GetInt64());
+    }
+
+    [Fact]
     public void WeatherJobUsesItsStatusAndOlderPollCannotReplaceIt()
     {
         var builder = new CardSnapshotBuilder();

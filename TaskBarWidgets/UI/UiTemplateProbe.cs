@@ -28,6 +28,8 @@ internal static class UiTemplateProbe
         object? weatherControls = null;
         object? offsetSettings = null;
         object? reorderControls = null;
+        object? themeControls = null;
+        object? materialControls = null;
         object? peripheralSettings = null;
         string? error = null;
         try
@@ -55,6 +57,8 @@ internal static class UiTemplateProbe
             }
             if (layoutChecks is not null)
             {
+                themeControls = await SettingsWindow.ProbeThemeControlsAsync(settings);
+                materialControls = await SettingsWindow.ProbeCardMaterialControlsAsync(settings);
                 reorderControls = await SettingsWindow.ProbeReorderControlsAsync(settings);
                 offsetSettings = await OffsetSettingsProbe.RunAsync(settings);
             }
@@ -71,7 +75,7 @@ internal static class UiTemplateProbe
             var result = resultIndex >= 0 && resultIndex + 1 < args.Length ? args[resultIndex + 1] : Path.Combine(AppContext.BaseDirectory, "template-probe.json");
             var winUiModule = System.Diagnostics.Process.GetCurrentProcess().Modules.Cast<System.Diagnostics.ProcessModule>()
                 .FirstOrDefault(module => string.Equals(module.ModuleName, "Microsoft.ui.xaml.dll", StringComparison.OrdinalIgnoreCase))?.FileName;
-            File.WriteAllText(result, JsonSerializer.Serialize(new { success = error is null, error, runtimeDirectory = RuntimeEnvironment.GetRuntimeDirectory(), winUiModule, checks, weatherControls, offsetSettings, reorderControls, peripheralSettings, layoutChecks, probeActivated = activated, externalForegroundChanged = GetForegroundWindow() != before }, new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(result, JsonSerializer.Serialize(new { success = error is null, error, runtimeDirectory = RuntimeEnvironment.GetRuntimeDirectory(), winUiModule, checks, weatherControls, offsetSettings, reorderControls, themeControls, materialControls, peripheralSettings, layoutChecks, probeActivated = activated, externalForegroundChanged = GetForegroundWindow() != before }, new JsonSerializerOptions { WriteIndented = true }));
             Environment.ExitCode = error is null ? 0 : 1;
             app.Exit();
         }

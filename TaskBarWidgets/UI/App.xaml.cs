@@ -150,6 +150,8 @@ public partial class App : Application
             ? new
             {
                 enabled = true,
+                material = value.Material,
+                glassBlur = value.GlassBlur,
                 vivid = value.Vivid,
                 tintOpacity = value.Tuning.LightTintOpacity,
                 luminosityOpacity = value.Tuning.LightLuminosityOpacity,

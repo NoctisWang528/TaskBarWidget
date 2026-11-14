@@ -8,6 +8,29 @@
 
 namespace Cards
 {
+    MaterialKind MaterialFromId(const std::wstring& id)
+    {
+        if (id == L"LiquidGlass") return MaterialKind::LiquidGlass;
+        if (id == L"Solid") return MaterialKind::Solid;
+        return MaterialKind::Mica;
+    }
+
+    const wchar_t* IdOf(MaterialKind kind)
+    {
+        switch (kind)
+        {
+        case MaterialKind::LiquidGlass: return L"LiquidGlass";
+        case MaterialKind::Solid: return L"Solid";
+        default: return L"Mica";
+        }
+    }
+
+    void MaterialSettings::Set(const std::wstring& id, double blur)
+    {
+        kind = MaterialFromId(id);
+        glassBlur = std::isfinite(blur) ? std::clamp(blur, 0.0, 1.0) : 0.35;
+    }
+
     const wchar_t* IdOf(Kind kind)
     {
         switch (kind)

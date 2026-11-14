@@ -16,6 +16,15 @@
 
 namespace Cards
 {
+    struct BackdropDiagnostics
+    {
+        std::wstring stage{ L"inactive" };
+        HRESULT lastResult{ S_OK };
+        uint64_t renderedFrames{};
+        bool blocked{};
+        bool running{};
+    };
+
     class CardHost
     {
     public:
@@ -38,6 +47,7 @@ namespace Cards
         void Show(POINT anchor);
         void Hide(const wchar_t* reason);
         bool Visible() const;
+        BackdropDiagnostics BackdropStatus() const;
 
         // A fresh quick-card configuration (order, columns, enabled, resource
         // mode, font, Mica tuning). Thread-safe.
@@ -49,7 +59,7 @@ namespace Cards
 
         // Draft appearance from the settings process. \`preview\` may be null to
         // drop the preview and fall back to the committed configuration.
-        void PreviewMica(bool vivid, const MicaTuning& tuning);
+        void PreviewMica(bool vivid, const MicaTuning& tuning, const MaterialSettings& material = {});
         void PreviewTheme(bool dark, bool enabled);
         void ClearPreview();
 

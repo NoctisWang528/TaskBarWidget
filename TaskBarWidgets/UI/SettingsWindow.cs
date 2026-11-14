@@ -68,10 +68,16 @@ public sealed partial class SettingsWindow : Window
     internal bool DraftCardMicaVivid => _media.Bool("cardMicaVivid", CardMicaTuning.DefaultVivid);
     internal bool CommittedCardMicaVivid => _media.GetSaved("cardMicaVivid") is JsonValue saved &&
         saved.TryGetValue<bool>(out var vivid) ? vivid : CardMicaTuning.DefaultVivid;
-    internal bool CanPreviewCardMica => !_accessibility.HighContrast && VividMicaBackdrop.IsSupported;
+    private static string NormalizeCardMaterial(string? value) => value is "LiquidGlass" or "Solid" ? value : "Mica";
+    private static double NormalizeGlassBlur(double value) => double.IsFinite(value) ? Math.Clamp(value, 0, 1) : 0.35;
+    internal string DraftCardMaterial => NormalizeCardMaterial(_media.Text("cardMaterial", "Mica"));
+    internal double DraftCardGlassBlur => NormalizeGlassBlur(_media.Number("cardGlassBlur", 0.35));
+    internal bool CanPreviewCardMaterial => _loaded && !_closed && _currentPage == "quickCards";
+    private bool? _probeCardHighContrast;
+    private bool CardHighContrast => _probeCardHighContrast ?? _accessibility.HighContrast;
     internal bool UsesVividSettingsBackdrop => _cardMicaPreviewBackdrop.Custom;
-    private CardMicaAppearance DraftCardMicaAppearance => new(DraftCardMicaVivid, DraftCardMicaTuning);
-    private CardMicaAppearance CommittedCardMicaAppearance => new(CommittedCardMicaVivid, CommittedCardMicaTuning);
+    private CardMicaAppearance DraftCardMicaAppearance => new(DraftCardMicaVivid, DraftCardMicaTuning, DraftCardMaterial, DraftCardGlassBlur);
+    private CardMicaAppearance CommittedCardMicaAppearance => new(CommittedCardMicaVivid, CommittedCardMicaTuning, NormalizeCardMaterial(_media.GetSaved("cardMaterial")?.ToString()), NormalizeGlassBlur(_media.SavedNumber("cardGlassBlur", 0.35)));
     internal CardMicaPreviewState? ActiveMicaPreview => _micaPreviewActive
         ? new(CommittedCardMicaAppearance, DraftCardMicaAppearance) : null;
     internal CardMicaTuning SettingsMicaTuning => _cardMicaPreviewBackdrop.Tuning;
@@ -371,6 +377,13 @@ public sealed partial class SettingsWindow : Window
             PeripheralConnectionChanged(connected);
             if (!connected) ShowError("主程序连接已断开；草稿仍保留，请恢复连接后应用。");
             else if (!_loaded) await GuardAsync(() => ReloadAsync());
+            else
+            {
+                // Media clears previews on disconnect. Re-send current drafts,
+                // without reloading over edits made while disconnected.
+                ApplyTheme();
+                UpdateCardMicaPreviewSurface();
+            }
         });
     }
     private async Task GuardAsync(Func<Task> action)
@@ -449,7 +462,8 @@ public sealed partial class SettingsWindow : Window
             }
             if (media.Values.Count > 0) _media.Readback(MediaValues(await RequestAsync("applyMediaSettings", media.Values)), media);
             ApplyTheme();
-            if (media.Values.ContainsKey("cardMicaVivid") ||
+            if (media.Values.ContainsKey("cardMaterial") || media.Values.ContainsKey("cardGlassBlur") ||
+                media.Values.ContainsKey("cardMicaVivid") ||
                 media.Values.ContainsKey("cardMicaTintOpacity") ||
                 media.Values.ContainsKey("cardMicaLuminosityOpacity") ||
                 media.Values.ContainsKey("cardMicaDarkTintOpacity") ||
@@ -476,14 +490,14 @@ public sealed partial class SettingsWindow : Window
 
     internal void PreviewCardMica(CardMicaTuning tuning)
     {
-        if (!_loaded || _closed || _currentPage != "quickCards" || !CanPreviewCardMica) return;
+        if (!CanPreviewCardMaterial) return;
         _pendingMicaPreview = tuning;
         if (_micaPreviewQueued) return;
         _micaPreviewQueued = true;
         if (!DispatcherQueue.TryEnqueue(() =>
         {
             _micaPreviewQueued = false;
-            if (!_loaded || _closed || !_micaPreviewActive || _currentPage != "quickCards" || !CanPreviewCardMica)
+            if (!CanPreviewCardMaterial || !_micaPreviewActive)
             {
                 DeactivateCardMicaPreview();
                 return;
@@ -502,7 +516,7 @@ public sealed partial class SettingsWindow : Window
 
     private void UpdateCardMicaPreviewSurface()
     {
-        if (!_loaded || _closed || _currentPage != "quickCards" || !CanPreviewCardMica)
+        if (!CanPreviewCardMaterial)
         {
             DeactivateCardMicaPreview();
             return;
@@ -512,8 +526,8 @@ public sealed partial class SettingsWindow : Window
 
     private void ApplyCardMicaPreview(CardMicaTuning tuning)
     {
-        var appearance = new CardMicaAppearance(DraftCardMicaVivid, tuning);
-        _cardMicaPreviewBackdrop.UpdateAppearance(appearance);
+        var appearance = new CardMicaAppearance(DraftCardMicaVivid, tuning, DraftCardMaterial, DraftCardGlassBlur);
+        _cardMicaPreviewBackdrop.UpdateAppearance(appearance.Material == "Mica" ? appearance : CardMicaAppearance.Default);
         _micaPreviewActive = true;
         MicaPreviewChanged?.Invoke(new CardMicaPreviewState(CommittedCardMicaAppearance, appearance));
         UpdateMicaStatus();
@@ -521,7 +535,7 @@ public sealed partial class SettingsWindow : Window
 
     private void ActivateCardMicaPreview(CardMicaTuning tuning)
     {
-        _cardMicaPreviewBackdrop.UpdateAppearance(new(DraftCardMicaVivid, tuning));
+        _cardMicaPreviewBackdrop.UpdateAppearance(DraftCardMaterial == "Mica" ? new(DraftCardMicaVivid, tuning) : CardMicaAppearance.Default);
         _micaPreviewActive = true;
     }
 
@@ -529,7 +543,7 @@ public sealed partial class SettingsWindow : Window
     {
         _micaPreviewQueued = false;
         var committed = CommittedCardMicaAppearance;
-        _cardMicaPreviewBackdrop.UpdateAppearance(committed);
+        _cardMicaPreviewBackdrop.UpdateAppearance(committed.Material == "Mica" ? committed : CardMicaAppearance.Default);
         if (!_micaPreviewActive) return;
         _micaPreviewActive = false;
         MicaPreviewChanged?.Invoke(new CardMicaPreviewState(committed, null));
@@ -537,13 +551,13 @@ public sealed partial class SettingsWindow : Window
 
     private void RefreshCardMicaAfterReadback()
     {
-        if (_currentPage == "quickCards" && CanPreviewCardMica)
+        if (CanPreviewCardMaterial)
         {
             ApplyCardMicaPreview(DraftCardMicaTuning);
             return;
         }
         var committed = CommittedCardMicaAppearance;
-        _cardMicaPreviewBackdrop.UpdateAppearance(committed);
+        _cardMicaPreviewBackdrop.UpdateAppearance(committed.Material == "Mica" ? committed : CardMicaAppearance.Default);
         _micaPreviewActive = false;
         MicaPreviewChanged?.Invoke(new CardMicaPreviewState(committed, null));
     }

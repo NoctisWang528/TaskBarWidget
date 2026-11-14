@@ -53,26 +53,7 @@ internal sealed class CardSnapshotBuilder
     internal object Build(AppSettings settings, MediaCoordinator media, AudioSnapshot? audio,
         UpdateSnapshot? update, bool connected, int theme, PeripheralBatterySnapshot? peripherals = null)
     {
-        // Quick cards: the exact persisted configuration, never re-derived here.
-        var quickCards = new
-        {
-            order = settings.QuickCardOrder,
-            columns = settings.QuickCardColumns,
-            enabled = settings.QuickCardEnabled,
-            resourceMode = settings.QuickCardResourceMode.ToString(),
-            animationSpeedPercent = settings.QuickCardAnimationSpeedPercent,
-            animationFps = settings.QuickCardAnimationFps,
-            font = settings.CardFontFamily,
-            revision = ConfigurationRevision,
-            mica = new
-            {
-                vivid = settings.CardMicaVivid,
-                tintOpacity = settings.CardMicaTintOpacity,
-                luminosityOpacity = settings.CardMicaLuminosityOpacity,
-                darkTintOpacity = settings.CardMicaDarkTintOpacity,
-                darkLuminosityOpacity = settings.CardMicaDarkLuminosityOpacity,
-            },
-        };
+        var quickCards = DescribeConfiguration(settings);
 
         var mediaState = DescribeMedia(media);
         var lyrics = DescribeLyrics(media.CardFrame);
@@ -92,6 +73,28 @@ internal sealed class CardSnapshotBuilder
             ["peripheralBattery"] = peripherals ?? new PeripheralBatterySnapshot(),
         };
     }
+
+    internal object DescribeConfiguration(AppSettings settings) => new
+        {
+            order = settings.QuickCardOrder,
+            columns = settings.QuickCardColumns,
+            enabled = settings.QuickCardEnabled,
+            resourceMode = settings.QuickCardResourceMode.ToString(),
+            animationSpeedPercent = settings.QuickCardAnimationSpeedPercent,
+            animationFps = settings.QuickCardAnimationFps,
+            font = settings.CardFontFamily,
+            revision = ConfigurationRevision,
+            material = settings.CardMaterial,
+            glassBlur = settings.CardGlassBlur,
+            mica = new
+            {
+                vivid = settings.CardMicaVivid,
+                tintOpacity = settings.CardMicaTintOpacity,
+                luminosityOpacity = settings.CardMicaLuminosityOpacity,
+                darkTintOpacity = settings.CardMicaDarkTintOpacity,
+                darkLuminosityOpacity = settings.CardMicaDarkLuminosityOpacity,
+            },
+        };
 
     internal object DescribeAudio(AudioSnapshot? snapshot, bool operationSucceeded = true, string? message = null)
     {

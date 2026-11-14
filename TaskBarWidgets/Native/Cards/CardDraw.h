@@ -51,9 +51,11 @@ namespace Cards::Draw
     // A capsule pill (used by the update card and the source row).
     void Pill(ID2D1DeviceContext* context, D2D1_RECT_F rect, Color color);
 
-    // Progress rail: track plus filled portion plus optional knob.
+    // Progress rail: track plus filled portion plus optional knob. Optional
+    // interaction enables glass feedback only; disabled sliders pass nullptr.
     void Progress(ID2D1DeviceContext* context, D2D1_RECT_F rect, float ratio, Color track,
-        Color fill, bool knob, bool focused = false, Color focusColor = {});
+        Color fill, bool knob, bool focused = false, Color focusColor = {},
+        const Paint::Interaction* interaction = nullptr, int id = 0);
 
     // Interaction-table helper so painters never hand-roll ids.
     int AddButton(Layout::Table& regions, int id, D2D1_RECT_F rect, const std::wstring& action,

@@ -71,6 +71,7 @@ namespace Cards
         const std::wstring& Diagnostic() const { return diagnostic; }
 
         ID2D1DeviceContext* ResourceContext() const { return context.Get(); }
+        IDXGIDevice* DxgiDevice() const { return dxgiDevice.Get(); }
         IDWriteFactory5* DWrite() const { return write.Get(); }
         ID2D1Factory1* D2DFactory() const { return factory.Get(); }
         IWICImagingFactory2* Wic() const { return wic.Get(); }

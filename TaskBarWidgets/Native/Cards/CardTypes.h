@@ -26,6 +26,17 @@ namespace Cards
     const wchar_t* IdOf(Kind kind);
     bool KindFromId(const std::wstring& id, Kind& kind);
 
+    enum class MaterialKind { Mica, LiquidGlass, Solid };
+    MaterialKind MaterialFromId(const std::wstring& id);
+    const wchar_t* IdOf(MaterialKind kind);
+
+    struct MaterialSettings
+    {
+        MaterialKind kind{ MaterialKind::Mica };
+        double glassBlur{ 0.35 };
+        void Set(const std::wstring& id, double blur);
+    };
+
     struct MicaTuning
     {
         bool vivid{ true };
@@ -49,6 +60,7 @@ namespace Cards
         int animationFps{0}; // 0 follows the monitor refresh rate.
         std::wstring font{ L"Microsoft YaHei UI" };
         MicaTuning mica{};
+        MaterialSettings material{};
         long long revision{ 0 };
 
         bool IsEnabled(Kind kind) const;

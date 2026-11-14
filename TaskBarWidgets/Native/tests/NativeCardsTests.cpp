@@ -1,4 +1,4 @@
-#include "CardPch.h"
+﻿#include "CardPch.h"
 #include "CardRuntime.h"
 #include "../TrafficMonitor/WinUiDependencyCheck.h"
 #include <filesystem>
@@ -402,6 +402,10 @@ void WriteTrafficPreviews(Cards::Graphics& graphics, const wchar_t* directory);
 void WritePeripheralPreviews(Cards::Graphics& graphics, const wchar_t* directory);
 void TestCardRenderingStability(Cards::Graphics& graphics);
 void TestMediaRedraw(Cards::CardEnvironment environment);
+void TestCardMaterials(Cards::CardEnvironment environment, const Cards::Snapshot& snapshot);
+void TestLiquidGlassRendering(Cards::Graphics& graphics,
+    winrt::Windows::UI::Composition::Compositor const& compositor,
+    winrt::Windows::UI::Composition::CompositionGraphicsDevice const& device);
 void MeasureCardPerformance(const wchar_t* outputPath);
 void TestCardSurfaceIsolation(Cards::Graphics& graphics,
     winrt::Windows::UI::Composition::Compositor const& compositor,
@@ -802,6 +806,11 @@ static void CheckHoverTransitions(Cards::CardWindow& card, const Cards::Snapshot
 
 int wmain(int argc, wchar_t** argv)
 {
+    if (argc == 2 && wcscmp(argv[1], L"--glass-preview") == 0)
+    {
+        std::cerr << "Glass preview disabled following a desktop compositor failure.\n";
+        return 2;
+    }
     SetUnhandledExceptionFilter(ReportCrash);
     std::cout.setf(std::ios::unitbuf);
     try
@@ -833,7 +842,7 @@ int wmain(int argc, wchar_t** argv)
             winrt::uninit_apartment();
             return 0;
         }
-        if (argc == 2 && wcscmp(argv[1], L"--surface-isolation") == 0)
+        if (argc == 2 && (wcscmp(argv[1], L"--surface-isolation") == 0 || wcscmp(argv[1], L"--liquid-glass") == 0))
         {
             {
                 Cards::Runtime runtime;
@@ -844,7 +853,8 @@ int wmain(int argc, wchar_t** argv)
                 std::wstring error;
                 auto device = graphics.CreateGraphicsDevice(compositor, error);
                 Require(device != nullptr, "surface isolation composition device");
-                TestCardSurfaceIsolation(graphics, compositor, device);
+                if (wcscmp(argv[1], L"--liquid-glass") == 0) TestLiquidGlassRendering(graphics, compositor, device);
+                else TestCardSurfaceIsolation(graphics, compositor, device);
             }
             appRuntime.Reset();
             winrt::uninit_apartment();
@@ -948,6 +958,7 @@ int wmain(int argc, wchar_t** argv)
             Cards::CardEnvironment environment;
             environment.graphics = &graphics; environment.compositor = compositor; environment.device = device;
             environment.reducedMotion = true;
+            TestCardMaterials(environment, snapshot);
             CheckCardPaging(environment);
             CheckPeripheralBattery(environment);
             CheckCardMotion(environment, snapshot);

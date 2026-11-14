@@ -1,4 +1,5 @@
 #include "CardPch.h"
+#include "CardBackdropCapture.h"
 #include "CardPopup.h"
 
 #include "CardDraw.h"
@@ -38,6 +39,15 @@ namespace Cards
         winrt::Windows::UI::Composition::ContainerVisual motion{ nullptr };
         CardMotion transition;
         winrt::Windows::UI::Composition::SpriteVisual content{ nullptr };
+        winrt::Windows::UI::Composition::ContainerVisual background{ nullptr };
+        winrt::Windows::UI::Composition::SpriteVisual edge{ nullptr };
+        winrt::Windows::UI::Composition::CompositionRoundedRectangleGeometry clip{ nullptr };
+        LiquidGlassBrush glass;
+        CaptureExclusion captureExclusion;
+        GlassControls controls;
+        bool glassActive{}, materialDirty{ true }, controlsAttached{};
+        float materialWidth{}, materialHeight{}, materialScale{};
+        mutable float cachedWidth{};
         DrawingSurface surface;
         SurfaceHandle boundSurface{ nullptr };
         CardAccessibility accessibility;
@@ -63,6 +73,7 @@ namespace Cards
 
         float WidthDip() const
         {
+            if (cachedWidth > 0) return cachedWidth;
             if (!graphics) return MinimumWidth;
             float widest = MinimumWidth;
             const auto family = environment.fontFamily.empty() ? L"Microsoft YaHei UI" : environment.fontFamily;
@@ -78,7 +89,7 @@ namespace Cards
                 if (SUCCEEDED(layout->GetMetrics(&metrics)))
                     widest = (std::max)(widest, metrics.widthIncludingTrailingWhitespace + 60.0f);
             }
-            return (std::min)(widest, MaximumWidth);
+            return cachedWidth = (std::min)(widest, MaximumWidth);
         }
 
         float HeightDip() const
@@ -113,6 +124,58 @@ namespace Cards
         const int widthPixels = (std::max)(1, static_cast<int>(std::lround(WidthDip() * scale)));
         const int heightPixels = (std::max)(1, static_cast<int>(std::lround(HeightDip() * scale)));
         root.Size({ static_cast<float>(widthPixels), static_cast<float>(heightPixels) });
+        if (materialDirty || materialWidth != widthPixels || materialHeight != heightPixels || materialScale != scale)
+        {
+            const bool wantGlass = environment.material.kind == MaterialKind::LiquidGlass && !environment.highContrast &&
+                LiquidGlassBrush::EffectsEnabled();
+            glassActive = wantGlass && glass.Update(*graphics, compositor, device,
+                static_cast<float>(widthPixels), static_cast<float>(heightPixels), scale, environment.material.glassBlur, environment.dark);
+            if (!glassActive)
+            {
+                controls.ClearBackdrop(); glass.Release(); captureExclusion.Restore();
+            }
+            background.Children().RemoveAll();
+            if (glassActive) background.Children().InsertAtTop(glass.Visual());
+            edge.Brush(glassActive ? glass.Rim() : nullptr);
+            clip.Size({static_cast<float>(widthPixels), static_cast<float>(heightPixels)});
+            clip.CornerRadius({8 * scale, 8 * scale});
+            materialWidth = static_cast<float>(widthPixels); materialHeight = static_cast<float>(heightPixels);
+            materialScale = scale; materialDirty = false;
+        }
+        if (glassActive)
+        {
+            std::vector<GlassControl> descriptions;
+            for (const auto& item : {std::pair{selected, 1}, {hot, 2}})
+            {
+                if (item.first < firstVisible || item.first >= firstVisible + VisibleRows() ||
+                    (item.second == 2 && hot == selected)) continue;
+                const float top = Padding + (item.first - firstVisible) * RowHeight;
+                GlassControl control;
+                control.id = item.second; control.kind = GlassControl::Kind::Segment;
+                control.bounds = Draw::Rect(4, top + 1, WidthDip() - 4, top + RowHeight - 1);
+                control.radius = 14; control.hover = item.first == hot ? 1.f : 0.f;
+                control.pressed = item.first == pressed;
+                descriptions.push_back(control);
+            }
+            try
+            {
+                controls.Update(*graphics, compositor, device, descriptions, scale, environment.dark, environment.reducedMotion);
+                if (glass.Scene() && environment.allowLiveCapture && captureExclusion.Active())
+                    controls.RenderBackdrop(*graphics, compositor, device, glass.Scene(), glass.SceneRevision());
+                if (!controlsAttached) { motion.Children().InsertAbove(controls.Visual(), edge); controlsAttached = true; }
+            }
+            catch (const winrt::hresult_error&)
+            {
+                if (controlsAttached)
+                    try { motion.Children().Remove(controls.Visual()); } catch (...) {}
+                controlsAttached = false; controls.Release();
+                glassActive = false; // The opaque painter below remains usable.
+            }
+        }
+        if (!glassActive && controlsAttached)
+        {
+            motion.Children().Remove(controls.Visual()); controlsAttached = false; controls.Release();
+        }
         surface.Ensure(device, widthPixels, heightPixels);
         if (!surface.Ready()) return;
         if (boundSurface != surface.Handle())
@@ -132,7 +195,7 @@ namespace Cards
         const float height = HeightDip();
         // A popup is a floating surface over arbitrary content, so it paints its
         // own opaque rounded panel instead of relying on Mica.
-        Draw::FillRound(context, Draw::Rect(0, 0, width, height), 8.0f,
+        if (!glassActive) Draw::FillRound(context, Draw::Rect(0, 0, width, height), 8.0f,
             environment.highContrast ? palette.panel : environment.dark ? Color{0.125f, 0.125f, 0.125f, 1} : Color{0.953f, 0.953f, 0.953f, 1});
         Draw::StrokeRound(context, Draw::Rect(0.5f, 0.5f, width - 0.5f, height - 0.5f), 8.0f,
             WithAlpha(palette.border, environment.dark ? 0.24f : 0.16f), 1.0f);
@@ -149,7 +212,7 @@ namespace Cards
             region.bounds = RECT{ 0, static_cast<LONG>(top), static_cast<LONG>(width),
                 static_cast<LONG>(top + RowHeight) };
             regions.Add(std::move(region));
-            if (itemIndex == selected || itemIndex == hot)
+            if (!glassActive && (itemIndex == selected || itemIndex == hot))
             {
                 const auto highlight = WithAlpha(palette.accent,
                     itemIndex == selected ? 0.23f : 0.125f);
@@ -336,6 +399,9 @@ namespace Cards
             impl->target = nullptr;
         }
         impl->root = nullptr;
+        impl->background = nullptr; impl->edge = nullptr; impl->clip = nullptr;
+        impl->captureExclusion.Restore();
+        impl->glass.Release(); impl->controls.Release(); impl->controlsAttached = false;
         impl->motion = nullptr;
         impl->content = nullptr;
         impl->boundSurface = nullptr;
@@ -353,10 +419,15 @@ namespace Cards
     void CardPopup::ApplyEnvironment(const CardEnvironment& environment)
     {
         impl->environment = environment;
+        impl->materialDirty = true; impl->cachedWidth = 0;
         impl->graphics = environment.graphics;
         if (!impl->window || !environment.compositor || !environment.device) return;
         if (impl->device != environment.device || impl->compositor != environment.compositor)
         {
+            if (impl->background) impl->background.Children().RemoveAll();
+            if (impl->edge) impl->edge.Brush(nullptr);
+            if (impl->controlsAttached) impl->motion.Children().Remove(impl->controls.Visual());
+            impl->controlsAttached = false; impl->controls.Release(); impl->glass.Release();
             impl->surface.Release();
             impl->boundSurface = nullptr;
             if (impl->content) impl->content.Brush(nullptr);
@@ -369,6 +440,14 @@ namespace Cards
             impl->root.Clip(impl->compositor.CreateInsetClip());
             impl->motion = impl->compositor.CreateContainerVisual();
             impl->motion.RelativeSizeAdjustment({ 1.0f, 1.0f });
+            impl->clip = impl->compositor.CreateRoundedRectangleGeometry();
+            impl->motion.Clip(impl->compositor.CreateGeometricClip(impl->clip));
+            impl->background = impl->compositor.CreateContainerVisual();
+            impl->background.RelativeSizeAdjustment({1, 1});
+            impl->edge = impl->compositor.CreateSpriteVisual();
+            impl->edge.RelativeSizeAdjustment({1, 1});
+            impl->motion.Children().InsertAtTop(impl->background);
+            impl->motion.Children().InsertAtTop(impl->edge);
             impl->content = impl->compositor.CreateSpriteVisual();
             impl->content.RelativeSizeAdjustment({ 1.0f, 1.0f });
             impl->motion.Children().InsertAtTop(impl->content);
@@ -404,6 +483,7 @@ namespace Cards
         impl->accessibility.Detach();
         impl->menu = menu;
         impl->items = items;
+        impl->cachedWidth = 0;
         impl->selected = -1;
         for (size_t index = 0; index < items.size(); ++index)
         {
@@ -438,6 +518,7 @@ namespace Cards
                 self->Paint();
             });
         EnableWindow(impl->window, TRUE);
+        EnableLiveBackdrop(impl->environment.allowLiveCapture && !diagnosticOffscreen && impl->glassActive);
         impl->Animate();
         ShowWindow(impl->window, SW_SHOWNOACTIVATE);
     }
@@ -459,6 +540,34 @@ namespace Cards
         impl->menu.clear();
         EnableWindow(impl->window, FALSE);
         impl->Animate(animate);
+    }
+
+    HWND CardPopup::Handle() const { return impl->window; }
+    bool CardPopup::HasLiquidGlass() const { return impl->glassActive; }
+    HRESULT CardPopup::MaterialResult() const { return impl->glass.LastResult(); }
+    const std::wstring& CardPopup::MaterialDiagnostic() const { return impl->glass.Diagnostic(); }
+    bool CardPopup::LiveBackdropActive() const { return impl->glassActive && impl->glass.LiveActive(); }
+    uint64_t CardPopup::BackdropFrameCount() const { return impl->glass.RenderedFrames(); }
+
+    bool CardPopup::EnableLiveBackdrop(bool enabled)
+    {
+        if (enabled && impl->glassActive && impl->environment.allowLiveCapture)
+            return impl->captureExclusion.Enable(impl->window);
+        impl->controls.ClearBackdrop(); impl->glass.ClearBackdrop();
+        impl->captureExclusion.Restore();
+        return !enabled;
+    }
+
+    bool CardPopup::RenderBackdrop(const BackdropFrame& frame)
+    {
+        if (!impl->glassActive || !impl->captureExclusion.Active()) return false;
+        try
+        {
+            if (!impl->glass.RenderBackdrop(*impl->graphics, impl->compositor, impl->device, frame, Bounds())) return false;
+            return impl->controls.RenderBackdrop(*impl->graphics, impl->compositor, impl->device,
+                impl->glass.Scene(), impl->glass.SceneRevision());
+        }
+        catch (...) { return false; }
     }
 
     bool CardPopup::Visible() const { return impl->visible; }

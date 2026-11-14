@@ -17,6 +17,7 @@
 #include "CardGraphics.h"
 #include "CardIcons.h"
 #include "CardLayout.h"
+#include "CardMaterial.h"
 #include "CardTypes.h"
 
 #include <Windows.h>
@@ -58,7 +59,9 @@ namespace Cards
         bool dark{ true };
         bool highContrast{ false };
         bool reducedMotion{ false };
+        bool allowLiveCapture{ false };
         MicaTuning mica{};
+        MaterialSettings material{};
         std::wstring fontFamily{ L"Microsoft YaHei UI" };
     };
 
@@ -76,6 +79,13 @@ namespace Cards
 
         // Theme, tuning and font changes. Never recreates the window.
         void ApplyEnvironment(const CardEnvironment& environment);
+        bool HasLiquidGlass() const;
+        bool EnableLiveBackdrop(bool enabled);
+        bool RenderBackdrop(const BackdropFrame& frame);
+        bool LiveBackdropActive() const;
+        uint64_t BackdropFrameCount() const;
+        HRESULT MaterialResult() const;
+        const std::wstring& MaterialDiagnostic() const;
         // A new whole snapshot. Repaints only when something the card shows changed.
         void SetSnapshot(const Snapshot& snapshot);
 
@@ -140,6 +150,7 @@ namespace Cards
         Paint::Interaction CurrentInteraction() const;
 
     private:
+        void UpdateMaterial();
         friend class CardHost;
         struct Impl;
 
@@ -208,6 +219,11 @@ namespace Cards
             std::map<int, float> hover;
             int pressed{};
             int focused{};
+            bool glass{}; // Effective LiquidGlass only; false in high contrast.
+            bool dark{};
+            bool reducedMotion{};
+            bool compositedGlass{};
+            std::vector<GlassControl>* glassControls{};
 
             float Hover(int id) const
             {

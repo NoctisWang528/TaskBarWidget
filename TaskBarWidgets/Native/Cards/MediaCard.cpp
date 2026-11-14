@@ -293,7 +293,8 @@ namespace Cards::Paint
                 : interaction.pressed == 4 ? 0.18f : 0.10f * interaction.Hover(4);
             Draw::Progress(context, Draw::Rect(railLeft, railTop, railRight, railTop + 3.0f), ratio,
                 Mix(palette.track, palette.accent, feedback), Mix(palette.accent, palette.primary, feedback),
-                true, snapshot.media.canSeek && interaction.focused == 4, palette.accent);
+                true, snapshot.media.canSeek && interaction.focused == 4, palette.accent,
+                snapshot.media.canSeek ? &interaction : nullptr, 4);
             Text(context, graphics, duration, environment.fontFamily, 10.0f, 400, palette.secondary,
                 Draw::Rect(railRight + 4.0f, progressTop, left + contentWidth, progressTop + 16.0f),
                 DWRITE_TEXT_ALIGNMENT_TRAILING);
