@@ -45,13 +45,18 @@ namespace Cards
         DesktopBackdrop& operator=(const DesktopBackdrop&) = delete;
 
         // Replaces any previous session; success does not imply a frame is ready.
-        bool Start(IDXGIDevice* renderDevice, ID2D1DeviceContext* renderContext, HMONITOR monitor);
+        // A cross-adapter output needs its own D3D device, cached after the first
+        // creation. Without allowSlowDevice, an uncached device is not created:
+        // Start fails with LastResult() == E_PENDING so an animation never blocks.
+        bool Start(IDXGIDevice* renderDevice, ID2D1DeviceContext* renderContext, HMONITOR monitor,
+            bool allowSlowDevice = true);
         // True only when bitmap content changed. Acquisition and staging Map never
         // wait for a frame/GPU; cross-adapter delivery is pipelined across polls.
         // S_FALSE means healthy but unchanged (including timeout/busy staging).
         // A failed HRESULT stops capture and clears Frame(); caller must restart.
         bool Poll();
-        // Clears all owned images/devices, retaining LastResult for diagnostics.
+        // Clears all owned images/sessions, retaining LastResult for diagnostics
+        // and the content-free cross-adapter device (released on failure/destruction).
         void Stop();
         bool Running() const;
         HMONITOR Monitor() const;

@@ -513,7 +513,21 @@ float4 main(
                 lens->SetInputEffect(0, gaussian.Get());
             }
             stage = L"source-transform";
-            transform->SetInput(0, source, TRUE);
+            if (control) transform->SetInput(0, source, TRUE);
+            else
+            {
+                // The monitor capture ends at the physical edge. A card entering
+                // or leaving across it would otherwise blur and refract toward
+                // transparent; clamp extends the edge pixels instead.
+                if (!border)
+                {
+                    winrt::check_hresult(context->CreateEffect(CLSID_D2D1Border, &border));
+                    winrt::check_hresult(border->SetValue(D2D1_BORDER_PROP_EDGE_MODE_X, D2D1_BORDER_EDGE_MODE_CLAMP));
+                    winrt::check_hresult(border->SetValue(D2D1_BORDER_PROP_EDGE_MODE_Y, D2D1_BORDER_EDGE_MODE_CLAMP));
+                }
+                border->SetInput(0, source, TRUE);
+                transform->SetInputEffect(0, border.Get(), TRUE);
+            }
             winrt::check_hresult(transform->SetValue(D2D1_2DAFFINETRANSFORM_PROP_TRANSFORM_MATRIX, sourceToLocal));
             if (control)
             {
@@ -631,7 +645,7 @@ float4 main(
     void RefractionSurface::Release()
     {
         brush = nullptr; bound = nullptr; surface.Release();
-        transform.Reset(); colorMatrix.Reset(); gaussian.Reset(); lens.Reset();
+        border.Reset(); transform.Reset(); colorMatrix.Reset(); gaussian.Reset(); lens.Reset();
         scene.Reset(); input.Reset();
     }
 }

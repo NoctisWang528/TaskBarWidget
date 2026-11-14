@@ -29,7 +29,7 @@ namespace Cards
         SurfaceHandle bound{nullptr};
         winrt::Windows::UI::Composition::CompositionSurfaceBrush brush{nullptr};
         Microsoft::WRL::ComPtr<ID2D1Bitmap1> scene, input;
-        Microsoft::WRL::ComPtr<ID2D1Effect> transform, colorMatrix, gaussian, lens;
+        Microsoft::WRL::ComPtr<ID2D1Effect> border, transform, colorMatrix, gaussian, lens;
         HRESULT result{S_OK};
         const wchar_t* stage{L"inactive"};
     };

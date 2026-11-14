@@ -129,6 +129,11 @@ namespace Cards
         ComPtr<ID3D11Device> captureDevice;
         ComPtr<ID3D11DeviceContext> captureContext;
         ComPtr<IDXGIOutputDuplication> duplication;
+        // Cross-adapter device creation can block for hundreds of milliseconds.
+        // Keep only the device (never captured content) across Stop/Start.
+        ComPtr<ID3D11Device> cachedOutputDevice;
+        ComPtr<ID3D11DeviceContext> cachedOutputContext;
+        LUID cachedOutputLuid{};
         capture::GraphicsCaptureItem captureItem{nullptr};
         capture::Direct3D11CaptureFramePool framePool{nullptr};
         capture::GraphicsCaptureSession captureSession{nullptr};
@@ -175,9 +180,18 @@ namespace Cards
             // Keep the lifetime serial counter and diagnostic HRESULT.
         }
 
+        void ReleaseCachedDevice()
+        {
+            cachedOutputContext.Reset();
+            cachedOutputDevice.Reset();
+            cachedOutputLuid = {};
+        }
+
         bool Fail(HRESULT result)
         {
             Clear();
+            // A deferred start has no bad device; any other failure may.
+            if (result != E_PENDING) ReleaseCachedDevice();
             lastResult = result;
             return false;
         }
@@ -190,7 +204,8 @@ namespace Cards
             return result;
         }
 
-        HRESULT Start(IDXGIDevice* device, ID2D1DeviceContext* context, HMONITOR requestedMonitor)
+        HRESULT Start(IDXGIDevice* device, ID2D1DeviceContext* context, HMONITOR requestedMonitor,
+            bool allowSlowDevice)
         {
             stage = L"capture/device";
             if (!device || !context || !requestedMonitor) return E_INVALIDARG;
@@ -222,12 +237,25 @@ namespace Cards
                 renderDesc.AdapterLuid.HighPart != captureDesc.AdapterLuid.HighPart;
             if (crossAdapter)
             {
-                // An explicit adapter requires UNKNOWN, never HARDWARE or WARP.
-                stage = L"capture/output-device";
-                result = D3D11CreateDevice(outputAdapter.Get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr,
-                    D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION,
-                    captureDevice.GetAddressOf(), nullptr, captureContext.GetAddressOf());
-                if (FAILED(result)) return result;
+                const bool cached = cachedOutputDevice &&
+                    cachedOutputLuid.LowPart == captureDesc.AdapterLuid.LowPart &&
+                    cachedOutputLuid.HighPart == captureDesc.AdapterLuid.HighPart &&
+                    SUCCEEDED(cachedOutputDevice->GetDeviceRemovedReason());
+                if (!cached)
+                {
+                    ReleaseCachedDevice();
+                    stage = L"capture/output-device-deferred";
+                    if (!allowSlowDevice) return E_PENDING;
+                    // An explicit adapter requires UNKNOWN, never HARDWARE or WARP.
+                    stage = L"capture/output-device";
+                    result = D3D11CreateDevice(outputAdapter.Get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr,
+                        D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION,
+                        cachedOutputDevice.GetAddressOf(), nullptr, cachedOutputContext.GetAddressOf());
+                    if (FAILED(result)) { ReleaseCachedDevice(); return result; }
+                    cachedOutputLuid = captureDesc.AdapterLuid;
+                }
+                captureDevice = cachedOutputDevice;
+                captureContext = cachedOutputContext;
             }
             else
             {
@@ -510,13 +538,14 @@ namespace Cards
     };
 
     DesktopBackdrop::DesktopBackdrop() : impl(std::make_unique<Impl>()) {}
-    DesktopBackdrop::~DesktopBackdrop() { impl->Clear(); }
+    DesktopBackdrop::~DesktopBackdrop() { impl->Clear(); impl->ReleaseCachedDevice(); }
 
-    bool DesktopBackdrop::Start(IDXGIDevice* renderDevice, ID2D1DeviceContext* renderContext, HMONITOR monitor)
+    bool DesktopBackdrop::Start(IDXGIDevice* renderDevice, ID2D1DeviceContext* renderContext, HMONITOR monitor,
+        bool allowSlowDevice)
     {
         impl->Clear();
         impl->startupDiagnostic.clear();
-        HRESULT result = impl->Start(renderDevice, renderContext, monitor);
+        HRESULT result = impl->Start(renderDevice, renderContext, monitor, allowSlowDevice);
         if (result == DXGI_ERROR_UNSUPPORTED)
         {
             const auto* unsupportedStage = impl->stage;

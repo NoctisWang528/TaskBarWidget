@@ -187,6 +187,12 @@ namespace Cards
         SpriteVisual rim{ nullptr };
         LiquidGlassBrush glass;
         CaptureExclusion captureExclusion;
+        // While a menu covers this card the HWND joins the capture so the menu
+        // refracts real card content; the card's own glass stays frozen. After
+        // re-exclusion it waits for two newer frames that no longer contain it.
+        bool captureSuspended{};
+        bool resumePending{};
+        uint64_t resumeSerial{};
         GlassControls glassControls;
         std::array<std::vector<GlassControl>, 2> controlDescriptions;
         bool glassControlsAttached{}, glassControlsFailed{};
@@ -584,19 +590,55 @@ namespace Cards
     bool CardWindow::EnableLiveBackdrop(bool enabled)
     {
         if (enabled && impl->glassActive && environment.allowLiveCapture)
-            return impl->captureExclusion.Enable(window);
+        {
+            if (!impl->captureSuspended) return impl->captureExclusion.Enable(window);
+            if (!impl->captureExclusion.Enable(window)) return false;
+            impl->captureSuspended = false;
+            impl->resumePending = true;
+            impl->resumeSerial = 0;
+            return true;
+        }
+        impl->captureSuspended = impl->resumePending = false;
+        impl->resumeSerial = 0;
         impl->glassControls.ClearBackdrop();
         impl->glass.ClearBackdrop();
         impl->captureExclusion.Restore();
         return !enabled;
     }
 
-    bool CardWindow::RenderBackdrop(const BackdropFrame& frame)
+    bool CardWindow::SuspendCaptureExclusion()
     {
-        if (!impl->glassActive || !impl->captureExclusion.Active()) return false;
+        if (!impl->glassActive || !environment.allowLiveCapture) return false;
+        if (!impl->captureSuspended)
+        {
+            // Keep the rendered glass; only let the capture see this HWND.
+            impl->captureExclusion.Restore();
+            impl->captureSuspended = true;
+            impl->resumePending = false;
+            impl->resumeSerial = 0;
+        }
+        return true;
+    }
+
+    bool CardWindow::RenderBackdrop(const BackdropFrame& frame, bool refreshControls)
+    {
+        if (!impl->glassActive) return false;
+        // Frozen while captured under a menu: rendering now would refract itself.
+        if (impl->captureSuspended) return true;
+        if (!impl->captureExclusion.Active()) return false;
+        if (impl->resumePending)
+        {
+            // The first frame seen after re-exclusion may predate it.
+            if (!impl->resumeSerial) impl->resumeSerial = frame.serial + 2;
+            if (frame.serial < impl->resumeSerial) return true;
+            impl->resumePending = false;
+        }
         try
         {
             if (!impl->glass.RenderBackdrop(*environment.graphics, impl->compositor, environment.device, frame, bounds)) return false;
+            // A skipped refresh keeps each control's previous lens; the next
+            // refresh sees a newer scene revision and catches up.
+            if (!refreshControls) return true;
             return impl->glassControlsFailed || impl->glassControls.RenderBackdrop(*environment.graphics, impl->compositor,
                 environment.device, impl->glass.Scene(), impl->glass.SceneRevision());
         }

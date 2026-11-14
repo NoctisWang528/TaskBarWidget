@@ -140,6 +140,7 @@ namespace Cards
         std::wstring backdropStage{ L"inactive" };
         HRESULT backdropLastResult{ S_OK };
         bool groupMoving{};
+        std::chrono::steady_clock::time_point controlGlassRefreshed{};
         float groupOffset{}, groupFrom{}, groupTo{}, groupDistance{};
         int groupDuration{240};
         std::chrono::steady_clock::time_point groupStarted, groupNextFrame;
@@ -324,6 +325,7 @@ namespace Cards
         void FailBackdrop(const wchar_t* operation, HRESULT result);
         void ConfigureBackdrop(bool scheduleTick = true);
         void BackdropTick();
+        bool RenderLiveGlass(bool refreshControls);
         void UpdateEnvironment(bool force);
         void RefreshSnapshot(const Protocol::Changes& changes);
         void OnTask();
@@ -573,7 +575,8 @@ namespace Cards
         const bool cardGlass = std::any_of(cards.begin(), cards.end(), [](const auto& entry) {
             return entry.second->Visible() && entry.second->HasLiquidGlass();
         });
-        if (!visible || diagnosticOffscreen || highContrast || shuttingDown ||
+        // An exit animation keeps the glass until StopGroupMotion hides the cards.
+        if ((!visible && !groupMoving) || diagnosticOffscreen || highContrast || shuttingDown ||
             !graphics.Ready() || !device || (!cardGlass && !popupGlass))
         {
             StopBackdrop();
@@ -628,26 +631,37 @@ namespace Cards
                 if (SUCCEEDED(exclusionResult)) exclusionResult = error ? HRESULT_FROM_WIN32(error) : E_FAIL;
             }
         };
+        // Excluded cards are invisible to the capture, so a menu above one would
+        // refract the desktop behind it and hide the card's own content. While
+        // the menu is logically open, the cards it covers join the capture with
+        // frozen glass; closing the menu re-excludes them before it fades out.
+        const bool menuOpen = popupGlass && popup->Visible();
+        const RECT menuBounds = menuOpen ? popup->Bounds() : RECT{};
         for (auto& [kind, card] : cards)
         {
             const bool desired = card->Visible() && card->HasLiquidGlass();
+            RECT cardBounds = card->Bounds(), overlap{};
+            if (desired && menuOpen && IntersectRect(&overlap, &cardBounds, &menuBounds) &&
+                card->SuspendCaptureExclusion()) continue;
             enable(*card, desired);
         }
         if (popup) enable(*popup, popupGlass);
         if (FAILED(exclusionResult)) { FailBackdrop(L"capture exclusion", exclusionResult); return; }
-        // Output duplication/device initialization can take time in the driver.
-        // Keep the entrance on the existing blur until its motion finishes.
-        if (!backdrop.Running() && groupMoving)
-        {
-            UpdateBackdropDiagnostics(L"entrance-delay");
-            if (!backdropTimerArmed && !ArmBackdropTimer(166'667))
-                FailBackdrop(L"startup timer", HRESULT_FROM_WIN32(GetLastError()));
-            return;
-        }
         if (!backdrop.Running())
         {
-            if (!backdrop.Start(graphics.DxgiDevice(), graphics.ResourceContext(), monitor))
+            // Same-adapter duplication reuses the render device and starts in
+            // about a millisecond, so the entrance refracts from its first
+            // visible frame. Only an uncached cross-adapter device is deferred
+            // until the motion ends; the cards keep the blur meanwhile.
+            if (!backdrop.Start(graphics.DxgiDevice(), graphics.ResourceContext(), monitor, !groupMoving))
             {
+                if (backdrop.LastResult() == E_PENDING)
+                {
+                    UpdateBackdropDiagnostics(L"entrance-delay");
+                    if (!backdropTimerArmed && !ArmBackdropTimer(166'667))
+                        FailBackdrop(L"startup timer", HRESULT_FROM_WIN32(GetLastError()));
+                    return;
+                }
                 FailBackdrop(backdrop.Diagnostic(), backdrop.LastResult());
                 return;
             }
@@ -671,40 +685,51 @@ namespace Cards
         if (!backdrop.Running()) return;
         const auto interval = std::chrono::nanoseconds(1'000'000'000 / (backdrop.CrossAdapter() ? 30 : 60));
         const auto next = tickStarted + interval;
-        backdrop.Poll();
-        if (!backdrop.Running()) { FailBackdrop(backdrop.Diagnostic(), backdrop.LastResult()); return; }
-        const auto& frame = backdrop.Frame();
-        if (frame.bitmap)
+        // During group motion GroupFrame polls and renders right after moving
+        // the HWNDs, so position and refracted content share one Composition batch.
+        if (!groupMoving)
         {
-            for (auto& [kind, card] : cards)
-                if (card->Visible() && card->HasLiquidGlass() && !card->RenderBackdrop(frame))
-                {
-                    FailBackdrop(FAILED(card->MaterialResult()) ? card->MaterialDiagnostic().c_str() : L"card controls",
-                        card->MaterialResult());
-                    return;
-                }
-            if (popup && IsWindowVisible(popup->Handle()) && popup->HasLiquidGlass() &&
-                !popup->RenderBackdrop(frame))
-            {
-                FailBackdrop(FAILED(popup->MaterialResult()) ? popup->MaterialDiagnostic().c_str() : L"popup controls",
-                    popup->MaterialResult());
-                return;
-            }
-            ++backdropRenderedFrames;
-            UpdateBackdropDiagnostics(L"live-refraction");
+            backdrop.Poll();
+            if (!backdrop.Running()) { FailBackdrop(backdrop.Diagnostic(), backdrop.LastResult()); return; }
+            // Render the cached frame even without a new desktop present: bounds,
+            // control hover and popup animation can change independently of pixels.
+            if (!RenderLiveGlass(true)) return;
         }
-        else
-        {
-            UpdateBackdropDiagnostics(L"waiting-first-frame", backdrop.LastResult());
-        }
-        // Render the cached frame even without a new desktop present: bounds,
-        // control hover and popup animation can change independently of pixels.
         const auto now = std::chrono::steady_clock::now();
         // Recover late frames after at least 1 ms, without adding another full
         // interval after the work or spinning on an immediately signaled timer.
         const LONGLONG delay = std::max(10'000LL,
             std::chrono::duration_cast<std::chrono::nanoseconds>(next - now).count() / 100);
         if (!ArmBackdropTimer(delay)) FailBackdrop(L"timer", HRESULT_FROM_WIN32(GetLastError()));
+    }
+
+    bool CardHost::Impl::RenderLiveGlass(bool refreshControls)
+    {
+        const auto& frame = backdrop.Frame();
+        if (!frame.bitmap)
+        {
+            UpdateBackdropDiagnostics(L"waiting-first-frame", backdrop.LastResult());
+            return true;
+        }
+        for (auto& [kind, card] : cards)
+            if (card->Visible() && card->HasLiquidGlass() && !card->RenderBackdrop(frame, refreshControls))
+            {
+                FailBackdrop(FAILED(card->MaterialResult()) ? card->MaterialDiagnostic().c_str() : L"card controls",
+                    card->MaterialResult());
+                return false;
+            }
+        const bool menuGlass = popup && IsWindowVisible(popup->Handle()) && popup->HasLiquidGlass();
+        if (menuGlass && !popup->RenderBackdrop(frame))
+        {
+            FailBackdrop(FAILED(popup->MaterialResult()) ? popup->MaterialDiagnostic().c_str() : L"popup controls",
+                popup->MaterialResult());
+            return false;
+        }
+        ++backdropRenderedFrames;
+        // Stage changes are logged once, so menu open/close shows whether the
+        // menu itself received live refraction.
+        UpdateBackdropDiagnostics(menuGlass ? L"live-refraction+menu" : L"live-refraction");
+        return true;
     }
 
     void CardHost::Impl::StopGroupMotion(bool settle)
@@ -727,7 +752,15 @@ namespace Cards
         }
         if (settle)
         {
-            if (!visible) for (auto& [kind, card] : cards) card->Hide(false);
+            if (!visible)
+            {
+                // The exit kept refracting until off-screen. Restore capture
+                // affinity and the blur material while the HWNDs are still shown,
+                // as the pre-exit release did: changing them after SW_HIDE left
+                // stale empty card frames on the desktop.
+                StopBackdrop();
+                for (auto& [kind, card] : cards) card->Hide(false);
+            }
             MoveGroup(0);
             if (!visible && wasMoving) ScheduleWarmup();
         }
@@ -781,7 +814,12 @@ namespace Cards
         if (!animate || reducedMotion || highContrast || groupRestBounds.empty() ||
             std::abs(groupTo - groupFrom) < 0.5f)
         {
-            if (!showing) for (auto& [kind, card] : cards) card->Hide(false);
+            if (!showing)
+            {
+                // Release capture state before the HWNDs are hidden.
+                StopBackdrop();
+                for (auto& [kind, card] : cards) card->Hide(false);
+            }
             MoveGroup(0);
             return;
         }
@@ -819,9 +857,25 @@ namespace Cards
         const float remaining = 1 - t;
         const float progress = visible ? 1 - remaining * remaining * remaining : t * t;
         groupReflowProgress = progress;
+        // Acquire before moving so the HWND move and the refraction for the
+        // same bounds are submitted back to back on this thread.
+        if (backdrop.Running())
+        {
+            backdrop.Poll();
+            if (!backdrop.Running()) FailBackdrop(backdrop.Diagnostic(), backdrop.LastResult());
+        }
         MoveGroup(groupFrom + (groupTo - groupFrom) * progress);
+        auto now = std::chrono::steady_clock::now();
+        if (backdrop.Running())
+        {
+            // Card glass follows every frame; the many small control lenses
+            // refresh at a bounded rate and catch up when motion settles.
+            const bool refreshControls = t >= 1 || now - controlGlassRefreshed >= std::chrono::milliseconds(33);
+            if (refreshControls) controlGlassRefreshed = now;
+            RenderLiveGlass(refreshControls);
+            now = std::chrono::steady_clock::now();
+        }
         if (t >= 1) { StopGroupMotion(true); return; }
-        const auto now = std::chrono::steady_clock::now();
         groupNextFrame += groupFrameInterval;
         // A late frame has already consumed its budget. Waiting a full interval
         // again halves the cadence around a refresh boundary (e.g. 120 -> 60).
@@ -939,15 +993,16 @@ namespace Cards
     {
         UNREFERENCED_PARAMETER(reason);
         visible = false;
-        StopBackdrop();
-        CloseMenu(animate);
         UninstallHooks();
         for (auto& [kind, card] : cards)
         {
             UNREFERENCED_PARAMETER(kind);
             EnableWindow(card->Handle(), FALSE);
         }
+        // Start the exit before reconciling the backdrop: a moving group keeps
+        // refracting, while an immediate hide stops capture here.
         AnimateGroup(false, animate);
+        CloseMenu(animate);
         // Lyrics subscription stops with the cards so a hidden panel never keeps
         // lyric work alive in the media service.
         client.Request(L"subscribeCardLyrics", "{\"visible\":false,\"session\":1}");
@@ -1040,7 +1095,9 @@ namespace Cards
 
     void CardHost::Impl::ShowCards()
     {
-        if (!visible) StopBackdrop(true);
+        // Reopening during an exit keeps a running capture; the reversed motion
+        // continues refracting without a restart or a blur frame.
+        if (!visible && !backdrop.Running()) StopBackdrop(true);
         startupWarmup = false;
         startupRequests.clear();
         CancelWarmup();

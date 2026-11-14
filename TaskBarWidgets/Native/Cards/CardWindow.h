@@ -81,7 +81,10 @@ namespace Cards
         void ApplyEnvironment(const CardEnvironment& environment);
         bool HasLiquidGlass() const;
         bool EnableLiveBackdrop(bool enabled);
-        bool RenderBackdrop(const BackdropFrame& frame);
+        // Temporarily includes this HWND in the capture (under an open menu)
+        // and freezes its glass; EnableLiveBackdrop(true) re-excludes it.
+        bool SuspendCaptureExclusion();
+        bool RenderBackdrop(const BackdropFrame& frame, bool refreshControls = true);
         bool LiveBackdropActive() const;
         uint64_t BackdropFrameCount() const;
         HRESULT MaterialResult() const;
