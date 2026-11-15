@@ -549,10 +549,10 @@ namespace Cards
     bool CardPopup::LiveBackdropActive() const { return impl->glassActive && impl->glass.LiveActive(); }
     uint64_t CardPopup::BackdropFrameCount() const { return impl->glass.RenderedFrames(); }
 
-    bool CardPopup::EnableLiveBackdrop(bool enabled)
+    bool CardPopup::EnableLiveBackdrop(bool enabled, bool sessionScoped)
     {
         if (enabled && impl->glassActive && impl->environment.allowLiveCapture)
-            return impl->captureExclusion.Enable(impl->window);
+            return impl->captureExclusion.Enable(impl->window, sessionScoped);
         impl->controls.ClearBackdrop(); impl->glass.ClearBackdrop();
         impl->captureExclusion.Restore();
         return !enabled;

@@ -523,7 +523,7 @@ namespace Cards
         if (stageChanged || errorChanged)
         {
             wchar_t message[256]{};
-            swprintf_s(message, L"TaskBarWidgets backdrop: stage=%ls hr=0x%08X frames=%llu blocked=%d running=%d\n",
+            _snwprintf_s(message, _TRUNCATE, L"TaskBarWidgets backdrop: stage=%ls hr=0x%08X frames=%llu blocked=%d running=%d\n",
                 backdropStage.c_str(), static_cast<unsigned>(backdropLastResult),
                 static_cast<unsigned long long>(backdropRenderedFrames),
                 backdropBlocked ? 1 : 0, backdrop.Running() ? 1 : 0);
@@ -543,7 +543,7 @@ namespace Cards
         // Boolean-only render APIs may not expose a more specific HRESULT.
         if (SUCCEEDED(result)) result = E_FAIL;
         wchar_t diagnostic[128]{};
-        swprintf_s(diagnostic, L"live backdrop %ls failed (HRESULT 0x%08X)",
+        _snwprintf_s(diagnostic, _TRUNCATE, L"live backdrop %ls failed (HRESULT 0x%08X)",
             operation, static_cast<unsigned>(result));
         lastError = diagnostic;
         UpdateBackdropDiagnostics(operation, result);
@@ -623,34 +623,54 @@ namespace Cards
         }
         backdropRetryAt = 0;
 
-        // All desired windows must be excluded before the first acquisition,
-        // including a popup whose logical Visible() is false during its exit.
-        HRESULT exclusionResult = S_OK;
-        const auto enable = [&exclusionResult](auto& surface, bool desired)
-        {
-            if (!desired) { surface.EnableLiveBackdrop(false); return; }
-            SetLastError(ERROR_SUCCESS);
-            if (!surface.EnableLiveBackdrop(true))
-            {
-                const DWORD error = GetLastError();
-                if (SUCCEEDED(exclusionResult)) exclusionResult = error ? HRESULT_FROM_WIN32(error) : E_FAIL;
-            }
-        };
         // Excluded cards are invisible to the capture, so a menu above one would
         // refract the desktop behind it and hide the card's own content. While
         // the menu is logically open, the cards it covers join the capture with
         // frozen glass; closing the menu re-excludes them before it fades out.
         const bool menuOpen = popupGlass && popup->Visible();
         const RECT menuBounds = menuOpen ? popup->Bounds() : RECT{};
-        for (auto& [kind, card] : cards)
+        const auto underMenu = [&](const auto& card)
         {
-            const bool desired = card->Visible() && card->HasLiquidGlass();
-            RECT cardBounds = card->Bounds(), overlap{};
-            if (desired && menuOpen && IntersectRect(&overlap, &cardBounds, &menuBounds) &&
-                card->SuspendCaptureExclusion()) continue;
-            enable(*card, desired);
+            RECT cardBounds = card.Bounds(), overlap{};
+            return menuOpen && IntersectRect(&overlap, &cardBounds, &menuBounds);
+        };
+        std::vector<HWND> excludedWindows;
+        for (auto& [kind, card] : cards)
+            if (card->Visible() && card->HasLiquidGlass() && !underMenu(*card))
+                excludedWindows.push_back(card->Handle());
+        if (popupGlass) excludedWindows.push_back(popup->Handle());
+        // Install a changed list on a fresh WGC producer before restoring any
+        // affinity. The previous producer's queued frames are discarded with it.
+        if (!backdrop.SetExcludedWindows(excludedWindows))
+        {
+            FailBackdrop(backdrop.Diagnostic(), backdrop.LastResult());
+            return;
         }
-        if (popup) enable(*popup, popupGlass);
+        const auto applyExclusions = [&](bool sessionScoped)
+        {
+            HRESULT result = S_OK;
+            const auto enable = [&](auto& surface, bool desired)
+            {
+                if (!desired) { surface.EnableLiveBackdrop(false); return; }
+                SetLastError(ERROR_SUCCESS);
+                if (!surface.EnableLiveBackdrop(true, sessionScoped) && SUCCEEDED(result))
+                {
+                    const DWORD error = GetLastError();
+                    result = error ? HRESULT_FROM_WIN32(error) : E_FAIL;
+                }
+            };
+            for (auto& [kind, card] : cards)
+            {
+                const bool desired = card->Visible() && card->HasLiquidGlass();
+                if (desired && underMenu(*card) && card->SuspendCaptureExclusion()) continue;
+                enable(*card, desired);
+            }
+            if (popup) enable(*popup, popupGlass);
+            return result;
+        };
+        // Legacy capture needs affinity before startup. On a running WGC session
+        // its list is already installed, so these HWNDs remain capturable elsewhere.
+        HRESULT exclusionResult = applyExclusions(backdrop.SessionExclusion());
         if (FAILED(exclusionResult)) { FailBackdrop(L"capture exclusion", exclusionResult); return; }
         if (!backdrop.Running())
         {
@@ -659,7 +679,7 @@ namespace Cards
             // visible frame. Only an uncached cross-adapter device is deferred
             // until the motion ends; the cards keep the blur meanwhile.
             const auto startBegan = std::chrono::steady_clock::now();
-            if (!backdrop.Start(graphics.DxgiDevice(), graphics.ResourceContext(), monitor, !groupMoving))
+            if (!backdrop.Start(graphics.DxgiDevice(), graphics.ResourceContext(), monitor, excludedWindows, !groupMoving))
             {
                 if (backdrop.LastResult() == E_PENDING)
                 {
@@ -670,6 +690,11 @@ namespace Cards
                 }
                 FailBackdrop(backdrop.Diagnostic(), backdrop.LastResult());
                 return;
+            }
+            if (backdrop.SessionExclusion())
+            {
+                exclusionResult = applyExclusions(true);
+                if (FAILED(exclusionResult)) { FailBackdrop(L"capture affinity restore", exclusionResult); return; }
             }
             // The start runs synchronously on the card thread; its duration is
             // logged so an entrance hitch can be attributed.

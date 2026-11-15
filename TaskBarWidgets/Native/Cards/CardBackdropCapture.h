@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace Cards
 {
@@ -16,12 +17,14 @@ namespace Cards
     {
     public:
         ~CaptureExclusion() { Restore(); }
-        bool Enable(HWND window);
-        void Restore();
+        // sessionScoped is valid only after this HWND's session list is installed.
+        bool Enable(HWND window, bool sessionScoped = false);
+        bool Restore();
         bool Active() const { return window != nullptr; }
     private:
         HWND window{};
         DWORD previous{};
+        bool sessionOnly{};
     };
 
     struct BackdropFrame
@@ -34,8 +37,8 @@ namespace Cards
 
     // Caller-owned, single-threaded capture resource. Use on the render device's
     // owning thread, outside BeginDraw/EndDraw; renderContext must use renderDevice.
-    // The caller owns window exclusion, scheduling, cropping and rotation. This
-    // helper neither creates nor changes windows and never adds a pointer overlay.
+    // The caller owns HWND affinity, scheduling, cropping and rotation. This
+    // helper owns WGC's session exclusion list and never changes windows.
     class DesktopBackdrop
     {
     public:
@@ -49,7 +52,11 @@ namespace Cards
         // creation. Without allowSlowDevice, an uncached device is not created:
         // Start fails with LastResult() == E_PENDING so an animation never blocks.
         bool Start(IDXGIDevice* renderDevice, ID2D1DeviceContext* renderContext, HMONITOR monitor,
-            bool allowSlowDevice = true);
+            const std::vector<HWND>& excludedWindows, bool allowSlowDevice = true);
+        bool SessionExclusion() const;
+        // A changed list restarts only the WGC producer, before any affinity is
+        // restored. No queued frame from the previous list can reach the renderer.
+        bool SetExcludedWindows(const std::vector<HWND>& windows);
         // True only when bitmap content changed. Acquisition and staging Map never
         // wait for a frame/GPU; cross-adapter delivery is pipelined across polls.
         // S_FALSE means healthy but unchanged (including timeout/busy staging).

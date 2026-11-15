@@ -5,6 +5,8 @@
 #include <d3d11_4.h>
 #include <windows.graphics.capture.interop.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
+#include <windows.ui.interop.h>
+#include <winrt/Windows.Foundation.Metadata.h>
 #include <winrt/Windows.Graphics.Capture.h>
 #include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
 
@@ -13,11 +15,16 @@ namespace Cards
     using Microsoft::WRL::ComPtr;
     namespace capture = winrt::Windows::Graphics::Capture;
 
-    bool CaptureExclusion::Enable(HWND value)
+    bool CaptureExclusion::Enable(HWND value, bool sessionScoped)
     {
-        if (value && window == value) return true;
-        Restore();
+        if (value && window == value && sessionOnly == sessionScoped) return true;
+        if (!Restore()) return false;
         if (!value) { SetLastError(ERROR_INVALID_WINDOW_HANDLE); return false; }
+        if (sessionScoped)
+        {
+            window = value; sessionOnly = true;
+            return true;
+        }
         // Only our newly created card/menu HWNDs use this owner, and none has
         // another affinity writer. Their initial value is WDA_NONE. The getter
         // documents a layered-window restriction which our Composition HWNDs
@@ -29,14 +36,23 @@ namespace Cards
         return true;
     }
 
-    void CaptureExclusion::Restore()
+    bool CaptureExclusion::Restore()
     {
-        if (window && IsWindow(window)) SetWindowDisplayAffinity(window, previous);
-        window = nullptr; previous = WDA_NONE;
+        if (window && !sessionOnly && IsWindow(window) && !SetWindowDisplayAffinity(window, previous)) return false;
+        window = nullptr; previous = WDA_NONE; sessionOnly = false;
+        return true;
     }
 
     namespace
     {
+        // Public UniversalApiContract 19 ABI, absent from the pinned 26100.0
+        // headers. Method order and IID match Windows.Graphics.winmd.
+        struct __declspec(uuid("bb91f61b-218a-587d-8580-2701a74c0525")) DisplayCaptureSession : IInspectable
+        {
+            virtual HRESULT STDMETHODCALLTYPE SetWindowExclusionList(void* windows, uint64_t* iteration) = 0;
+            virtual HRESULT STDMETHODCALLTYPE GetWindowExclusionList(void** windows) = 0;
+        };
+
         // Permit an 8K monitor, but bound allocations and pitch arithmetic even
         // if a driver reports an unusable mode. Each pixel occupies four bytes.
         constexpr uint64_t MaxPixels = 40000000;
@@ -141,6 +157,8 @@ namespace Cards
         capture::GraphicsCaptureItem captureItem{nullptr};
         capture::Direct3D11CaptureFramePool framePool{nullptr};
         capture::GraphicsCaptureSession captureSession{nullptr};
+        bool sessionExclusion{};
+        std::vector<HWND> excludedWindows;
         ULONGLONG captureStarted{};
         const wchar_t* stage{L"capture/inactive"};
         std::wstring startupDiagnostic;
@@ -165,6 +183,7 @@ namespace Cards
             // before releasing the pool, image copies or the shared render device.
             try { if (captureSession) captureSession.Close(); } catch (...) {}
             captureSession = nullptr;
+            sessionExclusion = false; excludedWindows.clear();
             try { if (framePool) framePool.Close(); } catch (...) {}
             framePool = nullptr; captureItem = nullptr; captureStarted = 0;
             frame = {};
@@ -305,10 +324,14 @@ namespace Cards
             return DeviceResult();
         }
 
-        HRESULT StartWindowsCapture(IDXGIDevice* device, ID2D1DeviceContext* context, HMONITOR requestedMonitor)
+        HRESULT StartWindowsCapture(IDXGIDevice* device, ID2D1DeviceContext* context, HMONITOR requestedMonitor,
+            const std::vector<HWND>* exclusions = nullptr)
         {
             try
             {
+                stage = L"capture/wgc-session-exclusion-support";
+                if (exclusions && !winrt::Windows::Foundation::Metadata::ApiInformation::IsApiContractPresent(
+                    L"Windows.Foundation.UniversalApiContract", 19)) return E_NOINTERFACE;
                 stage = L"capture/wgc-support";
                 if (!capture::GraphicsCaptureSession::IsSupported()) return DXGI_ERROR_UNSUPPORTED;
                 winrt::check_hresult(device->QueryInterface(IID_PPV_ARGS(renderDevice.GetAddressOf())));
@@ -336,6 +359,39 @@ namespace Cards
                     winrt::Windows::Graphics::DirectX::DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, size);
                 stage = L"capture/wgc-session";
                 captureSession = framePool.CreateCaptureSession(captureItem);
+                if (exclusions)
+                {
+                    stage = L"capture/wgc-session-exclusion-query";
+                    auto displaySession = captureSession.as<DisplayCaptureSession>();
+                    // The 26100.0 SDK declares this public function but omits
+                    // its import-library entry. Resolve the named system export.
+                    stage = L"capture/wgc-session-exclusion-window-id";
+                    struct ModuleScope
+                    {
+                        HMODULE value{LoadLibraryExW(L"Windows.UI.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32)};
+                        ~ModuleScope() { if (value) FreeLibrary(value); }
+                    } module;
+                    winrt::check_bool(module.value != nullptr);
+                    auto getWindowId = reinterpret_cast<decltype(&GetWindowIdFromWindow)>(
+                        GetProcAddress(module.value, "GetWindowIdFromWindow"));
+                    winrt::check_bool(getWindowId != nullptr);
+                    std::vector<winrt::Windows::UI::WindowId> ids;
+                    for (HWND window : *exclusions)
+                    {
+                        ABI::Windows::UI::WindowId id{};
+                        winrt::check_hresult(getWindowId(window, &id));
+                        ids.push_back({id.Value});
+                    }
+                    auto list = winrt::single_threaded_vector<winrt::Windows::UI::WindowId>(std::move(ids))
+                        .as<winrt::Windows::Foundation::Collections::IIterable<winrt::Windows::UI::WindowId>>();
+                    stage = L"capture/wgc-session-exclusion-set";
+                    uint64_t iteration{};
+                    winrt::check_hresult(displaySession->SetWindowExclusionList(winrt::get_abi(list), &iteration));
+                    // Do not infer frame timing from the undocumented return value.
+                    // Every list is installed before starting a fresh producer.
+                    excludedWindows = *exclusions;
+                    sessionExclusion = true;
+                }
                 try { captureSession.IsCursorCaptureEnabled(false); } catch (const winrt::hresult_error&) {}
                 // Windows may retain its border without borderless permission.
                 // Do not request permission or change system capture preferences.
@@ -347,7 +403,7 @@ namespace Cards
                 // including when the monitor is driven by another GPU.
                 rotation = DXGI_MODE_ROTATION_IDENTITY;
                 crossAdapter = false;
-                stage = L"capture/windows-graphics-capture";
+                stage = sessionExclusion ? L"capture/wgc-session-exclusion" : L"capture/windows-graphics-capture";
                 return DeviceResult();
             }
             catch (const winrt::hresult_error& error) { return error.code(); }
@@ -545,12 +601,19 @@ namespace Cards
     DesktopBackdrop::~DesktopBackdrop() { impl->Clear(); impl->ReleaseCachedDevice(); }
 
     bool DesktopBackdrop::Start(IDXGIDevice* renderDevice, ID2D1DeviceContext* renderContext, HMONITOR monitor,
-        bool allowSlowDevice)
+        const std::vector<HWND>& excludedWindows, bool allowSlowDevice)
     {
         impl->Clear();
         impl->startupDiagnostic.clear();
+        // Prefer WGC only if session-scoped exclusion can actually be installed.
+        HRESULT result = impl->StartWindowsCapture(renderDevice, renderContext, monitor, &excludedWindows);
+        if (SUCCEEDED(result)) { impl->lastResult = S_OK; return true; }
+        wchar_t exclusionDiagnostic[160]{};
+        swprintf_s(exclusionDiagnostic, L"; session-exclusion unavailable at %ls hr=0x%08X",
+            impl->stage, static_cast<unsigned>(result));
+        impl->Clear();
         const bool skipDuplication = monitor && monitor == impl->duplicationRejected;
-        HRESULT result = skipDuplication ? DXGI_ERROR_UNSUPPORTED :
+        result = skipDuplication ? DXGI_ERROR_UNSUPPORTED :
             impl->Start(renderDevice, renderContext, monitor, allowSlowDevice);
         if (result == DXGI_ERROR_UNSUPPORTED)
         {
@@ -563,6 +626,8 @@ namespace Cards
             result = impl->StartWindowsCapture(renderDevice, renderContext, monitor);
             impl->startupDiagnostic = std::wstring(impl->stage) + L" (after " + impl->duplicationRejectedStage + L")";
         }
+        if (impl->startupDiagnostic.empty()) impl->startupDiagnostic = impl->stage;
+        impl->startupDiagnostic += exclusionDiagnostic;
         // A failed fallback may mean the display changed; probe DXGI again next time.
         if (FAILED(result)) { impl->duplicationRejected = nullptr; return impl->Fail(result); }
         impl->lastResult = S_OK;
@@ -570,6 +635,21 @@ namespace Cards
     }
 
     bool DesktopBackdrop::Poll() { return impl->Poll(); }
+    bool DesktopBackdrop::SessionExclusion() const { return impl->sessionExclusion; }
+    bool DesktopBackdrop::SetExcludedWindows(const std::vector<HWND>& windows)
+    {
+        if (!impl->sessionExclusion || windows == impl->excludedWindows) return true;
+        ComPtr<IDXGIDevice> device;
+        HRESULT result = impl->renderDevice.As(&device);
+        auto context = impl->renderContext;
+        const auto monitor = impl->monitor;
+        impl->Clear();
+        impl->startupDiagnostic.clear();
+        if (SUCCEEDED(result)) result = impl->StartWindowsCapture(device.Get(), context.Get(), monitor, &windows);
+        if (FAILED(result)) return impl->Fail(result);
+        impl->lastResult = S_OK;
+        return true;
+    }
     void DesktopBackdrop::Stop() { impl->Clear(); }
     bool DesktopBackdrop::Running() const { return impl->duplication != nullptr || impl->captureSession != nullptr; }
     HMONITOR DesktopBackdrop::Monitor() const { return impl->monitor; }
