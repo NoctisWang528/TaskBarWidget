@@ -37,6 +37,11 @@ namespace Cards::Draw
         Color base, Color accent, const Paint::Interaction& interaction, int id, bool enabled = true);
     void StrokeRound(ID2D1DeviceContext* context, D2D1_RECT_F rect, float radius, Color color, float width);
     void Line(ID2D1DeviceContext* context, D2D1_POINT_2F from, D2D1_POINT_2F to, Color color, float width);
+    // A clipped white reflection gradient for small liquid-glass surfaces (no
+    // effects, backdrop sampling or wall-clock animation). `pressed` flips the
+    // highlight to the bottom edge to suggest a depressed control.
+    void GlassSheen(ID2D1DeviceContext* context, D2D1_RECT_F rect, float radius,
+        float opacity, bool pressed = false);
 
     // Text drawn with the chip's typography rules. Alignment defaults to leading;
     // \`ellipsis\` clips with a trailing ellipsis when the text is too wide.
@@ -72,6 +77,7 @@ namespace Cards::Draw
 namespace Cards::Paint
 {
     float WeatherHeight(const Snapshot& snapshot, const CardEnvironment& environment, float widthDip);
+    float DeviceHeight(const Snapshot& snapshot, const CardEnvironment& environment, float widthDip);
     // Battery values fit their measured text box; percentages never use ellipsis.
     Microsoft::WRL::ComPtr<IDWriteTextLayout> PeripheralValueLayout(Graphics& graphics,
         const std::wstring& value, const std::wstring& family, float size, int weight,

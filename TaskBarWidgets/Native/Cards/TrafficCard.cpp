@@ -150,7 +150,18 @@ namespace Cards::Paint
                 cellTop + CellSize);
             const Color fill = day.isFuture ? Color{ 0, 0, 0, 0 }
                 : environment.highContrast ? HighContrastLevel(day.level) : RampColor(day.level, environment.dark);
-            if (fill.a > 0.0f) Draw::FillRound(context, cell, 4.0f, fill);
+            if (fill.a > 0.0f)
+            {
+                Draw::FillRound(context, cell, 4.0f, fill);
+                // Liquid-glass cells keep their ramp colour but gain a top
+                // reflection and a bright rim, matching the other glass surfaces.
+                if (interaction.glass)
+                {
+                    Draw::GlassSheen(context, cell, 4.0f, environment.dark ? 0.20f : 0.30f);
+                    Draw::StrokeRound(context, cell, 4.0f,
+                        Color{ 1, 1, 1, environment.dark ? 0.13f : 0.22f }, 1.0f);
+                }
+            }
             const int id = 300 + day.week * 7 + day.weekday;
             const float opacity = interaction.pressed == id ? 0.22f : 0.16f * interaction.Hover(id);
             if (!day.isFuture && opacity > 0)

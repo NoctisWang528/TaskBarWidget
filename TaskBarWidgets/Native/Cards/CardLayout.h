@@ -20,9 +20,9 @@ namespace Cards
         constexpr float Gap{ 12.0f };
         constexpr float Padding{ 16.0f };
         constexpr float HeightTraffic{ 284.0f };
-        constexpr float HeightDevice{ 244.0f };   // baseline; measured by content
+        constexpr float HeightDevice{ 244.0f };   // fallback when measurement is unavailable
         constexpr float HeightMedia{ 248.0f };
-        constexpr float HeightWeather{ 388.0f };  // fixed across current/forecast views
+        constexpr float HeightWeather{ 388.0f };  // fallback when measurement is unavailable
         constexpr float HeightUpdate{ 180.0f };
         constexpr float HeightPeripheralCompact{ 184.0f };
         constexpr float HeightPeripheralDetailed{ 288.0f };

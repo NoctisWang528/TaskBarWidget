@@ -213,9 +213,18 @@ namespace Cards::Paint
         }
     }
 
-    float WeatherHeight(const Snapshot&, const CardEnvironment&, float)
+    float WeatherHeight(const Snapshot& snapshot, const CardEnvironment&, float)
     {
-        return Layout::HeightWeather;
+        const auto& weather = snapshot.weather;
+        if (!HasWeather(weather)) return 152.0f;  // compact empty state, no forecast/alert/metrics
+        const bool hasAlert = !weather.alerts.empty();
+        const bool hasStatus = !Status(weather).empty();
+        // The forecast list keeps its fixed 212..324 region so page transitions
+        // stay stable; only the optional alert/status rows grow the card below it.
+        float bottom = 324.0f;
+        if (hasAlert || hasStatus) bottom = 340.0f;
+        if (hasAlert && hasStatus) bottom = 354.0f;
+        return bottom + Layout::Padding;
     }
 
     void Weather(ID2D1DeviceContext* context, const Snapshot& snapshot, const CardEnvironment& environment,
@@ -225,6 +234,8 @@ namespace Cards::Paint
         auto& graphics = *environment.graphics;
         const auto palette = Draw::Colors(environment);
         const auto& weather = snapshot.weather;
+        const bool hasWeather = HasWeather(weather);
+        const bool hasAlert = hasWeather && !weather.alerts.empty();
         const auto colors = WeatherColors(environment.dark);
         const float left = Layout::Padding, right = widthDip - Layout::Padding;
         const float width = right - left;
@@ -287,14 +298,16 @@ namespace Cards::Paint
         DrawGlyph(context, Glyph::Refresh, WithAlpha(palette.primary, weather.updating ? 0.4f : 0.9f),
             right - 22, 22, 16);
 
-        StatusLine(context, snapshot, environment, left, heightDip - 48, width, regions);
-        if (!HasWeather(weather))
+        if (!hasWeather)
         {
+            const float statusTop = heightDip - Layout::Padding - 14.0f;
+            StatusLine(context, snapshot, environment, left, statusTop, width, regions);
             const auto empty = EmptyText(weather);
-            context->PushAxisAlignedClip(Draw::Rect(left, 70, right, heightDip - 58), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            const float clipBottom = statusTop - 4.0f;
+            context->PushAxisAlignedClip(Draw::Rect(left, 70, right, clipBottom), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
             TextBlock(context, environment, empty, left, 70, width, 12, 400, palette.secondary);
             context->PopAxisAlignedClip();
-            Draw::AddText(regions, 452, Draw::Rect(left, 70, right, heightDip - 58), empty);
+            Draw::AddText(regions, 452, Draw::Rect(left, 70, right, clipBottom), empty);
             return;
         }
 
@@ -487,7 +500,7 @@ namespace Cards::Paint
                 }
             }
         }
-        if (!weather.alerts.empty())
+        if (hasAlert)
         {
             const auto& alert = weather.alerts[(GetTickCount64() / 4000) % weather.alerts.size()];
             const auto type = HasValue(alert.typeName) ? alert.typeName : HasValue(alert.type) ? alert.type : L"天气预警";
@@ -497,5 +510,6 @@ namespace Cards::Paint
             text(warning, left, 326, width, 14, 10, 600, palette.primary);
             Draw::AddText(regions, 452, Draw::Rect(left, 325, right, 340), warning);
         }
+        StatusLine(context, snapshot, environment, left, hasAlert ? 340.0f : 326.0f, width, regions);
     }
 }

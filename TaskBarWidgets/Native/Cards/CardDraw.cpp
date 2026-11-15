@@ -81,28 +81,26 @@ namespace Cards::Draw
             const float hover = std::isfinite(value) ? std::clamp(value, 0.0f, 1.0f) : 0.0f;
             return interaction.reducedMotion ? (hover > 0.0f ? 1.0f : 0.0f) : hover;
         }
+    }
 
-        // Reflections use a small clipped gradient; no effects, backdrop
-        // sampling, wall-clock animation or foreground blur belong in painters.
-        void GlassSheen(ID2D1DeviceContext* context, D2D1_RECT_F rect, float radius,
-            float opacity, bool pressed)
-        {
-            if (!context || opacity <= 0.0f || rect.right <= rect.left || rect.bottom <= rect.top) return;
-            const D2D1_GRADIENT_STOP stops[] = {
-                { 0.0f, D2D1::ColorF(1, 1, 1, opacity) },
-                { 0.45f, D2D1::ColorF(1, 1, 1, opacity * 0.22f) },
-                { 1.0f, D2D1::ColorF(1, 1, 1, 0) },
-            };
-            ComPtr<ID2D1GradientStopCollection> collection;
-            if (FAILED(context->CreateGradientStopCollection(stops, 3, D2D1_GAMMA_2_2,
-                D2D1_EXTEND_MODE_CLAMP, collection.GetAddressOf()))) return;
-            ComPtr<ID2D1LinearGradientBrush> brush;
-            const auto from = D2D1::Point2F(rect.left, pressed ? rect.bottom : rect.top);
-            const auto to = D2D1::Point2F(rect.right, pressed ? rect.top : rect.bottom);
-            if (SUCCEEDED(context->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(from, to),
-                collection.Get(), brush.GetAddressOf())))
-                context->FillRoundedRectangle(D2D1::RoundedRect(rect, radius, radius), brush.Get());
-        }
+    void GlassSheen(ID2D1DeviceContext* context, D2D1_RECT_F rect, float radius,
+        float opacity, bool pressed)
+    {
+        if (!context || opacity <= 0.0f || rect.right <= rect.left || rect.bottom <= rect.top) return;
+        const D2D1_GRADIENT_STOP stops[] = {
+            { 0.0f, D2D1::ColorF(1, 1, 1, opacity) },
+            { 0.45f, D2D1::ColorF(1, 1, 1, opacity * 0.22f) },
+            { 1.0f, D2D1::ColorF(1, 1, 1, 0) },
+        };
+        ComPtr<ID2D1GradientStopCollection> collection;
+        if (FAILED(context->CreateGradientStopCollection(stops, 3, D2D1_GAMMA_2_2,
+            D2D1_EXTEND_MODE_CLAMP, collection.GetAddressOf()))) return;
+        ComPtr<ID2D1LinearGradientBrush> brush;
+        const auto from = D2D1::Point2F(rect.left, pressed ? rect.bottom : rect.top);
+        const auto to = D2D1::Point2F(rect.right, pressed ? rect.top : rect.bottom);
+        if (SUCCEEDED(context->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(from, to),
+            collection.Get(), brush.GetAddressOf())))
+            context->FillRoundedRectangle(D2D1::RoundedRect(rect, radius, radius), brush.Get());
     }
 
     void ControlBackground(ID2D1DeviceContext* context, D2D1_RECT_F rect, float radius,

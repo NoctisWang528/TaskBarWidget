@@ -8,6 +8,7 @@ namespace Cards::Paint
         constexpr float SectionGap{ 8.0f };
         constexpr float LabelHeight{ 16.0f };
         constexpr float SelectorHeight{ 32.0f };
+        constexpr float SliderRowHeight{ 32.0f };
 
         const AudioEndpoint* Default(const std::vector<AudioEndpoint>& endpoints)
         {
@@ -22,10 +23,21 @@ namespace Cards::Paint
             return FormatPercent(static_cast<int>(std::lround(endpoint->volume * 100.0)));
         }
 
+        // A footer row appears only when the audio service reports a message or
+        // when the current device exposes no volume control. Both the painter and
+        // the height measurement derive from this so they can never diverge.
+        bool HasFooter(const AudioState& audio)
+        {
+            if (!audio.message.empty()) return true;
+            const auto* output = Default(audio.outputs);
+            const auto* input = Default(audio.inputs);
+            return (output && !output->canControl) || (input && !input->canControl);
+        }
+
         float Section(float top, const std::wstring& title, const std::vector<AudioEndpoint>& endpoints,
             const std::wstring& flow, int baseId, ID2D1DeviceContext* context,
             const CardEnvironment& environment, Layout::Table& regions, float left, float width,
-            const Draw::Palette& palette, bool busy, const Interaction& interaction)
+            const Draw::Palette& palette, bool busy, const Interaction& interaction, bool last = false)
         {
             Graphics& graphics = *environment.graphics;
             Draw::Text(context, graphics, title, environment.fontFamily, 10.0f, 400, palette.secondary,
@@ -48,7 +60,7 @@ namespace Cards::Paint
                 !endpoints.empty() && !busy);
             top += SelectorHeight + 4.0f;
 
-            const float muteSize = 32.0f;
+            const float muteSize = SliderRowHeight;
             const float muteWidth = 46.f;
             const D2D1_RECT_F mute = Draw::Rect(left, top, left + muteWidth, top + muteSize);
             const bool muted = current && current->isMuted;
@@ -101,9 +113,17 @@ namespace Cards::Paint
             Draw::Text(context, graphics, VolumeText(current), environment.fontFamily, 11.0f, 400,
                 palette.secondary, Draw::Rect(sliderRight + 4.0f, top + 7.0f, left + width, top + 24.0f),
                 DWRITE_TEXT_ALIGNMENT_TRAILING);
-            top += muteSize + SectionGap;
+            top += muteSize + (last ? 0.0f : SectionGap);
             return top;
         }
+    }
+
+    float DeviceHeight(const Snapshot& snapshot, const CardEnvironment&, float)
+    {
+        const float section = LabelHeight + 3.0f + SelectorHeight + 4.0f + SliderRowHeight;
+        float height = Layout::Padding * 2.0f + section * 2.0f + SectionGap;
+        if (HasFooter(snapshot.audio)) height += 22.0f;
+        return height;
     }
 
     void Device(ID2D1DeviceContext* context, const Snapshot& snapshot, const CardEnvironment& environment,
@@ -123,23 +143,18 @@ namespace Cards::Paint
         top = Section(top, L"输出设备", snapshot.audio.outputs, L"output", 200, context, environment,
             regions, left, width, palette, busy, interaction);
         top = Section(top, L"输入设备", snapshot.audio.inputs, L"input", 210, context, environment,
-            regions, left, width, palette, busy, interaction);
+            regions, left, width, palette, busy, interaction, true);
 
         if (!snapshot.audio.message.empty())
         {
             Draw::Text(context, graphics, snapshot.audio.message, environment.fontFamily, 10.0f, 400,
                 palette.secondary, Draw::Rect(left, top, left + width, top + 22.0f));
         }
-        else
+        else if (HasFooter(snapshot.audio))
         {
-            const auto* output = Default(snapshot.audio.outputs);
-            const auto* input = Default(snapshot.audio.inputs);
-            if ((output && !output->canControl) || (input && !input->canControl))
-            {
-                Draw::Text(context, graphics, L"设备音量暂不可用，仍可选择其他设备。",
-                    environment.fontFamily, 10.0f, 400, palette.secondary,
-                    Draw::Rect(left, top, left + width, top + 22.0f));
-            }
+            Draw::Text(context, graphics, L"设备音量暂不可用，仍可选择其他设备。",
+                environment.fontFamily, 10.0f, 400, palette.secondary,
+                Draw::Rect(left, top, left + width, top + 22.0f));
         }
     }
 }
