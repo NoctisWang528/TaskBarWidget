@@ -640,12 +640,12 @@ namespace Cards
     bool CardWindow::LiveBackdropActive() const { return impl->glassActive && impl->glass.LiveActive(); }
     uint64_t CardWindow::BackdropFrameCount() const { return impl->glass.RenderedFrames(); }
 
-    bool CardWindow::EnableLiveBackdrop(bool enabled)
+    bool CardWindow::EnableLiveBackdrop(bool enabled, bool sessionScoped)
     {
         if (enabled && impl->glassActive && environment.allowLiveCapture)
         {
-            if (!impl->captureSuspended) return impl->captureExclusion.Enable(window);
-            if (!impl->captureExclusion.Enable(window)) return false;
+            if (!impl->captureSuspended) return impl->captureExclusion.Enable(window, sessionScoped);
+            if (!impl->captureExclusion.Enable(window, sessionScoped)) return false;
             impl->captureSuspended = false;
             impl->resumePending = true;
             impl->resumeSerial = 0;
@@ -665,7 +665,7 @@ namespace Cards
         if (!impl->captureSuspended)
         {
             // Keep the rendered glass; only let the capture see this HWND.
-            impl->captureExclusion.Restore();
+            if (!impl->captureExclusion.Restore()) return false;
             impl->captureSuspended = true;
             impl->resumePending = false;
             impl->resumeSerial = 0;

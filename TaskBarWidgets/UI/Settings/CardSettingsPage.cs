@@ -159,7 +159,7 @@ public sealed partial class SettingsWindow
             blur.ValueChanged += (_, _) => { _media.Set("cardGlassBlur", blur.Value / 100); Changed(); PreviewCardMica(DraftCardMicaTuning); };
             material.Children.Add(blur);
             material.Children.Add(Copy("两种主题共用此调节。打开快捷卡片查看真实材质；设置窗口背景保持 Mica。"));
-            material.Children.Add(Copy("实时折射启用时，玻璃卡片及其菜单不会出现在系统截图和录屏中。需要录制卡片时可切换为 Mica 或纯色。"));
+            material.Children.Add(Copy("若截图或录屏中不显示卡片，可切换为 Mica 或纯色。"));
         }
         AutomationProperties.SetAutomationId(material, "section-cardMica");
         var canPreview = CanPreviewCardMaterial;
