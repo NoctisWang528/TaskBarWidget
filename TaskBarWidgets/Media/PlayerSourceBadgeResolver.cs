@@ -30,6 +30,11 @@ internal static class PlayerSourceBadgeResolver
             return default;
         }
 
+        if (AppleMusicSource.IsAppleMusic(source))
+        {
+            var icon = PlayerIconResolver.ResolveDataUrl(AppleMusicSource.PackagedAppId, allowActiveSessionFallback: false);
+            return new PlayerSourceBadge("Apple Music", icon.Length > 0 ? icon : LoadAsset("Presets/music-player.svg"), icon.Length == 0);
+        }
         if (BuiltInSources.TryGetValue(source, out var builtIn))
         {
             return new PlayerSourceBadge(builtIn.Name, LoadAsset(builtIn.FileName), false);

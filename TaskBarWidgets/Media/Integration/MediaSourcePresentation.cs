@@ -28,6 +28,7 @@ internal static class MediaSourcePresentation
             !name.Equals("Browser", StringComparison.OrdinalIgnoreCase) && name != "浏览器")
             return FriendlyName(name);
 
+        if (AppleMusicSource.IsAppleMusic(id)) return "Apple Music";
         var process = ProcessExecutablePathResolver.GetProcessNameCandidate(id);
         return process?.ToLowerInvariant() switch
         {
@@ -49,6 +50,7 @@ internal static class MediaSourcePresentation
 
     private static string FriendlyName(string value) => value switch
     {
+        "AppleMusic" => "Apple Music",
         "QQMusic" => "QQ 音乐",
         "Netease" => "网易云音乐",
         "Kugou" => "酷狗音乐",

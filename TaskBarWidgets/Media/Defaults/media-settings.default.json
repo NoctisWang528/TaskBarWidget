@@ -5,12 +5,14 @@
     "Netease",
     "Kugou",
     "Spotify",
+    "AppleMusic",
     "Browser"
   ],
   "EnableNetease": true,
   "EnableQQMusic": true,
   "EnableKugou": true,
   "EnableSpotify": true,
+  "EnableAppleMusic": true,
   "EnableBrowser": true,
   "PlayerSources": {
     "QQMusic": {
@@ -77,6 +79,27 @@
       ]
     },
     "Spotify": {
+      "LyricOffsetMilliseconds": 0,
+      "LyricProviders": [
+        {
+          "ProviderId": "QQMusic",
+          "Enabled": true
+        },
+        {
+          "ProviderId": "Kugou",
+          "Enabled": true
+        },
+        {
+          "ProviderId": "Netease",
+          "Enabled": true
+        },
+        {
+          "ProviderId": "LRCLIB",
+          "Enabled": true
+        }
+      ]
+    },
+    "AppleMusic": {
       "LyricOffsetMilliseconds": 0,
       "LyricProviders": [
         {

@@ -230,8 +230,8 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
         var playback = GetSessionPlaybackState(session);
         return (playback.Previous, playback.Next, playback.PlayPause);
     }
-    private static readonly string[] DefaultEnabledSources = { "QQMusic", "Netease", "Kugou", "Spotify" };
-    private static readonly string[] DefaultRecognitionOrder = { "QQMusic", "Netease", "Kugou", "Spotify", "Browser" };
+    private static readonly string[] DefaultEnabledSources = { "QQMusic", "Netease", "Kugou", "Spotify", "AppleMusic" };
+    private static readonly string[] DefaultRecognitionOrder = { "QQMusic", "Netease", "Kugou", "Spotify", "AppleMusic", "Browser" };
     private static readonly TimeSpan MissingCoverRetryInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan CoverReadTimeout = TimeSpan.FromSeconds(5);
     private static readonly Regex TitleArtistRegex = new(
@@ -1309,6 +1309,7 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
     internal static string NormalizeSource(string? sourceAppUserModelId)
     {
         if (string.IsNullOrWhiteSpace(sourceAppUserModelId)) return string.Empty;
+        if (AppleMusicSource.IsAppleMusic(sourceAppUserModelId)) return "AppleMusic";
         if (sourceAppUserModelId.Contains("spotify", StringComparison.OrdinalIgnoreCase))
         {
             return "Spotify";
@@ -1378,10 +1379,10 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
     {
         if (string.IsNullOrWhiteSpace(sourceAppUserModelId)) return false;
         if (IsBlockedSystemSource(sourceAppUserModelId)) return false;
-        if (!IsBrowserSource(sourceAppUserModelId)) return true;
-        return _configuredCustomSources.Contains(sourceAppUserModelId)
-            ? _enabledSources.Contains(sourceAppUserModelId)
-            : _enabledSources.Contains("Browser");
+        if (_configuredCustomSources.Contains(sourceAppUserModelId)) return _enabledSources.Contains(sourceAppUserModelId);
+        var normalized = NormalizeSource(sourceAppUserModelId);
+        if (IsKnownSource(normalized)) return _enabledSources.Contains(normalized);
+        return !IsBrowserSource(sourceAppUserModelId) || _enabledSources.Contains("Browser");
     }
 
     private string ResolveSourceWithProcessFallback(string sourceApp)
@@ -1586,6 +1587,7 @@ public sealed class SmtcMusicSessionProvider : IMusicSessionProvider, IMediaPlay
             return string.Empty;
         }
 
+        if (AppleMusicSource.IsAppleMusic(source)) return "AppleMusic";
         if (source.Contains("qqmusic", StringComparison.OrdinalIgnoreCase))
         {
             return "QQMusic";

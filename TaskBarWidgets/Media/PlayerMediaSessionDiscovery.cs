@@ -45,13 +45,8 @@ internal static class PlayerMediaSessionDiscovery
             }
 
             var normalized = SmtcMusicSessionProvider.NormalizeSource(id);
-            var isBuiltIn = normalized is "QQMusic" or "Netease" or "Kugou" or "Spotify";
-            var name = id.Contains('!') ? id[(id.LastIndexOf('!') + 1)..] : id;
-            if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-            {
-                name = Path.GetFileNameWithoutExtension(name);
-            }
-            if (name.Length > 80) name = name[..80];
+            var isBuiltIn = normalized is "QQMusic" or "Netease" or "Kugou" or "Spotify" or "AppleMusic";
+            var name = DisplayNameFor(id);
             var iconDataUrl = isBuiltIn ? string.Empty : await TryReadAppIconAsync(id, cancellationToken);
             result.Add(new AvailablePlayerSession(
                 id,
@@ -66,6 +61,15 @@ internal static class PlayerMediaSessionDiscovery
         return result.OrderByDescending(session => session.IsPlaying)
             .ThenBy(session => session.DisplayName, StringComparer.CurrentCultureIgnoreCase)
             .ToArray();
+    }
+
+    internal static string DisplayNameFor(string id)
+    {
+        if (AppleMusicSource.IsAppleMusic(id)) return "Apple Music";
+        var name = id.Contains('!') ? id[(id.LastIndexOf('!') + 1)..] : id;
+        if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            name = Path.GetFileNameWithoutExtension(name);
+        return name.Length > 80 ? name[..80] : name;
     }
 
     private static async Task<string> TryReadAppIconAsync(string appUserModelId, CancellationToken cancellationToken)

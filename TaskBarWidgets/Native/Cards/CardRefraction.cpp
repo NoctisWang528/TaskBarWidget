@@ -214,11 +214,17 @@ float4 main(
                 {
                     if (errors && errors->GetBufferPointer())
                         OutputDebugStringA(static_cast<const char*>(errors->GetBufferPointer()));
+                    // Blob implementations belong to the compiler DLL. Release
+                    // their COM vtables while that module is still loaded.
+                    code.Reset();
+                    errors.Reset();
                     FreeLibrary(compiler);
                     return;
                 }
                 const auto* bytes = static_cast<const BYTE*>(code->GetBufferPointer());
                 bytecode.assign(bytes, bytes + code->GetBufferSize());
+                code.Reset();
+                errors.Reset();
                 FreeLibrary(compiler);
             });
             compileResult = cachedResult;

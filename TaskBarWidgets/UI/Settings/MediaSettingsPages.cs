@@ -34,7 +34,7 @@ public sealed partial class SettingsWindow
         TaskCompletionSource<bool> Completion);
     private static readonly (string Id, string Label, string Key)[] Players = [
         ("QQMusic", "QQ 音乐", "enableQQMusic"), ("Netease", "网易云音乐", "enableNetease"),
-        ("Kugou", "酷狗音乐", "enableKugou"), ("Spotify", "Spotify", "enableSpotify"), ("Browser", "浏览器", "enableBrowser") ];
+        ("Kugou", "酷狗音乐", "enableKugou"), ("Spotify", "Spotify", "enableSpotify"), ("AppleMusic", "Apple Music", "enableAppleMusic"), ("Browser", "浏览器", "enableBrowser") ];
 
     private static JsonObject MediaValues(JsonObject values)
     {
@@ -310,6 +310,7 @@ public sealed partial class SettingsWindow
     {
         var order = (_media.Get("sourceRecognitionOrder") as JsonArray)?.Select(node => Text(node)).ToList() ?? Players.Select(player => player.Id).ToList();
         var custom = (_media.Get("customPlayerSources") as JsonArray)?.OfType<JsonObject>().ToList() ?? [];
+        foreach (var player in Players) if (!order.Contains(player.Id, StringComparer.Ordinal)) order.Add(player.Id);
         foreach (var id in order) {
             var known = Players.FirstOrDefault(player => player.Id == id);
             if (known.Id is not null) yield return (id, known.Label, known.Key, false);
@@ -365,7 +366,7 @@ public sealed partial class SettingsWindow
                 MaxLines = 1
             });
             Grid.SetColumn(labels, 1); row.Children.Add(labels);
-            var enabled = SettingsToggle.Compact(_media.Bool(source.Key), "启用" + source.Label,
+            var enabled = SettingsToggle.Compact(_media.Bool(source.Key, source.Id == "AppleMusic"), "启用" + source.Label,
                 "source-enabled-" + source.Id,
                 changed: value => { _media.Set(source.Key, value); Changed(); });
             Grid.SetColumn(enabled, 2); row.Children.Add(enabled);

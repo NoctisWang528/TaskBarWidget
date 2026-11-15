@@ -16,7 +16,7 @@ public sealed class MediaSettingsService : IDisposable
 {
     private const int ProtocolVersion = 1;
     private const string ProductRepositoryUrl = "https://github.com/NoctisWang528/TaskBarWidget";
-    private static readonly string[] BuiltInPlayerSources = ["QQMusic", "Netease", "Kugou", "Spotify", "Browser"];
+    private static readonly string[] BuiltInPlayerSources = ["QQMusic", "Netease", "Kugou", "Spotify", "AppleMusic", "Browser"];
     private static readonly JsonSerializerOptions SettingsJsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -1063,6 +1063,7 @@ public sealed class MediaSettingsService : IDisposable
             EnableQQMusic = _settings.EnableQQMusic,
             EnableKugou = _settings.EnableKugou,
             EnableSpotify = _settings.EnableSpotify,
+            EnableAppleMusic = _settings.EnableAppleMusic,
             EnableBrowser = _settings.EnableBrowser,
             PlayerLyricOffsets = _settings.PlayerSources.ToDictionary(
                 pair => pair.Key,
@@ -1394,6 +1395,9 @@ public sealed class MediaSettingsService : IDisposable
                 break;
             case "enableSpotify":
                 _settings.EnableSpotify = ReadBool(element, _settings.EnableSpotify);
+                break;
+            case "enableAppleMusic":
+                _settings.EnableAppleMusic = ReadBool(element, _settings.EnableAppleMusic);
                 break;
             case "enableBrowser":
                 _settings.EnableBrowser = ReadBool(element, _settings.EnableBrowser);
@@ -2087,6 +2091,7 @@ public sealed class MediaSettingsService : IDisposable
         target.EnableQQMusic = source.EnableQQMusic;
         target.EnableKugou = source.EnableKugou;
         target.EnableSpotify = source.EnableSpotify;
+        target.EnableAppleMusic = source.EnableAppleMusic;
         target.EnableBrowser = source.EnableBrowser;
         source.NormalizePlayerSources();
         target.PlayerSources = source.PlayerSources.ToDictionary(
@@ -2238,6 +2243,7 @@ public sealed class MediaSettingsService : IDisposable
         public bool EnableQQMusic { get; set; }
         public bool EnableKugou { get; set; }
         public bool EnableSpotify { get; set; }
+        public bool EnableAppleMusic { get; set; }
         public bool EnableBrowser { get; set; }
         public Dictionary<string, int> PlayerLyricOffsets { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, List<LyricProviderPreference>> PlayerLyricProviders { get; set; } = new(StringComparer.OrdinalIgnoreCase);

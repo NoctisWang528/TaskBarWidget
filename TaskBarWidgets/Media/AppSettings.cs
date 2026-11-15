@@ -117,6 +117,7 @@ public sealed class AppSettings
         "Netease",
         "Kugou",
         "Spotify",
+        "AppleMusic",
         "Browser"
     };
 
@@ -127,6 +128,13 @@ public sealed class AppSettings
     public bool EnableKugou { get; set; } = true;
 
     public bool EnableSpotify { get; set; } = true;
+    private bool _enableAppleMusic = true;
+    private bool _appleMusicEnablementExplicit;
+    public bool EnableAppleMusic
+    {
+        get => _enableAppleMusic;
+        set { _enableAppleMusic = value; _appleMusicEnablementExplicit = true; }
+    }
     public bool EnableBrowser { get; set; } = true;
 
     public Dictionary<string, PlayerSourceSettings> PlayerSources { get; set; } = CreateDefaultPlayerSources();
@@ -316,6 +324,7 @@ public sealed class AppSettings
 
     public void NormalizePlayerSources()
     {
+        MigrateAppleMusicCustomSource();
         CustomPlayerSources = (CustomPlayerSources ?? [])
             .Where(source => source is not null && IsValidCustomSourceId(source.SourceAppUserModelId))
             .Select(source =>
@@ -356,6 +365,42 @@ public sealed class AppSettings
         }
 
         PlayerSources = normalized;
+        SourceRecognitionOrder ??= [];
+        if (!SourceRecognitionOrder.Contains("AppleMusic", StringComparer.OrdinalIgnoreCase))
+            SourceRecognitionOrder.Add("AppleMusic");
+    }
+
+    // Earlier versions discovered Apple Music as a generic custom source. Fold
+    // only its exact identities into the built-in row; arbitrary custom players
+    // keep their names, enabled state, and ordering. A JSON property setter marks
+    // an explicit built-in preference, while an absent legacy property does not.
+    private void MigrateAppleMusicCustomSource()
+    {
+        var legacy = (CustomPlayerSources ?? []).Where(source => source is not null &&
+            AppleMusicSource.IsAppleMusic(source.SourceAppUserModelId)).ToArray();
+        if (legacy.Length == 0) return;
+        var order = SourceRecognitionOrder ?? [];
+        var preferred = order.Select(id => legacy.FirstOrDefault(source =>
+            string.Equals(source.SourceAppUserModelId?.Trim(), id?.Trim(), StringComparison.OrdinalIgnoreCase)))
+            .FirstOrDefault(source => source is not null) ?? legacy[0];
+        if (!_appleMusicEnablementExplicit) EnableAppleMusic = preferred.Enabled;
+        // Keep lyric matching preferences when a legacy custom player becomes built-in.
+        if (PlayerSources is not null && !PlayerSources.ContainsKey("AppleMusic") &&
+            PlayerSources.TryGetValue(preferred.SourceAppUserModelId.Trim(), out var legacySettings) && legacySettings is not null)
+            PlayerSources["AppleMusic"] = legacySettings.Clone();
+        var hasBuiltInPosition = order.Any(id => string.Equals(id?.Trim(), "AppleMusic", StringComparison.OrdinalIgnoreCase));
+        var updated = new List<string>();
+        var inserted = false;
+        foreach (var id in order)
+        {
+            if (!AppleMusicSource.IsAppleMusic(id)) { updated.Add(id); continue; }
+            if (hasBuiltInPosition && !string.Equals(id?.Trim(), "AppleMusic", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!inserted) { updated.Add("AppleMusic"); inserted = true; }
+        }
+        if (!inserted) updated.Add("AppleMusic");
+        SourceRecognitionOrder = updated;
+        CustomPlayerSources = (CustomPlayerSources ?? []).Where(source => source is null ||
+            !AppleMusicSource.IsAppleMusic(source.SourceAppUserModelId)).ToList();
     }
 
     public void NormalizeQuickCards()
@@ -640,12 +685,14 @@ public sealed class AppSettings
             ["Netease"] = new() { LyricOffsetMilliseconds = GetDefaultPlayerLyricOffsetMilliseconds("Netease") },
             ["Kugou"] = new() { LyricOffsetMilliseconds = GetDefaultPlayerLyricOffsetMilliseconds("Kugou") },
             ["Spotify"] = new() { LyricOffsetMilliseconds = GetDefaultPlayerLyricOffsetMilliseconds("Spotify") },
+            ["AppleMusic"] = new() { LyricOffsetMilliseconds = 0 },
             ["Browser"] = new() { LyricOffsetMilliseconds = GetDefaultPlayerLyricOffsetMilliseconds("Browser") }
         };
     }
 
     private static string? NormalizePlayerSourceName(string? sourceApp)
     {
+        if (AppleMusicSource.IsAppleMusic(sourceApp)) return "AppleMusic";
         return sourceApp?.Trim().ToLowerInvariant() switch
         {
             "qqmusic" => "QQMusic",
