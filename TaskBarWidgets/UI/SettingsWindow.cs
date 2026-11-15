@@ -118,7 +118,7 @@ public sealed partial class SettingsWindow : Window
             if (page.Id == "quickCards")
             {
                 item.SelectsOnInvoked = false;
-                foreach (var child in new[] { ("quickCards", "卡片与顺序"), ("quickCardsWeather", "天气"), ("peripheralBattery", "外设电量") })
+                foreach (var child in new[] { ("quickCards", "卡片与顺序"), ("quickCardsWeather", "天气"), ("peripheralBattery", "外设电量"), ("aiUsage", "AI 用量") })
                     item.MenuItems.Add(new NavigationViewItem { Content = child.Item2, Tag = child.Item1 });
             }
             _navigation.MenuItems.Add(item);
@@ -202,6 +202,7 @@ public sealed partial class SettingsWindow : Window
         Closed += (_, _) => {
             DeactivateCardMicaPreview();
             _closed = true;
+            LeaveAiUsagePage();
             LeavePeripheralBatteryPage();
             _cardMicaPreviewBackdrop.StatusChanged -= OnMicaStatusChanged;
             CancelWeatherPage();
@@ -656,6 +657,7 @@ public sealed partial class SettingsWindow : Window
     private void RenderPage()
     {
         UpdatePeripheralSampling();
+        LeaveAiUsagePage();
         if (_loaded && _currentPage == "peripheralBattery" && _peripheralPage is { } peripheral)
         {
             UpdatePeripheralControls(peripheral);
@@ -673,6 +675,7 @@ public sealed partial class SettingsWindow : Window
         if (_currentPage == "taskbar") RenderTaskbar();
         else if (_currentPage is "quickCards" or "quickCardsWeather") RenderQuickCards();
         else if (_currentPage == "peripheralBattery") RenderPeripheralBattery();
+        else if (_currentPage == "aiUsage") RenderAiUsage();
         else if (_currentPage is "hardware" or "general") { RenderNativeGroups(_currentPage); if (_currentPage == "general") RenderGeneral(); }
         else RenderMediaPage(_currentPage);
     }

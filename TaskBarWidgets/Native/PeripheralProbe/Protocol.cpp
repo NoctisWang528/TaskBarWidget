@@ -78,6 +78,7 @@ static const Profile profiles[] = {
 };
 bool KnownIdentity(unsigned vid, unsigned pid)
 {
+    if (vid == 0x1532 && pid == 0x00f1) return true;
     if (extra_keyboard::KnownIdentity(vid, pid)) return true;
     if (keyboard_advanced::KnownIdentity(vid, pid) || headset_controller::KnownIdentity(vid, pid) || extra_mouse::KnownIdentity(vid, pid)) return true;
     if ((vid == 0x373b && (pid == 0x11cb || pid == 0x1204)) || (vid == 0x054c && pid == 0x0e53)) return true;
@@ -90,6 +91,7 @@ bool KnownIdentity(unsigned vid, unsigned pid)
 }
 bool NeedsDescriptor(unsigned vid, unsigned pid)
 {
+    if (vid == 0x1532 && pid == 0x00f1) return true;
     if (extra_keyboard::KnownIdentity(vid, pid)) return true;
     if (keyboard_advanced::KnownIdentity(vid, pid) || headset_controller::KnownIdentity(vid, pid) || extra_mouse::KnownIdentity(vid, pid)) return true;
     for (const auto& profile : profiles) if (profile.vid == vid && profile.pid == pid) return true;
@@ -105,11 +107,21 @@ static bool Feature(const Candidate& c, unsigned id, unsigned descriptorLength, 
 {
     return c.feature == nativeLength && c.layout.Has(Report::Feature, id, descriptorLength);
 }
+static bool RazerProductName(const std::string& name)
+{
+    return name.size() > 6 && name.size() <= 128 && name.rfind("Razer ", 0) == 0 &&
+        name != "Razer mouse" && name != "Razer Mouse" &&
+        std::none_of(name.begin(), name.end(), [](unsigned char ch) { return ch < 0x20 || ch == 0x7f; });
+}
 Protocol Classify(Candidate& c)
 {
     c.protocol = Protocol::None;
     c.adapter.clear();
     if (c.physical.empty() || c.path.empty()) return c.protocol;
+    // The 1ACE collection is present with only a keyboard paired too. Its
+    // legacy reader cannot identify a downstream mouse; do not invent one.
+    if (c.vid == 0x0b05 && c.pid == 0x1ace &&
+        c.mi == 2 && c.page == 0xff01 && c.usage == 1) return c.protocol;
     Candidate privateChannel = c;
     privateChannel.pointer = c.page == 1 && c.usage == 2;
     privateChannel.keyboard = c.page == 1 && c.usage == 6;
@@ -141,6 +153,7 @@ Protocol Classify(Candidate& c)
                  c.layout.Has(Report::Output, 0x11, 20) && c.input == 20 && c.output == 20)) &&
                 c.layout.Has(Report::Input, 0x11, 20) && c.input >= 20 && c.input <= 64 && c.output >= 7 && c.output <= 64; break;
         case Protocol::Razer: accept = Feature(c, 0, 90, 91); break;
+        case Protocol::RazerDock: accept = c.input == 0 && c.output == 0 && Feature(c, 0, 90, 91); break;
         case Protocol::Rog: accept = Io(c, 3, 64) && (c.pid != 0x1ace || c.path.find("mi_02&col03") != std::string::npos); break;
         case Protocol::RogStandard:
         case Protocol::Steelseries:
@@ -173,8 +186,9 @@ Protocol Classify(Candidate& c)
         }
         if (!accept) continue;
         c.protocol = p.protocol; c.transaction = p.transaction; c.wired = p.wired;
-        c.name = p.name;
-        c.kind = p.protocol == Protocol::Blackshark || p.protocol == Protocol::Xiberia || p.protocol == Protocol::Pelta ? "headset" :
+        c.name = p.protocol == Protocol::Razer && RazerProductName(c.usbProduct) ? c.usbProduct : p.name;
+        c.kind = p.protocol == Protocol::RazerDock ? "unknown" :
+            p.protocol == Protocol::Blackshark || p.protocol == Protocol::Xiberia || p.protocol == Protocol::Pelta ? "headset" :
             p.protocol == Protocol::F87Passive || p.protocol == Protocol::Rainy75 || p.protocol == Protocol::Irok || p.protocol == Protocol::Langtu ? "keyboard" : "mouse";
         return c.protocol;
     }
@@ -278,6 +292,7 @@ const char* ProtocolName(Protocol p)
     case Protocol::Nordic: return "nordic54";
     case Protocol::Hidpp: return "hidpp20";
     case Protocol::Razer: return "razer-feature";
+    case Protocol::RazerDock: return "razer-dock";
     case Protocol::Rog: return "rog-report3";
     case Protocol::RogStandard: return "rog-standard";
     case Protocol::Mhub: return "mhub-cache";
@@ -308,6 +323,10 @@ const char* ProtocolName(Protocol p)
     }
 }
 bool OnceOnly(Protocol p) { return p == Protocol::Blackshark; }
+bool RequiresInputDrain(Transport transport)
+{
+    return transport == Transport::Output || transport == Transport::ControlOutput || transport == Transport::Hidpp;
+}
 bool BeginInitialization(std::set<std::string>& initialized, const std::string& identity, const std::function<void()>& notify)
 {
     if (initialized.count(identity) || initialized.size() >= 4096) return false;
@@ -626,6 +645,91 @@ std::vector<std::pair<Candidate, std::optional<Reading>>> ReadHidppUnits(const C
             names->emplace(device.unit, name); device.name = std::move(name);
         }
         return results;
+}
+std::optional<Bytes> RazerDockPayload(const Bytes& b, unsigned command)
+{
+    unsigned size = command == 0x82 ? 22 : command == 0xbf ? 31 : command == 0x80 ? 2 : 0;
+    unsigned meaningful = command == 0x82 ? 15 : size;
+    unsigned commandClass = command == 0x80 ? 7 : 0;
+    if (!size || b.size() != 91 || !Prefix(b, {0,2,0x1f,0,0,0,static_cast<unsigned char>(size),
+        static_cast<unsigned char>(commandClass),static_cast<unsigned char>(command)}) || b[90] != 0) return {};
+    unsigned checksum = 0;
+    // Dock V2 reuses the unused report buffer for RGB traffic. Captured 00/82
+    // has exactly 15 serial characters, despite the declared legacy size 22;
+    // 07/80 has two bytes. Its CRC covers the header and these actual fields,
+    // with unused bytes treated as zero. Validate, never discard, that CRC.
+    for (unsigned i = 3; i < 9 + meaningful; ++i) checksum ^= b[i];
+    if (checksum != b[89]) return {};
+    return Bytes(b.begin() + 9, b.begin() + 9 + meaningful);
+}
+static bool RazerUnitSerial(const std::string& serial)
+{
+    if (serial.size() < 4 || serial.size() > 22 ||
+        !std::all_of(serial.begin(), serial.end(), [](unsigned char ch) {
+            return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z'); }) ||
+        std::all_of(serial.begin(), serial.end(), [&](char ch) { return ch == serial.front(); })) return false;
+    std::string upper = serial;
+    for (char& ch : upper) if (ch >= 'a' && ch <= 'z') ch -= 'a' - 'A';
+    return upper.rfind("UNKWN", 0) != 0;
+}
+bool ValidRazerDockUnitIdentity(const std::string& unit)
+{
+    const std::string prefix = "pid=00e3;serial=";
+    if (unit.rfind(prefix, 0) != 0) return false;
+    auto encoded = unit.substr(prefix.size());
+    if (encoded.size() < 8 || encoded.size() > 44 || encoded.size() % 2) return false;
+    std::string serial;
+    for (size_t i = 0; i < encoded.size(); i += 2)
+    {
+        auto hex = [](char ch) { return ch >= '0' && ch <= '9' ? ch - '0' : ch >= 'a' && ch <= 'f' ? ch - 'a' + 10 : -1; };
+        int high = hex(encoded[i]), low = hex(encoded[i + 1]);
+        if (high < 0 || low < 0) return false;
+        serial += static_cast<char>((high << 4) | low);
+    }
+    return RazerUnitSerial(serial);
+}
+static std::string RazerDockIdentity(const Candidate& receiver, const RazerDockCall& call)
+{
+    auto paired = RazerDockPayload(call(0x1f, 0, 0xbf, 31), 0xbf);
+    if (!paired || (*paired)[0] != 2 || (*paired)[1] != 1 || (*paired)[2] != 0 || (*paired)[3] != 0xe3 ||
+        (*paired)[4] != 0 || (*paired)[5] != 0xff || (*paired)[6] != 0xff ||
+        std::any_of(paired->begin() + 7, paired->end(), [](unsigned char value) { return value != 0; })) return {};
+    // Captured routing is one connected Basilisk V4 Pro in the first slot and
+    // an empty second slot. Other models and multi-device routing stay unknown.
+    auto payload = RazerDockPayload(call(0x1f, 0, 0x82, 22), 0x82);
+    if (!payload) return {};
+    std::string serial(payload->begin(), payload->end());
+    if (!RazerUnitSerial(serial) || serial == receiver.serial || serial == receiver.hidSerial) return {};
+    constexpr char digits[] = "0123456789abcdef";
+    std::string unit = "pid=00e3;serial=";
+    for (unsigned char ch : serial) { unit += digits[ch >> 4]; unit += digits[ch & 15]; }
+    return unit;
+}
+std::vector<std::pair<Candidate, std::optional<Reading>>> ReadRazerDockUnits(
+    const Candidate& receiver, const RazerDockCall& call, bool readBattery)
+{
+    if (receiver.protocol != Protocol::RazerDock || receiver.vid != 0x1532 || receiver.pid != 0x00f1 ||
+        receiver.mi != 3 || receiver.page != 0x0c || receiver.usage != 1 || receiver.input || receiver.output ||
+        !Feature(receiver, 0, 90, 91)) return {};
+    auto unit = RazerDockIdentity(receiver, call);
+    if (unit.empty() || (!receiver.unit.empty() && receiver.unit != unit)) return {};
+    std::optional<Reading> reading;
+    if (readBattery)
+    {
+        auto battery = RazerDockPayload(call(0x1f, 7, 0x80, 2), 0x80);
+        if (battery && (*battery)[0] == 0)
+        {
+            Reading fresh; fresh.percentage = int(std::lround((*battery)[1] * 100.0 / 255));
+            reading = fresh; // A wireless receiver link does not imply charging.
+        }
+    }
+    // Confirm both model and unit after the sample. A replacement paired during
+    // the exchange must never inherit the old unit's battery or configured ID.
+    if (RazerDockIdentity(receiver, call) != unit) return {};
+    Candidate device = receiver;
+    device.unit = unit; device.name = "Razer Basilisk V4 Pro"; device.kind = "mouse"; device.wired = false;
+    device.identity = CanonicalIdentity(device);
+    return {{std::move(device), reading}};
 }
 Bytes SonyRequest(unsigned command, unsigned transaction)
 {

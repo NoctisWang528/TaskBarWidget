@@ -50,9 +50,13 @@ namespace Cards
 
         constexpr UINT WM_CARD_WHEEL = WM_APP + 0x218;
         constexpr UINT WM_CARD_TASK = WM_APP + 0x211;
+        constexpr UINT WM_CARD_GRAPHICS_STATUS = WM_APP + 0x219;
         constexpr UINT_PTR IdleTimer = 0xCD03;
         constexpr UINT_PTR WarmupTimer = 0xCD04;
+        constexpr UINT_PTR AiUsageTimer = 0xCD05;
+        constexpr UINT_PTR GpuIdleTimer = 0xCD06;
         constexpr UINT IdleMilliseconds = 10 * 60 * 1000;
+        constexpr UINT GpuIdleMilliseconds = 5000;
         constexpr UINT WarmupMilliseconds = 250;
 
         constexpr UINT COMMAND_SHOW = 1;
@@ -155,6 +159,8 @@ namespace Cards
         ULONGLONG errorUntil{};
         std::chrono::steady_clock::time_point lastInteraction{};
         bool resident{ true };
+        bool gpuSuspended{};
+        ULONGLONG gpuIdleDeadline{};
         bool warmupPending{};
         bool startupWarmup{ true };
         bool warmupConfigReady{};
@@ -336,6 +342,11 @@ namespace Cards
         void OnTask();
         void OnPipeMessages();
         void OnIdle();
+        void OnGpuIdle();
+        void UpdateGpuIdleTimer();
+        void CancelGpuIdleTimer();
+        void ReleaseGpuResources();
+        bool EnsureGraphics();
         CardWindow* Card(Kind kind) const;
         void HideAll(const std::wstring& reason, bool animate);
         void ShowCards();
@@ -387,6 +398,7 @@ namespace Cards
         client.Request(L"getState", "{\"artworkDelta\":true}", L"state");
         client.Request(L"getUpdateState", {}, L"update");
         client.Request(L"getPeripheralBatteries", {}, L"peripheral");
+        if (config.IsEnabled(Kind::AiUsage)) client.Request(L"getAiUsage", {}, L"aiUsage");
         client.Request(L"subscribeCardLyrics", "{\"visible\":true,\"session\":1}", L"lyrics");
     }
 
@@ -406,12 +418,22 @@ namespace Cards
         environment.material = previewMica ? previewMaterial : config.material;
         if (previewMica) environment.mica.vivid = previewVivid;
         environment.fontFamily = config.font.empty() ? L"Microsoft YaHei UI" : config.font;
-        for (Kind kind : { Kind::Weather, Kind::Traffic, Kind::Device, Kind::Media, Kind::Update, Kind::PeripheralBattery })
+        for (Kind kind : { Kind::Weather, Kind::Traffic, Kind::Device, Kind::Media, Kind::Update, Kind::PeripheralBattery, Kind::AiUsage })
         {
             const bool enabled = kind == Kind::Update ? snapshot.update.Visible() : config.IsEnabled(kind) &&
-                (kind != Kind::PeripheralBattery || snapshot.peripheralBattery.Visible());
+                (kind != Kind::PeripheralBattery || snapshot.peripheralBattery.Visible()) &&
+                (kind != Kind::AiUsage || snapshot.aiUsage.Visible());
             if (!enabled) { cards.erase(kind); continue; }
-            if (cards.find(kind) != cards.end()) continue;
+            if (auto found = cards.find(kind); found != cards.end())
+            {
+                if (!found->second->RestoreGraphics(environment, instance))
+                {
+                    lastError = L"card visual tree restoration failed";
+                    cards.erase(found);
+                }
+                else found->second->SetSnapshot(snapshot);
+                continue;
+            }
             auto card = std::make_unique<CardWindow>(kind, *this);
             if (!card->Create(environment, instance))
             {
@@ -939,6 +961,7 @@ namespace Cards
         const bool updateVisible = snapshot.update.Visible();
         auto visibleConfig = config;
         visibleConfig.enabled[L"peripheralBattery"] = config.IsEnabled(Kind::PeripheralBattery) && snapshot.peripheralBattery.Visible();
+        visibleConfig.enabled[L"aiUsage"] = config.IsEnabled(Kind::AiUsage) && snapshot.aiUsage.Visible();
         const auto placement = Layout::PlaceGroup(visibleConfig, heights, anchor, owner, updateVisible,
             Paint::MeasureHeight(Kind::Update, snapshot, environment, Layout::UpdateCardWidth));
         if (!placement.valid)
@@ -1040,8 +1063,11 @@ namespace Cards
     void CardHost::Impl::UpdateIdleTimer()
     {
         if (!window) return;
+        UpdateGpuIdleTimer();
         if (visible || resident) KillTimer(window, IdleTimer);
         else SetTimer(window, IdleTimer, IdleMilliseconds, nullptr);
+        if (visible && config.IsEnabled(Kind::AiUsage) && snapshot.aiUsage.Visible()) SetTimer(window, AiUsageTimer, 60000, nullptr);
+        else KillTimer(window, AiUsageTimer);
     }
 
     void CardHost::Impl::CancelWarmup()
@@ -1052,7 +1078,7 @@ namespace Cards
 
     void CardHost::Impl::ScheduleWarmup()
     {
-        if (!window || visible || (!resident && !startupWarmup) || shuttingDown || groupMoving || warmupPending) return;
+        if (!window || visible || gpuSuspended || (!resident && !startupWarmup) || shuttingDown || groupMoving || warmupPending) return;
         if (!warmupConfigReady || (!diagnosticOffscreen && !warmupSnapshotReady)) return;
         // Coalesce incoming snapshots without postponing work on every update.
         // A hidden group has no animation or continuous frame timer.
@@ -1062,7 +1088,7 @@ namespace Cards
     void CardHost::Impl::WarmHiddenCards()
     {
         CancelWarmup();
-        if (visible || (!resident && !startupWarmup) || shuttingDown || groupMoving) return;
+        if (visible || gpuSuspended || (!resident && !startupWarmup) || shuttingDown || groupMoving) return;
         if (!warmupConfigReady || (!diagnosticOffscreen && !warmupSnapshotReady)) return;
         if (startupWarmup && !startupDataRequested)
         {
@@ -1080,9 +1106,7 @@ namespace Cards
             }
         }
         // On-demand may already have released the shared drawing resources.
-        if (!graphics.Ready() && !graphics.Initialize()) return;
-        if (!device) { std::wstring error; device = graphics.CreateGraphicsDevice(compositor, error); }
-        if (!device) return;
+        if (!EnsureGraphics()) return;
         RECT entry{};
         if (owner && GetWindowRect(owner, &entry))
             anchor = { entry.left + (entry.right - entry.left) / 2, entry.top };
@@ -1103,21 +1127,91 @@ namespace Cards
     void CardHost::Impl::DestroyIdleCards()
     {
         if (visible || resident) return;
+        ReleaseGpuResources();
+        groupRestBounds.clear();
+        cards.clear();
+    }
+
+    void CardHost::Impl::CancelGpuIdleTimer()
+    {
+        if (window) KillTimer(window, GpuIdleTimer);
+        gpuIdleDeadline = 0;
+    }
+
+    void CardHost::Impl::UpdateGpuIdleTimer()
+    {
+        if (!window) return;
+        if (visible || gpuSuspended || shuttingDown) { CancelGpuIdleTimer(); return; }
+        // A background snapshot or draft must not keep pushing this deadline out.
+        if (gpuIdleDeadline) return;
+        gpuIdleDeadline = GetTickCount64() + GpuIdleMilliseconds;
+        SetTimer(window, GpuIdleTimer, GpuIdleMilliseconds, nullptr);
+    }
+
+    void CardHost::Impl::OnGpuIdle()
+    {
+        if (visible || gpuSuspended || shuttingDown) { CancelGpuIdleTimer(); return; }
+        if (!gpuIdleDeadline) { UpdateGpuIdleTimer(); return; }
+        const auto now = GetTickCount64();
+        if (now < gpuIdleDeadline)
+        {
+            SetTimer(window, GpuIdleTimer, static_cast<UINT>(gpuIdleDeadline - now), nullptr);
+            return;
+        }
+        // Exit animations and popups may still be consuming the visual tree.
+        if (groupMoving || (popup && popup->Visible()))
+        {
+            SetTimer(window, GpuIdleTimer, 100, nullptr);
+            return;
+        }
+        ReleaseGpuResources();
+    }
+
+    void CardHost::Impl::ReleaseGpuResources()
+    {
+        CancelGpuIdleTimer();
+        gpuSuspended = true;
         startupWarmup = false;
         startupRequests.clear();
         CancelWarmup();
-        StopGroupMotion(false);
-        StopBackdrop();
-        groupRestBounds.clear();
+        try { StopGroupMotion(false); } catch (...) { }
+        groupMoving = false;
+        groupReflowFrom.clear();
+        if (groupTimer) CancelWaitableTimer(groupTimer);
+        try { StopBackdrop(true); } catch (...) { }
+        if (backdropTimer) CancelWaitableTimer(backdropTimer);
+        backdropTimerArmed = false;
+        backdrop.Release();
+        popup.reset();
         for (auto& [kind, card] : cards)
         {
             UNREFERENCED_PARAMETER(kind);
-            card->Destroy();
+            try { card->ReleaseGraphics(); } catch (...) { }
         }
-        cards.clear();
-        popup.reset();
+        try { if (device) device.Close(); } catch (...) { }
         device = nullptr;
+        try { if (compositor) compositor.Close(); } catch (...) { }
+        compositor = nullptr;
         graphics.Release();
+    }
+
+    bool CardHost::Impl::EnsureGraphics()
+    {
+        try
+        {
+            if (!graphics.Ready() && !graphics.Initialize())
+                lastError = graphics.Diagnostic();
+            else
+            {
+                if (!compositor) compositor = winrt::Windows::UI::Composition::Compositor();
+                if (!device) device = graphics.CreateGraphicsDevice(compositor, lastError);
+                if (device) return true;
+            }
+        }
+        catch (const winrt::hresult_error& error) { lastError = std::wstring(error.message().c_str()); }
+        ReleaseGpuResources();
+        Status(lastError.c_str());
+        return false;
     }
 
     void CardHost::Impl::ShowCards()
@@ -1128,25 +1222,19 @@ namespace Cards
         startupWarmup = false;
         startupRequests.clear();
         CancelWarmup();
-        if (!graphics.Ready())
-        {
-            if (!graphics.Initialize())
-            {
-                Status(graphics.Diagnostic().c_str());
-                return;
-            }
-        }
-        if (!device) { std::wstring error; device = graphics.CreateGraphicsDevice(compositor, error); }
-        if (!device) return;
+        CancelGpuIdleTimer();
+        if (!EnsureGraphics()) return;
+        gpuSuspended = false;
         visible = true;
         if (window) KillTimer(window, IdleTimer);
         CreateCards();
         PlaceGroup(true, true);
         visible = std::any_of(cards.begin(), cards.end(), [](const auto& entry) { return entry.second->Visible(); });
-        if (!visible) { StopBackdrop(); return; }
+        if (!visible) { ReleaseGpuResources(); UpdateIdleTimer(); return; }
         if (!diagnosticOffscreen)
             if (auto* card = Card(Kind::Media); card && card->Visible()) SetForegroundWindow(card->Handle());
         InstallHooks();
+        UpdateIdleTimer();
         RequestInitialState();
     }
 
@@ -1170,6 +1258,8 @@ namespace Cards
 
     void CardHost::Impl::RefreshSnapshot(const Protocol::Changes& changes)
     {
+        const bool aiLayout = changes.aiUsage &&
+            ((Card(Kind::AiUsage) != nullptr) != (config.IsEnabled(Kind::AiUsage) && snapshot.aiUsage.Visible()));
         const auto* peripheral = Card(Kind::PeripheralBattery);
         const bool peripheralLayout = changes.peripheralBattery &&
             ((peripheral != nullptr) != (config.IsEnabled(Kind::PeripheralBattery) && snapshot.peripheralBattery.Visible()) ||
@@ -1181,7 +1271,8 @@ namespace Cards
                 (kind == Kind::Media && (changes.media || changes.lyrics)) ||
                 (kind == Kind::Device && changes.audio) || (kind == Kind::Traffic && changes.traffic) ||
                 (kind == Kind::Weather && changes.weather) || (kind == Kind::Update && changes.update) ||
-                (kind == Kind::PeripheralBattery && changes.peripheralBattery);
+                (kind == Kind::PeripheralBattery && changes.peripheralBattery) ||
+                (kind == Kind::AiUsage && changes.aiUsage);
             if (!changed) continue;
             card->SetSnapshot(snapshot);
         }
@@ -1194,13 +1285,14 @@ namespace Cards
             UpdateEnvironment(true);
         }
         else if (changes.theme) UpdateEnvironment(true);
-        if (visible && (changes.config || changes.update || peripheralLayout))
+        if (changes.aiUsage) UpdateIdleTimer();
+        if (visible && (changes.config || changes.update || peripheralLayout || aiLayout))
         {
             if (!device) { std::wstring error; device = graphics.CreateGraphicsDevice(compositor, error); }
             if (device) CreateCards();
         }
-        if (visible && (changes.config || changes.update || changes.weather || changes.audio || peripheralLayout))
-            PlaceGroup(false, true, peripheralLayout || !groupReflowFrom.empty());
+        if (visible && (changes.config || changes.update || changes.weather || changes.audio || peripheralLayout || aiLayout))
+            PlaceGroup(false, true, peripheralLayout || aiLayout || !groupReflowFrom.empty());
         // A ready update must never open the group by itself: the update card only
         // joins the layout while the user already has cards open.
         if (changes.update && !snapshot.update.Visible() && visible)
@@ -1238,6 +1330,7 @@ namespace Cards
                     accumulated.weather |= changes.weather;
                     accumulated.update |= changes.update;
                     accumulated.peripheralBattery |= changes.peripheralBattery;
+                    accumulated.aiUsage |= changes.aiUsage;
                     accumulated.status |= changes.status;
                 }
             }
@@ -1289,6 +1382,11 @@ namespace Cards
                     if (Protocol::ApplyPeripheralBatteryReply(snapshot.peripheralBattery, reply.payloadJson))
                     { accumulated.peripheralBattery = true; changed = true; }
                 }
+                else if (reply.requestId.rfind(L"aiUsage", 0) == 0)
+                {
+                    if (Protocol::ApplyAiUsageReply(snapshot.aiUsage, reply.payloadJson))
+                    { accumulated.aiUsage = true; changed = true; }
+                }
                 else if (reply.requestId.rfind(L"media", 0) == 0)
                 {
                     if (Protocol::ApplyMediaReply(snapshot.media, reply.payloadJson))
@@ -1312,6 +1410,7 @@ namespace Cards
                         accumulated.weather |= stateChanges.weather;
                         accumulated.update |= stateChanges.update;
                         accumulated.peripheralBattery |= stateChanges.peripheralBattery;
+                        accumulated.aiUsage |= stateChanges.aiUsage;
                         accumulated.status |= stateChanges.status;
                         changed = true;
                     }
@@ -1355,10 +1454,8 @@ namespace Cards
             {
                 const bool restore = visible;
                 HideAll(L"device-lost", false);
-                popup.reset(); cards.clear(); device = nullptr;
-                graphics.OnDeviceLost();
+                ReleaseGpuResources();
                 if (restore) ShowCards();
-                else ScheduleWarmup();
                 break;
             }
             case COMMAND_TOGGLE:
@@ -1591,6 +1688,20 @@ namespace Cards
             payload = L"{\"mode\":" + quote(action.substr(15)) + L"}";
             kind = L"peripheral";
         }
+        else if (action == L"aiUsageProvider:previous" || action == L"aiUsageProvider:next")
+        {
+            const auto selected = snapshot.aiUsage.AdjacentProviderId(action == L"aiUsageProvider:previous" ? -1 : 1);
+            if (selected.empty() || !IsAiProviderId(selected)) return;
+            request = L"setAiUsagePreferences";
+            payload = L"{\"providerId\":" + quote(selected) + L"}";
+            kind = L"aiUsage";
+        }
+        else if (action == L"refreshAiUsage")
+        {
+            request = L"getAiUsage";
+            payload = L"{\"force\":true}";
+            kind = L"aiUsage";
+        }
         else if (action == L"refreshWeather")
         {
             request = L"weatherCommand";
@@ -1600,6 +1711,12 @@ namespace Cards
         else if (action == L"openSettings")
         {
             OnOpenSettings();
+            return;
+        }
+        else if (action == L"openAiUsageSettings")
+        {
+            HideAll(L"ai-usage-settings", false);
+            client.Request(L"openSettings", "{\"page\":\"aiUsage\"}");
             return;
         }
         else if (action == L"openWeatherSettings")
@@ -1882,6 +1999,20 @@ namespace Cards
             if (!self) return DefWindowProcW(window, message, keys, position);
             switch (message)
             {
+            case WM_CARD_GRAPHICS_STATUS:
+            {
+                // Read real owned resources on the card STA, without exporting
+                // COM objects or racing their release from the caller's thread.
+                unsigned status = self->graphics.Ready() || self->graphics.DxgiDevice() ? 1u : 0u;
+                if (self->device || self->compositor) status |= 2;
+                if (self->backdrop.HasResources()) status |= 4;
+                for (const auto& [kind, card] : self->cards)
+                {
+                    if (card->HasGraphicsResources()) status |= 8;
+                    if (card->HasRenderedContent()) status += 0x100;
+                }
+                return status;
+            }
             case WM_CARD_PIPE_WAKE:
                 self->OnPipeMessages();
                 return 0;
@@ -1908,7 +2039,14 @@ namespace Cards
                 {
                     self->OnIdle();
                 }
+                else if (keys == GpuIdleTimer) self->OnGpuIdle();
                 else if (keys == WarmupTimer) self->WarmHiddenCards();
+                else if (keys == AiUsageTimer)
+                {
+                    if (self->visible && self->config.IsEnabled(Kind::AiUsage) && self->snapshot.aiUsage.Visible())
+                        self->client.Request(L"getAiUsage", {}, L"aiUsage");
+                    else KillTimer(window, AiUsageTimer);
+                }
                 return 0;
             default:
                 return DefWindowProcW(window, message, keys, position);
@@ -1946,10 +2084,11 @@ namespace Cards
         }
         if (!device)
         {
-            compositor = nullptr; graphics.Release(); DestroyWindow(window); window = nullptr;
+            ReleaseGpuResources(); DestroyWindow(window); window = nullptr;
             ready.set_value(false); return;
         }
         ready.set_value(true);
+        UpdateGpuIdleTimer();
 
         if (!diagnosticOffscreen)
         {
@@ -1983,24 +2122,15 @@ namespace Cards
                 WaitForSingleObject(backdropTimer, 0) == WAIT_OBJECT_0)) BackdropTick();
         }
 
-        // Teardown: stop producers first, then release device-bound resources.
-        StopBackdrop(true);
+        // Reuse the same ordered teardown for idle, device loss and shutdown.
+        ReleaseGpuResources();
         if (backdropTimer) { CloseHandle(backdropTimer); backdropTimer = nullptr; }
         CancelWarmup();
         StopGroupMotion(false);
         if (groupTimer) { CloseHandle(groupTimer); groupTimer = nullptr; }
         client.Stop();
         UninstallHooks();
-        popup.reset();
-        for (auto& [kind, card] : cards)
-        {
-            UNREFERENCED_PARAMETER(kind);
-            card->Destroy();
-        }
         cards.clear();
-        device = nullptr;
-        graphics.Release();
-        compositor = nullptr;
         if (window)
         {
             SetWindowLongPtrW(window, GWLP_USERDATA, 0);
@@ -2052,6 +2182,16 @@ namespace Cards
     {
         std::lock_guard lock(impl->backdropMutex);
         return impl->backdropDiagnostics;
+    }
+
+    GraphicsDiagnostics CardHost::GraphicsStatus() const
+    {
+        DWORD_PTR value{};
+        const auto window = impl->window.load();
+        const bool observed = window && SendMessageTimeoutW(window, WM_CARD_GRAPHICS_STATUS, 0, 0,
+            SMTO_ABORTIFHUNG | SMTO_BLOCK, 2000, &value) != 0;
+        return { observed, (value & 1) != 0, (value & 2) != 0, (value & 4) != 0, (value & 8) != 0,
+            static_cast<unsigned>(value >> 8) };
     }
 
     void CardHost::ApplyConfig(const Config& config)

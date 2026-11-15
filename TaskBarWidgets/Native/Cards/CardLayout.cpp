@@ -40,6 +40,7 @@ namespace Cards::Layout
         switch (kind)
         {
         case Kind::Traffic: return HeightTraffic;
+        case Kind::AiUsage: return 400.0f;
         case Kind::Device: return HeightDevice;
         case Kind::Media: return HeightMedia;
         case Kind::Weather: return HeightWeather;

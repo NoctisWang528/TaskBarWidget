@@ -7,7 +7,7 @@ namespace TaskBarWidgets.Media.Peripherals;
 
 // HID metadata and vendor I/O can block inside a driver. Only this owned helper
 // may be terminated on timeout; the desktop host and users' applications aren't touched.
-internal sealed class NativePeripheralBatteryProvider(string applicationRoot, bool vigilWatt = false) : IPeripheralBatteryProvider, IPeripheralBatteryIdle
+internal sealed class NativePeripheralBatteryProvider(string applicationRoot, bool vigilWatt = false) : IPeripheralBatteryProvider, IPeripheralBatteryIdle, IPeripheralBatteryRetirements
 {
     private const int MaximumLineCharacters = 1024 * 1024;
     private readonly string _executable = vigilWatt ? Path.Combine(applicationRoot, "Media", "PeripheralHost", "TaskBarWidgets.PeripheralHost.exe")
@@ -34,6 +34,7 @@ internal sealed class NativePeripheralBatteryProvider(string applicationRoot, bo
     private DateTimeOffset _lastUse;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     public event Action? DevicesChanged { add { } remove { } }
+    public IReadOnlySet<string> RetiredDeviceIds { get; private set; } = new HashSet<string>(StringComparer.Ordinal);
 
     internal void Configure(PeripheralBatterySettings settings) => _vendorExtensions = settings.VendorExtensionsEnabled;
 
@@ -61,7 +62,7 @@ internal sealed class NativePeripheralBatteryProvider(string applicationRoot, bo
             var result = await ExecuteAsync(operation, ids, vendorExtensions, linked.Token).ConfigureAwait(false);
             if (operation == "discover" && !vigilWatt)
             {
-                var receivers = result.Where(d => d.Source == "hidpp20" &&
+                var receivers = result.Where(d => d.Source is "hidpp20" or "razer-dock" &&
                     _identities.TryGetValue(d.Id, out var key) && !key.Contains("|unit=", StringComparison.Ordinal)).ToArray();
                 var receiverIds = receivers.Select(d => d.Id).ToHashSet(StringComparer.Ordinal);
                 var devices = result.Where(d => !receiverIds.Contains(d.Id)).ToDictionary(d => d.Id, StringComparer.Ordinal);
@@ -70,12 +71,13 @@ internal sealed class NativePeripheralBatteryProvider(string applicationRoot, bo
                     var parent = _identities[receiver.Id];
                     // A receiver proves presence, not whether every paired unit is
                     // awake. Keep its known units stale until they answer again.
-                    foreach (var cached in _known.Values.Where(d => _identities.TryGetValue(d.Id, out var key) && IsHidppChild(parent, key)))
+                    foreach (var cached in _known.Values.Where(d => d.Source == receiver.Source &&
+                        _identities.TryGetValue(d.Id, out var key) && IsReceiverChild(receiver.Source, parent, key)))
                         devices.TryAdd(cached.Id, cached with { State = "unavailable", Stale = true });
                     if (!receiver.CanRead) continue;
                     var units = await ExecuteAsync("identify", [receiver.Id], vendorExtensions, linked.Token).ConfigureAwait(false);
-                    foreach (var unit in units.Where(d => d.Source == "hidpp20" &&
-                        _identities.TryGetValue(d.Id, out var key) && IsHidppChild(parent, key))) devices[unit.Id] = unit;
+                    foreach (var unit in units.Where(d => d.Source == receiver.Source &&
+                        _identities.TryGetValue(d.Id, out var key) && IsReceiverChild(receiver.Source, parent, key))) devices[unit.Id] = unit;
                 }
                 result = devices.Values.ToArray();
             }
@@ -109,7 +111,8 @@ internal sealed class NativePeripheralBatteryProvider(string applicationRoot, bo
             // Progress messages make it possible to distinguish a bad interface;
             // they never extend the total budget indefinitely.
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
-            var budget = selectedIds.Sum(id => _known.GetValueOrDefault(id)?.Source == "hidpp20" ? 20 : 5);
+            var budget = selectedIds.Sum(id => _known.GetValueOrDefault(id)?.Source switch
+                { "hidpp20" => 20, "razer-dock" => 30, _ => 5 });
             timeout.CancelAfter(TimeSpan.FromSeconds(operation == "discover" ? (vigilWatt ? 60 : 15) : Math.Clamp(budget, 8, 60)));
             await _process!.StandardInput.WriteLineAsync(request.AsMemory(), timeout.Token).ConfigureAwait(false);
             await _process.StandardInput.FlushAsync(timeout.Token).ConfigureAwait(false);
@@ -148,7 +151,9 @@ internal sealed class NativePeripheralBatteryProvider(string applicationRoot, bo
             foreach (var item in (reply.Devices ?? []).Take(256))
             {
                 if (item is null || string.IsNullOrWhiteSpace(item.Identity) || item.Identity.Length > 1024 || string.IsNullOrWhiteSpace(item.Name)) continue;
-                if (operation == "identify" && (item.Source != "hidpp20" || !selected.Any(parent => IsHidppChild(parent, item.Identity)))) continue;
+                if (operation == "identify" && !selectedIds.Any(selectedId =>
+                    _known.GetValueOrDefault(selectedId)?.Source == item.Source &&
+                    IsReceiverChild(item.Source, _identities[selectedId], item.Identity))) continue;
                 if (operation == "read" && !selected.Contains(item.Identity, StringComparer.Ordinal)) continue;
                 var id = PeripheralIdentity.FromKey(item.Identity);
                 if (!_identities.ContainsKey(id) && _identities.Count >= 1024)
@@ -171,16 +176,40 @@ internal sealed class NativePeripheralBatteryProvider(string applicationRoot, bo
                 }
                 if (operation == "read")
                     id = selectedIds.FirstOrDefault(selectedId => _identities.GetValueOrDefault(selectedId) == item.Identity) ?? id;
-                var device = new PeripheralDeviceSnapshot { Id = id, Name = item.Name, Kind = item.Kind,
+                var name = item.Name;
+                var modelIdentity = item.Source == "rog_omni_keyboard" && item.ModelIdentityConfirmed &&
+                    item.State is "online" or "unavailable" && IsOmniModelIdentity(item.Identity, item.ModelIdentity)
+                    ? item.ModelIdentity : null;
+                var modelIdentityConfirmed = modelIdentity is not null;
+                var freshReading = item.State == "online" && !item.Stale &&
+                    (item.Batteries ?? []).Any(b => b.Percentage is >= 0 and <= 100);
+                // The native Omni reader supplies a specific name only after proving
+                // its paired model. A new valid but unmapped model deliberately resets
+                // this to neutral; discovery/failed reads must not erase the last name.
+                if (item.Source == "rog_omni_keyboard" && !modelIdentityConfirmed &&
+                    (operation == "discover" || !freshReading) && _known.TryGetValue(id, out var previous) &&
+                    previous.Source == item.Source)
+                {
+                    modelIdentity = previous.ModelIdentity;
+                    if (name == "ROG Omni keyboard" && previous.Name != "ROG Omni keyboard") name = previous.Name;
+                }
+                var device = new PeripheralDeviceSnapshot { Id = id, Name = name, Kind = item.Kind,
                     Brand = PeripheralIdentity.Brand(item.Name, item.Identity, item.Source),
                     LegacyIds = legacyIds.ToArray(), Identity = item.IdentityEvidence,
                     NameQuality = item.NameQuality, KindQuality = item.KindQuality,
                     Connection = item.Connection, State = item.State, CanRead = item.CanRead,
                     Batteries = item.Batteries ?? [], UpdatedAt = item.UpdatedAt,
-                    Stale = item.State != "online" || item.Stale, Source = item.Source, Compatibility = item.Compatibility };
+                    Stale = item.State != "online" || item.Stale, Source = item.Source, Compatibility = item.Compatibility,
+                    ModelIdentity = modelIdentity, ModelIdentityConfirmed = modelIdentityConfirmed };
                 result.Add(device);
                 _known.Remove(id); _known[id] = device;
                 if (_known.Count > 256) _known.Remove(_known.Keys.First());
+            }
+            if (operation == "discover" && string.IsNullOrEmpty(reply.Error))
+            {
+                RetiredDeviceIds = (reply.RetiredIdentities ?? []).Where(IsRetiredRogReceiverIdentity)
+                    .Take(256).Select(PeripheralIdentity.FromKey).ToHashSet(StringComparer.Ordinal);
+                foreach (var retired in RetiredDeviceIds) { _known.Remove(retired); _identities.Remove(retired); _queryIds.Remove(retired); }
             }
             if (operation == "discover" && _quarantine.Count != 0)
             {
@@ -204,6 +233,52 @@ internal sealed class NativePeripheralBatteryProvider(string applicationRoot, bo
         var unit = identity[prefix.Length..];
         return unit.Length == 27 && unit[8..15] == "|model=" && unit[..8] is not ("00000000" or "ffffffff") &&
             unit[15..] != "000000000000" && (unit[..8] + unit[15..]).All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
+    }
+
+    private static bool IsReceiverChild(string source, string parent, string identity) => source switch
+    {
+        "hidpp20" => IsHidppChild(parent, identity),
+        "razer-dock" => IsRazerDockChild(parent, identity),
+        _ => false
+    };
+
+    internal static bool IsRazerDockChild(string parent, string identity)
+    {
+        var prefix = parent + "|unit=pid=00e3;serial=";
+        if (!identity.StartsWith(prefix, StringComparison.Ordinal)) return false;
+        var hex = identity[prefix.Length..];
+        if (hex.Length is < 8 or > 44 || hex.Length % 2 != 0 ||
+            !hex.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f')) return false;
+        var serial = Encoding.ASCII.GetString(Convert.FromHexString(hex));
+        return serial.All(c => c is >= '0' and <= '9' or >= 'A' and <= 'Z' or >= 'a' and <= 'z') &&
+            !serial.All(c => c == serial[0]) && !serial.StartsWith("UNKWN", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool IsRetiredRogReceiverIdentity(string identity)
+    {
+        const string suffix = "|vid=0b05|pid=1ace|mi=2|usage=ff01:0001|channel=rog-report3";
+        if (identity is null || identity.Length > 1024 || !identity.EndsWith(suffix, StringComparison.Ordinal)) return false;
+        var transport = identity[..^suffix.Length];
+        const string serialPrefix = "hid:v1|serial=", containerPrefix = "hid:v1|container=";
+        if (transport.StartsWith(serialPrefix, StringComparison.Ordinal))
+        {
+            var serial = transport[serialPrefix.Length..];
+            return serial.Length is >= 2 and <= 256 && serial.Length % 2 == 0 &&
+                serial.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
+        }
+        return transport.StartsWith(containerPrefix, StringComparison.Ordinal) &&
+            Guid.TryParse(transport[containerPrefix.Length..], out _);
+    }
+
+    internal static bool IsOmniModelIdentity(string identity, string? model)
+    {
+        if (model is null) return false;
+        // These are protocol-confirmed paired PIDs, not receiver USB IDs or names.
+        var supported = identity.Contains("|vid=0b05|pid=1ace|", StringComparison.Ordinal)
+            ? new[] { 0x1a85, 0x1b42, 0x1cf1, 0x1ab0, 0x1b7a, 0x1b06 }
+            : identity.Contains("|vid=0b05|pid=1ad0|", StringComparison.Ordinal)
+                ? new[] { 0x1c12, 0x1a85, 0x1b42, 0x1c25, 0x1cf1, 0x1da4 } : [];
+        return supported.Any(pid => model == pid.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
     private bool StartProcess()
@@ -310,6 +385,7 @@ internal sealed class NativePeripheralBatteryProvider(string applicationRoot, bo
         public int RequestId { get; init; }
         public ProbeDevice[] Devices { get; init; } = [];
         public string[]? Initialized { get; init; }
+        public string[]? RetiredIdentities { get; init; }
         public string[]? ClaimedPaths { get; init; }
         public JsonElement[]? Diagnostics { get; init; }
         public string Error { get; init; } = "";
@@ -332,5 +408,7 @@ internal sealed class NativePeripheralBatteryProvider(string applicationRoot, bo
         public bool CanRead { get; init; }
         public string Source { get; init; } = "hid";
         public string Compatibility { get; init; } = "implemented";
+        public bool ModelIdentityConfirmed { get; init; }
+        public string? ModelIdentity { get; init; }
     }
 }

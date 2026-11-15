@@ -390,7 +390,7 @@ namespace Cards
     GlassControls::GlassControls() : impl(std::make_unique<Impl>()) {}
     GlassControls::~GlassControls() = default;
     ContainerVisual GlassControls::Visual() const { return impl->root; }
-    void GlassControls::Release() { impl = std::make_unique<Impl>(); }
+    void GlassControls::Release() { impl->root = nullptr; impl->controls.clear(); }
 
     void GlassControls::Update(Graphics& graphics, const Compositor& compositor,
         const CompositionGraphicsDevice& device, const std::vector<GlassControl>& descriptions,

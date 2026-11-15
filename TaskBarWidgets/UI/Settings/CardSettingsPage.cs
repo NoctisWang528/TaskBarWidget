@@ -18,7 +18,8 @@ public sealed partial class SettingsWindow
         ("traffic", "流量消耗", "\uE9D9"),
         ("device", "音频设备", "\uE7F5"),
         ("media", "媒体", "\uE8D6"),
-        ("peripheralBattery", "外设电量", "\uE996")
+        ("peripheralBattery", "外设电量", "\uE996"),
+        ("aiUsage", "AI 用量", "\uE9D9")
     ];
     private static readonly (string Id, string Label)[] CardMaterials = [("LiquidGlass", "液态玻璃"), ("Mica", "Mica"), ("Solid", "纯色")];
     private readonly List<(Border Cell, int Column, int Slot)> _cardOrderCells = [];
@@ -329,7 +330,7 @@ public sealed partial class SettingsWindow
         motion.Children.Add(frameRate);
         motion.Children.Add(Copy("较高帧率更流畅，也会增加动画期间的资源消耗；实际帧率受屏幕和系统负载影响。系统关闭动画时仍立即显示或隐藏。"));
 
-        var performance = Section("后台资源", "程序启动后会静默预加载一次卡片。常驻模式继续在后台更新画面；按需模式完成预加载后停止隐藏绘制，闲置 10 分钟后释放窗口和绘图缓存。");
+        var performance = Section("后台资源", "程序启动后会静默预加载一次卡片。两种模式都会在卡片隐藏约 5 秒后回收图形资源，保留最新数据；再次打开时重新准备画面。");
         var modes = new[] { "Resident", "OnDemand" };
         var mode = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
         mode.Items.Add("常驻（优先速度）");
@@ -343,7 +344,7 @@ public sealed partial class SettingsWindow
             Changed();
         };
         performance.Children.Add(mode);
-        performance.Children.Add(Copy("常驻模式占用更多内存，隐藏时不播放动画；按需模式释放资源后，再次打开需要重新准备画面。"));
+        performance.Children.Add(Copy("常驻模式保留窗口和界面状态；按需模式还会在闲置 10 分钟后释放窗口。图形资源回收后，后台数据更新不会重新占用显存。"));
     }
 
     private void RenderQuickCardsWeather()

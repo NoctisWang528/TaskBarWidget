@@ -2114,6 +2114,9 @@ public sealed class MediaSettingsService : IDisposable
         target.EnableWordScanning = source.EnableWordScanning;
         target.ToolWindowTheme = source.ToolWindowTheme;
         target.QuickCardOrder = source.QuickCardOrder.ToList();
+        target.AiUsageProviderId = source.AiUsageProviderId;
+        target.AiUsageShowApi = source.AiUsageShowApi;
+        target.AiUsageEnabledServices = new Dictionary<string, bool>(source.AiUsageEnabledServices ?? [], StringComparer.Ordinal);
         target.PeripheralBattery = source.PeripheralBattery.Clone();
         target.QuickCardColumns = new Dictionary<string, int>(
             source.QuickCardColumns ?? [],

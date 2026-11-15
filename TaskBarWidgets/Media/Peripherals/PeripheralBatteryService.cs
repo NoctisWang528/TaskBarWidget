@@ -257,6 +257,7 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
             lock (_gate) PublishLocked(true, "");
             var batch = new Dictionary<int, PeripheralDeviceSnapshot[]>();
             var discoveryVersions = new Dictionary<int, long>();
+            var retiredBatch = new Dictionary<int, string[]>();
             for (var index = 0; index < _providers.Length; index++)
             {
                 token.ThrowIfCancellationRequested();
@@ -265,6 +266,8 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
                     lock (_gate) discoveryVersions[index] = _notificationVersion;
                     var found = await _providers[index].DiscoverAsync(token).ConfigureAwait(false);
                     batch[index] = found.Where(ValidDevice).OrderBy(d => d.State == "disconnected").Take(256).ToArray();
+                    if (_providers[index] is IPeripheralBatteryRetirements retirements)
+                        retiredBatch[index] = retirements.RetiredDeviceIds.Where(PeripheralIdentity.IsValid).Take(256).ToArray();
                 }
                 catch (Exception error) when (error is not OperationCanceledException || !token.IsCancellationRequested)
                 { errors.Add("部分设备发现失败（" + error.GetType().Name + "）"); }
@@ -295,6 +298,23 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
                         _endpoints[endpoint] = RetainEndpointSample(_endpoints.GetValueOrDefault(endpoint), item, true, preserveMetadata);
                     }
                 }
+                foreach (var (provider, retiredIds) in retiredBatch)
+                    foreach (var retired in retiredIds)
+                    {
+                        // Retire only the disproven endpoint, never a proven alias
+                        // belonging to another active device/provider.
+                        if (batch[provider].Any(d => d.Id == retired) || _resolver.ResolveId(retired) != retired ||
+                            _endpoints.Keys.Any(e => e.Id == retired || _routes.GetValueOrDefault(e) == retired) ||
+                            !_devices.TryGetValue(retired, out var cached)) continue;
+                        if (HasReading(cached) || cached.UpdatedAt.HasValue)
+                            _devices[retired] = cached with { State = "disconnected", Stale = true, CanRead = false };
+                        else
+                        {
+                            _devices.Remove(retired); _identities.Remove(retired); _historical.Remove(retired);
+                            foreach (var key in _readings.Keys.Where(k => k.Id == retired).ToArray()) _readings.Remove(key);
+                        }
+                        _cacheDirty = true;
+                    }
                 ResolveBatchLocked();
                 foreach (var (provider, found) in batch)
                     foreach (var item in found)
@@ -354,7 +374,8 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
                     var newerNotification = notified is { State: "online", Stale: false } &&
                         notificationDuringRead;
                     var succeeded = newerNotification || result is { State: "online", Stale: false } && HasReading(result) ||
-                        result is { State: "disconnected", Connection: "wireless", CanRead: true };
+                        result is { State: "disconnected", Connection: "wireless", CanRead: true } ||
+                        result is { Source: "rog_omni_keyboard", ModelIdentityConfirmed: true, ModelIdentity: not null };
                     var failures = succeeded ? 0 : Math.Min(4, _attempts.GetValueOrDefault(endpoint).Failures + 1);
                     _attempts[endpoint] = (_clock.GetUtcNow(), failures);
                     if (!notificationDuringRead && !returned.Contains(id) && notified is not null)
@@ -390,15 +411,34 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
     private static int KindQuality(PeripheralDeviceSnapshot item) => item.KindQuality != 0 ? item.KindQuality :
         item.Kind == "unknown" ? 0 : 1;
 
+    private static bool OmniModelChanged(PeripheralDeviceSnapshot? existing, PeripheralDeviceSnapshot incoming) =>
+        incoming.Source == "rog_omni_keyboard" && incoming.ModelIdentityConfirmed && incoming.ModelIdentity is not null &&
+        existing?.ModelIdentity != incoming.ModelIdentity;
+
+    private static PeripheralDeviceSnapshot RetainOmniModel(PeripheralDeviceSnapshot? existing,
+        PeripheralDeviceSnapshot incoming, bool discovery)
+    {
+        if (existing is not null && incoming.Source == "rog_omni_keyboard" &&
+            (existing.Source == incoming.Source || existing.ModelIdentity is not null) &&
+            incoming.ModelIdentity is null && !incoming.ModelIdentityConfirmed && (discovery || !HasReading(incoming)))
+            return incoming with { ModelIdentity = existing.ModelIdentity,
+                Name = incoming.Name == "ROG Omni keyboard" ? existing.Name : incoming.Name,
+                NameQuality = incoming.Name == "ROG Omni keyboard" ? existing.NameQuality : incoming.NameQuality };
+        return incoming;
+    }
+
     private static PeripheralDeviceSnapshot RetainEndpointSample(PeripheralDeviceSnapshot? existing,
         PeripheralDeviceSnapshot incoming, bool discovery, bool preserveMetadata = false)
     {
         if (existing is null) return incoming;
+        incoming = RetainOmniModel(existing, incoming, discovery);
+        var modelChanged = OmniModelChanged(existing, incoming);
         var older = incoming.UpdatedAt.HasValue && existing.UpdatedAt > incoming.UpdatedAt;
         preserveMetadata |= !discovery && older;
+        if (modelChanged && (preserveMetadata || older)) return existing;
         if (existing.Identity is { } oldIdentity && incoming.Identity is { } newIdentity &&
             PeripheralIdentityResolver.Conflicts(oldIdentity, newIdentity)) return preserveMetadata ? existing : incoming;
-        if (!HasReading(incoming) || older)
+        if ((!HasReading(incoming) || older) && !modelChanged)
         {
             var batteries = existing.Batteries.Select(old =>
                 !older && incoming.Batteries.FirstOrDefault(value => value.Role == old.Role && value.Charging.HasValue) is { } status
@@ -409,7 +449,10 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
         if (preserveMetadata)
             incoming = incoming with { State = existing.State, Stale = existing.Stale, CanRead = existing.CanRead,
                 Connection = existing.Connection, Source = existing.Source };
-        if (NameQuality(existing) > NameQuality(incoming))
+        if (preserveMetadata && existing.Source == "rog_omni_keyboard")
+            incoming = incoming with { Name = existing.Name, NameQuality = existing.NameQuality,
+                ModelIdentity = existing.ModelIdentity, ModelIdentityConfirmed = existing.ModelIdentityConfirmed };
+        if (!modelChanged && NameQuality(existing) > NameQuality(incoming))
             incoming = incoming with { Name = existing.Name, NameQuality = NameQuality(existing) };
         if (KindQuality(existing) > KindQuality(incoming))
             incoming = incoming with { Kind = existing.Kind, KindQuality = KindQuality(existing) };
@@ -501,11 +544,23 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
     {
         if (!ValidDevice(incoming) || !_routes.TryGetValue(endpoint, out var id)) return;
         var existing = _endpoints.GetValueOrDefault(endpoint);
+        if (OmniModelChanged(existing, incoming) && (preserveMetadata ||
+            incoming.UpdatedAt.HasValue && existing?.UpdatedAt > incoming.UpdatedAt)) return;
         if (existing?.Identity is { } oldIdentity && incoming.Identity is { } newIdentity &&
             PeripheralIdentityResolver.Conflicts(oldIdentity, newIdentity))
         {
             if (!discovery) { _discoverPending = true; Signal(); }
             return;
+        }
+        incoming = RetainOmniModel(_devices.GetValueOrDefault(id), incoming, discovery);
+        if (!preserveMetadata && OmniModelChanged(_devices.GetValueOrDefault(id), incoming))
+        {
+            // The receiver endpoint is stable across pairing changes. Samples
+            // belong to the confirmed target, not to the receiver's USB identity.
+            foreach (var key in _readings.Keys.Where(k => k.Id == id).ToArray()) _readings.Remove(key);
+            if (_devices.TryGetValue(id, out var old))
+                _devices[id] = old with { Name = incoming.Name, NameQuality = incoming.NameQuality,
+                    ModelIdentity = incoming.ModelIdentity, ModelIdentityConfirmed = true, Batteries = [], UpdatedAt = null, Stale = true };
         }
         if (existing is { State: "disconnected" } && incoming.State != "disconnected") _attempts.Remove(endpoint);
         _endpoints[endpoint] = RetainEndpointSample(existing, incoming, discovery, preserveMetadata);
@@ -542,7 +597,9 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
             foreach (var key in _readings.Keys.Where(k => k.Id == unused.Id).ToArray()) _readings.Remove(key);
         }
         var metadata = endpoints.Concat(old is null ? [] : new[] { old }).ToArray();
-        var name = metadata.OrderByDescending(NameQuality).First();
+        var model = endpoints.Where(d => d.Source == "rog_omni_keyboard" && d.ModelIdentity is not null)
+            .OrderByDescending(d => d.ModelIdentityConfirmed).FirstOrDefault();
+        var name = model is { ModelIdentityConfirmed: true } ? model : metadata.OrderByDescending(NameQuality).First();
         var kind = metadata.OrderByDescending(KindQuality).First();
         var preferred = endpoints.OrderByDescending(d => d.CanRead).ThenByDescending(d => SourcePriority(d.Source))
             .ThenBy(d => d.Source, StringComparer.Ordinal).First();
@@ -552,7 +609,8 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
         var online = endpoints.Any(d => d.State == "online");
         _devices[id] = preferred with
         {
-            Id = id, Name = name.Name, NameQuality = NameQuality(name), Kind = kind.Kind, KindQuality = KindQuality(kind),
+            Id = id, ModelIdentity = model?.ModelIdentity, ModelIdentityConfirmed = model?.ModelIdentityConfirmed ?? false,
+            Name = name.Name, NameQuality = NameQuality(name), Kind = kind.Kind, KindQuality = KindQuality(kind),
             Brand = metadata.FirstOrDefault(d => d.Brand.Length > 0)?.Brand ?? "",
             CanRead = endpoints.Any(d => d.CanRead),
             State = online ? "online" : endpoints.Any(d => d.State == "unavailable") ? "unavailable" : "disconnected",

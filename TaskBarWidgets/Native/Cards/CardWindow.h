@@ -76,6 +76,10 @@ namespace Cards
         // Creates the HWND, the compositor and the empty visual tree.
         bool Create(const CardEnvironment& environment, HINSTANCE instance);
         void Destroy();
+        // Keep the HWND, accessibility and CPU snapshot while dropping all GPU
+        // resources; only an explicit group show restores the visual tree.
+        void ReleaseGraphics();
+        bool RestoreGraphics(const CardEnvironment& environment, HINSTANCE instance);
 
         // Theme, tuning and font changes. Never recreates the window.
         void ApplyEnvironment(const CardEnvironment& environment);
@@ -142,6 +146,7 @@ namespace Cards
         const CardEnvironment& Environment() const { return environment; }
         HWND Handle() const { return window; }
         bool HasRenderedContent() const;
+        bool HasGraphicsResources() const;
         winrt::Windows::UI::Composition::CompositionBrush ContentBrush() const;
         bool HasActiveBackdropConfiguration() const;
         void RefreshBackdropConfiguration();
@@ -261,6 +266,9 @@ namespace Cards
             const Interaction& interaction = {}, MediaLayer layer = MediaLayer::All,
             bool rebuildRegions = true);
         void Device(ID2D1DeviceContext* context, const Snapshot& snapshot,
+            const CardEnvironment& environment, Layout::Table& regions, float widthDip, float heightDip,
+            const Interaction& interaction = {});
+        void AiUsage(ID2D1DeviceContext* context, const Snapshot& snapshot,
             const CardEnvironment& environment, Layout::Table& regions, float widthDip, float heightDip,
             const Interaction& interaction = {});
         void Traffic(ID2D1DeviceContext* context, const Snapshot& snapshot,

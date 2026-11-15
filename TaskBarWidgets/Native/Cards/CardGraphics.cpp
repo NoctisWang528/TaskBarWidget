@@ -80,6 +80,8 @@ namespace Cards
 
     void Graphics::Release()
     {
+        if (context) context->SetTarget(nullptr);
+        if (iconContext) iconContext->SetTarget(nullptr);
         ClearPeripheralBrandCache();
         ReleaseMask();
         bitmaps.clear();
@@ -92,6 +94,15 @@ namespace Cards
         factory.Reset();
         write.Reset();
         wic.Reset();
+        // Submit releases after every surface/effect/Composition reference has
+        // been detached. Do not leave bound D3D state retaining its textures.
+        ComPtr<ID3D11Device> renderDevice;
+        if (dxgiDevice && SUCCEEDED(dxgiDevice.As(&renderDevice)))
+        {
+            ComPtr<ID3D11DeviceContext> immediate;
+            renderDevice->GetImmediateContext(immediate.GetAddressOf());
+            if (immediate) { immediate->ClearState(); immediate->Flush(); }
+        }
         dxgiDevice.Reset();
         ready = false;
     }
@@ -560,6 +571,8 @@ namespace Cards
 
     void Graphics::ReleaseMask()
     {
+        if (maskContext) maskContext->SetTarget(nullptr);
+        if (maskBlur) maskBlur->SetInput(0, nullptr);
         mask.Reset();
         maskContext.Reset();
         maskBlur.Reset();

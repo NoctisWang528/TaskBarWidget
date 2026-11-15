@@ -14,7 +14,7 @@ enum class Report { Input, Output, Feature };
 enum class Protocol { None, Standard, Compx, Nordic, Hidpp, Razer, Rog, RogStandard,
     Mhub, MhubV2, Sonix, Incott, Rapoo, X23, X23Passive, Steelseries, Blackshark, Xiberia,
     OHub, N9Serial, SonyH9, Gaia, F87Passive, DeluxPassive, Rainy75, Irok, Langtu, Pelta, ExtraKeyboard,
-    KeyboardAdvanced, HeadsetController, ExtraMouse };
+    KeyboardAdvanced, HeadsetController, ExtraMouse, RazerDock };
 struct Layout
 {
     bool valid = false;
@@ -47,6 +47,7 @@ struct Reading
     std::vector<Reading> components;
 };
 enum class Transport { Output, Feature, Passive, ControlOutput, Standard, Hidpp };
+bool RequiresInputDrain(Transport transport);
 struct Query
 {
     Transport transport = Transport::Passive;
@@ -73,6 +74,13 @@ using HidppCall = std::function<Bytes(unsigned, unsigned, unsigned, Bytes)>;
 std::vector<std::pair<Candidate, std::optional<Reading>>> ReadHidppUnits(const Candidate& receiver, const HidppCall& call, bool readBattery = true,
     std::map<std::string, std::string>* names = nullptr);
 bool HidppReplyMatches(const Bytes& packet, unsigned target, unsigned feature, unsigned address);
+// Only the captured Dock V2 Pro commands are admitted. The callback returns a
+// complete native Feature report (including its leading report-ID byte).
+using RazerDockCall = std::function<Bytes(unsigned, unsigned, unsigned, unsigned)>;
+std::optional<Bytes> RazerDockPayload(const Bytes& packet, unsigned command);
+bool ValidRazerDockUnitIdentity(const std::string& unit);
+std::vector<std::pair<Candidate, std::optional<Reading>>> ReadRazerDockUnits(
+    const Candidate& receiver, const RazerDockCall& call, bool readBattery = true);
 Bytes SonyRequest(unsigned command, unsigned transaction);
 std::optional<Bytes> SonyPayload(const Bytes& packet, unsigned command, unsigned transaction);
 }

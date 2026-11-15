@@ -310,7 +310,7 @@ namespace Cards
         DwmSetWindowAttribute(window, DWMWA_WINDOW_CORNER_PREFERENCE, &preference, sizeof(preference));
         BuildVisualTree(instance);
         ApplyEnvironment(cardEnvironment);
-        if (!impl->compositor) return false;
+        if (!impl->compositor) { Destroy(); return false; }
         accessibility.Attach(window, AccessibleSummary(), [this] { return std::cref(regions); },
             [this] { return scale; },
             [this](int id)
@@ -360,6 +360,8 @@ namespace Cards
             impl->root.RelativeSizeAdjustment(winrt::Windows::Foundation::Numerics::float2{ 1.0f, 1.0f });
             impl->target.Root(impl->root);
             impl->corner = impl->compositor.CreateRoundedRectangleGeometry();
+            impl->corner.Size({ static_cast<float>(bounds.right - bounds.left), static_cast<float>(bounds.bottom - bounds.top) });
+            impl->corner.CornerRadius({ Layout::CornerRadius * scale, Layout::CornerRadius * scale });
             impl->root.Clip(impl->compositor.CreateGeometricClip(impl->corner));
 
             // Motion container: the show/hide animation changes only its opacity
@@ -393,23 +395,59 @@ namespace Cards
         }
         catch (const winrt::hresult_error&)
         {
-            impl->compositor = nullptr;
-            impl->target = nullptr;
-            impl->root = nullptr;
+            ReleaseGraphics();
         }
     }
 
     void CardWindow::Destroy()
     {
-        ResetPageAnimation();
-        ClearPeripheralNames();
-        impl->transition.Detach();
+        ReleaseGraphics();
         accessibility.Detach();
+        if (window)
+        {
+            SetWindowLongPtrW(window, GWLP_USERDATA, 0);
+            DestroyWindow(window);
+            window = nullptr;
+        }
+        visible = false;
+    }
+
+    bool CardWindow::RestoreGraphics(const CardEnvironment& cardEnvironment, HINSTANCE instance)
+    {
+        if (!window || !cardEnvironment.device || !cardEnvironment.compositor) return false;
+        if (impl->compositor) return true;
+        try
+        {
+            environment = cardEnvironment;
+            BuildVisualTree(instance);
+            if (impl->compositor)
+            {
+                ApplyEnvironment(cardEnvironment);
+                if (impl->target && impl->content) return true;
+            }
+        }
+        catch (const winrt::hresult_error&) { }
+        ReleaseGraphics();
+        return false;
+    }
+
+    void CardWindow::ReleaseGraphics()
+    {
+        const auto detach = [](auto&& action) { try { action(); } catch (...) { } };
+        detach([&] { ResetPageAnimation(); });
+        detach([&] { ClearPeripheralNames(); });
+        // A removed device may reject visual calls; dropping the owning
+        // references still has to complete, including partially built trees.
+        impl->pageBatch = nullptr;
+        impl->outgoingNames.clear();
+        impl->peripheralNames.clear();
+        impl->peripheralNameScale = 0;
+        impl->outgoingSurface.Release();
+        impl->transition.Detach();
         if (window)
         {
             KillTimer(window, AnimationTimer);
             impl->timerInterval = 0;
-            SetWindowLongPtrW(window, GWLP_USERDATA, 0);
         }
         if (impl->mica)
         {
@@ -421,21 +459,29 @@ namespace Cards
         impl->micaReady = false;
         impl->dynamicSurface.Release();
         impl->boundDynamicSurface = nullptr;
-        if (impl->dynamicContent) impl->dynamicContent.Brush(nullptr);
+        detach([&] { if (impl->dynamicContent) impl->dynamicContent.Brush(nullptr); });
         impl->dynamicContent = nullptr;
         impl->outgoingPage = nullptr;
         impl->pageViewport = nullptr;
         impl->surface.Release();
         impl->boundSurface = nullptr;
-        if (impl->content) impl->content.Brush(nullptr);
+        detach([&] { if (impl->content) impl->content.Brush(nullptr); });
         impl->content = nullptr;
-        if (impl->wash) { impl->wash.Brush(nullptr); impl->wash.Children().RemoveAll(); }
-        if (impl->rim) impl->rim.Brush(nullptr);
+        detach([&] { if (impl->wash) { impl->wash.Brush(nullptr); impl->wash.Children().RemoveAll(); } });
+        detach([&] { if (impl->rim) impl->rim.Brush(nullptr); });
         impl->captureExclusion.Restore();
         impl->glass.Release();
         impl->glassControls.Release();
         impl->glassControlsAttached = false;
         impl->glassActive = false;
+        impl->controlDescriptions = {};
+        impl->reflowSurfaceSize = {};
+        impl->captureSuspended = impl->resumePending = false;
+        impl->resumeSerial = 0;
+        if (impl->target)
+        {
+            try { impl->target.Root(nullptr); impl->target.Close(); } catch (...) { }
+        }
         impl->rim = nullptr;
         impl->wash = nullptr;
         impl->motion = nullptr;
@@ -443,17 +489,24 @@ namespace Cards
         impl->corner = nullptr;
         impl->target = nullptr;
         impl->compositor = nullptr;
-        if (window)
-        {
-            DestroyWindow(window);
-            window = nullptr;
-        }
+        environment.device = nullptr;
+        environment.compositor = nullptr;
+        impl->dirty = impl->mediaStaticDirty = impl->mediaRegionsDirty = true;
     }
 
     void CardWindow::ApplyEnvironment(const CardEnvironment& cardEnvironment)
     {
         ClearPeripheralNames();
         environment = cardEnvironment;
+        if (!impl->compositor)
+        {
+            // A hidden theme/config update must not retain the host's previous
+            // device or recreate a retired visual tree.
+            environment.device = nullptr;
+            environment.compositor = nullptr;
+            impl->dirty = impl->mediaStaticDirty = impl->mediaRegionsDirty = true;
+            return;
+        }
         impl->glassControlsFailed = false;
         ResetPageAnimation();
         if (environment.reducedMotion || environment.highContrast)
@@ -1413,6 +1466,9 @@ namespace Cards
                 case Kind::Device:
                     Paint::Device(context, painted, environment, regions, widthDip, heightDip, interaction);
                     break;
+                case Kind::AiUsage:
+                    Paint::AiUsage(context, painted, environment, regions, widthDip, heightDip, interaction);
+                    break;
                 case Kind::Traffic:
                     Paint::Traffic(context, painted, environment, regions, widthDip, heightDip, interaction);
                     break;
@@ -1532,6 +1588,16 @@ namespace Cards
     {
         return impl->surface.Ready() && impl->content && impl->content.Brush() && !impl->dirty &&
             ((kind != Kind::Media && !HasPageContent()) || (impl->dynamicSurface.Ready() && impl->dynamicContent && impl->dynamicContent.Brush()));
+    }
+
+    bool CardWindow::HasGraphicsResources() const
+    {
+        return environment.device || environment.compositor || impl->compositor || impl->target ||
+            impl->root || impl->motion || impl->corner || impl->wash || impl->rim ||
+            impl->content || impl->dynamicContent || impl->outgoingPage || impl->pageViewport || impl->pageBatch ||
+            impl->surface.Ready() || impl->dynamicSurface.Ready() || impl->outgoingSurface.Ready() ||
+            impl->mica || impl->micaConfiguration || impl->glass.Visual() || impl->glassControls.Visual() ||
+            !impl->peripheralNames.empty() || !impl->outgoingNames.empty();
     }
 
     CompositionBrush CardWindow::ContentBrush() const
@@ -1828,6 +1894,8 @@ namespace Cards
         switch (kind)
         {
         case Kind::Weather: name = L"天气"; break;
+        case Kind::AiUsage: return L"AI用量，" + (!snapshot.aiUsage.ProviderVisible(snapshot.aiUsage.providerId)
+            ? std::wstring(L"选择已开启的服务") : snapshot.aiUsage.providerName);
         case Kind::Traffic: name = L"流量"; break;
         case Kind::Device: name = L"音频设备"; break;
         case Kind::Media: name = L"媒体"; break;

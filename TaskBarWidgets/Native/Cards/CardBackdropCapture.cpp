@@ -542,7 +542,7 @@ namespace Cards
     };
 
     DesktopBackdrop::DesktopBackdrop() : impl(std::make_unique<Impl>()) {}
-    DesktopBackdrop::~DesktopBackdrop() { impl->Clear(); impl->ReleaseCachedDevice(); }
+    DesktopBackdrop::~DesktopBackdrop() { Release(); }
 
     bool DesktopBackdrop::Start(IDXGIDevice* renderDevice, ID2D1DeviceContext* renderContext, HMONITOR monitor,
         bool allowSlowDevice)
@@ -571,6 +571,13 @@ namespace Cards
 
     bool DesktopBackdrop::Poll() { return impl->Poll(); }
     void DesktopBackdrop::Stop() { impl->Clear(); }
+    void DesktopBackdrop::Release() { impl->Clear(); impl->ReleaseCachedDevice(); }
+    bool DesktopBackdrop::HasResources() const
+    {
+        return impl->renderDevice || impl->renderContext || impl->captureDevice || impl->captureContext ||
+            impl->cachedOutputDevice || impl->cachedOutputContext || impl->duplication || impl->framePool ||
+            impl->captureSession || impl->ownedTexture || impl->bitmap || impl->frame.bitmap;
+    }
     bool DesktopBackdrop::Running() const { return impl->duplication != nullptr || impl->captureSession != nullptr; }
     HMONITOR DesktopBackdrop::Monitor() const { return impl->monitor; }
     const BackdropFrame& DesktopBackdrop::Frame() const { return impl->frame; }

@@ -103,6 +103,7 @@ namespace
         {
         case Kind::Weather: Paint::Weather(context.Get(), snapshot, environment, frame.regions, width, height, interaction); break;
         case Kind::Traffic: Paint::Traffic(context.Get(), snapshot, environment, frame.regions, width, height, interaction); break;
+        case Kind::AiUsage: Paint::AiUsage(context.Get(), snapshot, environment, frame.regions, width, height, interaction); break;
         case Kind::Device: Paint::Device(context.Get(), snapshot, environment, frame.regions, width, height, interaction); break;
         case Kind::Media: Paint::Media(context.Get(), snapshot, coverTransition, {}, environment, frame.regions, width, height, interaction); break;
         case Kind::PeripheralBattery: Paint::PeripheralBattery(context.Get(), snapshot, environment, frame.regions, width, height, interaction, peripheralPage); break;
@@ -352,6 +353,21 @@ namespace
             snapshot.traffic.days.push_back(day);
         }
         snapshot.traffic.today = snapshot.traffic.selectedDate = snapshot.traffic.days.back().date;
+        snapshot.aiUsage.providerId = L"codex";
+        snapshot.aiUsage.providerName = L"ChatGPT";
+        snapshot.aiUsage.enabledServices[L"openai"] = true;
+        snapshot.aiUsage.providers = {{L"codex", L"ChatGPT", L"subscription", L"openai"}};
+        snapshot.aiUsage.quotas = {{L"primary", L"5 hours", 10, 300, 1800000000},
+            {L"weekly", L"Weekly", 19, 10080, 1800000000}};
+        SYSTEMTIME now{}; GetLocalTime(&now);
+        const std::chrono::sys_days today = std::chrono::year{now.wYear}/std::chrono::month{now.wMonth}/std::chrono::day{now.wDay};
+        for (int i = 0; i < 84; ++i)
+        {
+            if (i % 7 == 2) continue;
+            const std::chrono::year_month_day date{today - std::chrono::days{i}};
+            wchar_t key[16]{}; swprintf_s(key, L"%04d-%02u-%02u", int(date.year()), unsigned(date.month()), unsigned(date.day()));
+            snapshot.aiUsage.days[key] = i % 3 == 0 ? 0 : 1000;
+        }
         const wchar_t* peripheralKinds[] = {L"mouse", L"keyboard", L"earbuds", L"headset", L"gamepad", L"pen", L"unknown"};
         for (int i = 0; i < 7; ++i)
         {
@@ -909,7 +925,8 @@ void TestCardRenderingStability(Cards::Graphics& graphics)
     // Automatic snapshot delivery with unchanged visible data must be pixel-stable.
     ++revised.weather.revision; ++revised.traffic.revision; ++revised.audio.revision;
     ++revised.media.revision; ++revised.lyrics.revision; ++revised.update.revision; ++revised.peripheralBattery.revision;
-    const Kind kinds[] = {Kind::Weather, Kind::Device, Kind::Media, Kind::Traffic, Kind::Update, Kind::PeripheralBattery};
+    ++revised.aiUsage.revision;
+    const Kind kinds[] = {Kind::Weather, Kind::Device, Kind::Media, Kind::Traffic, Kind::Update, Kind::PeripheralBattery, Kind::AiUsage};
     for (bool dark : {false, true})
     for (float dpi : {1.0f, 1.25f, 1.5f, 2.0f})
     for (float fit : {1.0f, 0.93f})
@@ -935,6 +952,16 @@ void TestCardRenderingStability(Cards::Graphics& graphics)
             const auto baseline = Render(graphics, kind, snapshot, dark, scale, origin);
             const auto kindLabel = Label(kind, scale, dark, origin);
             Compare(baseline, Render(graphics, kind, revised, dark, scale, origin), scale, kindLabel + " repeat/revision");
+            if (kind == Kind::AiUsage)
+            {
+                Paint::Interaction glass;
+                glass.glass = true; glass.dark = dark;
+                const auto reflected = Render(graphics, kind, snapshot, dark, scale, origin, glass);
+                Compare(reflected, Render(graphics, kind, revised, dark, scale, origin, glass), scale,
+                    kindLabel + " glass repeat/revision");
+                Compare(reflected, Render(graphics, kind, snapshot, dark, scale, {17, 29}, glass), scale,
+                    kindLabel + " glass atlas translation", {}, 1);
+            }
             for (const auto offset : {D2D1::Point2F(17, 29), D2D1::Point2F(111, 7)})
             {
                 const auto translated = Render(graphics, kind, snapshot, dark, scale, offset);
@@ -949,7 +976,8 @@ void TestCardRenderingStability(Cards::Graphics& graphics)
 
             const std::vector<int> ids = kind == Kind::Device ? std::vector<int>{200, 201, 202} :
                 kind == Kind::Media ? std::vector<int>{100} : kind == Kind::Traffic ? std::vector<int>{340} :
-                kind == Kind::Weather ? std::vector<int>{400} : kind == Kind::PeripheralBattery ? std::vector<int>{600, 601, 603} : std::vector<int>{500};
+                kind == Kind::Weather ? std::vector<int>{400} : kind == Kind::PeripheralBattery ? std::vector<int>{600, 601, 603} :
+                kind == Kind::AiUsage ? std::vector<int>{700, 701} : std::vector<int>{500};
             for (int id : ids)
             {
                 const auto* region = baseline.regions.Find(id);

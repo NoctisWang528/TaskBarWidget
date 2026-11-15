@@ -42,7 +42,9 @@ if ($Mode -eq 'Measure') {
     $launch.ArgumentList = @('--liquid-glass')
 }
 $process = Start-Process @launch
-if (-not $process.WaitForExit(45000)) { Stop-Process -Id $process.Id; throw 'Isolated card probe did not exit in 45 seconds.' }
+# Regression includes real five-second hidden-GPU deadlines for both startup
+# prewarm and a shown/closed card group, alongside the existing render checks.
+if (-not $process.WaitForExit(75000)) { Stop-Process -Id $process.Id; throw 'Isolated card probe did not exit in 75 seconds.' }
 $process.Refresh()
 Get-Content -LiteralPath $launch.RedirectStandardOutput
 Get-Content -LiteralPath $launch.RedirectStandardError

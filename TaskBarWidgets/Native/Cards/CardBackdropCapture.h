@@ -58,6 +58,9 @@ namespace Cards
         // Clears all owned images/sessions, retaining LastResult for diagnostics
         // and the content-free cross-adapter device (released on failure/destruction).
         void Stop();
+        // Full idle/device-loss teardown, including the content-free cached
+        // cross-adapter device that ordinary hide/reopen keeps briefly warm.
+        void Release();
         bool Running() const;
         HMONITOR Monitor() const;
         // Borrowed, mutable content, not a snapshot. Do not retain bitmap copies
@@ -67,6 +70,7 @@ namespace Cards
         HRESULT LastResult() const;
         const wchar_t* Diagnostic() const;
         bool CrossAdapter() const;
+        bool HasResources() const;
 
     private:
         struct Impl;
