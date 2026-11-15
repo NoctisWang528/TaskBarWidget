@@ -258,25 +258,24 @@ namespace Cards
         void AddMoon(ID2D1DeviceContext* context, const WeatherPalette& palette, float cx, float cy, float radius)
         {
             const auto brush = Solid(context, palette.moon);
-            if (!brush || !IconFactory(context)) return;
+            const auto factory = IconFactory(context);
+            if (!brush || !factory) return;
+            ComPtr<ID2D1EllipseGeometry> disc;
+            ComPtr<ID2D1EllipseGeometry> cutout;
+            if (FAILED(factory->CreateEllipseGeometry(
+                D2D1::Ellipse(D2D1::Point2F(cx, cy), radius, radius), disc.GetAddressOf()))) return;
+            const float inner = 0.88f * radius;
+            if (FAILED(factory->CreateEllipseGeometry(
+                D2D1::Ellipse(D2D1::Point2F(cx + 0.42f * radius, cy - 0.34f * radius), inner, inner),
+                cutout.GetAddressOf()))) return;
             ComPtr<ID2D1PathGeometry> geometry;
             ComPtr<ID2D1GeometrySink> sink;
-            if (FAILED(IconFactory(context)->CreatePathGeometry(geometry.GetAddressOf()))) return;
+            if (FAILED(factory->CreatePathGeometry(geometry.GetAddressOf()))) return;
             if (FAILED(geometry->Open(sink.GetAddressOf()))) return;
-            // Alternate fill: the outer disc minus an offset inner disc forms the
-            // crescent. Both figures are closed so the subtraction is exact.
-            sink->SetFillMode(D2D1_FILL_MODE_ALTERNATE);
-            sink->BeginFigure(D2D1::Point2F(cx - radius, cy), D2D1_FIGURE_BEGIN_FILLED);
-            AddArc(sink.Get(), D2D1::Point2F(cx + radius, cy), radius, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_LARGE);
-            AddArc(sink.Get(), D2D1::Point2F(cx - radius, cy), radius, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_LARGE);
-            sink->EndFigure(D2D1_FIGURE_END_CLOSED);
-            const float inner = 0.88f * radius;
-            const float ix = cx + 0.42f * radius;
-            const float iy = cy - 0.34f * radius;
-            sink->BeginFigure(D2D1::Point2F(ix - inner, iy), D2D1_FIGURE_BEGIN_FILLED);
-            AddArc(sink.Get(), D2D1::Point2F(ix + inner, iy), inner, D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE, D2D1_ARC_SIZE_LARGE);
-            AddArc(sink.Get(), D2D1::Point2F(ix - inner, iy), inner, D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE, D2D1_ARC_SIZE_LARGE);
-            sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+            // Subtract the cutout; alternate fill would also paint its portion
+            // outside the moon disc, leaving an extra arc beside the crescent.
+            if (FAILED(disc->CombineWithGeometry(cutout.Get(), D2D1_COMBINE_MODE_EXCLUDE,
+                nullptr, sink.Get()))) return;
             if (FAILED(sink->Close())) return;
             context->FillGeometry(geometry.Get(), brush.Get());
         }
