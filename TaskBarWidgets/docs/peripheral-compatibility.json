@@ -4714,6 +4714,50 @@
       "hardwareValidated": false,
       "hardwareEvidence": "",
       "limit": "须用户启用厂商扩展，且对应厂商驱动已安装；不安装或启动厂商软件。"
+    },
+    {
+      "section": "vigil_watt",
+      "sourceProtocol": "vigil-razer-90b",
+      "identity": "1532:00E2",
+      "name": "Razer Basilisk V4 Pro",
+      "nativeAdapter": "PeripheralHost",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "91-byte Feature channel; strict response validation; charging may be unknown. Protocol implemented, pending TaskBarWidgets hardware verification."
+    },
+    {
+      "section": "vigil_watt",
+      "sourceProtocol": "vigil-razer-90b",
+      "identity": "1532:00E3",
+      "name": "Razer Basilisk V4 Pro receiver",
+      "nativeAdapter": "PeripheralHost",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "91-byte Feature channel; strict response validation; charging may be unknown. Protocol implemented, pending TaskBarWidgets hardware verification."
+    },
+    {
+      "section": "vigil_watt",
+      "sourceProtocol": "vigil-razer-90b",
+      "identity": "1532:00E5",
+      "name": "Razer Viper V4 Pro",
+      "nativeAdapter": "PeripheralHost",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "91-byte Feature channel; strict response validation; charging may be unknown. Protocol implemented, pending TaskBarWidgets hardware verification."
+    },
+    {
+      "section": "vigil_watt",
+      "sourceProtocol": "vigil-razer-90b",
+      "identity": "1532:00E6",
+      "name": "Razer Viper V4 Pro receiver",
+      "nativeAdapter": "PeripheralHost",
+      "status": "implemented",
+      "hardwareValidated": false,
+      "hardwareEvidence": "",
+      "limit": "91-byte Feature channel; strict response validation; charging may be unknown. Protocol implemented, pending TaskBarWidgets hardware verification."
     }
   ],
   "hardwareChecks": [
@@ -4772,5 +4816,46 @@
       "status": "identityOnly",
       "limit": "现有资料无法证明不可伪装的型号/服务身份；仅显示识别信息，不发送RFCOMM请求。"
     }
-  ]
+  ],
+  "vigilWatt": {
+    "source": "https://github.com/evren-oct/vigil-watt",
+    "commit": "4df830043296760f5d5c273f4cdc0ea9456c4bc7",
+    "license": "MIT",
+    "synchronization": "development-time pinned import; shipped with application",
+    "plugins": [
+      "Logitech.LogitechPlugin",
+      "Razer.RazerPlugin",
+      "Razer.RazerKrakenPlugin",
+      "Haute.HautePlugin",
+      "Sony.DualSensePlugin",
+      "Sony.InzoneH9Plugin",
+      "Ajazz.AjazzPlugin",
+      "Akg.AkgPlugin",
+      "Asus.AsusPlugin",
+      "Atk.AtkPlugin",
+      "Aula.AulaG9Plugin",
+      "Aula.AulaPlugin",
+      "Betop.BetopPlugin",
+      "Cherry.CherryPlugin",
+      "Darkrim.DarkrimPlugin",
+      "Delux.DeluxPlugin",
+      "Eweadn.EweadnPlugin",
+      "GameSir.GameSirPlugin",
+      "Ganss.GanssPlugin",
+      "Hecate.HecatePlugin",
+      "Hecate.HecateWirelessPlugin",
+      "HyperX.HyperXPlugin",
+      "Inphic.InphicPlugin",
+      "Lingbao.LingbaoPlugin",
+      "Mchose.MchoseA5Plugin",
+      "Mchose.MchosePlugin",
+      "Mojhon.MojhonPlugin",
+      "Pulsar.PulsarPlugin",
+      "Rapoo.RapooPlugin",
+      "Thunderobot.ThunderobotPlugin",
+      "Vgn.VgnPlugin"
+    ],
+    "hardwareValidated": false,
+    "note": "The registry lists integrated protocol plugins, not proof that every product or firmware is supported. Admission also requires matching interface capabilities and validated replies. Existing hardwareChecks describe earlier native-provider observations only."
+  }
 }

@@ -111,7 +111,7 @@ internal sealed class AirPodsAdvertisementProvider : IPeripheralBatteryProvider
                 ? endpoint.Name[..^10] : endpoint.Name;
             var state = !endpoint.Present || endpoint.Connected == false ? "disconnected"
                 : endpoint.Connected == true ? "online" : "unavailable";
-            var device = previous with { Name = name, Kind = models[0] is 0x200a or 0x201f or 0x202d ? "headset" : "earbuds",
+            var device = previous with { Identity = WindowsPeripheralIdentity.Evidence(group), NameQuality = 40, KindQuality = 50, Name = name, Kind = models[0] is 0x200a or 0x201f or 0x202d ? "headset" : "earbuds",
                 Brand = "apple", Connection = "bluetooth", State = state, CanRead = true,
                 Source = "apple-ble-proximity", Compatibility = "implemented",
                 Stale = previous.UpdatedAt.HasValue && (previous.Stale || state != "online") };

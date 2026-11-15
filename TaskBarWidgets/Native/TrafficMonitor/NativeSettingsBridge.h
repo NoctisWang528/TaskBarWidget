@@ -5,6 +5,9 @@
 #include "TaskbarHelper.h"
 #include "auto_start_helper.h"
 #include "../Builtins/Weather/WeatherService.h"
+#include "../Builtins/Peripherals/PeripheralTaskbar.h"
+#include "../Builtins/Peripherals/PeripheralAliasesJson.h"
+#include "SettingsHelper.h"
 #include <winrt/Windows.Data.Json.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <functional>
@@ -255,14 +258,48 @@ public:
             SetStartup(true);
             return;
         }
-        for(const auto& pair:values)
+        bool migratedOrder = false;
+        const auto& aliases = PeripheralTaskbar::Provider::Instance().Aliases();
+        for (const auto& pair : values)
         {
-            auto found=std::find_if(fields.begin(),fields.end(),[&](const Field& field){return field.descriptor.GetNamedString(L"key")==pair.Key();});
+            const std::wstring key = pair.Key().c_str();
+            migratedOrder |= key.ends_with(L".order") && PeripheralTaskbar::CanonicalSettingKey(aliases, key) != key;
+        }
+        auto canonicalValues = PeripheralTaskbar::CanonicalSettingsValues(aliases, values, items.size() + aliases.size());
+        if (migratedOrder)
+        {
+            // A full draft from before deduplication can contain ranks above
+            // today's item count. Preserve relative order, then close the gaps.
+            std::vector<std::pair<double, size_t>> requested;
+            for (size_t index = 0; index < items.size(); ++index)
+            {
+                const auto key = L"items." + items[index].StableId() + L".order";
+                double rank = ranks[index];
+                if (canonicalValues.HasKey(key))
+                {
+                    const auto input = canonicalValues.GetNamedValue(key);
+                    if (input.ValueType() != JsonValueType::Number ||
+                        !NativeSettingsValidation::Integer(input.GetNumber(), 1,
+                            static_cast<int>(items.size() + aliases.size()))) Invalid();
+                    rank = input.GetNumber();
+                }
+                requested.emplace_back(rank, index);
+            }
+            std::stable_sort(requested.begin(), requested.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+            for (size_t rank = 0; rank < requested.size(); ++rank)
+                canonicalValues.SetNamedValue(L"items." + items[requested[rank].second].StableId() + L".order",
+                    JsonValue::CreateNumberValue(static_cast<double>(rank + 1)));
+        }
+        for (const auto& pair : canonicalValues)
+        {
+            const std::wstring key = pair.Key().c_str();
+            auto found=std::find_if(fields.begin(),fields.end(),[&](const Field& field){return field.descriptor.GetNamedString(L"key")==key;});
             if(found==fields.end()) throw std::invalid_argument("Unknown setting key; reload the settings page.");
             found->set(pair.Value());
         }
         std::vector<int> order(items.size()); std::iota(order.begin(),order.end(),0);
         std::stable_sort(order.begin(),order.end(),[this](int left,int right){return ranks[left]<ranks[right];}); taskbar.item_order.SetOrder(order); taskbar.show_tool_tip=false;
+        CSettingsHelper::CanonicalizePeripheralItems(taskbar);
         taskbar.SetTaskabrTransparent(transparent);
         if(!taskbar.disable_d2d && !CTaskBarDlgDrawCommonSupport::CheckSupport()) throw std::invalid_argument("Direct2D is unavailable on this system.");
         auto previous=theApp.m_cfg_data; theApp.m_cfg_data=config;

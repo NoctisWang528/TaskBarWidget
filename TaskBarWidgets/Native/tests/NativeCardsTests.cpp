@@ -401,6 +401,7 @@ struct Services : Cards::CardHostServices
 void WriteTrafficPreviews(Cards::Graphics& graphics, const wchar_t* directory);
 void WritePeripheralPreviews(Cards::Graphics& graphics, const wchar_t* directory);
 void TestCardRenderingStability(Cards::Graphics& graphics);
+void TestPeripheralAliasesAndLayout(Cards::Graphics& graphics);
 void TestMediaRedraw(Cards::CardEnvironment environment);
 void TestCardMaterials(Cards::CardEnvironment environment, const Cards::Snapshot& snapshot);
 void TestLiquidGlassRendering(Cards::Graphics& graphics,
@@ -435,7 +436,7 @@ static void CheckCardPaging(Cards::CardEnvironment environment)
         device.batteries.push_back({L"main", count * 10, L"", false, false});
         fixture.peripheralBattery.devices.push_back(device);
         Require(Paint::MeasureHeight(Kind::PeripheralBattery, fixture, environment, 384) ==
-            88 + std::min(count, 4) * 50, "detailed height follows visible row count");
+            88 + std::min(count, 4) * 50, "detailed height follows visible rows");
     }
     Require(Paint::MeasureHeight(Kind::PeripheralBattery, fixture, environment, 384, 1) == 138,
         "five-device last page has no three-row blank space");
@@ -462,7 +463,7 @@ static void CheckCardPaging(Cards::CardEnvironment environment)
     Require(peripheral.PeripheralPage() == 1 && peripheral.MeasuredHeightDip() == 138 &&
         peripheral.PageTransitionRunning(), "tail page resizes and starts Composition transition");
     for (const auto& region : peripheral.Regions().All())
-        Require(region.bounds.bottom <= 138, "tail-page controls stay inside compact height");
+        Require(region.bounds.bottom <= 138, "tail-page controls stay inside measured height");
     peripheral.TurnPage(-1); peripheral.TurnPage(1);
     const auto paints = peripheral.ContentPaintCount();
     Require(PumpFor(260, peripheral.Handle()) == 0 && !peripheral.PageTransitionRunning() &&
@@ -535,6 +536,7 @@ static void CheckPeripheralBattery(Cards::CardEnvironment environment)
     Require(Protocol::ApplySnapshot(snapshot, LR"({"peripheralBattery":{"version":1,"revision":10,"devices":[]}})", repeated) &&
         !repeated.peripheralBattery && state.devices.size() == 7, "duplicate peripheral revision cannot repaint or clear readings");
     Require(!Protocol::ApplyPeripheralBatteryReply(state, LR"({"version":1,"revision":9,"devices":[]})") &&
+        !Protocol::ApplyPeripheralBatteryReply(state, LR"({"version":3,"revision":11,"devices":[]})") &&
         !Protocol::ApplyPeripheralBatteryReply(state, LR"({"version":2,"revision":11,"devices":[]})") &&
         !Protocol::ApplyPeripheralBatteryReply(state, LR"({"version":1,"devices":[]})"), "reject stale, unsupported and missing revisions");
     auto invalid = state;
@@ -546,7 +548,7 @@ static void CheckPeripheralBattery(Cards::CardEnvironment environment)
     Require(Protocol::ApplyPeripheralBatteryReply(reset.peripheralBattery, LR"({"version":1,"revision":0,"devices":[]})"),
         "connection reset accepts restarted revision counter");
     Require(Layout::WidthDip(Kind::PeripheralBattery) == 384 &&
-        Paint::MeasureHeight(Kind::PeripheralBattery, snapshot, environment, 384) == 184, "compact native shape");
+        Paint::MeasureHeight(Kind::PeripheralBattery, snapshot, environment, 384) == 184, "compact natural shape");
 
     Services services;
     CardWindow card(Kind::PeripheralBattery, services);
@@ -590,6 +592,7 @@ static void CheckPeripheralBattery(Cards::CardEnvironment environment)
         const POINT point{x + (r.left + r.right) / 2, y + (r.top + r.bottom) / 2};
         card.OnPointer(WM_LBUTTONDOWN, point, true); card.OnPointer(WM_LBUTTONUP, point, false);
     };
+    Require(!card.Regions().Find(604), "removed attribution has no pointer, keyboard or UI Automation region");
     click(610);
     Require(services.action.empty(), "clicking a battery reading never dispatches an unsupported card action");
     click(603);
@@ -816,6 +819,17 @@ int wmain(int argc, wchar_t** argv)
     try
     {
         winrt::init_apartment(winrt::apartment_type::single_threaded);
+        if (argc == 2 && (wcscmp(argv[1], L"--peripheral-aliases") == 0 || wcscmp(argv[1], L"--render-check") == 0))
+        {
+            {
+                Cards::Graphics graphics;
+                Require(graphics.Initialize(), "offscreen fixture graphics initialization");
+                if (wcscmp(argv[1], L"--render-check") == 0) TestCardRenderingStability(graphics);
+                else TestPeripheralAliasesAndLayout(graphics);
+            }
+            winrt::uninit_apartment();
+            return 0;
+        }
         if (argc == 3 && (wcscmp(argv[1], L"--traffic-preview") == 0 || wcscmp(argv[1], L"--peripheral-preview") == 0))
         {
             {
@@ -958,6 +972,7 @@ int wmain(int argc, wchar_t** argv)
             Cards::CardEnvironment environment;
             environment.graphics = &graphics; environment.compositor = compositor; environment.device = device;
             environment.reducedMotion = true;
+            TestPeripheralAliasesAndLayout(graphics);
             TestCardMaterials(environment, snapshot);
             CheckCardPaging(environment);
             CheckPeripheralBattery(environment);

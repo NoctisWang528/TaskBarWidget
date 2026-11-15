@@ -1608,13 +1608,6 @@ namespace Cards
             client.Request(L"openSettings", "{\"page\":\"hardware\"}");
             return;
         }
-        else if (action == L"openWeatherProvider" || action == L"openWeatherAttribution")
-        {
-            const wchar_t* url = action == L"openWeatherProvider" ? L"https://www.qweather.com/"
-                : L"https://developer.qweather.com/attribution.html";
-            ShellExecuteW(window, L"open", url, nullptr, nullptr, SW_SHOWNORMAL);
-            return;
-        }
         else if (action == L"installUpdate" || action == L"downloadUpdate" ||
             action == L"cancelUpdateDownload")
         {

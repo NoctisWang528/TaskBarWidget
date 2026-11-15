@@ -2,6 +2,7 @@
 #include "CardProtocol.h"
 #include "CardText.h"
 #include "../TrafficMonitor/NativeMediaJson.h"
+#include "../Builtins/Peripherals/PeripheralAliasesJson.h"
 
 #include <winrt/Windows.Data.Json.h>
 
@@ -447,23 +448,37 @@ namespace Cards::Protocol
 
         bool PeripheralFrom(const JsonObject& object, PeripheralBatteryState& target)
         {
-            if (!object || Number(object, L"version", -1) != 1) return false;
+            if (!object) return false;
+            PeripheralTaskbar::AliasMap aliases;
+            try { aliases = PeripheralTaskbar::MergeAliases(target.aliases, PeripheralTaskbar::ReadAliases(object)); }
+            catch (...) { return false; }
             const double revision = Number(object, L"revision", -1);
             if (revision < 0 || revision > 9007199254740991.0 || std::floor(revision) != revision ||
                 revision <= target.revision) return false;
             PeripheralBatteryState state;
+            state.aliases = aliases;
             state.revision = static_cast<long long>(revision);
             state.mode = Text(object, L"mode") == L"detailed" ? L"detailed" : L"compact";
             state.hideDisconnected = Boolean(object, L"hideDisconnected");
             state.refreshing = Boolean(object, L"refreshing");
             state.error = Text(object, L"error");
-            if (const auto devices = Array(object, L"devices"))
+            const auto devices = Array(object, L"devices");
+            if (!devices) return false;
+            if (devices.Size() > 1024) return false;
             for (const auto& entry : devices)
             {
                 if (entry.ValueType() != JsonValueType::Object) continue;
                 const auto item = entry.GetObject();
                 PeripheralDevice device;
                 device.id = Text(item, L"id");
+                if (Number(object, L"version", -1) == 2 && !PeripheralTaskbar::ValidId(device.id)) return false;
+                const auto canonicalId = PeripheralTaskbar::ResolveAlias(aliases, device.id);
+                if (Number(object, L"version", -1) == 2 || !aliases.empty())
+                {
+                    if (std::any_of(state.devices.begin(), state.devices.end(),
+                        [&](const auto& prior) { return prior.id == canonicalId; })) return false;
+                }
+                device.id = canonicalId;
                 if (device.id.empty() || std::any_of(state.devices.begin(), state.devices.end(),
                     [&](const auto& prior) { return prior.id == device.id; })) continue;
                 device.name = Text(item, L"name"); device.kind = Text(item, L"kind");

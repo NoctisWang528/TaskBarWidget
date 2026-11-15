@@ -159,7 +159,7 @@ namespace
         const size_t start = count ? std::min(static_cast<size_t>(std::max(0, weather.forecastOffset)) / pageSize,
             (count - 1) / pageSize) * pageSize : 0;
         require(previous->enabled == (start > 0) && next->enabled == (start + pageSize < count), "wrong page boundary");
-        require(regions.Find(402) && regions.Find(403), "fixed provider attribution actions lost");
+        require(!regions.Find(402) && !regions.Find(403) && !regions.Find(451), "removed weather branding and attribution regions returned");
         if (variant == 2)
         {
             require(regions.Find(440)->name.find(L"今天") == 0, "observation date not labeled today");

@@ -33,6 +33,8 @@ namespace Cards
         constexpr float PeripheralCompactStatusTop{ 139.0f };
         constexpr float PeripheralCompactStatusHeight{ 12.0f };
         constexpr float PeripheralFooterBottomGap{ 8.0f };
+        constexpr float PeripheralPagingTop(float height)
+        { return height - PeripheralFooterBottomGap - 24.f; }
         constexpr float CornerRadius{ 8.0f };
         constexpr float EdgeReserve{ 20.0f };
 

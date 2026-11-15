@@ -40,6 +40,7 @@ function Invoke-BuildCommand([string]$Name, [string]$Program, [string[]]$Argumen
 Push-Location $productRoot
 try {
     & (Join-Path $PSScriptRoot 'check-boundaries.ps1')
+    if ($Component -in @('All', 'Media')) { & (Join-Path $PSScriptRoot 'sync-vigil-watt.ps1') -Check }
     if ($Component -in @('All', 'Native')) {
         $versionDirectory = Join-Path $productRoot 'Native\Obj\ProductVersion'
         New-Item -ItemType Directory -Path $versionDirectory -Force | Out-Null
@@ -90,6 +91,7 @@ try {
         $managedVersion = @("-p:Version=$assemblyVersion", "-p:FileVersion=$fileVersion", "-p:InformationalVersion=$buildVersion", '-p:IncludeSourceRevisionInInformationalVersion=false')
         $managedVersion += @('-p:RollForward=LatestPatch')
         Invoke-BuildCommand 'publish-media' 'dotnet' (@('publish', 'Media/TaskBarWidgets.Media.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', 'false', '-o', (Join-Path $appDirectory 'Media'), '-p:BuildInParallel=false', '--verbosity', 'minimal') + $managedVersion)
+        Invoke-BuildCommand 'publish-peripheral-host' 'dotnet' (@('publish', 'PeripheralHost/TaskBarWidgets.PeripheralHost.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', 'false', '-o', (Join-Path $appDirectory 'Media/PeripheralHost'), '-p:BuildInParallel=false', '--verbosity', 'minimal') + $managedVersion)
         Invoke-BuildCommand 'publish-ui' 'dotnet' (@('publish', 'UI/TaskBarWidgets.UI.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', 'false', '-o', (Join-Path $appDirectory 'UI'), '-p:BuildInParallel=false', '--verbosity', 'minimal') + $managedVersion)
         # WinUI loads native DLLs from its own process directory, not the native owner's directory.
         $uiInstallation = $installation
@@ -125,7 +127,7 @@ try {
     Copy-Item -LiteralPath 'docs\peripheral-compatibility.csv', 'docs\peripheral-compatibility.json', 'docs\外设电量.md' -Destination $appDirectory -Force
     if ($Component -eq 'All') {
         & (Join-Path $PSScriptRoot 'check-runtime-layout.ps1') -Directory $appDirectory
-        foreach ($required in @('TaskBarWidgets.exe', 'TaskBarWidgets.Updater.exe', 'TaskBarWidgets.PeripheralProbe.exe', 'OpenHardwareMonitorApi.dll', 'LibreHardwareMonitorLib.dll', 'Media\TaskBarWidgets.Media.exe', 'UI\TaskBarWidgets.UI.exe', 'UI\TaskBarWidgets.UI.pri', 'UI\App.xbf')) {
+        foreach ($required in @('TaskBarWidgets.exe', 'TaskBarWidgets.Updater.exe', 'TaskBarWidgets.PeripheralProbe.exe', 'OpenHardwareMonitorApi.dll', 'LibreHardwareMonitorLib.dll', 'Media\TaskBarWidgets.Media.exe', 'Media\PeripheralHost\TaskBarWidgets.PeripheralHost.exe', 'UI\TaskBarWidgets.UI.exe', 'UI\TaskBarWidgets.UI.pri', 'UI\App.xbf')) {
             if (-not (Test-Path -LiteralPath (Join-Path $appDirectory $required))) { throw "Missing packaged file: $required" }
         }
     }

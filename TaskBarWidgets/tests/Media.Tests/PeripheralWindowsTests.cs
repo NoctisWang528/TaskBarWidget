@@ -61,7 +61,10 @@ public sealed class PeripheralWindowsTests
     {
         var pnp = Node();
         var nodes = new[] { pnp, Node("a", address: "112233445566"), Node("b", address: "aabbccddeeff") };
-        Assert.Equal("container:" + Container.ToString("D"), WindowsPeripheralIdentity.Key(pnp, nodes));
+        // The shared receiver node cannot identify either target or form a third device.
+        Assert.Null(WindowsPeripheralIdentity.Key(pnp, nodes));
+        Assert.Equal("bluetooth:112233445566", WindowsPeripheralIdentity.Key(nodes[1], nodes));
+        Assert.Equal("bluetooth:aabbccddeeff", WindowsPeripheralIdentity.Key(nodes[2], nodes));
     }
 
     [Fact]

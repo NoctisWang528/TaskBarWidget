@@ -137,6 +137,33 @@ Require(reading.Single().Batteries.Single().Percentage == 42, "Demand recovers a
 await provider.SuspendAsync();
 Console.WriteLine("Peripheral provider process contract passed: identity filtering, restart, demand cancellation, timeout, initialization journal, quarantine, extension discovery and broken-pipe suspension recovery.");
 
+var managedDirectory = Path.Combine(directory, "Media", "PeripheralHost");
+Directory.CreateDirectory(managedDirectory);
+File.Copy(Path.Combine(directory, "TaskBarWidgets.PeripheralProbe.exe"),
+    Path.Combine(managedDirectory, "TaskBarWidgets.PeripheralHost.exe"), true);
+var managedTranscript = Path.Combine(managedDirectory, "requests.jsonl");
+File.WriteAllText(managedTranscript, "");
+await using (var managed = new NativePeripheralBatteryProvider(directory, vigilWatt: true))
+{
+    var found = await managed.DiscoverAsync(default);
+    Require(found.Count == 2, "Full discovery inventories both fixture devices.");
+    var selected = found.Where(d => d.Name == "Synthetic first").Select(d => d.Id).ToHashSet();
+    Require(selected.Count == 1, "Select exactly one device for restart.");
+    await managed.SuspendAsync();
+    var offset = ReadTranscript(managedTranscript).Length;
+    var selectedReadings = await managed.ReadAsync(selected, new(), default);
+    Require(selectedReadings.Count == 1 && selectedReadings[0].Batteries.Single().Percentage == 42,
+        "Selected managed device remains readable after restart.");
+    foreach (var request in ReadTranscript(managedTranscript).Skip(offset).Select(Parse))
+    {
+        Require(request.GetProperty("deviceIds").EnumerateArray().Select(v => v.GetString()).SequenceEqual(["vigil:fixture:first"]),
+            "Restart discovery and reads must retain selected identities.");
+        Require(request.GetProperty("queryIds").EnumerateArray().Select(v => v.GetString()).SequenceEqual(["query:first"]),
+            "Restart discovery must retain the selected protocol child boundary.");
+    }
+}
+Console.WriteLine("Managed peripheral restart demand boundary passed.");
+
 static JsonElement Parse(string line) { using var document = JsonDocument.Parse(line); return document.RootElement.Clone(); }
 static string[] ReadTranscript(string file)
 {

@@ -3,8 +3,9 @@ $ErrorActionPreference = 'Stop'
 if (Test-Path -LiteralPath (Join-Path $Directory 'Runtime')) { throw 'Lightweight packages must not contain a private Runtime directory.' }
 $languages = @(Get-ChildItem -LiteralPath (Join-Path $Directory 'language') -File | Select-Object -ExpandProperty Name | Sort-Object)
 if (($languages -join ',') -ne 'English.ini,Simplified_Chinese.ini') { throw 'Unexpected native language resources.' }
-foreach ($component in @('Media','UI')) {
-    $config = Get-Content -LiteralPath (Join-Path $Directory "$component/TaskBarWidgets.$component.runtimeconfig.json") -Raw | ConvertFrom-Json
+foreach ($component in @('Media','UI','Media/PeripheralHost')) {
+    $assemblyName = Split-Path $component -Leaf
+    $config = Get-Content -LiteralPath (Join-Path $Directory "$component/TaskBarWidgets.$assemblyName.runtimeconfig.json") -Raw | ConvertFrom-Json
     $frameworks = @($config.runtimeOptions.frameworks) + @($config.runtimeOptions.framework)
     $frameworks = @($frameworks | Where-Object { $null -ne $_ })
     if (-not ($frameworks | Where-Object name -EQ 'Microsoft.NETCore.App')) { throw "$component does not declare shared .NET." }
@@ -21,7 +22,7 @@ foreach ($component in @('Media','UI')) {
         if ($resource.Directory.Name -notmatch '^(en(?:-.+)?|zh|zh-Hans|zh-CN|zh-SG)$') { throw "Unexpected translation: $($resource.Name)" }
     }
 }
-foreach ($file in @('TaskBarWidgets.Updater.exe','TaskBarWidgets.PeripheralProbe.exe','Dependencies/HeadsetControl/headsetcontrol.exe','Dependencies/HeadsetControl/LICENSE','Dependencies/HeadsetControl/HeadsetControl-4.1.0-source.zip','Media/TaskBarWidgets.Media.dll','UI/TaskBarWidgets.UI.dll','UI/TaskBarWidgets.UI.pri','UI/App.xbf','UI/Microsoft.WindowsAppRuntime.Bootstrap.dll')) {
+foreach ($file in @('Media/PeripheralHost/TaskBarWidgets.PeripheralHost.exe','Media/PeripheralHost/TaskBarWidgets.PeripheralHost.dll','TaskBarWidgets.Updater.exe','TaskBarWidgets.PeripheralProbe.exe','Dependencies/HeadsetControl/headsetcontrol.exe','Dependencies/HeadsetControl/LICENSE','Dependencies/HeadsetControl/HeadsetControl-4.1.0-source.zip','Media/TaskBarWidgets.Media.dll','UI/TaskBarWidgets.UI.dll','UI/TaskBarWidgets.UI.pri','UI/App.xbf','UI/Microsoft.WindowsAppRuntime.Bootstrap.dll')) {
     if (-not (Test-Path -LiteralPath (Join-Path $Directory $file) -PathType Leaf)) { throw "Missing required application component: $file" }
 }
 Write-Host 'Shared .NET / Windows App Runtime package layout verified; no bundled runtime.'

@@ -114,7 +114,10 @@ internal sealed partial class WindowsPeripheralBatteryProvider : IPeripheralBatt
     internal static PeripheralDeviceSnapshot Apply(PeripheralDeviceSnapshot previous,
         IEnumerable<(string Key, PeripheralBatteryReading Reading)> readings, string source, DateTimeOffset now)
     {
-        var batteries = WindowsPeripheralIdentity.Roles(readings);
+        var batteries = source == "windows-pnp"
+            ? readings.Where(v => v.Reading.Percentage.HasValue).OrderBy(v => v.Key, StringComparer.Ordinal)
+                .Take(1).Select(v => v.Reading with { Role = "main" }).ToArray()
+            : WindowsPeripheralIdentity.Roles(readings);
         return HasValue(readings) ? previous with
         {
             Batteries = batteries, UpdatedAt = now, Stale = false, State = "online",
@@ -156,8 +159,9 @@ internal sealed partial class WindowsPeripheralBatteryProvider : IPeripheralBatt
                 .Select(n => n.Name).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n)) ?? "Peripheral";
             WindowsPeripheralHistory.Remember(_known, old with
             {
+                Identity = WindowsPeripheralIdentity.Evidence(group), NameQuality = 20, KindQuality = bt ? 20 : 10,
                 Name = name, Brand = PeripheralIdentity.Brand(name, string.Join(" ", group.Select(n => n.InstanceId))),
-                Kind = controllers.ContainsKey(id) ? "gamepad" : group.Select(n => n.Kind).FirstOrDefault(k => k != "unknown") ?? "unknown",
+                Kind = controllers.ContainsKey(id) ? "gamepad" : group.OrderByDescending(n => n.Bluetooth && !n.Pnp).ThenBy(n => n.Kind == "mouse" ? 0 : n.Kind == "keyboard" ? 1 : 2).Select(n => n.Kind).FirstOrDefault(k => k != "unknown") ?? "unknown",
                 Connection = bt ? "bluetooth" : "usb", CanRead = readable,
                 State = disconnected || !group.Any(n => n.Present) ? "disconnected" : connected ? "online" : "unavailable",
                 Source = old.Source.Length > 0 ? old.Source : "windows", Compatibility = readable ? "implemented" : "identityOnly",

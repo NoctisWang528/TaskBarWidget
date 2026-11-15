@@ -1,0 +1,258 @@
+--- a/src/VigilWatt.Core/Plugins/Logitech/LogitechPlugin.cs
++++ b/src/VigilWatt.Core/Plugins/Logitech/LogitechPlugin.cs
+@@ -15,6 +15,9 @@
+ /// </summary>
+ public sealed class LogitechPlugin : BatteryPluginBase, IBatteryPlugin
+ {
++    public override bool HostIsCandidate(HidDeviceInfo info) =>
++        IsCenturionCandidate(info) || IsHidppInterface(info);
++
+     public const ushort LogitechVid = 0x046D;
+     public const ushort HidppUsagePage = 0xFF43;
+ 
+@@ -92,11 +95,11 @@
+     {
+         public required DeviceStatus Status;
+         public byte ProtocolMajor = 2;
++        public byte InfoFeatureIdx;
+         public byte? UnifiedBatteryIdx;     // 0x1004 的 feature index
+         public byte? BatteryStatusIdx;      // 0x1000 的 feature index
+         public byte? BatteryVoltageIdx;     // 0x1001
+         public byte? AdcMeasurementIdx;     // 0x1F20
+-        public byte? UnifiedWorkingFunc;    // 已验证可用的 Unified Battery func（0 或 1）
+         public int? RegisterBattery;        // 1.0: 0x07 或 0x0D
+         public ushort? WirelessPid;         // 配对寄存器 WPID，供电压曲线覆盖
+         public int ConsecutiveFailures;
+@@ -135,12 +138,6 @@
+         _claims = claims;
+         var claimed = new List<DeviceStatus>();
+ 
+-        // 同 VID/PID 上按目录报文偏好跳过冗余接口（Bolt 跳短；Unifying 跳长）
+-        var hidppPeers = availableDevices
+-            .Where(IsHidppInterface)
+-            .Select(d => (d.VendorId, d.ProductId, d.OutputReportLength))
+-            .ToList();
+-
+         foreach (var info in availableDevices)
+         {
+             if (IsCenturionCandidate(info)) continue;
+@@ -148,19 +145,7 @@
+                 continue;
+             // 写入许可关闭：HID++ 的发现与读数全靠写帧，直接不认领（safety.md §3 规则 2）。
+             if (!WritesEnabled) continue;
+-            var pref = HidppCatalog.ReportPreference(info.ProductId);
+-            if (HidppCodec.ShouldSkipInterface(
+-                    info.VendorId, info.ProductId, info.OutputReportLength, hidppPeers, pref))
+-            {
+-                if (_sessions.TryRemove(info.DevicePath, out var skipped))
+-                {
+-                    StopListening(skipped);
+-                    skipped.Io?.Dispose();
+-                    claims.Release(info.DevicePath, Name);
+-                }
+-                Log.Info($"罗技跳过冗余接口（偏好={pref}）: {info}");
+-                continue;
+-            }
++            // Endpoint choice belongs to the parent, never to a VID/PID group.
+             if (!claims.TryClaim(info.DevicePath, Name))
+                 continue;
+ 
+@@ -192,7 +177,7 @@
+             if (session.Io != null)
+             {
+                 // 空接收器也要听通知，否则只能靠每分钟空槽超时发现设备。
+-                EnsureListening(session);
++                // No background notifications or implicit slot discovery in the host.
+                 DiscoverDevices(session);
+                 if (session.Devices.Count > 0)
+                     claimed.AddRange(session.Devices.Values.Select(d => d.Status));
+@@ -389,7 +374,10 @@
+         if (DeviceBlocklist.IsBlocked(SlotId(session, idx))) return;
+ 
+         var io = session.Io!;
+-        string name = ReadDeviceName(io, idx) ?? $"罗技设备 {idx}";
++        byte infoFeature = protocolMajor >= 2 ? ResolveFeature(io, idx, 0x0003) : (byte)0;
++        string targetUnit = infoFeature == 0 ? "" : ReadTargetUnit(io, idx, infoFeature);
++        string? targetName = ReadDeviceName(io, idx);
++        string name = targetName ?? $"Logitech device {idx}";
+         var kind = DeviceKind.Unknown;
+         ushort? wpid = null;
+         if (!session.DirectDevice &&
+@@ -397,12 +385,19 @@
+         {
+             kind = pairedKind;
+         }
++        int kindQuality = kind == DeviceKind.Unknown ? 0 : 50;
+         if (kind == DeviceKind.Unknown)
+             kind = DeviceKindGuesser.Guess(name);
+ 
+         var status = new DeviceStatus
+         {
+             Id = SlotId(session, idx),
++            HostSlot = idx.ToString(System.Globalization.CultureInfo.InvariantCulture),
++            HostUnitId = targetUnit.Length > 0 ? targetUnit : idx.ToString(System.Globalization.CultureInfo.InvariantCulture),
++            HostUnitScope = targetUnit.Length > 0 ? TaskBarWidgets.PeripheralHost.HidppIdentity.Scope : "endpoint",
++            HostIdentityVerified = targetUnit.Length > 0,
++            HostNameQuality = string.IsNullOrWhiteSpace(targetName) ? 0 : 50,
++            HostKindQuality = kindQuality,
+             Name = name,
+             Source = DeviceSource.Hid24G,
+             Kind = kind,
+@@ -412,6 +407,7 @@
+         {
+             Status = status,
+             ProtocolMajor = protocolMajor,
++            InfoFeatureIdx = infoFeature,
+             WirelessPid = wpid,
+         };
+         // 预解析电量 feature 下标，后台通知才能按 feature 匹配（不必等下一轮 Poll）
+@@ -542,6 +538,7 @@
+             // 发现只在 Attach / 通知补槽里做；此处再扫会把空接收器的超时翻倍
+             foreach (var (idx, dev) in session.Devices)
+             {
++                if (DeviceBlocklist.IsBlocked(SlotId(session, idx)) || !dev.Status.HostIdentityVerified) continue;
+                 try
+                 {
+                     // 熔断停写：退避期满前不再查询，期满放行一轮（递增退避口径见 Plugins/WriteBackoff.cs）
+@@ -552,7 +549,24 @@
+                         Log.Info($"罗技 {dev.Status.DisplayName} 停写退避期满（{WriteBackoff.For(dev.BreakerTrips).TotalSeconds:0} 秒），恢复查询");
+                     }
+ 
+-                    if (RefreshBattery(session, idx, dev))
++                    if (ReadTargetUnit(session.Io, idx, dev.InfoFeatureIdx) != dev.Status.HostUnitId)
++                    {
++                        dev.Status.BatteryPercent = null;
++                        dev.Status.Charging = ChargingState.Unknown;
++                        dev.Status.IsOnline = false;
++                        updated.Add(dev.Status);
++                        continue;
++                    }
++                    bool refreshed = RefreshBattery(session, idx, dev);
++                    if (ReadTargetUnit(session.Io, idx, dev.InfoFeatureIdx) != dev.Status.HostUnitId)
++                    {
++                        dev.Status.BatteryPercent = null;
++                        dev.Status.Charging = ChargingState.Unknown;
++                        dev.Status.IsOnline = false;
++                        updated.Add(dev.Status);
++                        continue;
++                    }
++                    if (refreshed)
+                     {
+                         updated.Add(dev.Status);
+                         dev.ConsecutiveFailures = 0;
+@@ -584,6 +598,10 @@
+         return updated;
+     }
+ 
++    private static string ReadTargetUnit(HidppIO io, byte slot, byte feature) => feature == 0 ? ""
++        : TaskBarWidgets.PeripheralHost.HidppIdentity.Parse(
++            io.Request(slot, HidppCodec.FeatureFunc(feature, 0), ReadOnlySpan<byte>.Empty) ?? []);
++
+     private bool RefreshBattery(ReceiverSession session, byte idx, DevEntry dev)
+     {
+         var io = session.Io!;
+@@ -591,50 +609,26 @@
+ 
+         if (dev.ProtocolMajor >= 2)
+         {
+-            // 1) Unified Battery 0x1004
+-            //    func 1 = GetStatus（电量% + 充电态）—— MX Master 3S 真机：90% / charging=1
+-            //    func 0 = GetCapabilities（档位能力），**不能当电量**（真机会被误读成 15%）
+-            //    优先 func 1；仅当 1 无响应时才回退 func 0（极旧固件）
++            // 0x1004 func 1 is status. Func 0 is capabilities, never a battery fallback.
+             var unifiedIdx = dev.UnifiedBatteryIdx ??= ResolveFeature(io, idx, 0x1004);
+             if (unifiedIdx != 0)
+             {
+-                byte[] funcs = dev.UnifiedWorkingFunc.HasValue
+-                    ? new byte[] { dev.UnifiedWorkingFunc.Value }
+-                    : new byte[] { 1, 0 };
+-                int? fallbackPct = null;
+-                ChargingState fallbackChg = ChargingState.Unknown;
+-                byte? fallbackFunc = null;
+-                foreach (byte func in funcs)
+-                {
+-                    var resp = io.Request(idx, HidppCodec.FeatureFunc(unifiedIdx, func), ReadOnlySpan<byte>.Empty);
+-                    if (resp == null || !HidppCodec.TryParseBattery20(resp, out var pct, out var chg))
+-                        continue;
+-
+-                    // 已锁定工作 func：直接用
+-                    if (dev.UnifiedWorkingFunc.HasValue)
++                var capabilities = io.Request(idx, HidppCodec.FeatureFunc(unifiedIdx, 0), ReadOnlySpan<byte>.Empty);
++                if (capabilities is { Length: >= 4 } && (capabilities[3] & 2) != 0)
++                {
++                    var resp = io.Request(idx, HidppCodec.FeatureFunc(unifiedIdx, 1), ReadOnlySpan<byte>.Empty);
++                    if (resp is { Length: >= 6 } && resp[2] <= 100 && resp[4] <= 4)
+                     {
+-                        ApplyBattery(status, pct, chg);
++                        var charging = resp[4] switch
++                        {
++                            0 => ChargingState.Discharging,
++                            1 or 2 => ChargingState.Charging,
++                            3 => ChargingState.Discharging,
++                            _ => ChargingState.Unknown,
++                        };
++                        ApplyBattery(status, resp[2], charging);
+                         return true;
+                     }
+-
+-                    // 探测期：func 1 立即采信；func 0 只作回退候选
+-                    if (func == 1)
+-                    {
+-                        dev.UnifiedWorkingFunc = 1;
+-                        ApplyBattery(status, pct, chg);
+-                        return true;
+-                    }
+-
+-                    fallbackPct = pct;
+-                    fallbackChg = chg;
+-                    fallbackFunc = 0;
+-                }
+-
+-                if (fallbackPct.HasValue)
+-                {
+-                    dev.UnifiedWorkingFunc = fallbackFunc;
+-                    ApplyBattery(status, fallbackPct.Value, fallbackChg);
+-                    return true;
+                 }
+             }
+ 
+@@ -659,7 +653,7 @@
+                 if (resp != null &&
+                     HidppCodec.TryParseBatteryVoltage(resp, curve, out var pct, out var chg, out _))
+                 {
+-                    ApplyBattery(status, pct, chg);
++                    ApplyBattery(status, pct, chg, estimated: true);
+                     return true;
+                 }
+             }
+@@ -673,7 +667,7 @@
+                 if (resp != null &&
+                     HidppCodec.TryParseAdcMeasurement(resp, curve, out var pct, out var chg, out _))
+                 {
+-                    ApplyBattery(status, pct, chg);
++                    ApplyBattery(status, pct, chg, estimated: true);
+                     return true;
+                 }
+             }
+@@ -708,7 +702,7 @@
+                 else // 0x0D：只有档位
+                 {
+                     var (percent, state) = MapTierBattery(resp[2], resp.Length >= 4 ? resp[3] : (byte)0);
+-                    ApplyBattery(status, percent, state);
++                    ApplyBattery(status, percent, state, estimated: true);
+                     return true;
+                 }
+             }
+@@ -718,10 +712,11 @@
+         return false;
+     }
+ 
+-    private static void ApplyBattery(DeviceStatus status, int percent, ChargingState charging)
++    private static void ApplyBattery(DeviceStatus status, int percent, ChargingState charging, bool estimated = false)
+     {
+         bool pctChanged = status.BatteryPercent != percent;
+         bool chgChanged = status.Charging != charging;
++        status.HostEstimated = estimated;
+         status.BatteryPercent = percent;
+         status.Charging = charging;
+         status.LastUpdated = DateTimeOffset.Now;

@@ -19,6 +19,7 @@
 #include <deque>
 #include <filesystem>
 #include <mutex>
+#include <set>
 #include <thread>
 #include <utility>
 
@@ -397,7 +398,13 @@ struct NativeMediaHost::Impl
         for (int index = 0; auto* item = provider.GetItem(index); ++index)
             if (theApp.m_taskbar_data.disp_str.GetConst(item) == item->GetItemLableText())
                 defaultLabels.push_back(item);
-        if (!provider.Apply(snapshot)) return;
+        std::set<std::wstring> selected;
+        for (const auto& item : theApp.m_taskbar_data.plugin_display_item.data())
+        {
+            const auto id = PeripheralTaskbar::DeviceId(item);
+            if (!id.empty()) selected.insert(id);
+        }
+        if (!provider.Apply(snapshot, selected)) return;
         theApp.m_plugins.SyncPeripheralItems();
         for (auto* item : defaultLabels)
             theApp.m_taskbar_data.disp_str.Get(item) = item->GetItemLableText();

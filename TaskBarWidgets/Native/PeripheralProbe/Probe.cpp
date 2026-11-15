@@ -131,8 +131,8 @@ bool IsBattery(const HIDP_VALUE_CAPS& f)
 }
 std::string UsbParentSerial(const Candidate& c)
 {
-    // Azoth HID serial metadata contains changing trailing bytes.
-    // Use the USB bus's unique instance serial, never trim or guess a prefix.
+    // Use only a USB bus instance explicitly marked unique within its VID/PID.
+    // HID serial strings can contain changing trailing bytes; never guess a prefix.
     HDEVINFO list = SetupDiCreateDeviceInfoList(nullptr, nullptr);
     if (list == INVALID_HANDLE_VALUE) return {};
     SP_DEVICE_INTERFACE_DATA iface{}; iface.cbSize = sizeof(iface);
@@ -233,6 +233,7 @@ bool Metadata(Channel& ch, bool descriptor)
     }
     if (ch.c.vid == 0x0b05 && (ch.c.pid == 0x1a83 || ch.c.pid == 0x1a85))
     { ch.c.hidSerial = ch.c.serial; ch.c.serial = UsbParentSerial(ch.c); }
+    ch.c.uniqueSerial = UsbParentSerial(ch.c);
     if (descriptor && NeedsDescriptor(ch.c.vid, ch.c.pid))
     {
         ch.c.layout = {};
@@ -557,15 +558,18 @@ public:
         return results;
     }
 };
-std::optional<Reading> Read(Channel& channel, yyjson_val* id, std::set<std::string>& initialized)
+std::optional<Reading> Read(Channel& channel, yyjson_val* id, std::set<std::string>& initialized, std::string& failure)
 {
     auto& c = channel.c;
-    if (c.protocol == Protocol::None || c.presentUnreadable || c.identityOnly) return {};
+    auto fail = [&](const char* reason) -> std::optional<Reading> { failure = reason; return {}; };
+    failure = "no-valid-battery-reply";
+    if (c.presentUnreadable) return fail("metadata-unavailable");
+    if (c.protocol == Protocol::None || c.identityOnly) return fail("identity-only");
     Event(id, "progress", c.identity);
     if (c.protocol == Protocol::OHub || c.protocol == Protocol::Gaia)
         return ReadSpecial(c, [&] { Event(id, "progress", c.identity); });
     Event(id, "progress", "hid-path:v1|" + c.path);
-    if (!Revalidate(channel)) return {};
+    if (!Revalidate(channel)) return fail("endpoint-revalidation-failed");
     if (IsSpecial(c.protocol)) return ReadSpecial(c, [&] { Event(id, "progress", "hid-path:v1|" + c.path); });
     if (c.protocol == Protocol::ExtraKeyboard)
         return extra_keyboard::Read(c, [&] { Event(id, "progress", "hid-path:v1|" + c.path); });
@@ -582,16 +586,16 @@ std::optional<Reading> Read(Channel& channel, yyjson_val* id, std::set<std::stri
         auto first = ReadStandard(channel);
         return first ? ReadStandard(channel) : std::nullopt;
     }
-    HidHandle hid(c.path); if (!hid.value) return {};
+    HidHandle hid(c.path); if (!hid.value) return fail("endpoint-open-failed");
     if (c.protocol == Protocol::Hidpp) return {}; // Routed separately: one receiver can return multiple units.
     bool once = OnceOnly(c.protocol), send = true;
     if (once)
     {
-        if (!initialized.count(c.identity) && initialized.size() >= 4096) return {};
+        if (!initialized.count(c.identity) && initialized.size() >= 4096) return fail("initialization-limit");
         send = BeginInitialization(initialized, c.identity, [&] { Event(id, "initialized", c.identity); });
     }
     auto query = BatteryQuery(c);
-    if (query.transport != Transport::Passive && !Drain(hid.value, c.input)) return {};
+    if (query.transport != Transport::Passive && !Drain(hid.value, c.input)) return fail("input-drain-failed");
     std::optional<Reading> result;
     for (unsigned round = 0; round < 2; ++round)
     {
@@ -599,12 +603,12 @@ std::optional<Reading> Read(Channel& channel, yyjson_val* id, std::set<std::stri
         auto next = Exchange(hid.value, c, 0, send && (!once || !round));
         if (!next) return {};
         if (next->state == "sleeping") return next;
-        if (result && result->peer != next->peer) return {};
+        if (result && result->peer != next->peer) return fail("target-changed-during-read");
         if (c.protocol == Protocol::Sonix || c.protocol == Protocol::Pelta)
         {
             Event(id, "progress", "hid-path:v1|" + c.path);
             auto charge = Exchange(hid.value, c, 1, true);
-            if (!charge || !charge->charging.has_value()) return {};
+            if (!charge || !charge->charging.has_value()) return fail("charging-reply-unconfirmed");
             next->charging = charge->charging;
         }
         result = next;
@@ -614,7 +618,25 @@ std::optional<Reading> Read(Channel& channel, yyjson_val* id, std::set<std::stri
 void Device(Response& response, yyjson_mut_val* devices, const Candidate& c, const std::optional<Reading>& reading, bool discovery, bool extensions = false)
 {
     auto d = response.doc; auto item = yyjson_mut_obj(d); yyjson_mut_arr_append(devices, item);
-    response.String(item, "identity", c.identity); response.String(item, "name", c.name.empty() ? "HID peripheral" : c.name);
+    response.String(item, "identity", c.identity);
+    const bool genericName = c.name.empty() || c.name == "Razer mouse" || c.name == "HID peripheral";
+    const auto name = genericName && !c.usbProduct.empty() ? c.usbProduct : c.name.empty() ? "HID peripheral" : c.name;
+    response.String(item, "name", name);
+    yyjson_mut_obj_add_int(d, item, "nameQuality", c.protocol == Protocol::Hidpp && !c.unit.empty() ? 50 : genericName ? (c.usbProduct.empty() ? 0 : 40) : 30);
+    yyjson_mut_obj_add_int(d, item, "kindQuality", c.protocol == Protocol::Standard ? 10 : 40);
+    auto evidence = yyjson_mut_obj(d); yyjson_mut_obj_add_val(d, item, "identityEvidence", evidence);
+    response.String(evidence, "endpointPath", c.path);
+    response.String(evidence, "containerId", c.protocol == Protocol::Gaia ? "" : c.physical);
+    response.String(evidence, "bluetoothAddress", c.protocol == Protocol::Gaia ? c.physical : "");
+    // Receiver identities never become target serials. HID++ has a separately
+    // queried hardware unit/model identity, stable across receiver slots.
+    response.String(evidence, "unitId", c.unit);
+    response.String(evidence, "unitScope", c.unit.empty() ? "" : "logitech:hidpp-unit-model");
+    const bool targetContainer = c.protocol != Protocol::Hidpp && c.adapter != "rog_omni_keyboard";
+    yyjson_mut_obj_add_bool(d, evidence, "containerIsDevice", targetContainer);
+    const bool targetSerial = targetContainer && c.unit.empty() && !c.uniqueSerial.empty();
+    response.String(evidence, "uniqueSerial", targetSerial ? c.uniqueSerial : "");
+    response.String(evidence, "serialScope", targetSerial ? SerialScope(c) : "");
     auto legacy = LegacyIdentities(c);
     if (!legacy.empty())
     {
@@ -656,6 +678,18 @@ void Device(Response& response, yyjson_mut_val* devices, const Candidate& c, con
     if (yyjson_mut_arr_size(batteries)) response.String(item, "updatedAt", Now());
     else yyjson_mut_obj_add_val(d, item, "updatedAt", yyjson_mut_null(d));
 }
+void Diagnostic(Response& response, yyjson_mut_val* diagnostics, const Candidate& c, const char* state, const std::string& reason)
+{
+    auto entry = yyjson_mut_obj(response.doc); yyjson_mut_arr_append(diagnostics, entry);
+    response.String(entry, "identity", c.identity);
+    response.String(entry, "path", c.path);
+    response.String(entry, "protocol", c.adapter.empty() ? ProtocolName(c.protocol) : c.adapter);
+    response.String(entry, "state", state); response.String(entry, "reason", reason);
+    yyjson_mut_obj_add_uint(response.doc, entry, "vid", c.vid); yyjson_mut_obj_add_uint(response.doc, entry, "pid", c.pid);
+    yyjson_mut_obj_add_uint(response.doc, entry, "usagePage", c.page); yyjson_mut_obj_add_uint(response.doc, entry, "usage", c.usage);
+    yyjson_mut_obj_add_uint(response.doc, entry, "input", c.input); yyjson_mut_obj_add_uint(response.doc, entry, "output", c.output);
+    yyjson_mut_obj_add_uint(response.doc, entry, "feature", c.feature);
+}
 bool StringArray(yyjson_val* value, std::set<std::string>& result, size_t maximum)
 {
     if (!value) return true;
@@ -681,6 +715,7 @@ void Process(const std::string& line, std::vector<Channel>& channels, std::set<s
     auto id = yyjson_obj_get(root, "requestId");
     Response response(ValidId(id) ? id : nullptr);
     auto devices = yyjson_mut_arr(response.doc); yyjson_mut_obj_add_val(response.doc, response.root, "devices", devices);
+    auto diagnostics = yyjson_mut_arr(response.doc); yyjson_mut_obj_add_val(response.doc, response.root, "diagnostics", diagnostics);
     std::string error;
     try
     {
@@ -701,7 +736,12 @@ void Process(const std::string& line, std::vector<Channel>& channels, std::set<s
         if (op == "discover")
         {
             channels = Discover(id, excluded, channels);
-            for (const auto& ch : channels) Device(response, devices, ch.c, {}, true, extensions && yyjson_get_bool(extensions));
+            for (const auto& ch : channels)
+            {
+                Device(response, devices, ch.c, {}, true, extensions && yyjson_get_bool(extensions));
+                Diagnostic(response, diagnostics, ch.c, ch.c.presentUnreadable ? "unavailable" : "matched",
+                    ch.c.presentUnreadable ? "metadata-unavailable" : "descriptor-match");
+            }
         }
         else if (op == "read" || op == "identify")
         {
@@ -736,7 +776,8 @@ void Process(const std::string& line, std::vector<Channel>& channels, std::set<s
                 {
                     if (!routed)
                     {
-                        Candidate unknown; unknown.identity = identity; Device(response, devices, unknown, {}, false); continue;
+                        Candidate unknown; unknown.identity = identity; Device(response, devices, unknown, {}, false);
+                        Diagnostic(response, diagnostics, unknown, "unavailable", "endpoint-not-found"); continue;
                     }
                 }
                 Channel active = routed ? *routed : *found;
@@ -745,23 +786,40 @@ void Process(const std::string& line, std::vector<Channel>& channels, std::set<s
                 {
                     Event(id, "progress", "hid-path:v1|" + active.c.path);
                     std::vector<std::pair<Candidate, std::optional<Reading>>> results;
+                    std::string failure = "endpoint-revalidation-failed";
                     if (Revalidate(active))
                     {
                         HidHandle handle(active.c.path);
-                        if (handle.value) results = Hidpp(handle.value, [&] { Event(id, "progress", "hid-path:v1|" + active.c.path); }).Read(active.c, !identifying);
+                        failure = "endpoint-open-failed";
+                        if (handle.value)
+                        {
+                            results = Hidpp(handle.value, [&] { Event(id, "progress", "hid-path:v1|" + active.c.path); }).Read(active.c, !identifying);
+                            failure = "hidpp-unit-unconfirmed";
+                        }
                     }
-                    if (results.empty()) Device(response, devices, active.c, {}, false);
+                    if (results.empty())
+                    {
+                        Device(response, devices, active.c, {}, false);
+                        Diagnostic(response, diagnostics, active.c, "unavailable", failure);
+                    }
                     for (const auto& result : results)
                         if (!Excluded(excluded, result.first) && emitted.insert(result.first.identity).second)
+                        {
                             Device(response, devices, result.first, result.second, false);
+                            if (!identifying && !result.second)
+                                Diagnostic(response, diagnostics, result.first, "unavailable", "hidpp-battery-unconfirmed");
+                        }
                     continue;
                 }
                 if (active.c.protocol == Protocol::OHub && (!extensions || !yyjson_get_bool(extensions)))
                 {
-                    Device(response, devices, active.c, {}, false); continue;
+                    Device(response, devices, active.c, {}, false);
+                    Diagnostic(response, diagnostics, active.c, "unavailable", "vendor-extension-disabled"); continue;
                 }
-                auto reading = Read(active, id, initialized);
+                std::string failure;
+                auto reading = Read(active, id, initialized, failure);
                 Device(response, devices, active.c, reading, false, extensions && yyjson_get_bool(extensions));
+                if (!reading) Diagnostic(response, diagnostics, active.c, "unavailable", failure);
             }
         }
         else throw std::runtime_error("unknown-operation");

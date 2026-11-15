@@ -47,8 +47,15 @@ def main(executable):
         assert device["identity"] == "synthetic-untrusted-path"
         assert device["state"] == "unsupported" and not device["canRead"]
         assert device["batteries"] == [] and device["updatedAt"] is None
+        diagnostic, = reply["diagnostics"]
+        assert diagnostic["identity"] == device["identity"]
+        assert diagnostic["reason"] == "endpoint-not-found" and diagnostic["state"] == "unavailable"
+        assert diagnostic["path"] == ""  # Untrusted identity is never treated as a hardware path.
+        evidence = device["identityEvidence"]
+        assert evidence["uniqueSerial"] == evidence["serialScope"] == evidence["endpointPath"] == ""
         request["excludedIdentities"] = request["deviceIds"]
-        assert exchange(process, lines, request)["devices"] == []
+        excluded_reply = exchange(process, lines, request)
+        assert excluded_reply["devices"] == [] and excluded_reply["diagnostics"] == []
         for malformed in [b"{", b'{"version":1,"version":1,"requestId":7,"operation":"read"}',
                           b'{"version":2,"requestId":7,"operation":"read"}',
                           b'{"version":1,"requestId":7,"operation":"read","deviceIds":[7]}',

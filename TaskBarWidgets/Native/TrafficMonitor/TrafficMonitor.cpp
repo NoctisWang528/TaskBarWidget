@@ -314,6 +314,7 @@ void CTrafficMonitorApp::LoadConfig()
 
 bool CTrafficMonitorApp::SaveConfig()
 {
+    CSettingsHelper::CanonicalizePeripheralItems(m_taskbar_data);
     CSettingsHelper ini;
 
     //常规设置

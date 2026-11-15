@@ -326,7 +326,7 @@ namespace Cards::Paint
             regions.Add(std::move(reading));
         }
 
-        const float footer = heightDip - 24 - Layout::PeripheralFooterBottomGap;
+        const float footer = Layout::PeripheralPagingTop(heightDip);
         text(state.refreshing ? L"正在刷新…" : L"",
             10, palette.secondary, Draw::Rect(16, footer + 4, 220, footer + 22));
         const auto previous = Draw::Rect(widthDip - 156, footer, widthDip - 128, footer + 24);

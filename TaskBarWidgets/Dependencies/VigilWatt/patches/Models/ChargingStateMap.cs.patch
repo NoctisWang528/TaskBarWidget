@@ -1,0 +1,11 @@
+--- a/src/VigilWatt.Core/Models/ChargingStateMap.cs
++++ b/src/VigilWatt.Core/Models/ChargingStateMap.cs
+@@ -14,7 +14,7 @@
+     public static ChargingState FromChargingFlag(bool charging, int percent)
+     {
+         if (charging) return ChargingState.Charging;
+-        if (percent >= 100) return ChargingState.Full;
++        // Battery fullness does not imply that a charging cable is connected.
+         return ChargingState.Discharging;
+     }
+ }

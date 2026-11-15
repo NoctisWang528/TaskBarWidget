@@ -32,6 +32,9 @@ public:
     void LoadTaskbarWndColors(const wchar_t* AppName, const wchar_t* KeyName, std::map<CommonDisplayItem, TaskbarItemColor>& text_colors, COLORREF default_color);
     void SaveTaskbarWndColors(const wchar_t* AppName, const wchar_t* KeyName, const std::map<CommonDisplayItem, TaskbarItemColor>& text_colors);
     void LoadPeripheralTaskbarItem(IPluginItem* item, TaskBarSettingData& data);
+    void LoadPeripheralAliases();
+    void MigratePeripheralConfig();
+    static void CanonicalizePeripheralItems(TaskBarSettingData& data);
 
     void LoadDisplayStr(const wchar_t* AppName, DispStrings& disp_str, bool is_main_window) const;
     void SaveDisplayStr(const wchar_t* AppName, const DispStrings& disp_str);

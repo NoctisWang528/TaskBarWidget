@@ -1,0 +1,32 @@
+--- a/src/VigilWatt.Core/Models/DeviceStatus.cs
++++ b/src/VigilWatt.Core/Models/DeviceStatus.cs
+@@ -27,6 +27,15 @@
+     /// <summary>稳定唯一 ID：BLE 用蓝牙地址，2.4G 用 HID 路径哈希 + 设备索引。</summary>
+     public required string Id { get; init; }
+ 
++    // Protocol identity evidence, never substituted for independent endpoint identity.
++    public string? HostUnitId { get; init; }
++    public string? HostUnitScope { get; init; }
++    public int HostNameQuality { get; init; } = 30;
++    public int HostKindQuality { get; init; } = 50;
++    public bool HostEstimated { get; set; }
++    public bool HostIdentityVerified { get; init; } = true;
++    public string? HostSlot { get; init; }
++
+     public required string Name { get; set; }
+ 
+     public required DeviceSource Source { get; init; }
+@@ -55,6 +64,13 @@
+     public DeviceStatus Clone() => new()
+     {
+         Id = Id,
++        HostUnitId = HostUnitId,
++        HostUnitScope = HostUnitScope,
++        HostNameQuality = HostNameQuality,
++        HostKindQuality = HostKindQuality,
++        HostEstimated = HostEstimated,
++        HostIdentityVerified = HostIdentityVerified,
++        HostSlot = HostSlot,
+         Name = Name,
+         Source = Source,
+         Kind = Kind,

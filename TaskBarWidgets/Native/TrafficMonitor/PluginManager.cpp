@@ -36,21 +36,15 @@ static wstring WcharArrayToWString(const wchar_t* str)
 void CPluginManager::LoadPlugins()
 {
     if (!m_modules.empty()) return;
-    // Restore memory-only placeholders before loading settings. Media will supply
-    // names/readings later, including cached offline devices. No hardware access.
+    // Only actual taskbar selections grant startup placeholder membership.
+    // Dormant ordering/labels/colors are configuration, not discovery evidence.
     auto& peripherals = PeripheralTaskbar::Provider::Instance();
     peripherals.SetChinese(theApp.m_str_table.IsSimplifiedChinese() ||
         theApp.m_str_table.GetLanguageInfo().bcp_47 == L"zh-TW");
     CSettingsHelper ini;
+    ini.LoadPeripheralAliases();
     std::vector<std::wstring> saved;
-    CCommon::StringSplit(ini.GetString(L"task_bar", L"item_order_ids", L"") + L"," +
-        ini.GetString(L"task_bar", L"plugin_display_item", L""), L',', saved);
-    std::map<std::wstring, std::wstring> labels;
-    ini.GetAllKeyValues(L"plugin_display_str_taskbar_window", labels);
-    for (const auto& [id, label] : labels) saved.push_back(id);
-    std::map<std::wstring, std::wstring> colors;
-    ini.GetAllKeyValues(L"task_bar_task_bar_text_color_peripherals", colors);
-    for (const auto& [key, value] : colors) saved.push_back(key.substr(0, key.find(L'.')));
+    CCommon::StringSplit(ini.GetString(L"task_bar", L"plugin_display_item", L""), L',', saved);
     for (auto id : saved)
     {
         if (id.starts_with(L"builtin_")) id.erase(0, 8);
@@ -92,31 +86,54 @@ void CPluginManager::LoadPlugins()
 bool CPluginManager::SyncPeripheralItems()
 {
     auto& provider = PeripheralTaskbar::Provider::Instance();
-    bool changed = false;
-    std::unique_ptr<CSettingsHelper> settings;
+    static PeripheralTaskbar::AliasMap syncedAliases;
+    bool changed = syncedAliases != provider.Aliases();
+    const auto savedOrder = theApp.m_taskbar_data.item_order.ToStableString();
+    std::vector<IPluginItem*> added;
     for (int index = 0; auto* item = provider.GetItem(index); ++index)
     {
-        if (m_plguin_item_map.find(item) != m_plguin_item_map.end()) continue;
-        m_plugins.push_back(item);
-        m_plguin_item_map[item] = &provider;
-        m_all_display_items_with_plugins.insert(item);
+        if (m_plguin_item_map.find(item) == m_plguin_item_map.end())
+        {
+            m_plugins.push_back(item);
+            m_plguin_item_map[item] = &provider;
+            added.push_back(item);
+            changed = true;
+        }
+        changed |= m_all_display_items_with_plugins.insert(item).second;
         for (auto& module : m_modules)
-            if (module.plugin == &provider) module.plugin_items.push_back(item);
-        if (!settings) settings = std::make_unique<CSettingsHelper>();
-        settings->LoadPeripheralTaskbarItem(item, theApp.m_taskbar_data);
-        changed = true;
+            if (module.plugin == &provider && std::find(module.plugin_items.begin(), module.plugin_items.end(), item) == module.plugin_items.end())
+                module.plugin_items.push_back(item);
     }
+    // Keep m_plugins and its indices stable: CommonDisplayItem's ordered maps
+    // compare by those indices, including maps held by open settings drafts.
+    for (auto it = m_all_display_items_with_plugins.begin(); it != m_all_display_items_with_plugins.end();)
+    {
+        if (it->IsPlugin() && !provider.Active(it->PluginItem()))
+        { it = m_all_display_items_with_plugins.erase(it); changed = true; }
+        else ++it;
+    }
+    for (auto& module : m_modules)
+        if (module.plugin == &provider) std::erase_if(module.plugin_items, [&](auto* item) { return !provider.Active(item); });
     if (changed)
     {
+        CSettingsHelper settings;
         theApp.m_taskbar_data.item_order.Init();
+        // Rebuild against today's active set, then restore the captured order;
+        // otherwise registration/removal normalization can move unrelated slots.
+        theApp.m_taskbar_data.item_order.FromStableString(
+            PeripheralTaskbar::CanonicalList(provider.Aliases(), savedOrder));
+        CSettingsHelper::CanonicalizePeripheralItems(theApp.m_taskbar_data);
+        for (auto* item : added) settings.LoadPeripheralTaskbarItem(item, theApp.m_taskbar_data);
         theApp.m_taskbar_default_style.RegisterPeripheralItems();
+        if (!provider.Aliases().empty()) theApp.SaveConfig();
+        syncedAliases = provider.Aliases();
     }
     return changed;
 }
 
 const std::vector<IPluginItem*>& CPluginManager::GetPluginItems() const
 {
-    return m_plugins;
+    return m_plugins; // Historical indices remain valid; presentation enumerators filter retired items.
 }
 
 const std::vector<CPluginManager::PluginInfo>& CPluginManager::GetPlugins() const
@@ -126,9 +143,10 @@ const std::vector<CPluginManager::PluginInfo>& CPluginManager::GetPlugins() cons
 
 IPluginItem* CPluginManager::GetItemById(const std::wstring& item_id)
 {
+    const auto canonical = PeripheralTaskbar::CanonicalItemId(PeripheralTaskbar::Provider::Instance().Aliases(), item_id);
     for (const auto& item : m_plugins)
     {
-        if (item->GetItemId() == item_id)
+        if (item->GetItemId() == canonical)
             return item;
     }
     return nullptr;
@@ -183,7 +201,7 @@ void CPluginManager::EnumPluginItem(std::function<void(IPluginItem*)> func) cons
 {
     for (const auto& item : m_plugins)
     {
-        if (item != nullptr)
+        if (item != nullptr && PeripheralTaskbar::Provider::Instance().Active(item))
         {
             func(item);
         }

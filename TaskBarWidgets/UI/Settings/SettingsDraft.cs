@@ -9,6 +9,68 @@ internal sealed class SettingsDraft
     private readonly Dictionary<string, JsonNode?> _base = new(StringComparer.Ordinal);
     private readonly Dictionary<string, long> _revisions = new(StringComparer.Ordinal);
     private long _revision;
+    private readonly Dictionary<string, string> _peripheralAliases = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (long Revision, bool Visible)> _peripheralVisibilityEdits = new(StringComparer.Ordinal);
+
+    internal string PeripheralId(string id)
+    {
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        var current = id;
+        while (_peripheralAliases.TryGetValue(current, out var canonical))
+        {
+            if (!visited.Add(current)) return id;
+            current = canonical;
+        }
+        return current;
+    }
+
+    internal void SetPeripheralAliases(JsonObject snapshot)
+    {
+        if (snapshot["version"]?.ToString() != "2" || snapshot["aliases"] is not JsonObject aliases) return;
+        foreach (var pair in aliases)
+            if (ValidPeripheralId(pair.Key) && pair.Value is JsonValue value && value.TryGetValue<string>(out var id) &&
+                ValidPeripheralId(id) && pair.Key != id)
+                _peripheralAliases[pair.Key] = id;
+        var current = Get("peripheralBattery");
+        var hadEdits = Pending.ContainsKey("peripheralBattery") || _peripheralVisibilityEdits.Count > 0;
+        if (_base.TryGetValue("peripheralBattery", out var saved))
+            _base["peripheralBattery"] = NormalizePeripheral(saved);
+        if (current is not null)
+        {
+            // Even an edit reverted to the old saved value may win after identities merge.
+            var normalized = NormalizePeripheral(current, includeEdits: true);
+            // A save already in flight may still acknowledge the pre-migration object.
+            if (hadEdits && !JsonNode.DeepEquals(current, normalized)) SetNode("peripheralBattery", normalized);
+            else if (JsonNode.DeepEquals(_base.GetValueOrDefault("peripheralBattery"), normalized)) Pending.Remove("peripheralBattery");
+            else Pending["peripheralBattery"] = normalized;
+        }
+    }
+
+    private static bool ValidPeripheralId(string id) => id.Length == 32 && id.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
+
+    private JsonNode? NormalizePeripheral(JsonNode? node, bool includeEdits = false)
+    {
+        if (node is not JsonObject values) return node?.DeepClone();
+        var result = PeripheralSettingsDraft.Normalize(values, PeripheralId);
+        if (includeEdits && _peripheralVisibilityEdits.Count > 0)
+        {
+            var visibility = result["cardVisibility"] as JsonObject ?? new JsonObject();
+            foreach (var pair in _peripheralVisibilityEdits.OrderBy(pair => pair.Value.Revision))
+                visibility[PeripheralId(pair.Key)] = pair.Value.Visible;
+            if (visibility.Parent is null) result["cardVisibility"] = visibility;
+        }
+        return result;
+    }
+
+    internal void SetPeripheralVisible(string id, bool visible)
+    {
+        _peripheralVisibilityEdits[id] = (_revision + 1, visible);
+        var values = Get("peripheralBattery") as JsonObject ?? new JsonObject();
+        var visibility = values["cardVisibility"] as JsonObject ?? new JsonObject();
+        visibility[PeripheralId(id)] = visible;
+        if (visibility.Parent is null) values["cardVisibility"] = visibility;
+        SetNode("peripheralBattery", values);
+    }
     public Dictionary<string, JsonNode?> Pending { get; } = new(StringComparer.Ordinal);
     public IEnumerable<string> Keys => _base.Keys;
     public JsonNode? Get(string key) => (Pending.TryGetValue(key, out var draft) ? draft : _base.GetValueOrDefault(key))?.DeepClone();
@@ -20,6 +82,7 @@ internal sealed class SettingsDraft
     public void Set(string key, object? value) => SetNode(key, JsonSerializer.SerializeToNode(value));
     public void SetNode(string key, JsonNode? value)
     {
+        if (key == "peripheralBattery") value = NormalizePeripheral(value, includeEdits: true);
         _revisions[key] = ++_revision;
         if (JsonNode.DeepEquals(_base.GetValueOrDefault(key), value)) Pending.Remove(key);
         else Pending[key] = value?.DeepClone();
@@ -30,8 +93,12 @@ internal sealed class SettingsDraft
         var newer = saved is null ? new Dictionary<string, JsonNode?>() : _revisions
             .Where(pair => pair.Value > saved.Revision).ToDictionary(pair => pair.Key, pair => Get(pair.Key), StringComparer.Ordinal);
         if (preservePending) foreach (var pair in Pending) newer.TryAdd(pair.Key, pair.Value?.DeepClone());
+        foreach (var id in _peripheralVisibilityEdits.Keys.ToArray())
+            if (!(saved is not null && _peripheralVisibilityEdits[id].Revision > saved.Revision) &&
+                !(preservePending && Pending.ContainsKey("peripheralBattery")))
+                _peripheralVisibilityEdits.Remove(id);
         _base.Clear();
-        foreach (var pair in values) _base[pair.Key] = pair.Value?.DeepClone();
+        foreach (var pair in values) _base[pair.Key] = pair.Key == "peripheralBattery" ? NormalizePeripheral(pair.Value) : pair.Value?.DeepClone();
         Pending.Clear();
         foreach (var pair in newer) SetNode(pair.Key, pair.Value);
     }
@@ -43,16 +110,42 @@ internal sealed record DisplayModule(string Id, string Name, string Sample, bool
 // All peripheral edits use the existing revisioned, global Apply draft.
 internal sealed class PeripheralSettingsDraft(SettingsDraft draft)
 {
+    internal static JsonObject Normalize(JsonObject values, Func<string, string> canonicalId)
+    {
+        var result = (JsonObject)values.DeepClone();
+        if (values["order"] is JsonArray order)
+            result["order"] = JsonSerializer.SerializeToNode(order.OfType<JsonValue>()
+                .Select(value => value.TryGetValue<string>(out var id) ? id : "")
+                .Where(id => id.Length > 0).Select(canonicalId).Distinct(StringComparer.Ordinal).ToArray());
+        if (values["cardVisibility"] is JsonObject visibility)
+        {
+            var merged = new JsonObject();
+            foreach (var group in visibility.Where(pair => pair.Value is JsonValue value && value.TryGetValue<bool>(out _))
+                .GroupBy(pair => canonicalId(pair.Key), StringComparer.Ordinal).OrderBy(group => group.Key, StringComparer.Ordinal))
+            {
+                // Explicit canonical wins; otherwise any explicit false wins.
+                merged[group.Key] = visibility[group.Key] is JsonValue value && value.TryGetValue<bool>(out var enabled)
+                    ? enabled : group.All(pair => pair.Value!.GetValue<bool>());
+            }
+            result["cardVisibility"] = merged;
+        }
+        return result;
+    }
+
     // Polling charge/state changes must not reload the taskbar editor's schema.
-    public static string InventoryKey(JsonObject snapshot) => JsonSerializer.Serialize(
-        (snapshot["devices"] as JsonArray ?? []).OfType<JsonObject>()
+    public static string InventoryKey(JsonObject snapshot) => JsonSerializer.Serialize(new
+    {
+        Aliases = (snapshot["aliases"] as JsonObject ?? new JsonObject())
+            .OrderBy(pair => pair.Key, StringComparer.Ordinal).Select(pair => new { pair.Key, Value = pair.Value?.ToString() }).ToArray(),
+        Devices = (snapshot["devices"] as JsonArray ?? []).OfType<JsonObject>()
             .OrderBy(device => device["id"]?.ToString(), StringComparer.Ordinal)
             .Select(device => new
             {
                 Id = device["id"]?.ToString(), Name = device["name"]?.ToString(), Kind = device["kind"]?.ToString(),
                 Roles = (device["batteries"] as JsonArray ?? []).OfType<JsonObject>()
                     .Select(battery => battery["role"]?.ToString()).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray()
-            }));
+            }).ToArray()
+    });
     public JsonObject Values => draft.Get("peripheralBattery") as JsonObject ?? new JsonObject();
     public bool Bool(string key) => Values[key] is JsonValue value && value.TryGetValue<bool>(out var result) && result;
     public string Mode => Values["mode"]?.ToString() == "detailed" ? "detailed" : "compact";
@@ -63,24 +156,18 @@ internal sealed class PeripheralSettingsDraft(SettingsDraft draft)
         draft.SetNode("peripheralBattery", values);
     }
     public bool Visible(string id, bool fallback) => Values["cardVisibility"] is JsonObject visibility &&
-        visibility[id] is JsonValue value && value.TryGetValue<bool>(out var enabled) ? enabled : fallback;
-    public void SetVisible(string id, bool visible)
-    {
-        var values = Values;
-        var visibility = values["cardVisibility"] as JsonObject ?? new JsonObject();
-        visibility[id] = visible;
-        if (visibility.Parent is null) values["cardVisibility"] = visibility;
-        draft.SetNode("peripheralBattery", values);
-    }
+        visibility[draft.PeripheralId(id)] is JsonValue value && value.TryGetValue<bool>(out var enabled) ? enabled : fallback;
+    public void SetVisible(string id, bool visible) => draft.SetPeripheralVisible(id, visible);
     public string[] Order(IEnumerable<string> inventory)
     {
         var saved = (Values["order"] as JsonArray ?? []).OfType<JsonValue>()
             .Select(value => value.TryGetValue<string>(out var id) ? id : "").Where(id => id.Length > 0);
-        return saved.Concat(inventory).Distinct(StringComparer.Ordinal).ToArray();
+        return saved.Concat(inventory).Select(draft.PeripheralId).Distinct(StringComparer.Ordinal).ToArray();
     }
     public void Reorder(IReadOnlyList<string> visibleOrder, string id, int gap)
     {
-        var moved = ReorderSequence.MoveToGap(visibleOrder, id, gap);
+        visibleOrder = visibleOrder.Select(draft.PeripheralId).Distinct(StringComparer.Ordinal).ToArray();
+        var moved = ReorderSequence.MoveToGap(visibleOrder, draft.PeripheralId(id), gap);
         // Keep remembered positions for devices missing from the current inventory.
         var full = Order(visibleOrder);
         var visible = visibleOrder.ToHashSet(StringComparer.Ordinal);

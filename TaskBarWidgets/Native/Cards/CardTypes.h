@@ -306,6 +306,7 @@ namespace Cards
         std::wstring mode{ L"compact" }, error;
         bool hideDisconnected{ false }, refreshing{ false };
         std::vector<PeripheralDevice> devices;
+        std::map<std::wstring, std::wstring> aliases; // Validated, flattened provenance from Media.
         std::vector<const PeripheralDevice*> Selected() const;
         int PageSize() const { return mode == L"detailed" ? 4 : 3; }
         int PageCount() const;

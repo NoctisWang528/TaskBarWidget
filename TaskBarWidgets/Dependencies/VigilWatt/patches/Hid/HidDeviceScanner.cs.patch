@@ -1,0 +1,10 @@
+--- a/src/VigilWatt.Core/Hid/HidDeviceScanner.cs
++++ b/src/VigilWatt.Core/Hid/HidDeviceScanner.cs
+@@ -47,6 +47,7 @@
+         {
+             foreach (var path in paths)
+             {
++                if (TaskBarWidgets.PeripheralHost.IoPolicy.IsExcluded(path)) continue;
+                 seen.Add(path);
+                 if (Cache.TryGetValue(path, out var cached))
+                 {

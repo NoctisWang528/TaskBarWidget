@@ -1,0 +1,85 @@
+--- a/src/VigilWatt.Core/Plugins/BatteryPluginBase.cs
++++ b/src/VigilWatt.Core/Plugins/BatteryPluginBase.cs
+@@ -14,6 +14,9 @@
+ public abstract class BatteryPluginBase : IBatteryPlugin
+ {
+     public abstract string Name { get; }
++
++    // Candidate matching is exposed only to the explicit host registry.
++    public virtual bool HostIsCandidate(HidDeviceInfo info) => IsCandidate(info);
+     public abstract string DisplayName { get; }
+     public abstract string DisplayNameEn { get; }
+ 
+@@ -242,7 +245,8 @@
+         }
+ 
+         // 同一物理设备的多接口合并：先释放被跳过的接口，否则它会一直留在列表里当第二行。
+-        var skipPaths = SkipPathsForThisPass(availableDevices);
++        // Host preserves every endpoint; pairing is decided by the parent from evidence.
++        var skipPaths = Array.Empty<string>();
+         var skipSet = new HashSet<string>(skipPaths, StringComparer.OrdinalIgnoreCase);
+         foreach (var path in skipSet)
+         {
+@@ -264,7 +268,7 @@
+             if (!IsCandidate(info)) continue;
+ 
+             // 永久移除的设备：连句柄都不开、帧也不发。只挡 Upsert 的话，插件照样会写帧。
+-            if (DeviceBlocklist.IsBlocked(IdFor(info.DevicePath)))
++            if (DeviceBlocklist.IsBlocked($"{Name.ToLowerInvariant()}:{PluginUtils.StableDeviceHash(info.DevicePath)}"))
+             {
+                 if (_devices.Remove(info.DevicePath, out var blocked))
+                 {
+@@ -418,9 +422,12 @@
+             // 设备 ID 可能由插件按物理身份算（读芯片 ID 会失败）：失败就当这一轮探测没成，
+             // 句柄与认领都要还回去，否则会留下一条没有 ID 的设备和一个占着接口的句柄。
+             string id;
++            string? unitId;
+             try
+             {
+-                id = BuildDeviceId(o.Handle!);
++                // Never invoke model-group IdFor overrides for endpoint identity.
++                id = $"{Name.ToLowerInvariant()}:{PluginUtils.StableDeviceHash(o.Info.DevicePath)}";
++                unitId = Name == "Haute42Gaming" ? BuildDeviceId(o.Handle!) : null;
+             }
+             catch (Exception ex)
+             {
+@@ -431,16 +438,6 @@
+                 continue;
+             }
+ 
+-            // 同一物理设备的另一条接口（插线后接收器 + 本体同时在场）：保留先认领的那条，
+-            // 后来的把句柄与认领都还回去，避免列表里出现两行矛盾读数。
+-            if (ExistingPathOfSameDevice(id, o.Info.DevicePath) is { } duplicateOf)
+-            {
+-                Log.Info($"{DisplayName} 同一设备的另一条接口已认领，释放: {o.Info.DevicePath}（同 {duplicateOf}）");
+-                o.Handle!.Dispose();
+-                _claims.Release(o.Info.DevicePath, Name);
+-                continue;
+-            }
+-
+             // 同一台设备在本轮里先下线又在新路径上认领回来（同轮重连）：只报新的一条，
+             // 别让上层看到"离线 → 在线"两条同 ID 的快照。
+             claimed.RemoveAll(d => string.Equals(d.Id, id, StringComparison.Ordinal));
+@@ -448,7 +445,11 @@
+             var status = new DeviceStatus
+             {
+                 Id = id,
++                HostUnitId = unitId,
++                HostUnitScope = Name == "Haute42Gaming" ? "adapter" : null,
+                 Name = BuildDisplayName(o.Info),
++                HostNameQuality = BuildDisplayName(o.Info).Equals(o.Info.Product, StringComparison.OrdinalIgnoreCase) ? 20 : 30,
++                HostEstimated = Name == "DualSense",
+                 Source = Source,
+                 Kind = ResolveKind(protocol),
+                 Protocol = protocol,
+@@ -465,8 +466,8 @@
+                 LastPassiveAt = status.IsOnline ? DateTimeOffset.Now : default,
+             };
+             _devices[o.Info.DevicePath] = dev;
+-            if (SupportsPassiveListen)
+-                StartPassiveListen(dev);
++            // Request-scoped host reads passive reports during ProbeAsync only.
++            // No listener may survive a response or empty demand.
+             Log.Info($"认领{DisplayName}设备: {o.Info} proto={protocol} 电量={percent} 充电={charging}");
+             claimed.Add(status);
+         }

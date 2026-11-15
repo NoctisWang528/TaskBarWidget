@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -29,6 +29,7 @@ public partial class App : System.Windows.Application
     private NativeCardBridge? _cards;
     private CardSnapshotBuilder? _cardSnapshot;
     private PeripheralBatteryService? _peripherals;
+    private HidPeripheralBatteryProvider? _hidPeripherals;
     private int _peripheralPublishPending;
     private AudioSnapshot? _lastAudio;
     private readonly SemaphoreSlim _audioRequests = new(1, 1);
@@ -136,9 +137,10 @@ public partial class App : System.Windows.Application
             };
             _pipe.Start();
             var peripheralCatalog = new WindowsPeripheralCatalog();
+            _hidPeripherals = new HidPeripheralBatteryProvider(applicationRoot);
             _peripherals = new PeripheralBatteryService(
-                [new NativePeripheralBatteryProvider(applicationRoot), new WindowsPeripheralBatteryProvider(peripheralCatalog, useControllers: true),
-                    new HeadsetControlProvider(applicationRoot), new AirPodsAdvertisementProvider(peripheralCatalog)],
+                [_hidPeripherals, new WindowsPeripheralBatteryProvider(peripheralCatalog, useControllers: true),
+                    new HeadsetControlProvider(applicationRoot, () => _hidPeripherals?.OwnedPaths ?? []), new AirPodsAdvertisementProvider(peripheralCatalog)],
                 Path.Combine(AppDataPaths.RootDirectory, "cache", "peripheral-batteries.json"));
             _peripherals.Changed += QueuePeripheralSnapshot;
             ApplyPeripheralDemand();
@@ -246,6 +248,8 @@ public partial class App : System.Windows.Application
             ? arguments : request;
         switch (action)
         {
+            case "getPeripheralDiagnostics": return new { report = PeripheralDiagnostics.Export(
+                salt => _peripherals?.ExportDiagnostics(salt) ?? "{}", _hidPeripherals?.Diagnostics ?? []) };
             case "getPeripheralBatteries": return _peripherals?.Snapshot ?? new PeripheralBatterySnapshot();
             case "refreshPeripheralBatteries":
                 _peripherals?.Refresh();
@@ -487,6 +491,8 @@ public partial class App : System.Windows.Application
         var payload = request.TryGetProperty("payload", out var body) ? body : default;
         switch (action)
         {
+            case "getPeripheralDiagnostics": return new { report = PeripheralDiagnostics.Export(
+                salt => _peripherals?.ExportDiagnostics(salt) ?? "{}", _hidPeripherals?.Diagnostics ?? []) };
             case "getPeripheralBatteries": return _peripherals?.Snapshot ?? new PeripheralBatterySnapshot();
             case "refreshPeripheralBatteries":
                 _peripherals?.Refresh();
@@ -659,7 +665,8 @@ public partial class App : System.Windows.Application
                 PreviewSettings,
                 RetrySpectrumCapture,
                 IsApplicationUsingLightTheme,
-                IsSystemUiUsingLightTheme);
+                IsSystemUiUsingLightTheme,
+                normalizePeripherals: values => _peripherals?.NormalizeSettings(values) ?? values.Clone());
         }
         return _settingsService;
     }
@@ -773,6 +780,7 @@ public partial class App : System.Windows.Application
     internal bool SaveSettings(AppSettings settings)
     {
         settings.UseFloatingWindow = false; settings.StartWithWindows = false; settings.AutoCheckUpdates = false;
+        settings.PeripheralBattery = _peripherals?.NormalizeSettings(settings.PeripheralBattery) ?? settings.PeripheralBattery.Clone();
         var updated = settings.Clone();
         if (_store?.Save(updated) != true) return false;
         Settings = updated;

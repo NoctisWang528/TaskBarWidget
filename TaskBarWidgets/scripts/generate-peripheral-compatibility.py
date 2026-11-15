@@ -126,6 +126,10 @@ output = dict(schemaVersion=2, sourceDatabaseVersion=179, hardwareValidated=Fals
                   dict(name="Beyerdynamic MMX 230 GAIA RFCOMM", status="identityOnly",
                        limit="现有资料无法证明不可伪装的型号/服务身份；仅显示识别信息，不发送RFCOMM请求。"),
               ])
+from peripheral_compatibility_vigil import append_vigil
+output = append_vigil(output, root)
+rows = output["devices"]
+
 destination = root / "docs"
 (destination / "peripheral-compatibility.json").write_text(json.dumps(output, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 with (destination / "peripheral-compatibility.csv").open("w", encoding="utf-8-sig", newline="") as stream:

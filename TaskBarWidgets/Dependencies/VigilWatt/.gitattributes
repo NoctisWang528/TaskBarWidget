@@ -1,0 +1,5 @@
+# Hash verification requires byte-identical checkouts, including on Windows.
+/upstream/** -text
+/Adapted/** -text
+/patches/** -text
+/source-manifest.json -text

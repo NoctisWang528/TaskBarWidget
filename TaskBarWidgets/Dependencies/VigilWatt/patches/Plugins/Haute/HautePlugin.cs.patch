@@ -1,0 +1,11 @@
+--- a/src/VigilWatt.Core/Plugins/Haute/HautePlugin.cs
++++ b/src/VigilWatt.Core/Plugins/Haute/HautePlugin.cs
+@@ -85,7 +85,7 @@
+             replacement = dev.Info.Open();
+             var firmware = replacement.GetFeature(HauteCodec.FirmwareReportId);
+             if (firmware == null || !HauteCodec.IsHauteFirmware(firmware)) return null;
+-            if (ReadDeviceId(replacement) != dev.Status.Id)
++            if (ReadDeviceId(replacement) != dev.Status.HostUnitId)
+             {
+                 Log.Warn("Haute 重开的接口属于另一接收器，保留原设备离线状态");
+                 RequestReprobe(dev);

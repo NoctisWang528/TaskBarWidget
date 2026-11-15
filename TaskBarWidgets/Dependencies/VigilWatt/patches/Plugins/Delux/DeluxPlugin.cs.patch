@@ -1,0 +1,105 @@
+--- a/src/VigilWatt.Core/Plugins/Delux/DeluxPlugin.cs
++++ b/src/VigilWatt.Core/Plugins/Delux/DeluxPlugin.cs
+@@ -1,3 +1,4 @@
++// Adapted from VigilWatt (MIT). Copyright (c) 2026 evren; see upstream/LICENSE.
+ using VigilWatt.Core.Hid;
+ using VigilWatt.Core.Models;
+ using VigilWatt.Core.Utils;
+@@ -27,6 +28,9 @@
+ 
+     /// <summary>探测只读状态帧，不发任何字节——不受写入开关约束。</summary>
+     protected override bool ProbeWrites => false;
++
++    // A validated dock status may know charging without a trustworthy percentage.
++    protected override bool NullPercentMeansOffline => false;
+ 
+     /// <summary>认领后后台只读 5 字节状态帧，电量/充电变化即时上报。</summary>
+     protected override bool SupportsPassiveListen => true;
+@@ -64,28 +68,58 @@
+     /// <summary>读数由后台被动监听负责；轮询不再占 ReadInput。</summary>
+     protected override (int? Percent, ChargingState Charging)? PollDevice(TrackedDevice _) => null;
+ 
+-    /// <summary>底座充电失真过滤：0x03 期间电量是装饰值，详见 <see cref="DockChargeFilter"/>。</summary>
+-    private readonly DockChargeFilter _dockFilter = new();
++    // Only filter state survives request-scoped plugin instances; no handles or listeners.
++    private sealed class DockState
++    {
++        public bool Charging;
++        public DateTimeOffset SettleUntil;
++        public DateTimeOffset LastSeen;
++    }
++    private static readonly Dictionary<string, DockState> DockStates = new(StringComparer.OrdinalIgnoreCase);
++    private static readonly object DockGate = new();
++    private const int MaximumDockStates = 512;
+ 
+-    /// <summary>解析 5 字节状态帧并过底座失真过滤器；非本协议帧返回 null。</summary>
++    internal static (int? Percent, ChargingState Charging)? FilterStatus(
++        string path, byte[] input, DateTimeOffset now)
++    {
++        if (!DeluxCodec.TryParse(input, out int percent, out _, out byte flag)
++            || flag is not (DeluxCodec.FlagDischarging or DeluxCodec.FlagCharging or DeluxCodec.FlagFull))
++            return null;
++        lock (DockGate)
++        {
++            if (!DockStates.TryGetValue(path, out var state))
++            {
++                if (DockStates.Count >= MaximumDockStates)
++                    DockStates.Remove(DockStates.MinBy(p => p.Value.LastSeen).Key);
++                DockStates[path] = state = new DockState();
++            }
++            state.LastSeen = now;
++            if (flag == DeluxCodec.FlagCharging)
++            {
++                state.Charging = true;
++                return (null, ChargingState.Charging);
++            }
++            if (flag == DeluxCodec.FlagFull)
++            {
++                state.Charging = false;
++                state.SettleUntil = default;
++                return (percent, ChargingState.Full);
++            }
++            if (state.Charging)
++            {
++                state.Charging = false;
++                state.SettleUntil = now + TimeSpan.FromSeconds(8);
++            }
++            return (now >= state.SettleUntil ? percent : null, ChargingState.Discharging);
++        }
++    }
++
+     protected override (int? Percent, ChargingState Charging, bool Offline)? TryParsePassiveInput(
+         TrackedDevice dev, byte[] input)
+-    {
+-        if (!DeluxCodec.TryParse(input, out int percent, out _, out byte chargeFlag)) return null;
++        => FilterStatus(dev.Info.DevicePath, input, DateTimeOffset.UtcNow) is { } status
++            ? (status.Percent, status.Charging, false) : null;
+ 
+-        _dockFilter.Seed(dev.Status.BatteryPercent);
+-        int filtered = _dockFilter.Apply(chargeFlag, percent, DateTimeOffset.Now);
+-        // 状态用过滤后的电量重新推导：避免保持值 <100 时仍显示"已充满"。
+-        var charging = chargeFlag == DeluxCodec.FlagFull
+-            ? ChargingState.Full
+-            : ChargingStateMap.FromChargingFlag(chargeFlag == DeluxCodec.FlagCharging, filtered);
+-
+-        Log.InfoOnChange($"delux-status:{dev.Status.Id}", $"{chargeFlag}|{percent}|{filtered}",
+-            $"DELUX 状态帧: 标志=0x{chargeFlag:X2} 电量={percent}% 上报={filtered}% 原始={Log.Hex(input)}");
+-        return (filtered, charging, Offline: false);
+-    }
+-
+-    private static async Task<(int Percent, ChargingState Charging)?> ListenStatusAsync(
++    private static async Task<(int? Percent, ChargingState Charging)?> ListenStatusAsync(
+         HidDeviceHandle handle, TimeSpan window)
+     {
+         var deadline = DateTime.UtcNow + window;
+@@ -96,8 +130,8 @@
+             if (slice <= TimeSpan.Zero) break;
+             var input = await handle.ReadInputAsync(slice).ConfigureAwait(false);
+             if (input == null) continue;
+-            if (DeluxCodec.TryParse(input, out int percent, out var charging, out _))
+-                return (percent, charging);
++            if (FilterStatus(handle.Info.DevicePath, input, DateTimeOffset.UtcNow) is { } status)
++                return status;
+         }
+         return null;
+     }

@@ -5,10 +5,12 @@ using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Media;
 using TaskBarWidgets.UI.Settings;
 using Windows.Foundation;
 using Windows.System;
+using Microsoft.Windows.Storage.Pickers;
 
 namespace TaskBarWidgets.UI;
 
@@ -20,6 +22,7 @@ public sealed partial class SettingsWindow
     private long _nativeSchemaVersion;
     private bool _peripheralSchemaReading;
     private string? _peripheralInventory;
+    private bool _peripheralDiagnosticsExporting;
     private PeripheralSettingsDraft PeripheralDraft => new(_media);
 
     private sealed class PeripheralBatterySession(DispatcherQueueTimer timer)
@@ -40,6 +43,7 @@ public sealed partial class SettingsWindow
         public Dictionary<string, PeripheralBatteryRow> Rows { get; } = new(StringComparer.Ordinal);
         public JsonObject Snapshot { get; set; } = new();
         public Button? Refresh { get; set; }
+        public Button? Export { get; set; }
         public bool Updating;
     }
 
@@ -87,7 +91,14 @@ public sealed partial class SettingsWindow
         page.Refresh = ActionButton("刷新设备", () => _peripheralSession is { } session
             ? ReadPeripheralBatteriesAsync(session, refresh: true) : Task.CompletedTask);
         AutomationProperties.SetAutomationId(page.Refresh, "peripheral-battery-refresh");
-        devices.Children.Add(page.Refresh);
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        actions.Children.Add(page.Refresh);
+        page.Export = ActionButton("导出诊断", ExportPeripheralDiagnosticsAsync);
+        AutomationProperties.SetAutomationId(page.Export, "peripheral-battery-export-diagnostics");
+        AutomationProperties.SetName(page.Export, "导出外设电量诊断");
+        page.Export.IsEnabled = !_peripheralDiagnosticsExporting && (_connection.IsConnected || ProbeRequestHandler is not null);
+        actions.Children.Add(page.Export);
+        devices.Children.Add(actions);
         AutomationProperties.SetAutomationId(page.Status, "peripheral-battery-status");
         devices.Children.Add(page.Status);
         AutomationProperties.SetAutomationId(page.Devices, "peripheral-battery-devices");
@@ -97,6 +108,14 @@ public sealed partial class SettingsWindow
         Toggle(extensions, "headsetControlEnabled", "启用 HeadsetControl", "为支持的耳机读取电量。");
         Toggle(extensions, "vendorExtensionsEnabled", "使用已安装的厂商服务");
         ToolTipService.SetToolTip(page.Options["vendorExtensionsEnabled"], "读取厂商服务提供的电量。");
+        var attribution = new TextBlock { FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4, 0, 4, 0) };
+        attribution.Inlines.Add(new Run { Text = "协议支持：" });
+        var project = new Hyperlink { NavigateUri = new Uri("https://github.com/evren-oct/vigil-watt") };
+        project.Inlines.Add(new Run { Text = "VigilWatt" });
+        AutomationProperties.SetName(project, "VigilWatt 项目主页");
+        attribution.Inlines.Add(project);
+        attribution.Inlines.Add(new Run { Text = " · 感谢开源贡献者" });
+        _page.Children.Add(attribution);
         UpdatePeripheralControls(page);
         page.Refresh.IsEnabled = _peripheralSession?.Reading == false && (_connection.IsConnected || ProbeRequestHandler is not null);
         UpdatePeripheralRows(page);
@@ -154,11 +173,13 @@ public sealed partial class SettingsWindow
             }
             var snapshot = await RequestAsync(refresh ? "refreshPeripheralBatteries" : "getPeripheralBatteries");
             if (!PeripheralRequestCurrent(page, generation, connection)) return;
-            if (snapshot["version"]?.ToString() != "1" || snapshot["devices"] is not JsonArray)
+            if (snapshot["version"]?.ToString() is not ("1" or "2") || snapshot["devices"] is not JsonArray)
                 throw new InvalidDataException("外设电量数据格式不受支持。");
             var revision = (long)Number(snapshot["revision"]);
             if (revision < page.Revision) return;
             page.Revision = revision;
+            _media.SetPeripheralAliases(snapshot);
+            UpdateSaveStatus();
             page.Snapshot = snapshot;
             if (_peripheralPage is { } view)
             {
@@ -182,6 +203,47 @@ public sealed partial class SettingsWindow
             {
                 page.Reading = false;
                 if (_peripheralPage?.Refresh is { } button) button.IsEnabled = true;
+            }
+        }
+    }
+
+    private async Task<string> ReadPeripheralDiagnosticsReportAsync()
+    {
+        var response = await RequestAsync("getPeripheralDiagnostics");
+        return response["report"] is JsonValue value && value.TryGetValue<string>(out var report) && !string.IsNullOrWhiteSpace(report)
+            ? report : throw new InvalidDataException("外设诊断数据格式不受支持。");
+    }
+
+    private async Task ExportPeripheralDiagnosticsAsync()
+    {
+        if (_peripheralDiagnosticsExporting || _closed) return;
+        _peripheralDiagnosticsExporting = true;
+        if (_peripheralPage?.Export is { } button) { button.IsEnabled = false; button.Content = "正在导出…"; }
+        try
+        {
+            var picker = new FileSavePicker(AppWindow.Id)
+            { SuggestedFileName = "peripheral-diagnostics", DefaultFileExtension = ".json" };
+            picker.FileTypeChoices.Add("JSON 文件", new List<string> { ".json" });
+            var file = await picker.PickSaveFileAsync();
+            if (file is null || _closed) return;
+            var report = await ReadPeripheralDiagnosticsReportAsync();
+            if (_closed) return;
+            // The service supplies redacted content, never an output path.
+            await File.WriteAllTextAsync(file.Path, report);
+            if (!_closed) ShowNotice("外设诊断已导出。", InfoBarSeverity.Success);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception)
+        {
+            if (!_closed) ShowError("导出外设诊断失败，请检查保存位置后重试。");
+        }
+        finally
+        {
+            _peripheralDiagnosticsExporting = false;
+            if (!_closed && _peripheralPage?.Export is { } export)
+            {
+                export.Content = "导出诊断";
+                export.IsEnabled = _connection.IsConnected || ProbeRequestHandler is not null;
             }
         }
     }
@@ -217,6 +279,7 @@ public sealed partial class SettingsWindow
         page.Reading = page.Subscribed = page.SubscriptionConfirmed = false;
         page.Revision = -1;
         if (_peripheralPage?.Refresh is { } button) button.IsEnabled = connected;
+        if (_peripheralPage?.Export is { } export) export.IsEnabled = connected && !_peripheralDiagnosticsExporting;
         if (connected)
         {
             _peripheralInventory = null;
@@ -253,9 +316,17 @@ public sealed partial class SettingsWindow
         finally { _peripheralSchemaReading = false; }
     }
 
-    private static IEnumerable<JsonObject> PeripheralDevices(JsonObject snapshot) =>
+    private IEnumerable<JsonObject> PeripheralDevices(JsonObject snapshot) =>
         (snapshot["devices"] as JsonArray ?? []).OfType<JsonObject>()
-            .Where(device => Text(device["id"]).Length > 0).DistinctBy(device => Text(device["id"]));
+            .Where(device => Text(device["id"]).Length > 0)
+            .OrderBy(device => Text(device["id"]) == _media.PeripheralId(Text(device["id"])) ? 0 : 1)
+            .ThenBy(device => Text(device["id"]), StringComparer.Ordinal)
+            .DistinctBy(device => _media.PeripheralId(Text(device["id"])))
+            .Select(device => {
+                var normalized = (JsonObject)device.DeepClone();
+                normalized["id"] = _media.PeripheralId(Text(device["id"]));
+                return normalized;
+            });
 
     private void UpdatePeripheralRows(PeripheralBatteryPage page)
     {

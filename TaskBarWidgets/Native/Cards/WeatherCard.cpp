@@ -199,9 +199,9 @@ namespace Cards::Paint
             }
             return text.empty() ? text : L"空气质量 · " + text;
         }
-        void Footer(ID2D1DeviceContext* context, const Snapshot& snapshot,
+        void StatusLine(ID2D1DeviceContext* context, const Snapshot& snapshot,
             const CardEnvironment& environment, float left, float top, float width,
-            Layout::Table& regions, const Interaction& interaction)
+            Layout::Table& regions)
         {
             auto& graphics = *environment.graphics;
             const auto palette = Draw::Colors(environment);
@@ -210,52 +210,6 @@ namespace Cards::Paint
                 Draw::Rect(left, top, left + width, top + 14));
             if (!status.empty()) Draw::AddText(regions, 450,
                 Draw::Rect(left, top, left + width, top + 14), status);
-            std::vector<std::wstring> lines;
-            bool qweatherLinks = false;
-            for (const auto* source : { &snapshot.weather.alertsAttribution, &snapshot.weather.airAttribution })
-            {
-                size_t start = 0;
-                while (start < source->size())
-                {
-                    const auto end = source->find(L'\n', start);
-                    auto line = source->substr(start, end == std::wstring::npos ? end : end - start);
-                    const auto first = std::find_if_not(line.begin(), line.end(), [](wchar_t c) { return std::iswspace(c); });
-                    const auto last = std::find_if_not(line.rbegin(), line.rend(), [](wchar_t c) { return std::iswspace(c); }).base();
-                    line = first < last ? std::wstring(first, last) : std::wstring{};
-                    if (line == L"https://developer.qweather.com/attribution.html") qweatherLinks = true;
-                    else if (HasValue(line) && std::find(lines.begin(), lines.end(), line) == lines.end())
-                        lines.push_back(std::move(line));
-                    if (end == std::wstring::npos) break;
-                    start = end + 1;
-                }
-            }
-            std::wstring text;
-            for (const auto& line : lines) text += (text.empty() ? L"" : L" · ") + line;
-            if (text.empty() && HasValue(snapshot.weather.provider)) text = snapshot.weather.provider;
-            const float rowTop = top + 15;
-            const float textRight = left + width - (qweatherLinks ? 120.0f : 0.0f);
-            Draw::Text(context, graphics, text, environment.fontFamily, 9, 400, palette.secondary,
-                Draw::Rect(left, rowTop, textRight, rowTop + 16));
-            if (!text.empty()) Draw::AddText(regions, 451,
-                Draw::Rect(left, rowTop, textRight, rowTop + 16), text);
-            if (qweatherLinks)
-            {
-                for (int i = 0; i < 2; ++i)
-                {
-                    const auto rect = Draw::Rect(left + width - 112 + i * 60, rowTop,
-                        left + width - 64 + i * 60, rowTop + 18);
-                    auto linkInteraction = interaction;
-                    linkInteraction.glass = false;
-                    Draw::ControlBackground(context, rect, 3, WithAlpha(palette.accent, 0), palette.accent,
-                        linkInteraction, 402 + i);
-                    Draw::Text(context, graphics, i ? L"数据来源" : L"和风天气", environment.fontFamily, 10, 400,
-                        environment.highContrast ? palette.primary : palette.accent, rect,
-                        DWRITE_TEXT_ALIGNMENT_LEADING, false, true);
-                    // Only fixed host actions; attribution text never becomes a URL.
-                    Draw::AddButton(regions, 402 + i, rect, i ? L"openWeatherAttribution" : L"openWeatherProvider",
-                        i ? L"数据来源" : L"和风天气");
-                }
-            }
         }
     }
 
@@ -333,7 +287,7 @@ namespace Cards::Paint
         DrawGlyph(context, Glyph::Refresh, WithAlpha(palette.primary, weather.updating ? 0.4f : 0.9f),
             right - 22, 22, 16);
 
-        Footer(context, snapshot, environment, left, heightDip - 48, width, regions, interaction);
+        StatusLine(context, snapshot, environment, left, heightDip - 48, width, regions);
         if (!HasWeather(weather))
         {
             const auto empty = EmptyText(weather);

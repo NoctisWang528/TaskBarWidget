@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <UseAppHost>true</UseAppHost>
+    <AssemblyName>TaskBarWidgets.PeripheralHost</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RollForward>LatestPatch</RollForward>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <VigilRoot>../Dependencies/VigilWatt</VigilRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="*.cs" />
+    <Compile Include="$(VigilRoot)/upstream/src/VigilWatt.Core/Hid/*.cs" Exclude="$(VigilRoot)/upstream/src/VigilWatt.Core/Hid/HidDeviceInfo.cs;$(VigilRoot)/upstream/src/VigilWatt.Core/Hid/HidDeviceScanner.cs" />
+    <Compile Include="$(VigilRoot)/upstream/src/VigilWatt.Core/Models/*.cs" Exclude="$(VigilRoot)/upstream/src/VigilWatt.Core/Models/DeviceStatus.cs;$(VigilRoot)/upstream/src/VigilWatt.Core/Models/ChargingStateMap.cs" />
+    <Compile Include="$(VigilRoot)/upstream/src/VigilWatt.Core/Plugins/**/*.cs"
+             Exclude="$(VigilRoot)/upstream/src/VigilWatt.Core/Plugins/BatteryPluginBase.cs;$(VigilRoot)/upstream/src/VigilWatt.Core/Plugins/PluginUtils.cs;$(VigilRoot)/upstream/src/VigilWatt.Core/Plugins/Logitech/LogitechPlugin.cs;$(VigilRoot)/upstream/src/VigilWatt.Core/Plugins/Razer/RazerPlugin.cs;$(VigilRoot)/upstream/src/VigilWatt.Core/Plugins/Razer/RazerCodec.cs;$(VigilRoot)/upstream/src/VigilWatt.Core/Plugins/Razer/RazerDeviceProfile.cs;$(VigilRoot)/upstream/src/VigilWatt.Core/Plugins/Haute/HautePlugin.cs;$(VigilRoot)/upstream/src/VigilWatt.Core/Plugins/Delux/DeluxPlugin.cs;$(VigilRoot)/upstream/src/VigilWatt.Core/Plugins/Asus/AsusPlugin.cs;$(VigilRoot)/upstream/src/VigilWatt.Core/Plugins/Atk/AtkPlugin.cs;$(VigilRoot)/upstream/src/VigilWatt.Core/Plugins/Logitech/HidppIO.cs" />
+    <Compile Include="$(VigilRoot)/Adapted/**/*.cs" />
+    <Compile Include="$(VigilRoot)/upstream/src/VigilWatt.Core/Utils/LogLevel.cs" />
+    <Compile Include="../tests/PeripheralHost.Tests/SelfTest.cs" Link="SelfTest.cs" />
+    <EmbeddedResource Include="$(VigilRoot)/upstream/src/VigilWatt.Core/Plugins/Logitech/logitech-hidpp.json"
+                      LogicalName="VigilWatt.Core.Plugins.Logitech.logitech-hidpp.json" />
+    <None Include="$(VigilRoot)/upstream/LICENSE" Link="licenses/VigilWatt-MIT.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

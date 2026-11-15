@@ -1,5 +1,6 @@
 #pragma once
 #include "PeripheralTaskbar.h"
+#include "PeripheralAliasesJson.h"
 #include <cmath>
 #include <stdexcept>
 #include <winrt/Windows.Data.Json.h>
@@ -10,11 +11,11 @@ namespace PeripheralTaskbar
     inline Snapshot ReadSnapshot(const winrt::Windows::Data::Json::JsonObject& object)
     {
         using namespace winrt::Windows::Data::Json;
-        if (object.GetNamedNumber(L"version") != 1) throw std::invalid_argument("Peripheral snapshot version.");
         const auto revision = object.GetNamedNumber(L"revision");
         if (!std::isfinite(revision) || revision < 0 || revision > 9007199254740991.0 || std::floor(revision) != revision)
             throw std::invalid_argument("Peripheral snapshot revision.");
         Snapshot result;
+        result.aliases = ReadAliases(object);
         result.revision = static_cast<std::uint64_t>(revision);
         result.hideDisconnected = object.GetNamedBoolean(L"hideDisconnected");
         const auto devices = object.GetNamedArray(L"devices");
@@ -25,7 +26,7 @@ namespace PeripheralTaskbar
             const auto input = value.GetObject();
             Device device;
             device.id = input.GetNamedString(L"id");
-            if (!ValidId(device.id) || !ids.insert(device.id).second)
+            if (!ValidId(device.id) || !ids.insert(ResolveAlias(result.aliases, device.id)).second)
                 throw std::invalid_argument("Invalid or duplicate peripheral ID.");
             device.name = input.GetNamedString(L"name");
             device.state = input.GetNamedString(L"state");

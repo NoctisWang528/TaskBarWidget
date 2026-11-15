@@ -26,9 +26,24 @@ internal static class WindowsPeripheralIdentity
             var addresses = nodes.Where(n => n.Container == node.Container).Select(n => Address(n.Address))
                 .Where(a => a is not null).Distinct(StringComparer.Ordinal).ToArray();
             if (addresses.Length == 1) address = addresses[0];
+            else if (addresses.Length > 1) return null; // An unaddressed receiver node cannot identify one of several targets.
         }
         return address is not null ? "bluetooth:" + address
             : node.Container != Guid.Empty ? "container:" + node.Container.ToString("D") : null;
+    }
+
+    internal static PeripheralIdentityEvidence Evidence(IReadOnlyList<WindowsPeripheralNode> group)
+    {
+        var addresses = group.Select(n => Address(n.Address)).Where(a => a is not null).Distinct().ToArray();
+        var containers = group.Select(n => n.Container).Where(c => c != Guid.Empty).Distinct().ToArray();
+        var endpoint = group.OrderByDescending(n => n.Battery is not null || n.BatteryService).FirstOrDefault();
+        return new()
+        {
+            ContainerId = containers.Length == 1 ? containers[0].ToString("D") : "",
+            BluetoothAddress = addresses.Length == 1 ? addresses[0]! : "",
+            ContainerIsDevice = addresses.Length <= 1 && group.Any(n => n.Bluetooth && !n.Pnp),
+            EndpointPath = endpoint?.Path ?? ""
+        };
     }
 
     internal static int? Percentage(object? value) => value switch

@@ -190,12 +190,13 @@ Protocol Classify(Candidate& c)
 static bool AzothSerialIdentity(const Candidate& c)
 {
     return c.vid == 0x0b05 && (c.pid == 0x1a83 || c.pid == 0x1a85) &&
-        c.protocol == Protocol::ExtraKeyboard && c.adapter == "rog_azoth_x" && !c.serial.empty();
+        c.protocol == Protocol::ExtraKeyboard && c.adapter == "rog_azoth_x" &&
+        !c.uniqueSerial.empty() && c.serial == c.uniqueSerial;
 }
 void SelectUnique(std::vector<Candidate>& candidates)
 {
-    // Only the same bus-validated unique serial proves a wired/wireless pair.
-    // Model names, percentage and receiver presence never prove device identity.
+    // Retain exact historical receiver aliases for a uniquely proven pair, but
+    // keep both query endpoints. Entity merging belongs to the Media resolver.
     for (auto& c : candidates) if (AzothSerialIdentity(c) && c.pid == 0x1a85)
     {
         unsigned wired = 0, wireless = 0;
@@ -205,7 +206,6 @@ void SelectUnique(std::vector<Candidate>& candidates)
         if (wired == 1 && wireless == 1)
         {
             wiredPeer->confirmedLegacyIdentities = LegacyIdentities(c);
-            c.protocol = Protocol::None; c.adapter.clear();
         }
     }
     std::map<std::pair<std::string, std::string>, unsigned> count;
@@ -218,34 +218,56 @@ void SelectUnique(std::vector<Candidate>& candidates)
     std::map<std::string, unsigned> identities;
     for (const auto& c : candidates) ++identities[c.identity];
     for (auto& c : candidates) if (identities[c.identity] > 1)
-    { c.protocol = Protocol::None; c.adapter.clear(); c.serial.clear(); c.identity = CanonicalIdentity(c); }
+    {
+        // A repeated serial on different admitted physical endpoints is not an
+        // ambiguous query interface. Keep each routable without asserting a link.
+        c.endpointIdentity = true; c.identity = CanonicalIdentity(c);
+    }
 }
 std::string CanonicalIdentity(const Candidate& c)
 {
     char fields[160]{};
     std::snprintf(fields, sizeof(fields), "|vid=%04x|pid=%04x|mi=%d|usage=%04x:%04x|channel=",
-        c.vid, AzothSerialIdentity(c) ? 0x1a85 : c.pid, c.mi, c.page, c.usage);
+        c.vid, c.pid, c.mi, c.page, c.usage);
     const char* prefix = c.protocol == Protocol::Gaia ? "bt:gaia:v1|address=" : c.protocol == Protocol::OHub ? "driver:ohub:v1|container=" : "hid:v1|container=";
+    const std::string endpoint = c.endpointIdentity ? "|endpoint=" + c.path : "";
     if (!c.serial.empty())
     {
         std::string serial;
         constexpr char digits[] = "0123456789abcdef";
         for (unsigned char byte : c.serial) { serial += digits[byte >> 4]; serial += digits[byte & 15]; }
-        return "hid:v1|serial=" + serial + fields + (c.adapter.empty() ? ProtocolName(c.protocol) : c.adapter) + (c.unit.empty() ? "" : "|unit=" + c.unit);
+        return "hid:v1|serial=" + serial + fields + (c.adapter.empty() ? ProtocolName(c.protocol) : c.adapter) + endpoint + (c.unit.empty() ? "" : "|unit=" + c.unit);
     }
     // A unique admitted channel needs no ephemeral collection path. Unsupported
     // collections retain the path because their MI/usage alone may be ambiguous.
     return std::string(prefix) + c.physical + fields + (c.protocol == Protocol::None ? c.path : c.adapter.empty() ? ProtocolName(c.protocol) : c.adapter) +
-        (c.unit.empty() ? "" : "|unit=" + c.unit);
+        endpoint + (c.unit.empty() ? "" : "|unit=" + c.unit);
+}
+std::string SerialScope(const Candidate& c)
+{
+    // This catalog equivalence is supported by the previously confirmed Azoth
+    // wired/receiver bus serial mapping. No other cross-PID equivalence is implied.
+    char scope[40]{};
+    std::snprintf(scope, sizeof(scope), "usb:%04x:%04x", c.vid, AzothSerialIdentity(c) ? 0x1a85 : c.pid);
+    return scope;
 }
 std::vector<std::string> LegacyIdentities(const Candidate& c)
 {
     // Only an exact raw serial observed on this validated physical channel proves
     // its legacy key. Never infer older corrupt suffixes from a shared prefix.
     if (!AzothSerialIdentity(c)) return {};
-    if (c.pid != 0x1a85 || c.hidSerial.empty() || c.hidSerial == c.serial) return c.confirmedLegacyIdentities;
-    Candidate legacy = c; legacy.serial = c.hidSerial;
-    return {CanonicalIdentity(legacy)};
+    auto aliases = c.confirmedLegacyIdentities;
+    Candidate legacy = c; legacy.pid = 0x1a85; legacy.endpointIdentity = false;
+    // Old wired keys normalized the PID to the receiver model. Preserve that
+    // exact bus-serial key without making it the transport routing identity.
+    if (c.pid == 0x1a83) aliases.push_back(CanonicalIdentity(legacy));
+    if (c.pid == 0x1a85 && !c.hidSerial.empty() && c.hidSerial != c.serial)
+    { legacy.serial = c.hidSerial; aliases.push_back(CanonicalIdentity(legacy)); }
+    std::sort(aliases.begin(), aliases.end());
+    aliases.erase(std::unique(aliases.begin(), aliases.end()), aliases.end());
+    const auto identity = CanonicalIdentity(c);
+    aliases.erase(std::remove(aliases.begin(), aliases.end(), identity), aliases.end());
+    return aliases;
 }
 const char* ProtocolName(Protocol p)
 {

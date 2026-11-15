@@ -569,8 +569,8 @@ namespace
                 Require(Layout::PeripheralCompactNameTop + Layout::PeripheralCompactNameHeight <= Layout::PeripheralCompactDetailsTop &&
                     Layout::PeripheralCompactDetailsTop + 2 * Layout::PeripheralCompactDetailHeight <= Layout::PeripheralCompactStatusTop &&
                     Layout::PeripheralCompactStatusTop + Layout::PeripheralCompactStatusHeight < baseline.regions.Find(602)->bounds.top &&
-                    baseline.regions.Find(602)->bounds.bottom == 184 - 8,
-                    "compact name, component lines, status and footer must not overlap; keep eight-DIP bottom inset");
+                    baseline.regions.Find(602)->bounds.bottom == 184 - 8 && !baseline.regions.Find(604),
+                    "compact content and paging do not overlap; keep eight-DIP bottom inset");
                 for (const auto& sample : {std::pair{L"超长名称的真无线耳机", 12.f}, std::pair{L"连接方式未知", 9.f}})
                 {
                     const float available = sample.second == 12 ? Layout::PeripheralCompactNameHeight : Layout::PeripheralCompactStatusHeight;
@@ -594,7 +594,7 @@ namespace
             {
                 const auto frame = render(snapshot, page);
                 const int count = std::min(snapshot.peripheralBattery.PageSize(), 7 - page * snapshot.peripheralBattery.PageSize());
-                Require(frame.regions.All().size() == size_t(4 + count), label + ": page reading count");
+                Require(frame.regions.All().size() == size_t(4 + count), label + ": page readings and control count");
                 const float pageHeight = snapshot.peripheralBattery.mode == L"detailed" ? 88.f + count * 50 : 184.f;
                 Require(frame.height == UINT(std::ceil(pageHeight * scale)), label + ": tail page shrinks to actual rows");
                 for (const auto& region : frame.regions.All())
@@ -887,6 +887,24 @@ void TestCardRenderingStability(Cards::Graphics& graphics)
     CheckCoverCrossfade(graphics);
     CheckPeripheralAppearance(graphics);
     const Snapshot snapshot = Fixture();
+    auto noCredits = snapshot;
+    noCredits.weather.provider.clear(); noCredits.weather.alertsAttribution.clear(); noCredits.weather.airAttribution.clear();
+    for (bool dark : {false, true})
+    for (bool contrast : {false, true})
+    {
+        const auto baseline = Render(graphics, Kind::Weather, noCredits, dark, 1, {}, {}, {}, false, 0, contrast);
+        auto withCredits = noCredits;
+        withCredits.weather.provider = L"和风天气";
+        for (bool fallbackOnly : {false, true})
+        {
+            withCredits.weather.alertsAttribution = fallbackOnly ? L"" : L"https://developer.qweather.com/attribution.html";
+            withCredits.weather.airAttribution = fallbackOnly ? L"" : L"Synthetic API provenance";
+            const auto frame = Render(graphics, Kind::Weather, withCredits, dark, 1, {}, {}, {}, false, 0, contrast);
+            Require(!frame.regions.Find(402) && !frame.regions.Find(403) && !frame.regions.Find(451),
+                "weather branding has no pointer, keyboard or accessibility regions");
+            Compare(baseline, frame, 1, "weather API provenance and provider fallback do not paint card branding");
+        }
+    }
     auto revised = snapshot;
     // Automatic snapshot delivery with unchanged visible data must be pixel-stable.
     ++revised.weather.revision; ++revised.traffic.revision; ++revised.audio.revision;

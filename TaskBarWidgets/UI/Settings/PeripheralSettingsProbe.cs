@@ -24,6 +24,8 @@ public sealed partial class SettingsWindow
         const string mouse = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         const string earbuds = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
         const string keyboard = "cccccccccccccccccccccccccccccccc";
+        const string canonicalMouse = "dddddddddddddddddddddddddddddddd";
+        const string diagnosticReport = "{\"version\":1,\"devices\":[],\"redacted\":true}";
         var native = (JsonObject)nativeFixture.DeepClone();
         var media = (JsonObject)mediaFixture.DeepClone();
         media["peripheralBattery"] = JsonNode.Parse($$$"""{"mode":"compact","hideDisconnected":false,"headsetControlEnabled":false,"vendorExtensionsEnabled":false,"order":["{{{mouse}}}","{{{earbuds}}}"],"cardVisibility":{"{{{mouse}}}":true,"{{{earbuds}}}":false}}""");
@@ -32,7 +34,7 @@ public sealed partial class SettingsWindow
         if (enabled.Parent is null) media["quickCardEnabled"] = enabled;
         var snapshot = JsonNode.Parse($$"""{"version":1,"revision":1,"mode":"compact","hideDisconnected":false,"refreshing":false,"error":"","devices":[{"id":"{{mouse}}","name":"测试鼠标","kind":"mouse","connection":"usb","state":"online","batteries":[{"role":"main","percentage":null,"charging":null}],"stale":false,"showInCard":true,"canRead":true,"source":"fixture","compatibility":"implemented"},{"id":"{{earbuds}}","name":"测试耳机","kind":"earbuds","connection":"bluetooth","state":"online","batteries":[{"role":"left","percentage":0,"charging":null},{"role":"right","percentage":80,"estimated":true,"charging":true}],"stale":false,"showInCard":false,"canRead":true,"source":"fixture","compatibility":"implemented"}]}""")!.AsObject();
         var subscriptions = 0; var releases = 0; var reads = 0; var schemaReads = 0; var refreshes = 0;
-        var applyCount = 0; var active = false;
+        var applyCount = 0; var diagnosticReads = 0; var active = false;
         TaskCompletionSource<bool>? saveStarted = null, saveRelease = null, readStarted = null;
         TaskCompletionSource<JsonObject>? heldRead = null, inFlightRead = null;
         JsonObject? submittedMedia = null;
@@ -42,7 +44,7 @@ public sealed partial class SettingsWindow
         {
             var schema = (JsonObject)native.DeepClone();
             var fields = schema["fields"]!.AsArray();
-            foreach (var device in PeripheralDevices(snapshot))
+            foreach (var device in window.PeripheralDevices(snapshot))
             {
                 var id = "builtin_peripheral_" + Text(device["id"]);
                 foreach (var (property, type, value) in new (string, string, JsonNode?)[] {
@@ -62,6 +64,10 @@ public sealed partial class SettingsWindow
         window.ProbeRequestHandler = async (action, payload) => {
             switch (action)
             {
+                case "getPeripheralDiagnostics":
+                    if (payload is not null) throw new InvalidOperationException("Diagnostic export sent an unexpected payload.");
+                    diagnosticReads++;
+                    return new JsonObject { ["report"] = diagnosticReport };
                 case "subscribePeripheralBatteries":
                     active = payload?["active"]?.GetValue<bool>() == true;
                     if (active) subscriptions++; else releases++;
@@ -174,6 +180,16 @@ public sealed partial class SettingsWindow
             var save = window.SaveAsync();
             await WaitPeripheralProbeAsync(() => saveStarted.Task.IsCompleted);
             page.Mode.SelectedIndex = 0; // New edit while the previous revision is saving.
+            snapshot["version"] = 2;
+            snapshot["revision"] = 4;
+            snapshot["aliases"] = new JsonObject { [mouse] = canonicalMouse };
+            var canonicalDevice = (JsonObject)snapshot["devices"]![0]!.DeepClone();
+            canonicalDevice["id"] = canonicalMouse;
+            snapshot["devices"]!.AsArray().Add(canonicalDevice); // Old row may still be present during migration.
+            await window.ReadPeripheralBatteriesAsync(session);
+            if (page.Rows.Count != 3 || page.Rows.ContainsKey(mouse) || !page.Rows.ContainsKey(canonicalMouse) ||
+                page.Rows[canonicalMouse].Visible.IsOn || window.PeripheralDraft.Order([]).Contains(mouse))
+                throw new InvalidOperationException("Alias migration duplicated a row or lost its pending visibility/order.");
             saveRelease.TrySetResult(true);
             await save;
             if (submittedMedia?["peripheralBattery"] is not JsonObject submitted || Text(submitted["mode"]) != "detailed" ||
@@ -183,6 +199,10 @@ public sealed partial class SettingsWindow
             await window.SaveAsync();
             if (window._media.Pending.Count != 0 || window.PeripheralDraft.Mode != "compact" || applyCount != 2)
                 throw new InvalidOperationException("Second global Apply did not acknowledge the preserved draft.");
+            if (await window.ReadPeripheralDiagnosticsReportAsync() != diagnosticReport || diagnosticReads != 1)
+                throw new InvalidOperationException("Diagnostic export did not read the report as string content.");
+            if (page.Export is null || AutomationProperties.GetName(page.Export).Length == 0)
+                throw new InvalidOperationException("Diagnostic export button is missing its accessible name.");
 
             foreach (var width in new[] { 720, 1180 })
             foreach (var theme in new[] { ElementTheme.Light, ElementTheme.Dark })
@@ -194,7 +214,8 @@ public sealed partial class SettingsWindow
                 await Task.Delay(120);
                 window._root.UpdateLayout();
                 AssertPeripheralProbeRows(page);
-                if (page.Mode.ActualWidth <= 0 || page.Mode.ActualHeight <= 0 || page.Options.Values.Any(toggle => toggle.ActualWidth <= 0))
+                if (page.Mode.ActualWidth <= 0 || page.Mode.ActualHeight <= 0 || page.Options.Values.Any(toggle => toggle.ActualWidth <= 0) ||
+                    page.Export.ActualWidth <= 0 || page.Export.ActualHeight <= 0)
                     throw new InvalidOperationException("Peripheral settings controls did not realize their templates.");
                 var png = Path.Combine(outputDirectory, $"settings-peripheral-battery-{theme.ToString().ToLowerInvariant()}-{width}.png");
                 await UiLayoutProbe.CaptureAsync(window._root, png);
@@ -203,8 +224,13 @@ public sealed partial class SettingsWindow
                 window._root.UpdateLayout();
                 var devicesPng = Path.Combine(outputDirectory, $"settings-peripheral-devices-{theme.ToString().ToLowerInvariant()}-{width}.png");
                 await UiLayoutProbe.CaptureAsync(window._root, devicesPng);
+                window._pageScroll.ChangeView(null, window._pageScroll.ScrollableHeight, null, true);
+                await Task.Delay(120);
+                window._root.UpdateLayout();
+                var supportPng = Path.Combine(outputDirectory, $"settings-peripheral-support-{theme.ToString().ToLowerInvariant()}-{width}.png");
+                await UiLayoutProbe.CaptureAsync(window._root, supportPng);
                 layouts.Add(new { requestedPhysicalWidth = width, theme = theme.ToString(), mode = window.PeripheralDraft.Mode,
-                    rowCount = page.Rows.Count, rowWidth = row.ActualWidth, modeWidth = page.Mode.ActualWidth, png, devicesPng, systemBackdropCaptured = false });
+                    rowCount = page.Rows.Count, rowWidth = row.ActualWidth, modeWidth = page.Mode.ActualWidth, png, devicesPng, supportPng, systemBackdropCaptured = false });
                 UiTemplateProbe.AssertOwnedWindowsOffscreen();
             }
 
@@ -242,6 +268,7 @@ public sealed partial class SettingsWindow
             return new { taskbarDemandScoped = true, sharedPageDemand = true, snapshotPolling = true, schemaChangesOnly = true,
                 modes = true, perDeviceVisibility = true, reorder = true, draftPreservation = true, globalApply = true,
                 newerEditPreserved = true, noPollingRebuild = true, unknownBatteryPreserved = true,
+                aliasMigrationPreserved = true, aliasRowsDeduplicated = true, diagnosticReportRead = true, savePickerNotOpened = true,
                 disconnectCallbacksIgnored = true, leaveCallbacksIgnored = true, unsubscribedOnLeave = true,
                 realHardwareOrSettingsTouched = false, probeActivated = activated, layouts };
         }

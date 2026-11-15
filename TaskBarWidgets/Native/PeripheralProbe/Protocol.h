@@ -27,13 +27,13 @@ struct Candidate
     unsigned vid = 0, pid = 0, revision = 0, page = 0, usage = 0;
     int mi = -1;
     unsigned input = 0, output = 0, feature = 0;
-    std::string path, physical, serial, hidSerial, usbProduct, identity, name, transportPath, unit, adapter, kind = "unknown";
+    std::string path, physical, serial, hidSerial, uniqueSerial, usbProduct, identity, name, transportPath, unit, adapter, kind = "unknown";
     std::vector<std::string> confirmedLegacyIdentities;
     bool pointer = false, keyboard = false, standard = false, presentUnreadable = false, identityOnly = false;
     Layout layout;
     Protocol protocol = Protocol::None;
     unsigned transaction = 0;
-    bool wired = false;
+    bool wired = false, endpointIdentity = false;
 };
 struct Reading
 {
@@ -59,6 +59,7 @@ bool NeedsDescriptor(unsigned vid, unsigned pid);
 Protocol Classify(Candidate& candidate);
 void SelectUnique(std::vector<Candidate>& candidates);
 std::string CanonicalIdentity(const Candidate& candidate);
+std::string SerialScope(const Candidate& candidate);
 std::vector<std::string> LegacyIdentities(const Candidate& candidate);
 const char* ProtocolName(Protocol protocol);
 bool OnceOnly(Protocol protocol);

@@ -265,3 +265,7 @@ wireless_usb,misiom,39A5:3D21,觅声 白羊座Pro,Special::OHub,implemented,Fals
 wireless_usb,misiom,3A95:3EE3,觅声 天蝎底座版,Special::OHub,implemented,False,,须用户启用厂商扩展，且对应厂商驱动已安装；不安装或启动厂商软件。
 wireless_usb,misiom,39A5:3FF1,觅声 阿尔法Pro,Special::OHub,implemented,False,,须用户启用厂商扩展，且对应厂商驱动已安装；不安装或启动厂商软件。
 wireless_usb,misiom,3206:7015,觅声 天蝎座,Special::OHub,implemented,False,,须用户启用厂商扩展，且对应厂商驱动已安装；不安装或启动厂商软件。
+vigil_watt,vigil-razer-90b,1532:00E2,Razer Basilisk V4 Pro,PeripheralHost,implemented,False,,"91-byte Feature channel; strict response validation; charging may be unknown. Protocol implemented, pending TaskBarWidgets hardware verification."
+vigil_watt,vigil-razer-90b,1532:00E3,Razer Basilisk V4 Pro receiver,PeripheralHost,implemented,False,,"91-byte Feature channel; strict response validation; charging may be unknown. Protocol implemented, pending TaskBarWidgets hardware verification."
+vigil_watt,vigil-razer-90b,1532:00E5,Razer Viper V4 Pro,PeripheralHost,implemented,False,,"91-byte Feature channel; strict response validation; charging may be unknown. Protocol implemented, pending TaskBarWidgets hardware verification."
+vigil_watt,vigil-razer-90b,1532:00E6,Razer Viper V4 Pro receiver,PeripheralHost,implemented,False,,"91-byte Feature channel; strict response validation; charging may be unknown. Protocol implemented, pending TaskBarWidgets hardware verification."

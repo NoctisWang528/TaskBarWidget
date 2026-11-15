@@ -7,12 +7,19 @@ namespace TaskBarWidgets.Media.Peripherals;
 
 // HID metadata and vendor I/O can block inside a driver. Only this owned helper
 // may be terminated on timeout; the desktop host and users' applications aren't touched.
-internal sealed class NativePeripheralBatteryProvider(string applicationRoot) : IPeripheralBatteryProvider, IPeripheralBatteryIdle
+internal sealed class NativePeripheralBatteryProvider(string applicationRoot, bool vigilWatt = false) : IPeripheralBatteryProvider, IPeripheralBatteryIdle
 {
     private const int MaximumLineCharacters = 1024 * 1024;
-    private readonly string _executable = Path.Combine(applicationRoot, "TaskBarWidgets.PeripheralProbe.exe");
+    private readonly string _executable = vigilWatt ? Path.Combine(applicationRoot, "Media", "PeripheralHost", "TaskBarWidgets.PeripheralHost.exe")
+        : Path.Combine(applicationRoot, "TaskBarWidgets.PeripheralProbe.exe");
+    private string[] _excludedPaths = [];
+    internal string[] ClaimedPaths { get; private set; } = [];
+    internal JsonElement[] Diagnostics { get; private set; } = [];
+    internal bool HasLiveProcess => _process is { HasExited: false };
+    internal void ExcludePaths(IEnumerable<string> paths) => _excludedPaths = paths.Select(p => p.ToLowerInvariant()).Distinct().Take(4096).ToArray();
     private readonly SemaphoreSlim _serial = new(1, 1);
     private readonly Dictionary<string, string> _identities = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _queryIds = new(StringComparer.Ordinal);
     private readonly Dictionary<string, PeripheralDeviceSnapshot> _known = new(StringComparer.Ordinal);
     private readonly HashSet<string> _initializations = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DateTimeOffset> _quarantine = new(StringComparer.Ordinal);
@@ -50,9 +57,9 @@ internal sealed class NativePeripheralBatteryProvider(string applicationRoot) : 
             foreach (var identity in expired) _quarantine.Remove(identity);
             var started = StartProcess();
             if ((started || expired.Length != 0) && operation == "read")
-                await ExecuteAsync("discover", [], vendorExtensions, linked.Token).ConfigureAwait(false);
+                await ExecuteAsync("discover", vigilWatt ? ids : [], vendorExtensions, linked.Token).ConfigureAwait(false);
             var result = await ExecuteAsync(operation, ids, vendorExtensions, linked.Token).ConfigureAwait(false);
-            if (operation == "discover")
+            if (operation == "discover" && !vigilWatt)
             {
                 var receivers = result.Where(d => d.Source == "hidpp20" &&
                     _identities.TryGetValue(d.Id, out var key) && !key.Contains("|unit=", StringComparison.Ordinal)).ToArray();
@@ -96,13 +103,14 @@ internal sealed class NativePeripheralBatteryProvider(string applicationRoot) : 
             var selectedIds = ids.Where(_identities.ContainsKey).ToArray();
             var selected = selectedIds.Select(id => _identities[id]).ToArray();
             var request = JsonSerializer.Serialize(new { version = 1, requestId, operation, deviceIds = selected,
+                queryIds = selectedIds.Where(_queryIds.ContainsKey).Select(id => _queryIds[id]).ToArray(),
                 vendorExtensionsEnabled = vendorExtensions, attemptedInitializations = _initializations.ToArray(),
-                excludedIdentities = _quarantine.Keys.ToArray() }, Json);
+                excludedIdentities = _quarantine.Keys.Concat(_excludedPaths).ToArray(), excludedPaths = _excludedPaths }, Json);
             // Progress messages make it possible to distinguish a bad interface;
             // they never extend the total budget indefinitely.
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
             var budget = selectedIds.Sum(id => _known.GetValueOrDefault(id)?.Source == "hidpp20" ? 20 : 5);
-            timeout.CancelAfter(TimeSpan.FromSeconds(operation == "discover" ? 15 : Math.Clamp(budget, 8, 60)));
+            timeout.CancelAfter(TimeSpan.FromSeconds(operation == "discover" ? (vigilWatt ? 60 : 15) : Math.Clamp(budget, 8, 60)));
             await _process!.StandardInput.WriteLineAsync(request.AsMemory(), timeout.Token).ConfigureAwait(false);
             await _process.StandardInput.FlushAsync(timeout.Token).ConfigureAwait(false);
             ProbeReply? reply;
@@ -127,6 +135,12 @@ internal sealed class NativePeripheralBatteryProvider(string applicationRoot) : 
                     throw new InvalidDataException("外设采集响应不匹配。");
                 break;
             }
+            if (vigilWatt) ClaimedPaths = (reply.ClaimedPaths ?? []).Where(p => p is { Length: > 0 and <= 4096 }).Take(4096).ToArray();
+            var diagnostics = (reply.Diagnostics ?? []).Where(d => d.ValueKind == JsonValueKind.Object).Take(512).Select(d => d.Clone()).ToArray();
+            Diagnostics = operation == "discover" ? diagnostics : Diagnostics.Concat(diagnostics)
+                .GroupBy(d => d.TryGetProperty("path", out var path) ? path.ToString() : d.ToString(), StringComparer.OrdinalIgnoreCase)
+                .Take(512).Select(group => JsonSerializer.SerializeToElement(group.SelectMany(d => d.EnumerateObject())
+                    .GroupBy(p => p.Name, StringComparer.Ordinal).ToDictionary(p => p.Key, p => p.Last().Value.Clone()), Json)).ToArray();
             foreach (var key in reply.Initialized ?? []) RememberInitialization(key);
             if (!string.IsNullOrWhiteSpace(reply.Error) && (reply.Devices?.Length ?? 0) == 0)
                 throw new IOException("外设采集失败。" + reply.Error[..Math.Min(160, reply.Error.Length)]);
@@ -138,8 +152,13 @@ internal sealed class NativePeripheralBatteryProvider(string applicationRoot) : 
                 if (operation == "read" && !selected.Contains(item.Identity, StringComparer.Ordinal)) continue;
                 var id = PeripheralIdentity.FromKey(item.Identity);
                 if (!_identities.ContainsKey(id) && _identities.Count >= 1024)
-                    _identities.Remove(_identities.Keys.First(key => !_known.ContainsKey(key)));
+                {
+                    var retired = _identities.Keys.First(key => !_known.ContainsKey(key));
+                    _identities.Remove(retired);
+                    _queryIds.Remove(retired);
+                }
                 _identities[id] = item.Identity;
+                if (vigilWatt && item.QueryId is { Length: > 0 and <= 1024 }) _queryIds[id] = item.QueryId;
                 var legacyIds = new List<string>(4);
                 foreach (var key in (item.LegacyIdentities ?? []).Take(4))
                 {
@@ -154,7 +173,8 @@ internal sealed class NativePeripheralBatteryProvider(string applicationRoot) : 
                     id = selectedIds.FirstOrDefault(selectedId => _identities.GetValueOrDefault(selectedId) == item.Identity) ?? id;
                 var device = new PeripheralDeviceSnapshot { Id = id, Name = item.Name, Kind = item.Kind,
                     Brand = PeripheralIdentity.Brand(item.Name, item.Identity, item.Source),
-                    LegacyIds = legacyIds.ToArray(),
+                    LegacyIds = legacyIds.ToArray(), Identity = item.IdentityEvidence,
+                    NameQuality = item.NameQuality, KindQuality = item.KindQuality,
                     Connection = item.Connection, State = item.State, CanRead = item.CanRead,
                     Batteries = item.Batteries ?? [], UpdatedAt = item.UpdatedAt,
                     Stale = item.State != "online" || item.Stale, Source = item.Source, Compatibility = item.Compatibility };
@@ -290,12 +310,18 @@ internal sealed class NativePeripheralBatteryProvider(string applicationRoot) : 
         public int RequestId { get; init; }
         public ProbeDevice[] Devices { get; init; } = [];
         public string[]? Initialized { get; init; }
+        public string[]? ClaimedPaths { get; init; }
+        public JsonElement[]? Diagnostics { get; init; }
         public string Error { get; init; } = "";
     }
     private sealed record ProbeDevice
     {
         public string Identity { get; init; } = "";
+        public string QueryId { get; init; } = "";
         public string[]? LegacyIdentities { get; init; }
+        public PeripheralIdentityEvidence? IdentityEvidence { get; init; }
+        public int NameQuality { get; init; }
+        public int KindQuality { get; init; }
         public string Name { get; init; } = "";
         public string Kind { get; init; } = "unknown";
         public string Connection { get; init; } = "usb-2.4g";

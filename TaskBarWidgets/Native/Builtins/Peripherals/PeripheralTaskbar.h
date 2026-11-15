@@ -1,4 +1,5 @@
 #pragma once
+#include "PeripheralAliases.h"
 #include "../../include/PluginInterface.h"
 #include <algorithm>
 #include <cstdint>
@@ -15,12 +16,6 @@
 // to the native main thread; DataRequired never enumerates or queries hardware.
 namespace PeripheralTaskbar
 {
-    inline bool ValidId(const std::wstring& id)
-    {
-        return id.size() == 32 && std::all_of(id.begin(), id.end(), [](wchar_t c)
-        { return (c >= L'0' && c <= L'9') || (c >= L'a' && c <= L'f'); });
-    }
-
     inline std::wstring DeviceId(const std::wstring& itemId)
     {
         constexpr std::wstring_view prefix = L"peripheral_";
@@ -51,6 +46,7 @@ namespace PeripheralTaskbar
         std::uint64_t revision{};
         bool hideDisconnected{}; // Card preference; taskbar selection stays authoritative.
         std::vector<Device> devices;
+        AliasMap aliases;
     };
 
     class Item final : public IPluginItem
@@ -123,26 +119,58 @@ namespace PeripheralTaskbar
         Item* Ensure(const std::wstring& id)
         {
             if (!ValidId(id)) return nullptr;
-            auto found = m_items.find(id);
+            const auto canonical = ResolveAlias(m_aliases, id);
+            auto found = m_items.find(canonical);
             if (found != m_items.end()) return found->second.get();
-            auto item = std::make_unique<Item>(id, m_chinese);
+            auto item = std::make_unique<Item>(canonical, m_chinese);
             auto* result = item.get();
-            m_items.emplace(id, std::move(item));
+            m_items.emplace(canonical, std::move(item));
             m_order.push_back(result);
             return result;
         }
-        bool Apply(const Snapshot& snapshot)
+        const AliasMap& Aliases() const { return m_aliases; }
+        void RestoreAliases(const AliasMap& aliases) { m_aliases = MergeAliases(m_aliases, aliases); }
+        bool Retired(IPluginItem* item) const
+        { return item && m_aliases.contains(DeviceId(item->GetItemId())); }
+        bool Active(IPluginItem* item) const
+        {
+            return item && (DeviceId(item->GetItemId()).empty() ||
+                std::find(m_order.begin(), m_order.end(), item) != m_order.end());
+        }
+        bool Apply(const Snapshot& snapshot, const std::set<std::wstring>& selected = {})
         {
             if (m_hasRevision && snapshot.revision <= m_revision) return false;
+            const auto aliases = MergeAliases(m_aliases, snapshot.aliases);
+            std::set<std::wstring> canonicalIds;
+            for (const auto& device : snapshot.devices)
+                if (!ValidId(device.id) || !canonicalIds.insert(ResolveAlias(aliases, device.id)).second)
+                    throw std::invalid_argument("Conflicting peripheral devices.");
+            bool changed = aliases != m_aliases;
+            const auto previousOrder = m_order;
+            m_aliases = aliases;
+            // Keep ownership and plugin IDs of retired objects forever. Existing
+            // settings drafts/renderers can still hold these IPluginItem pointers.
+            std::erase_if(m_order, [&](auto* item) { return Retired(item); });
+            for (const auto& [oldId, retained] : m_aliases)
+            {
+                const auto old = m_items.find(oldId);
+                if (old == m_items.end() || m_items.contains(retained)) continue;
+                auto device = old->second->Current();
+                device.id = retained;
+                Ensure(retained)->Update(std::move(device));
+            }
             m_revision = snapshot.revision;
             m_hasRevision = true;
+            std::set<std::wstring> retainedSelection;
+            for (const auto& id : selected)
+                if (auto* item = Ensure(id)) retainedSelection.insert(DeviceId(item->GetItemId()));
             // Accept newer state/revisions even when their rendered text is
             // identical. Timestamp, refreshing and card-preference churn must
             // not request native taskbar invalidation or relayout.
-            bool changed = false;
             std::set<std::wstring> seen;
-            for (const auto& device : snapshot.devices)
+            for (auto device : snapshot.devices)
             {
+                device.id = ResolveAlias(m_aliases, device.id);
                 const bool known = m_items.contains(device.id);
                 if (auto* item = Ensure(device.id))
                 {
@@ -151,10 +179,11 @@ namespace PeripheralTaskbar
                     seen.insert(device.id);
                 }
             }
-            // A complete snapshot may omit previously known devices. Keep their
-            // object identity, last reading and all native composition settings.
+            // Omitted objects keep their reading/configuration and pointer lifetime,
+            // but only actual taskbar selections retain an offline presentation row.
             for (auto& [id, item] : m_items)
             {
+                if (m_aliases.contains(id)) continue;
                 if (seen.contains(id)) continue;
                 auto device = item->Current();
                 device.state = L"disconnected";
@@ -162,7 +191,26 @@ namespace PeripheralTaskbar
                 const bool presentationChanged = item->Update(std::move(device));
                 changed = changed || presentationChanged;
             }
-            return changed;
+            for (const auto& [oldId, retained] : m_aliases)
+            {
+                const auto old = m_items.find(oldId), current = m_items.find(retained);
+                if (old == m_items.end() || current == m_items.end()) continue;
+                auto device = current->second->Current();
+                device.id = oldId;
+                old->second->Update(std::move(device));
+            }
+            std::erase_if(m_order, [&](auto* item)
+            {
+                const auto id = DeviceId(item->GetItemId());
+                return !seen.contains(id) && !retainedSelection.contains(id);
+            });
+            // Ensure(existing) deliberately never reactivates a dormant object.
+            // A new authoritative snapshot/selection is what grants membership.
+            for (const auto& id : seen)
+                if (auto* item = Ensure(id); !Active(item)) m_order.push_back(item);
+            for (const auto& id : retainedSelection)
+                if (auto* item = Ensure(id); !Active(item)) m_order.push_back(item);
+            return changed || previousOrder != m_order;
         }
         void Disconnected()
         {
@@ -195,6 +243,7 @@ namespace PeripheralTaskbar
         }
     private:
         std::map<std::wstring, std::unique_ptr<Item>> m_items;
+        AliasMap m_aliases;
         std::vector<Item*> m_order;
         std::uint64_t m_revision{};
         bool m_hasRevision{}, m_chinese{};

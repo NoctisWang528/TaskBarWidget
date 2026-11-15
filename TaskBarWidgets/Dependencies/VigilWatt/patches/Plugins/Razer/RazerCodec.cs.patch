@@ -1,0 +1,66 @@
+--- a/src/VigilWatt.Core/Plugins/Razer/RazerCodec.cs
++++ b/src/VigilWatt.Core/Plugins/Razer/RazerCodec.cs
+@@ -52,6 +52,10 @@
+     {
+         // 毒蝰 Viper V4 Pro：真机验证（2026-10-24，接收器 1532:00E6，接口 3，feature 91 字节）
+         //   请求 [00 1F 00 00 00 02 07 80 …85 00] → 应答 status=0x02, args[1]=0xFF → 100%
++        // Public descriptor evidence only; hardware acceptance remains pending.
++        // https://github.com/openrazer/openrazer/issues/2958 (no GPL source copied).
++        [0x00E2] = new(BatteryScale.Scaled255, TransactionId: 0x1F),
++        [0x00E3] = new(BatteryScale.Scaled255, TransactionId: 0x1F),
+         [0x00E6] = new(BatteryScale.Scaled255, TransactionId: 0x1F),
+         // 同一型号的本体 PID（有线直连时枚举）。协议同代，未单独验证。
+         [0x00E5] = new(BatteryScale.Scaled255, TransactionId: 0x1F),
+@@ -74,6 +78,8 @@
+     /// </summary>
+     public static byte[] BuildRequest(byte commandId, byte transactionId, byte dataSize = 0x02)
+     {
++        if (commandId is not (CommandGetBattery or CommandGetCharging) || dataSize != 2)
++            throw new ArgumentOutOfRangeException(nameof(commandId));
+         var p = new byte[PayloadLength];
+         p[0] = 0x00;              // status: 新命令
+         p[1] = transactionId;
+@@ -101,19 +107,19 @@
+     /// [0]=report id，[1]=status，[2]=transaction id，[7]=class，[8]=command，[9..]=arguments。
+     /// 成功时 arguments[1]（整包 byte 10）是电量原始值。
+     /// </summary>
+-    public static bool TryParseBattery(byte[]? buffer, out int raw)
++    public static bool TryParseBattery(byte[]? buffer, out int raw, byte transactionId = 0x1F)
+     {
+         raw = 0;
+-        if (!IsValidEcho(buffer, CommandGetBattery)) return false;
++        if (!IsValidEcho(buffer, CommandGetBattery, transactionId)) return false;
+         raw = buffer![10];
+         return true;
+     }
+ 
+     /// <summary>解析充电状态。部分型号（含毒蝰 V4 Pro）不支持 0x84，返回 false 由调用方退回 Unknown。</summary>
+-    public static bool TryParseCharging(byte[]? buffer, out ChargingState state)
++    public static bool TryParseCharging(byte[]? buffer, out ChargingState state, byte transactionId = 0x1F)
+     {
+         state = ChargingState.Unknown;
+-        if (!IsValidEcho(buffer, CommandGetCharging)) return false;
++        if (!IsValidEcho(buffer, CommandGetCharging, transactionId)) return false;
+         state = buffer![10] switch
+         {
+             0x00 => ChargingState.Discharging,
+@@ -123,13 +129,13 @@
+         return true;
+     }
+ 
+-    private static bool IsValidEcho(byte[]? buffer, byte commandId)
++    private static bool IsValidEcho(byte[]? buffer, byte commandId, byte transactionId)
+     {
+-        if (buffer == null || buffer.Length < BufferLength) return false;
+-        // 先看 status：忙 / 无响应时，应答头可能还是上一条命令的 echo，先判它会误读旧值。
+-        if (buffer[1] == StatusBusy || buffer[1] == StatusNoResponse) return false;
+-        if (buffer[1] != StatusSuccess) return false;
+-        return buffer[7] == CommandClassBattery && buffer[8] == commandId;
++        if (buffer == null || buffer.Length != BufferLength || buffer[0] != ReportId) return false;
++        return buffer[1] == StatusSuccess && buffer[2] == transactionId
++            && buffer[3] == 0 && buffer[4] == 0 && buffer[5] == 0 && buffer[6] == 2
++            && buffer[7] == CommandClassBattery && buffer[8] == commandId
++            && buffer[89] == Checksum(buffer.AsSpan(3, 86)) && buffer[90] == 0;
+     }
+ 
+     /// <summary>把原始值换算成百分比，并对越界值做收敛。</summary>

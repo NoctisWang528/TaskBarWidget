@@ -1,0 +1,205 @@
+{
+  "version": 1,
+  "repository": "https://github.com/evren-oct/vigil-watt",
+  "commit": "4df830043296760f5d5c273f4cdc0ea9456c4bc7",
+  "registrySha256": "fd717c853c5f5f75ec33f4770130aff3b7baf111be9868e09bac4f3eb174593c",
+  "plugins": [
+    {
+      "type": "VigilWatt.Core.Plugins.Logitech.LogitechPlugin",
+      "source": "Plugins/Logitech/LogitechPlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Razer.RazerPlugin",
+      "source": "Plugins/Razer/RazerPlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Razer.RazerKrakenPlugin",
+      "source": "Plugins/Razer/RazerKrakenPlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Haute.HautePlugin",
+      "source": "Plugins/Haute/HautePlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Sony.DualSensePlugin",
+      "source": "Plugins/Sony/DualSensePlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Sony.InzoneH9Plugin",
+      "source": "Plugins/Sony/InzoneH9Plugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Ajazz.AjazzPlugin",
+      "source": "Plugins/Ajazz/AjazzPlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Akg.AkgPlugin",
+      "source": "Plugins/Akg/AkgPlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Asus.AsusPlugin",
+      "source": "Plugins/Asus/AsusPlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Atk.AtkPlugin",
+      "source": "Plugins/Atk/AtkPlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Aula.AulaG9Plugin",
+      "source": "Plugins/Aula/AulaG9Plugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Aula.AulaPlugin",
+      "source": "Plugins/Aula/AulaPlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Betop.BetopPlugin",
+      "source": "Plugins/Betop/BetopPlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Cherry.CherryPlugin",
+      "source": "Plugins/Cherry/CherryPlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Darkrim.DarkrimPlugin",
+      "source": "Plugins/Darkrim/DarkrimPlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Delux.DeluxPlugin",
+      "source": "Plugins/Delux/DeluxPlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Eweadn.EweadnPlugin",
+      "source": "Plugins/Eweadn/EweadnPlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.GameSir.GameSirPlugin",
+      "source": "Plugins/GameSir/GameSirPlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Ganss.GanssPlugin",
+      "source": "Plugins/Ganss/GanssPlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Hecate.HecatePlugin",
+      "source": "Plugins/Hecate/HecatePlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Hecate.HecateWirelessPlugin",
+      "source": "Plugins/Hecate/HecateWirelessPlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.HyperX.HyperXPlugin",
+      "source": "Plugins/HyperX/HyperXPlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Inphic.InphicPlugin",
+      "source": "Plugins/Inphic/InphicPlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Lingbao.LingbaoPlugin",
+      "source": "Plugins/Lingbao/LingbaoPlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Mchose.MchoseA5Plugin",
+      "source": "Plugins/Mchose/MchoseA5Plugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Mchose.MchosePlugin",
+      "source": "Plugins/Mchose/MchosePlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Mojhon.MojhonPlugin",
+      "source": "Plugins/Mojhon/MojhonPlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Pulsar.PulsarPlugin",
+      "source": "Plugins/Pulsar/PulsarPlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Rapoo.RapooPlugin",
+      "source": "Plugins/Rapoo/RapooPlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Thunderobot.ThunderobotPlugin",
+      "source": "Plugins/Thunderobot/ThunderobotPlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    },
+    {
+      "type": "VigilWatt.Core.Plugins.Vgn.VgnPlugin",
+      "source": "Plugins/Vgn/VgnPlugin.cs",
+      "compatibility": "implemented",
+      "hardwareAcceptance": "pending"
+    }
+  ],
+  "restrictions": [
+    "Explicit built-in registry only. Imported source does not imply protocol admission.",
+    "Razer E2/E3/E5/E6: VID1532, usage000C/0001, MI03, feature91. V3 SE00DF keeps its separate codec and exact profile.",
+    "BlackShark0555 is excluded here; product native blackshark_pa fallback implements its audited PA session.",
+    "Logitech HID++ requires valid0003 unit+model identity, with checks before and after battery polling; slots without target identity remain identityOnly/canRead=false. Precise1004 requires capability bit1; voltage/ADC/coarse values are estimated.",
+    "All plugins are request-scoped; there are no retained passive listeners, active probes, device watchers or child processes.",
+    "Discover with nonempty deviceIds requires queryIds and restricts both endpoints and slots. Empty read does not open hardware.",
+    "Receiver containers/serials are not target identity evidence. Direct-body whitelist plus CM unique bus ID gates serial evidence; Haute chip ID scope is adapter.",
+    "DELUX charging and settling frames expose only charging; old percentage/sample time is retained by the parent.",
+    "Synthetic tests do not establish real hardware compatibility."
+  ]
+}

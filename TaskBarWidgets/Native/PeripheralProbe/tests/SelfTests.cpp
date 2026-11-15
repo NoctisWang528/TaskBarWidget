@@ -5,6 +5,7 @@
 #include "../ExtraMouse.h"
 #include "../Protocol.h"
 #include <iostream>
+#include <algorithm>
 #include <stdexcept>
 using namespace peripheral;
 namespace
@@ -63,12 +64,15 @@ void Tests()
 
         Candidate wireless;wireless.path="azoth-wireless";wireless.physical="wireless-container";
         wireless.vid=0x0b05;wireless.pid=0x1a85;wireless.mi=1;wireless.page=0xff00;wireless.usage=1;
-        wireless.input=wireless.output=65;wireless.serial="unique-usb-serial";
+        wireless.input=wireless.output=65;wireless.serial=wireless.uniqueSerial="unique-usb-serial";
         wireless.layout=capturedLayout("0600ff0901a1010902150026ff007508954081020903150026ff00750895409102c0");
         Check(Classify(wireless)==Protocol::ExtraKeyboard,"actual Azoth wireless descriptor");
         auto wired=wireless;wired.pid=0x1a83;wired.path="azoth-wired";wired.physical="wired-container";
         Check(Classify(wired)==Protocol::ExtraKeyboard&&wired.wired,"Azoth wired reuses battery-only protocol");
-        Check(CanonicalIdentity(wired)==CanonicalIdentity(wireless),"same proven Azoth serial survives transport change");
+        Check(CanonicalIdentity(wired)!=CanonicalIdentity(wireless),"Azoth transports retain distinct routable identities");
+        Check(SerialScope(wired)==SerialScope(wireless),"proven Azoth bus serial retains catalog cross-PID scope");
+        auto unrelatedPid=wireless;unrelatedPid.pid=0x1c25;
+        Check(SerialScope(unrelatedPid)!=SerialScope(wireless),"other model with same serial cannot join Azoth scope");
         Check(CanonicalIdentity(wireless).find("|pid=1a85|")!=std::string::npos,"retain historically supported Azoth model PID");
         wireless.hidSerial="unique-usb-serial\x1b";
         auto aliases=LegacyIdentities(wireless);auto old=wireless;old.serial=wireless.hidSerial;
@@ -78,11 +82,23 @@ void Tests()
         unproven=wireless;unproven.hidSerial=unproven.serial;
         Check(LegacyIdentities(unproven).empty(),"do not emit canonical identity as its own alias");
         std::vector<Candidate> pair{wireless,wired};SelectUnique(pair);
-        Check(pair[0].protocol==Protocol::None&&pair[1].protocol==Protocol::ExtraKeyboard,"Azoth pair prefers wired once");
-        Check(LegacyIdentities(pair[1])==aliases&&LegacyIdentities(pair[0]).empty(),"preferred wired candidate carries exact proven receiver alias");
-        wired.serial="other-usb-serial";pair={wireless,wired};SelectUnique(pair);
+        Check(pair[0].protocol==Protocol::ExtraKeyboard&&pair[1].protocol==Protocol::ExtraKeyboard&&pair[0].identity!=pair[1].identity,
+            "proven Azoth pair keeps both transport endpoints");
+        auto wiredAliases=LegacyIdentities(pair[1]);
+        Check(wiredAliases.size()==2&&std::find(wiredAliases.begin(),wiredAliases.end(),aliases[0])!=wiredAliases.end()&&
+            std::find(wiredAliases.begin(),wiredAliases.end(),CanonicalIdentity(wireless))!=wiredAliases.end(),
+            "wired endpoint retains old normalized key and exact proven receiver alias");
+        Check(LegacyIdentities(pair[0])==aliases,"receiver remains available with its exact legacy alias");
+        auto extraReceiver=wireless;extraReceiver.path="second-azoth-receiver";extraReceiver.physical="second-receiver-container";
+        pair={wireless,extraReceiver,wired};SelectUnique(pair);
+        Check(pair[2].confirmedLegacyIdentities.empty(),"multiple matching receivers never transfer an unconfirmed raw HID alias");
+        wired.serial=wired.uniqueSerial="other-usb-serial";pair={wireless,wired};SelectUnique(pair);
         Check(pair[0].protocol==Protocol::ExtraKeyboard&&pair[1].protocol==Protocol::ExtraKeyboard&&pair[0].identity!=pair[1].identity,"different Azoth units never merge");
-        Check(LegacyIdentities(pair[1]).empty(),"different serial never transfers receiver aliases");
+        auto separateAliases=LegacyIdentities(pair[1]);
+        Check(separateAliases.size()==1&&std::find(separateAliases.begin(),separateAliases.end(),aliases[0])==separateAliases.end(),
+            "different serial retains only its own historic key, never another receiver alias");
+        auto unverified=wireless;unverified.uniqueSerial.clear();
+        Check(LegacyIdentities(unverified).empty(),"legacy aliases require a bus-validated unique serial");
         wired.serial.clear();wireless.serial.clear();pair={wireless,wired};SelectUnique(pair);
         Check(pair[0].protocol==Protocol::ExtraKeyboard&&pair[1].protocol==Protocol::ExtraKeyboard&&pair[0].identity!=pair[1].identity,"missing serial does not prove Azoth pair");
     }
@@ -111,6 +127,25 @@ void Tests()
     std::vector<Candidate> duplicates{c,c}; duplicates[1].path = "second-channel";
     SelectUnique(duplicates);
     Check(duplicates[0].protocol == Protocol::None && duplicates[1].protocol == Protocol::None,"ambiguous channel rejected");
+    {
+        auto other=c;other.physical="other-device-container";other.path="other-device-channel";
+        auto first=c;first.serial=other.serial="reused-hid-serial";
+        std::vector<Candidate> endpoints{first,other};SelectUnique(endpoints);
+        Check(endpoints[0].protocol==Protocol::Compx&&endpoints[1].protocol==Protocol::Compx&&endpoints[0].identity!=endpoints[1].identity,
+            "serial identity collision never disables independent verified query endpoints");
+        Check(endpoints[0].serial==first.serial&&endpoints[1].serial==other.serial,"routing fallback preserves revalidation serial metadata");
+        auto third=first;third.pid=0x1234;
+        Check(SerialScope(first)!=SerialScope(third),"equal serial strings on unrelated PIDs have different scopes");
+        // Identity fallback must retain the parent-prefix HID++ child contract.
+        first.protocol=other.protocol=Protocol::Hidpp;
+        endpoints={first,other};SelectUnique(endpoints);
+        auto child=endpoints[0];child.unit="01020304|model=408200000000";
+        Check(CanonicalIdentity(child)==endpoints[0].identity+"|unit="+child.unit,"endpoint identity suffix precedes HID++ unit suffix");
+        std::vector<Candidate> ambiguous{c,c};ambiguous[1].path="second-same-physical-channel";
+        ambiguous[1].serial="different-hid-serial";SelectUnique(ambiguous);
+        Check(ambiguous[0].protocol==Protocol::None&&ambiguous[1].protocol==Protocol::None,
+            "different serial metadata never bypasses ambiguous protocol-channel rejection");
+    }
     auto copy = c; copy.mi = 2;
     Check(CanonicalIdentity(c) != CanonicalIdentity(copy),"interface identity");
     copy = c; copy.physical = "other-container";

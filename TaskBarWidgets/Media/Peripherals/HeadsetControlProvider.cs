@@ -13,17 +13,18 @@ internal sealed class HeadsetControlProvider : IPeripheralBatteryProvider
     private readonly string _executable;
     private readonly Func<HeadsetControlDevice, CancellationToken, Task<string>> _query;
     private readonly Func<bool> _available;
+    private readonly Func<IEnumerable<string>> _claimedPaths;
     private readonly Dictionary<string, PeripheralDeviceSnapshot> _known = new(StringComparer.Ordinal);
     private volatile bool _enabled;
     private volatile bool _disposed;
     public event Action? DevicesChanged;
 
     /// <summary>installRoot is the directory containing TaskBarWidgets.exe, not its Media subdirectory.</summary>
-    public HeadsetControlProvider(string? installRoot = null)
-        : this(installRoot, new WindowsPeripheralCatalog(), null, null) { }
+    public HeadsetControlProvider(string? installRoot = null, Func<IEnumerable<string>>? claimedPaths = null)
+        : this(installRoot, new WindowsPeripheralCatalog(), null, null, claimedPaths) { }
 
     internal HeadsetControlProvider(string? installRoot, IWindowsPeripheralCatalog catalog,
-        Func<HeadsetControlDevice, CancellationToken, Task<string>>? query, Func<bool>? available)
+        Func<HeadsetControlDevice, CancellationToken, Task<string>>? query, Func<bool>? available, Func<IEnumerable<string>>? claimedPaths = null)
     {
         var basePath = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         installRoot ??= Path.GetFileName(basePath).Equals("Media", StringComparison.OrdinalIgnoreCase)
@@ -31,6 +32,7 @@ internal sealed class HeadsetControlProvider : IPeripheralBatteryProvider
         _executable = Path.Combine(Path.GetFullPath(installRoot), "Dependencies", "HeadsetControl", "headsetcontrol.exe");
         _catalog = catalog;
         _query = query ?? Query;
+        _claimedPaths = claimedPaths ?? (() => []);
         _available = available ?? (() => File.Exists(_executable));
         _catalog.Changed += Changed;
     }
@@ -53,8 +55,21 @@ internal sealed class HeadsetControlProvider : IPeripheralBatteryProvider
             if (!_enabled || !_available()) return [];
             var nodes = await _catalog.GetAsync(token).ConfigureAwait(false);
             if (!_enabled) return [];
-            return Discover(HeadsetControlDevices.Map(nodes), nodes);
+            return Discover(AvailableDevices(nodes), nodes);
         }, cancellationToken);
+
+    private Dictionary<string, HeadsetControlDevice> AvailableDevices(IReadOnlyList<WindowsPeripheralNode> nodes)
+    {
+        var claims = _claimedPaths().ToArray();
+        return HeadsetControlDevices.Map(nodes).Where(p => !TransportClaimed(p.Value.Pair, claims))
+            .ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
+    }
+
+    // HeadsetControl can select only a VID/PID. Skip its ambiguous command if
+    // another admitted implementation owns any matching transport. This is
+    // query ownership, never evidence for merging two device identities.
+    internal static bool TransportClaimed(string pair, IEnumerable<string> claims) => pair.Length == 9 &&
+        claims.Any(path => path.Contains("vid_" + pair[..4] + "&pid_" + pair[5..], StringComparison.OrdinalIgnoreCase));
 
     private PeripheralDeviceSnapshot[] Discover(Dictionary<string, HeadsetControlDevice> map, IReadOnlyList<WindowsPeripheralNode> nodes)
     {
@@ -66,6 +81,8 @@ internal sealed class HeadsetControlProvider : IPeripheralBatteryProvider
             var previous = _known.GetValueOrDefault(id) ?? new() { Id = id };
             WindowsPeripheralHistory.Remember(_known, previous with
             {
+                Identity = WindowsPeripheralIdentity.Evidence(nodes.Where(n => device.Paths.Contains(n.Path, StringComparer.OrdinalIgnoreCase)).ToArray()) with { ContainerIsDevice = true },
+                NameQuality = 30, KindQuality = 40,
                 Name = device.Name, Kind = "headset", Connection = "usb", State = "online", CanRead = true,
                 Source = "headsetcontrol-4.1.0", Compatibility = "extension", Stale = previous.Stale
             }, present);
@@ -92,7 +109,7 @@ internal sealed class HeadsetControlProvider : IPeripheralBatteryProvider
         {
             if (!_enabled || !settings.HeadsetControlEnabled) return [];
             var nodes = await _catalog.GetAsync(token).ConfigureAwait(false);
-            var map = HeadsetControlDevices.Map(nodes);
+            var map = AvailableDevices(nodes);
             Discover(map, nodes);
             foreach (var id in deviceIds)
             {
@@ -110,7 +127,7 @@ internal sealed class HeadsetControlProvider : IPeripheralBatteryProvider
                     token.ThrowIfCancellationRequested();
                     // The upstream CLI selects the first matching VID/PID. Validate topology again
                     // before attributing a result; an arrival/removal during the call invalidates it.
-                    var after = HeadsetControlDevices.Map(await _catalog.GetAsync(token).ConfigureAwait(false));
+                    var after = AvailableDevices(await _catalog.GetAsync(token).ConfigureAwait(false));
                     if (!_enabled || !after.TryGetValue(id, out var current) || current.Pair != device.Pair ||
                         !current.Paths.SequenceEqual(device.Paths, StringComparer.Ordinal))
                     {

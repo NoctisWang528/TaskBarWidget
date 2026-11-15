@@ -39,6 +39,7 @@ public sealed class MediaSettingsService : IDisposable
     private readonly Func<TrackInfo, ResolvedLyrics, CancellationToken, Task<ResolvedLyricCacheStoreResult>> _rememberResolvedLyrics;
     private readonly Action _clearLyricCache;
     private readonly Func<AppSettings, bool> _saveSettings;
+    private readonly Func<PeripheralBatterySettings, PeripheralBatterySettings> _normalizePeripherals;
     private readonly Action<AppSettings>? _previewSettings;
     private readonly Action? _retrySpectrumCapture;
     private readonly Func<bool> _isApplicationUsingLightTheme;
@@ -79,7 +80,8 @@ public sealed class MediaSettingsService : IDisposable
         Func<IReadOnlyList<DisplayMonitor>>? getDisplays = null,
         Func<double>? getPrimaryDpiScale = null,
         Func<double>? getWorkAreaWidth = null,
-        Func<CancellationToken, Task<IReadOnlyList<AvailablePlayerSession>>>? discoverPlayerSessions = null)
+        Func<CancellationToken, Task<IReadOnlyList<AvailablePlayerSession>>>? discoverPlayerSessions = null,
+        Func<PeripheralBatterySettings, PeripheralBatterySettings>? normalizePeripherals = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(getCurrentTrackLyricsContext);
@@ -97,6 +99,7 @@ public sealed class MediaSettingsService : IDisposable
         _rememberResolvedLyrics = rememberResolvedLyrics;
         _clearLyricCache = clearLyricCache;
         _saveSettings = saveSettings;
+        _normalizePeripherals = normalizePeripherals ?? (values => values.Clone());
         _previewSettings = previewSettings;
         _retrySpectrumCapture = retrySpectrumCapture;
         _isApplicationUsingLightTheme = isApplicationUsingLightTheme ?? (() => true);
@@ -1087,7 +1090,7 @@ public sealed class MediaSettingsService : IDisposable
             EnableWordScanning = _settings.EnableWordScanning,
             ToolWindowTheme = _settings.ToolWindowTheme,
             QuickCardOrder = _settings.QuickCardOrder.ToList(),
-            PeripheralBattery = _settings.PeripheralBattery.Clone(),
+            PeripheralBattery = _normalizePeripherals(_settings.PeripheralBattery),
             QuickCardColumns = new Dictionary<string, int>(
                 _settings.QuickCardColumns ?? [],
                 StringComparer.Ordinal),
@@ -1451,7 +1454,7 @@ public sealed class MediaSettingsService : IDisposable
                     if (peripheral is not null)
                     {
                         peripheral.Normalize();
-                        _settings.PeripheralBattery = peripheral;
+                        _settings.PeripheralBattery = _normalizePeripherals(peripheral);
                     }
                 }
                 break;

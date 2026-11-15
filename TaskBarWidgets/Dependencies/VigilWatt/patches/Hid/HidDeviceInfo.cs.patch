@@ -1,0 +1,10 @@
+--- a/src/VigilWatt.Core/Hid/HidDeviceInfo.cs
++++ b/src/VigilWatt.Core/Hid/HidDeviceInfo.cs
+@@ -60,6 +60,7 @@
+ 
+     private HidDeviceHandle OpenCore(uint access)
+     {
++        TaskBarWidgets.PeripheralHost.IoPolicy.BeforeOpen(DevicePath);
+         var handle = NativeHid.CreateFileW(
+             DevicePath,
+             access,

@@ -961,7 +961,7 @@ namespace Cards
     D2D1_RECT_F CardWindow::PageContentBounds() const
     {
         return kind == Kind::Weather ? Draw::Rect(0, 212, ContentWidthDip(), 324) :
-            Draw::Rect(0, 44, ContentWidthDip(), ContentHeightDip() - 24 - Layout::PeripheralFooterBottomGap);
+            Draw::Rect(0, 44, ContentWidthDip(), Layout::PeripheralPagingTop(ContentHeightDip()));
     }
 
     bool CardWindow::PageTransitionRunning() const { return impl->pageBatch != nullptr; }
@@ -1438,7 +1438,10 @@ namespace Cards
                 }
                 if (!snapshot.statusText.empty() && (HasPageContent() ? layer == 0 : kind != Kind::Media || layer == 1))
                 {
-                    const auto area = Draw::Rect(8, heightDip - 25, widthDip - 8, heightDip - 3);
+                    const auto area = kind == Kind::PeripheralBattery
+                        ? Draw::Rect(16, Layout::PeripheralPagingTop(heightDip), widthDip - 164,
+                            heightDip - Layout::PeripheralFooterBottomGap)
+                        : Draw::Rect(8, heightDip - 25, widthDip - 8, heightDip - 3);
                     Draw::FillRound(context, area, 4, environment.dark ? Color{0.15f, 0.1f, 0.1f, 1} : Color{1, 0.94f, 0.92f, 1});
                     Draw::Text(context, *environment.graphics, snapshot.statusText, environment.fontFamily, 10, 400,
                         Draw::Colors(environment).primary, area);

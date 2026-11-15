@@ -73,10 +73,11 @@ public sealed class PeripheralBatteryServiceTests
     [Fact]
     public async Task ProvenLegacyIdentityRetainsTaskbarSelectionAndCardOptOut()
     {
+        var endpointId = PeripheralIdentity.FromKey("corrected:usb-serial");
         var provider = new FakeProvider
         {
-            DiscoveryResult = Device() with { Id = PeripheralIdentity.FromKey("corrected:usb-serial"), LegacyIds = [Id] },
-            Result = Device(64)
+            DiscoveryResult = Device() with { Id = endpointId, LegacyIds = [Id] },
+            Result = Device(64) with { Id = endpointId }
         };
         await using var service = new PeripheralBatteryService([provider], null);
         var settings = new PeripheralBatterySettings { CardVisibility = new() { [Id] = false }, Order = [Id] };
@@ -85,6 +86,8 @@ public sealed class PeripheralBatteryServiceTests
         await Until(() => service.Snapshot.Devices.SingleOrDefault()?.Batteries.FirstOrDefault()?.Percentage == 64 && !service.Snapshot.Refreshing);
         var device = Assert.Single(service.Snapshot.Devices);
         Assert.Equal(Id, device.Id);
+        Assert.Contains(endpointId, provider.ReadIds);
+        Assert.DoesNotContain(Id, provider.ReadIds);
         Assert.False(device.ShowInCard);
         provider.Notify();
         await Until(() => provider.DiscoveryCalls >= 2 && !service.Snapshot.Refreshing);
@@ -339,7 +342,7 @@ public sealed class PeripheralBatteryServiceTests
     }
 
     [Fact]
-    public async Task HistoricalCacheMakesRoomForNewDevicesWithoutEvictingConfiguredIdentity()
+    public async Task IdentityLessV1HistoryIsHiddenUntilSelectedOrRediscovered()
     {
         var directory = Path.Combine(Path.GetTempPath(), "tbw-battery-test-" + Guid.NewGuid().ToString("N"));
         var cache = Path.Combine(directory, "cache.json");
@@ -349,14 +352,393 @@ public sealed class PeripheralBatteryServiceTests
             Directory.CreateDirectory(directory);
             await File.WriteAllTextAsync(cache, JsonSerializer.Serialize(history));
             await using var service = new PeripheralBatteryService([new FakeProvider()], cache);
-            service.Configure(new() { Order = [history[0].Id] }, false, false, false); service.Start();
-            await Until(() => service.Snapshot.Devices.Length == 256);
+            service.Configure(new() { Order = [history[0].Id], CardVisibility = new() { [history[0].Id] = false } }, false, false, false);
+            service.Start();
             service.SetSettingsActive(true);
             await Until(() => service.Snapshot.Devices.Any(d => d.Id == Id && d.Batteries.Length == 1) && !service.Snapshot.Refreshing);
-            Assert.Equal(256, service.Snapshot.Devices.Length);
+            Assert.Single(service.Snapshot.Devices);
+            service.SetTaskbarDemand([history[0].Id]);
+            service.Configure(new() { Order = [history[0].Id], CardVisibility = new() { [history[0].Id] = false } }, false, false, false);
+            Assert.Equal(2, service.Snapshot.Devices.Length);
             Assert.Contains(service.Snapshot.Devices, d => d.Id == history[0].Id);
         }
         finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public async Task SharedEntityRoutesReadsAndNotificationsToEachProviderEndpoint()
+    {
+        var other = PeripheralIdentity.FromKey("protocol-endpoint");
+        var evidence = new PeripheralIdentityEvidence { BluetoothAddress = "11:22:33:44:55:66" };
+        var windows = new FakeProvider { DiscoveryResult = Device() with { Identity = evidence, Source = "windows" },
+            Result = Device(31) with { Identity = evidence, Source = "windows-pnp" } };
+        var protocol = new FakeProvider { DiscoveryResult = Device() with { Id = other, Identity = evidence, Source = "hidpp20" },
+            Result = Device(72) with { Id = other, Identity = evidence, Source = "hidpp20", UpdatedAt = DateTimeOffset.UtcNow.AddSeconds(1) } };
+        await using var service = new PeripheralBatteryService([windows, protocol], null);
+        service.Configure(new() { CardVisibility = new() { [Id] = false } }, false, false, false);
+        service.SetTaskbarDemand([Id]); service.Start();
+        await Until(() => protocol.ReadCalls == 1 && !service.Snapshot.Refreshing);
+        var merged = Assert.Single(service.Snapshot.Devices);
+        Assert.Equal(Id, merged.Id); Assert.False(merged.ShowInCard);
+        Assert.Equal(72, Assert.Single(merged.Batteries).Percentage);
+        Assert.Equal(new[] { Id }, windows.ReadIds);
+        Assert.Equal(new[] { other }, protocol.ReadIds);
+        Assert.Contains(other, protocol.Demand);
+        Assert.Equal(Id, service.Snapshot.Aliases[other]);
+        protocol.Notify(protocol.Result with { Batteries = [new() { Percentage = 85 }], UpdatedAt = DateTimeOffset.UtcNow.AddSeconds(2) });
+        Assert.Equal(85, Assert.Single(Assert.Single(service.Snapshot.Devices).Batteries).Percentage);
+        service.SetTaskbarDemand([]);
+        await Until(() => windows.Demand.Count == 0 && protocol.Demand.Count == 0);
+        protocol.Notify(protocol.Result with { Batteries = [new() { Percentage = 90 }], UpdatedAt = DateTimeOffset.UtcNow.AddSeconds(3) });
+        Assert.Equal(85, service.Snapshot.Devices[0].Batteries[0].Percentage);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DedicatedProtocolWinsTiedReadingTimeAndQualityControlsDescriptions(bool protocolFirst)
+    {
+        var other = PeripheralIdentity.FromKey("dedicated-protocol"); var at = DateTimeOffset.UtcNow;
+        var identity = new PeripheralIdentityEvidence { EndpointPath = @"HID\VID_0001&PID_0002\instance" };
+        var windowsSample = Device(20) with { Name = "Actual paired product", NameQuality = 50, Kind = "mouse", KindQuality = 40,
+            Identity = identity, UpdatedAt = at, Source = "windows-pnp" };
+        var protocolSample = Device(75) with { Id = other, Name = "HID-compliant mouse", Kind = "unknown",
+            Identity = identity, UpdatedAt = at, Source = "vigil-watt:MouseBattery" };
+        var windows = new FakeProvider { DiscoveryResult = windowsSample, Result = windowsSample };
+        var protocol = new FakeProvider { DiscoveryResult = protocolSample, Result = protocolSample };
+        await using var service = new PeripheralBatteryService(protocolFirst ? [protocol, windows] : [windows, protocol], null);
+        service.SetTaskbarDemand([Id]); service.Start();
+        await Until(() => windows.ReadCalls == 1 && protocol.ReadCalls == 1 && !service.Snapshot.Refreshing);
+        var merged = Assert.Single(service.Snapshot.Devices);
+        Assert.Equal(75, Assert.Single(merged.Batteries).Percentage);
+        Assert.Equal("vigil-watt:MouseBattery", merged.Source);
+        Assert.Equal("Actual paired product", merged.Name); Assert.Equal("mouse", merged.Kind);
+        windows.Notify(windowsSample with { UpdatedAt = at.AddSeconds(-1), Batteries = [new() { Percentage = 10 }] });
+        Assert.Equal(75, service.Snapshot.Devices[0].Batteries[0].Percentage);
+        windows.Notify(windowsSample with { UpdatedAt = at.AddSeconds(1), Batteries = [new() { Percentage = 19 }] });
+        Assert.Equal(19, service.Snapshot.Devices[0].Batteries[0].Percentage);
+    }
+
+    [Fact]
+    public async Task NewSettingsWrittenDuringDiscoveryWinAliasMigration()
+    {
+        var other = PeripheralIdentity.FromKey("late-protocol");
+        var evidence = new PeripheralIdentityEvidence { UniqueSerial = "unique", SerialScope = "usb:0001:0002" };
+        var windows = new FakeProvider { DiscoveryResult = Device() with { Identity = evidence } };
+        var protocol = new FakeProvider { DiscoveryResult = Device() with { Id = other, Identity = evidence },
+            Result = Device(40) with { Id = other }, FinishDiscovery = new(TaskCreationOptions.RunContinuationsAsynchronously) };
+        await using var service = new PeripheralBatteryService([windows, protocol], null);
+        service.Configure(new() { CardVisibility = new() { [other] = false } }, false, false, false);
+        service.SetTaskbarDemand([Id]); service.Start();
+        await protocol.DiscoveryEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        service.Configure(new() { CardVisibility = new() { [Id] = true, [other] = false } }, false, false, false);
+        protocol.FinishDiscovery.SetResult();
+        await Until(() => protocol.ReadCalls > 0 && !service.Snapshot.Refreshing);
+        Assert.True(Assert.Single(service.Snapshot.Devices).ShowInCard);
+        var input = new PeripheralBatterySettings { Order = [other, Id], CardVisibility = new() { [Id] = true, [other] = false } };
+        var normalized = service.NormalizeSettings(input);
+        Assert.Equal(new[] { Id }, normalized.Order); Assert.True(normalized.CardVisibility[Id]);
+        Assert.Equal(2, input.Order.Count);
+        service.Configure(new() { CardVisibility = new() { [Id] = false } }, false, false, false);
+        Assert.False(service.Snapshot.Devices[0].ShowInCard);
+    }
+
+    [Fact]
+    public async Task V2CacheRetainsProvenAliasesRoleTimesAndOfflineEvidenceAcrossNewEndpointIds()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "tbw-battery-test-" + Guid.NewGuid().ToString("N"));
+        var cache = Path.Combine(directory, "cache.json");
+        var other = PeripheralIdentity.FromKey("replacement-endpoint"); var at = DateTimeOffset.UtcNow;
+        var evidence = new PeripheralIdentityEvidence { UniqueSerial = "cache-unit", SerialScope = "usb:0001:0002" };
+        var sample = Device() with { Identity = evidence, UpdatedAt = at, Source = "hidpp20", Batteries =
+            [new() { Role = "left", Percentage = 40 }, new() { Role = "right", Percentage = 60 }] };
+        try
+        {
+            var provider = new FakeProvider { DiscoveryResult = sample, Result = sample };
+            await using (var service = new PeripheralBatteryService([provider], cache))
+            {
+                service.SetTaskbarDemand([Id]); service.Start();
+                await Until(() => provider.ReadCalls > 0 && !service.Snapshot.Refreshing);
+                provider.Notify(sample with { UpdatedAt = at.AddSeconds(5), Batteries = [new() { Role = "left", Percentage = 39 }] });
+                Assert.Equal(2, service.Snapshot.Devices[0].Batteries.Length);
+            }
+            using (var saved = JsonDocument.Parse(await File.ReadAllTextAsync(cache)))
+                Assert.Equal(2, saved.RootElement.GetProperty("version").GetInt32());
+            var replacement = new FakeProvider { DiscoveryResult = Device() with { Id = other, Identity = evidence },
+                Result = Device() with { Id = other, Identity = evidence, UpdatedAt = at.AddSeconds(2),
+                    Batteries = [new() { Role = "right", Percentage = 58 }] } };
+            await using (var restored = new PeripheralBatteryService([replacement], cache))
+            {
+                restored.SetTaskbarDemand([Id]); restored.Start();
+                await Until(() => replacement.ReadCalls > 0 && !restored.Snapshot.Refreshing);
+                var merged = Assert.Single(restored.Snapshot.Devices);
+                Assert.Equal(Id, merged.Id); Assert.Equal(Id, restored.ResolveId(other));
+                Assert.Equal(at.AddSeconds(5), merged.UpdatedAt);
+                Assert.Equal(39, merged.Batteries.Single(b => b.Role == "left").Percentage);
+                Assert.Equal(58, merged.Batteries.Single(b => b.Role == "right").Percentage);
+                Assert.Equal(new[] { other }, replacement.ReadIds);
+            }
+            await using var again = new PeripheralBatteryService([], cache);
+            again.Start();
+            await Until(() => again.Snapshot.Devices.Length == 1);
+            Assert.Equal(Id, again.ResolveId(other));
+            Assert.Equal(2, again.Snapshot.Devices[0].Batteries.Length);
+            Assert.True(again.Snapshot.Devices[0].Stale);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public async Task V1HistoryOrderAndOptOutAreNotSelectionButExplicitTrueIs()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "tbw-battery-test-" + Guid.NewGuid().ToString("N"));
+        var cache = Path.Combine(directory, "cache.json"); var at = DateTimeOffset.UtcNow;
+        try
+        {
+            Directory.CreateDirectory(directory);
+            await File.WriteAllTextAsync(cache, JsonSerializer.Serialize(new[] { Device(41) with { UpdatedAt = at } }));
+            var provider = new FakeProvider { Present = false };
+            await using var service = new PeripheralBatteryService([provider], cache);
+            service.Configure(new() { Order = [Id], CardVisibility = new() { [Id] = false } }, false, false, false);
+            service.SetSettingsActive(true); service.Start();
+            await Until(() => provider.DiscoveryCalls > 0 && !service.Snapshot.Refreshing);
+            Assert.Empty(service.Snapshot.Devices);
+            service.Configure(new() { Order = [Id], CardVisibility = new() { [Id] = true } }, false, false, false);
+            var selected = Assert.Single(service.Snapshot.Devices);
+            Assert.Equal(41, Assert.Single(selected.Batteries).Percentage); Assert.Equal(at, selected.UpdatedAt);
+            Assert.Equal("disconnected", selected.State); Assert.True(selected.Stale);
+            Assert.False(selected.CanRead);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public async Task DiagnosticsUseOneReportSaltAndNeverExposePrivateIdentityValues()
+    {
+        var other = PeripheralIdentity.FromKey("diagnostic-alias");
+        var sample = Device(50) with { Name = "Private user name", Source = "hidpp20", LegacyIds = [other], Identity = new()
+            { ContainerId = "private-container", BluetoothAddress = "112233445566", UniqueSerial = "private-serial",
+              SerialScope = "private-scope", EndpointPath = @"\\?\hid#private-endpoint", UnitId = "private-unit", UnitScope = "unit-scope" } };
+        var provider = new FakeProvider { DiscoveryResult = sample, Result = sample };
+        await using var service = new PeripheralBatteryService([provider], null);
+        service.SetTaskbarDemand([Id]); service.Start();
+        await Until(() => provider.ReadCalls > 0 && !service.Snapshot.Refreshing);
+        var salt = Enumerable.Range(0, 32).Select(i => (byte)i).ToArray();
+        var report = service.ExportDiagnostics(salt);
+        Assert.Equal(report, service.ExportDiagnostics(salt));
+        Assert.NotEqual(report, service.ExportDiagnostics());
+        foreach (var secret in new[] { Id, other, sample.Name, "private-container", "112233445566", "private-serial", "private-scope",
+            "private-endpoint", "private-unit", "unit-scope" }) Assert.DoesNotContain(secret, report);
+        using var json = JsonDocument.Parse(report);
+        var entity = json.RootElement.GetProperty("devices")[0];
+        Assert.Equal(entity.GetProperty("id").GetString(), entity.GetProperty("endpoints")[0].GetProperty("id").GetString());
+        Assert.StartsWith("redacted-", entity.GetProperty("id").GetString());
+        Assert.True(entity.GetProperty("canRead").GetBoolean());
+        Assert.Equal(entity.GetProperty("id").GetString(), json.RootElement.GetProperty("aliases")[0].GetProperty("to").GetString());
+        Assert.Equal(25, entity.GetProperty("evidence")[0].GetProperty("uniqueSerial").GetString()!.Length);
+    }
+
+    [Fact]
+    public async Task SameReceiverPathKeepsChildReadingsIndependent()
+    {
+        var other = PeripheralIdentity.FromKey("receiver-child-b");
+        var identity = new PeripheralIdentityEvidence { EndpointPath = @"hid\shared-receiver", UnitId = "unit-a|model",
+            UnitScope = "logitech:hidpp-unit-model" };
+        var a = Device(25) with { Identity = identity };
+        var b = Device(80) with { Id = other, Identity = identity with { UnitId = "unit-b|model" } };
+        var provider = new FakeProvider { DiscoveryResults = [a, b], Results = [a, b] };
+        await using var service = new PeripheralBatteryService([provider], null);
+        service.SetTaskbarDemand([Id, other]); service.Start();
+        await Until(() => provider.ReadCalls > 0 && !service.Snapshot.Refreshing);
+        Assert.Equal(2, service.Snapshot.Devices.Length);
+        Assert.Equal(25, Assert.Single(service.Snapshot.Devices.Single(d => d.Id == Id).Batteries).Percentage);
+        Assert.Equal(80, Assert.Single(service.Snapshot.Devices.Single(d => d.Id == other).Batteries).Percentage);
+        Assert.Empty(service.Snapshot.Aliases);
+        using var diagnostics = JsonDocument.Parse(service.ExportDiagnostics());
+        Assert.Equal("", diagnostics.RootElement.GetProperty("devices")[0].GetProperty("evidence")[0].GetProperty("bluetoothAddress").GetString());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReusedEndpointKeepsTheSelectedOriginalOfflineAndTheReplacementSeparate(bool losingAlias)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "tbw-battery-test-" + Guid.NewGuid().ToString("N"));
+        var cache = Path.Combine(directory, "cache.json"); var at = DateTimeOffset.UtcNow;
+        var endpointId = losingAlias ? PeripheralIdentity.FromKey("reused-losing-alias") : Id;
+        var evidence = new PeripheralIdentityEvidence { UniqueSerial = "original-device", SerialScope = "usb:0001:0002" };
+        var original = Device(80) with { Id = endpointId, Name = "Original device", Identity = evidence, UpdatedAt = at,
+            LegacyIds = losingAlias ? [Id] : [] };
+        var replacement = Device() with { Id = endpointId, Name = "Replacement device", Kind = "keyboard",
+            Identity = evidence with { UniqueSerial = "replacement-device" } };
+        var settings = new PeripheralBatterySettings { Order = [Id], CardVisibility = new() { [Id] = true } };
+        string replacementId;
+        try
+        {
+            var provider = new FakeProvider { DiscoveryResult = original, Result = original };
+            await using (var service = new PeripheralBatteryService([provider], cache))
+            {
+                service.Configure(settings, false, false, false); service.SetTaskbarDemand([Id]); service.Start();
+                await Until(() => provider.ReadCalls == 1 && !service.Snapshot.Refreshing);
+                provider.DiscoveryResult = replacement; provider.Notify();
+                await Until(() => provider.DiscoveryCalls == 2 && !service.Snapshot.Refreshing);
+                var old = service.Snapshot.Devices.Single(d => d.Id == Id);
+                var current = service.Snapshot.Devices.Single(d => d.Id != Id);
+                replacementId = current.Id;
+                Assert.NotEqual(endpointId, replacementId); Assert.NotEqual(Id, replacementId);
+                Assert.Equal("disconnected", old.State); Assert.True(old.Stale); Assert.False(old.CanRead); Assert.True(old.ShowInCard);
+                Assert.Equal(80, Assert.Single(old.Batteries).Percentage); Assert.Equal(at, old.UpdatedAt);
+                Assert.Equal("Replacement device", current.Name); Assert.Equal("keyboard", current.Kind);
+                Assert.Empty(current.Batteries); Assert.Null(current.UpdatedAt); Assert.False(current.ShowInCard);
+                Assert.Equal(Id, service.ResolveId(Id)); Assert.Equal(1, provider.ReadCalls);
+                Assert.Equal(Id, service.ResolveId(endpointId));
+                if (losingAlias) Assert.Equal(Id, service.Snapshot.Aliases[endpointId]);
+                Assert.Equal(new[] { Id }, service.NormalizeSettings(settings).Order);
+                provider.Result = replacement with { UpdatedAt = at.AddSeconds(1), Batteries = [new() { Percentage = 22 }] };
+                service.SetTaskbarDemand([Id, replacementId]);
+                await Until(() => provider.ReadCalls == 2 && !service.Snapshot.Refreshing);
+                Assert.Equal(new[] { endpointId }, provider.ReadIds);
+                Assert.Equal(22, Assert.Single(service.Snapshot.Devices.Single(d => d.Id == replacementId).Batteries).Percentage);
+                provider.Notify();
+                await Until(() => provider.DiscoveryCalls == 3 && !service.Snapshot.Refreshing);
+                Assert.Equal(replacementId, service.Snapshot.Devices.Single(d => d.Name == replacement.Name).Id);
+                Assert.Equal("disconnected", service.Snapshot.Devices.Single(d => d.Id == Id).State);
+                Assert.True(service.Snapshot.Devices.Single(d => d.Id == Id).Stale);
+                Assert.DoesNotContain(Id, service.Snapshot.Aliases.Keys);
+                Assert.Equal(Id, service.ResolveId(endpointId));
+                var oldDraft = service.NormalizeSettings(new() { Order = [endpointId], CardVisibility = new() { [endpointId] = false } });
+                Assert.Equal(new[] { Id }, oldDraft.Order); Assert.False(oldDraft.CardVisibility[Id]);
+            }
+            var restoredProvider = new FakeProvider { DiscoveryResult = replacement,
+                Result = replacement with { UpdatedAt = at.AddSeconds(2), Batteries = [new() { Percentage = 21 }] } };
+            await using var restored = new PeripheralBatteryService([restoredProvider], cache);
+            restored.Configure(settings, false, false, false); restored.SetTaskbarDemand([Id, replacementId]); restored.Start();
+            await Until(() => restoredProvider.ReadCalls == 1 && !restored.Snapshot.Refreshing);
+            Assert.Equal(new[] { endpointId }, restoredProvider.ReadIds);
+            var historical = restored.Snapshot.Devices.Single(d => d.Id == Id);
+            Assert.Equal("disconnected", historical.State); Assert.True(historical.Stale);
+            Assert.Equal(80, Assert.Single(historical.Batteries).Percentage); Assert.Equal(at, historical.UpdatedAt);
+            Assert.Equal(21, Assert.Single(restored.Snapshot.Devices.Single(d => d.Id == replacementId).Batteries).Percentage);
+            Assert.Equal(Id, restored.ResolveId(Id)); Assert.DoesNotContain(Id, restored.Snapshot.Aliases.Keys);
+            Assert.Equal(Id, restored.ResolveId(endpointId));
+            if (losingAlias) Assert.Equal(Id, restored.Snapshot.Aliases[endpointId]);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public async Task ChargingFreshnessIsIndependentOfPercentageAndSurvivesCacheRestore()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "tbw-battery-test-" + Guid.NewGuid().ToString("N"));
+        var cache = Path.Combine(directory, "cache.json"); var at = DateTimeOffset.UtcNow;
+        var sample = Device(40) with { Source = "hidpp20", UpdatedAt = at,
+            Batteries = [new() { Percentage = 40, Charging = false }] };
+        try
+        {
+            var provider = new FakeProvider { DiscoveryResult = sample, Result = sample };
+            await using (var service = new PeripheralBatteryService([provider], cache))
+            {
+                service.SetTaskbarDemand([Id]); service.Start();
+                await Until(() => provider.ReadCalls == 1 && !service.Snapshot.Refreshing);
+                provider.Notify(sample with { UpdatedAt = at.AddSeconds(10), Batteries = [new() { Charging = true }] });
+                provider.Notify(sample with { UpdatedAt = at.AddSeconds(5), Batteries = [new() { Charging = false }] });
+                var reading = Assert.Single(Assert.Single(service.Snapshot.Devices).Batteries);
+                Assert.Equal(40, reading.Percentage); Assert.True(reading.Charging);
+                Assert.Equal(at, service.Snapshot.Devices[0].UpdatedAt);
+            }
+            using (var saved = JsonDocument.Parse(await File.ReadAllTextAsync(cache)))
+            {
+                var role = saved.RootElement.GetProperty("devices")[0].GetProperty("readings")[0];
+                Assert.Equal(at, role.GetProperty("updatedAt").GetDateTimeOffset());
+                Assert.Equal(at.AddSeconds(10), role.GetProperty("chargingUpdatedAt").GetDateTimeOffset());
+            }
+            var delayed = sample with { UpdatedAt = at.AddSeconds(7), Batteries = [new() { Percentage = 39, Charging = false }] };
+            var restoredProvider = new FakeProvider { DiscoveryResult = Device(), Result = delayed };
+            await using var restored = new PeripheralBatteryService([restoredProvider], cache);
+            restored.SetTaskbarDemand([Id]); restored.Start();
+            await Until(() => restoredProvider.ReadCalls == 1 && !restored.Snapshot.Refreshing);
+            var retained = Assert.Single(Assert.Single(restored.Snapshot.Devices).Batteries);
+            Assert.Equal(39, retained.Percentage); Assert.True(retained.Charging);
+            Assert.Equal(at.AddSeconds(7), restored.Snapshot.Devices[0].UpdatedAt);
+            restoredProvider.Notify(sample with { UpdatedAt = at.AddSeconds(11), Batteries = [new() { Charging = false }] });
+            Assert.False(restored.Snapshot.Devices[0].Batteries[0].Charging);
+            Assert.Equal(at.AddSeconds(7), restored.Snapshot.Devices[0].UpdatedAt);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public async Task SameSourceUnknownChargingInvalidatesOnlyOlderChargingEvidence()
+    {
+        var at = DateTimeOffset.UtcNow;
+        var sample = Device(40) with { Source = "vigil-watt:RazerBattery", UpdatedAt = at,
+            Batteries = [new() { Percentage = 40, Charging = true }] };
+        var provider = new FakeProvider { DiscoveryResult = sample, Result = sample };
+        await using var service = new PeripheralBatteryService([provider], null);
+        service.SetTaskbarDemand([Id]); service.Start();
+        await Until(() => provider.ReadCalls == 1 && !service.Snapshot.Refreshing);
+        provider.Notify(sample with { UpdatedAt = at.AddSeconds(1), Batteries = [new() { Percentage = 39 }] });
+        Assert.Null(service.Snapshot.Devices[0].Batteries[0].Charging);
+        provider.Notify(sample with { UpdatedAt = at.AddSeconds(10), Batteries = [new() { Charging = true }] });
+        provider.Notify(sample with { UpdatedAt = at.AddSeconds(5), Batteries = [new() { Percentage = 38 }] });
+        Assert.True(service.Snapshot.Devices[0].Batteries[0].Charging);
+        Assert.Equal(38, service.Snapshot.Devices[0].Batteries[0].Percentage);
+        provider.Notify(sample with { Source = "windows-pnp", UpdatedAt = at.AddSeconds(11),
+            Batteries = [new() { Percentage = 37 }] });
+        Assert.True(service.Snapshot.Devices[0].Batteries[0].Charging);
+        provider.Notify(sample with { UpdatedAt = at.AddSeconds(12), Batteries = [new() { Percentage = 36 }] });
+        Assert.Null(service.Snapshot.Devices[0].Batteries[0].Charging);
+        provider.Notify(sample with { UpdatedAt = at.AddSeconds(11), Batteries = [new() { Charging = false }] });
+        Assert.Null(service.Snapshot.Devices[0].Batteries[0].Charging);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NotificationWhileLaterProviderDiscoversSurvivesEarlierDiscoveryResult(bool omitted)
+    {
+        var at = DateTimeOffset.UtcNow;
+        var sample = Device(70) with { UpdatedAt = at };
+        var first = new FakeProvider { DiscoveryResult = sample, Result = sample };
+        var second = new FakeProvider { Present = false };
+        await using var service = new PeripheralBatteryService([first, second], null);
+        service.SetTaskbarDemand([Id]); service.Start();
+        await Until(() => first.ReadCalls == 1 && !service.Snapshot.Refreshing);
+        second.FinishDiscovery = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        second.DiscoveryEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        first.DiscoveryResults = omitted ? [] : [Device() with { State = "disconnected", Stale = true, CanRead = false }];
+        first.Notify();
+        await second.DiscoveryEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        first.Notify(sample with { UpdatedAt = at.AddSeconds(2), Batteries = [new() { Percentage = 68 }] });
+        second.FinishDiscovery.SetResult();
+        await Until(() => second.DiscoveryCalls == 2 && !service.Snapshot.Refreshing);
+        var retained = Assert.Single(service.Snapshot.Devices);
+        Assert.Equal("online", retained.State); Assert.True(retained.CanRead); Assert.False(retained.Stale);
+        Assert.Equal(68, Assert.Single(retained.Batteries).Percentage);
+        Assert.Equal(at.AddSeconds(2), retained.UpdatedAt);
+        Assert.Equal(1, first.ReadCalls);
+    }
+
+    [Fact]
+    public async Task OlderReadStillUpdatesOtherRolesWithoutReplacingNotificationConnectionState()
+    {
+        var at = DateTimeOffset.UtcNow;
+        var initial = Device() with { UpdatedAt = at, Batteries =
+            [new() { Role = "left", Percentage = 50 }, new() { Role = "right", Percentage = 70 }] };
+        var provider = new FakeProvider { DiscoveryResult = initial, FinishRead = new(TaskCreationOptions.RunContinuationsAsynchronously),
+            Result = initial with { UpdatedAt = at.AddSeconds(1), State = "disconnected", CanRead = false, Stale = true,
+                Batteries = [new() { Role = "left", Percentage = 49 }, new() { Role = "right", Percentage = 67 }] } };
+        await using var service = new PeripheralBatteryService([provider], null);
+        service.SetTaskbarDemand([Id]); service.Start();
+        await provider.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        provider.Notify(initial with { UpdatedAt = at.AddSeconds(2), Batteries = [new() { Role = "left", Percentage = 48 }] });
+        provider.FinishRead.SetResult();
+        await Until(() => !service.Snapshot.Refreshing);
+        var retained = Assert.Single(service.Snapshot.Devices);
+        Assert.Equal(48, retained.Batteries.Single(b => b.Role == "left").Percentage);
+        Assert.Equal(67, retained.Batteries.Single(b => b.Role == "right").Percentage);
+        Assert.Equal(at.AddSeconds(2), retained.UpdatedAt);
+        Assert.Equal("online", retained.State); Assert.True(retained.CanRead); Assert.False(retained.Stale);
     }
 
     [Fact]
@@ -377,6 +759,9 @@ public sealed class PeripheralBatteryServiceTests
     private sealed class FakeProvider : IPeripheralBatteryProvider, IPeripheralBatteryNotifications
     {
         public TaskCompletionSource? FinishRead;
+        public TaskCompletionSource? FinishDiscovery;
+        public TaskCompletionSource DiscoveryEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public IReadOnlySet<string> ReadIds { get; private set; } = new HashSet<string>();
         public event Action<PeripheralDeviceSnapshot>? ReadingChanged;
         public IReadOnlySet<string> Demand { get; private set; } = new HashSet<string>();
         public Task SetDemandAsync(IReadOnlySet<string> deviceIds, CancellationToken cancellationToken)
@@ -387,24 +772,28 @@ public sealed class PeripheralBatteryServiceTests
         public bool Present = true, FailRead, FailDiscovery, BlockRead, Disposed, ReadCancelled;
         public PeripheralDeviceSnapshot Result = Device(75);
         public PeripheralDeviceSnapshot? DiscoveryResult;
+        public PeripheralDeviceSnapshot[]? DiscoveryResults, Results;
         public TaskCompletionSource Entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public void Notify() => DevicesChanged?.Invoke();
-        public Task<IReadOnlyList<PeripheralDeviceSnapshot>> DiscoverAsync(CancellationToken cancellationToken)
+        public async Task<IReadOnlyList<PeripheralDeviceSnapshot>> DiscoverAsync(CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref DiscoveryCalls);
+            DiscoveryEntered.TrySetResult();
+            if (FinishDiscovery is not null) await FinishDiscovery.Task.WaitAsync(cancellationToken);
             if (FailDiscovery) throw new IOException("test discovery failure");
-            return Task.FromResult<IReadOnlyList<PeripheralDeviceSnapshot>>(Present ? [DiscoveryResult ?? Device()] : []);
+            return Present ? DiscoveryResults ?? [DiscoveryResult ?? Device()] : [];
         }
         public async Task<IReadOnlyList<PeripheralDeviceSnapshot>> ReadAsync(IReadOnlySet<string> deviceIds,
             PeripheralBatterySettings settings, CancellationToken cancellationToken)
         {
+            ReadIds = deviceIds.ToHashSet();
             Interlocked.Increment(ref ReadCalls); Entered.TrySetResult();
             if (FinishRead is not null) await FinishRead.Task.WaitAsync(cancellationToken);
             if (BlockRead)
                 try { await Task.Delay(Timeout.Infinite, cancellationToken); }
                 catch (OperationCanceledException) { ReadCancelled = true; throw; }
             if (FailRead) throw new IOException("test read failure");
-            return [Result];
+            return Results ?? [Result];
         }
         public ValueTask DisposeAsync() { Disposed = true; return ValueTask.CompletedTask; }
     }

@@ -1,0 +1,44 @@
+--- a/src/VigilWatt.Core/Plugins/Asus/AsusPlugin.cs
++++ b/src/VigilWatt.Core/Plugins/Asus/AsusPlugin.cs
+@@ -1,3 +1,4 @@
++// Adapted from VigilWatt (MIT). Copyright (c) 2026 evren; see upstream/LICENSE.
+ using VigilWatt.Core.Hid;
+ using VigilWatt.Core.Models;
+ using VigilWatt.Core.Utils;
+@@ -35,14 +36,23 @@
+     private (string Protocol, int? Percent, ChargingState Charging)? ProbeHeadset(HidDeviceHandle handle)
+     {
+         if (!WritesEnabled) return null;
+-        var percent = ReadHeadsetPower(handle);
+-        if (percent == null)
++        var reading = ReadHeadsetStatus(() => ReadHeadsetPower(handle),
++            percent => ReadHeadsetCharging(handle, percent));
++        if (reading == null)
+         {
+             Log.Once(LogLevel.Debug, handle.Info.DevicePath + "|asus-hs", "华硕耳机 POWER 无应答（未开机或未连上）");
+             return null;
+         }
+-        // 认领只发电量帧：多一条会让"启动约 1 秒认领"退化成 1.7 秒，充电位下一轮补上即可。
+-        return (AsusHeadsetCodec.Protocol, percent, ChargingState.Unknown);
++        // The host detaches after each request; the optional bounded charging read belongs here.
++        return (AsusHeadsetCodec.Protocol, reading.Value.Percent, reading.Value.Charging);
++    }
++
++    internal static (int Percent, ChargingState Charging)? ReadHeadsetStatus(
++        Func<int?> readPower, Func<int, ChargingState?> readCharging)
++    {
++        int? percent = readPower();
++        if (percent is not (>= 0 and <= 100)) return null;
++        return (percent.Value, readCharging(percent.Value) ?? ChargingState.Unknown);
+     }
+ 
+     protected override DeviceKind ResolveKind(string protocol) =>
+@@ -87,7 +97,7 @@
+             return null;
+         }
+         ReportPollAnswered(dev);
+-        var charging = ReadHeadsetCharging(dev.Handle, percent.Value) ?? dev.Status.Charging;
++        var charging = ReadHeadsetCharging(dev.Handle, percent.Value) ?? ChargingState.Unknown;
+         return (percent, charging);
+     }
+ 

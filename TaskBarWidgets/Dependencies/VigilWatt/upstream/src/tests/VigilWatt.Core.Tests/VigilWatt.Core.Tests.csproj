@@ -1,0 +1,175 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>VigilWatt.Core.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <!-- HistoryStore 的删除/统计逻辑要真跑 SQLite（DELETE 不还空间、VACUUM 不丢数据这类行为只有真库能验） -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+  </ItemGroup>
+
+  <!--
+    直接链接被验证的源文件，测的是真代码，不是复制品。
+    这些文件都刻意做成零依赖的纯逻辑，所以能脱离 WinRT 单独编译——
+    正因如此这里用 <Compile Include> 而不是 ProjectReference：Core 的目标框架是
+    net8.0-windows10.0.19041.0，本测试项目保持纯净的 net8.0（AnyCPU），
+    不引入 Windows SDK / WinRT 依赖。改这些源文件后必须重跑测试。
+
+    HistoryStore 能进这个项目，是因为它虽然碰 SQLite，但不碰 WinRT：
+    依赖只有 Microsoft.Data.Sqlite + AppPaths + Log + DeviceStatus（全是纯 .NET）。
+    它靠 HistoryStore(dbPath) 的可选构造参数指向临时库，测试因此不碰真实 history.db。
+  -->
+  <ItemGroup>
+    <Compile Include="..\..\VigilWatt.Core\Hid\NativeHid.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Hid\HidDeviceInfo.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Asus\AsusKeyboardCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Asus\AsusHeadsetCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Razer\RazerHeadsetCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Razer\RazerViperSeCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Razer\RazerDeviceProfile.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Razer\RazerReadingState.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Thunderobot\ThunderobotCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Akg\AkgN9Codec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Akg\AkgN9PacketAssembler.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Akg\AkgN9Transport.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Aula\AulaHero68Codec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Aula\AulaHero68PacketAssembler.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Ajazz\AjazzCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\BatteryPluginBase.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Settings\AppSettings.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Settings\IgnoredDevice.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Devices\DeviceBlocklist.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\IBatteryPlugin.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\BatteryReadingFilter.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\PluginUtils.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\DeviceClaimRegistry.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\OfflinePolicy.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\WriteBackoff.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Mchose\MchoseV1Codec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Mchose\MchoseMouseCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Mchose\MchoseK7Codec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Mchose\MchoseGmouseCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Mchose\MchoseV9ProCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Mchose\MchoseX9Codec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Mchose\MchoseA5Codec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Mchose\MchoseMouseProtocol.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Mchose\MchoseInterfaceClassifier.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Lingbao\LingbaoCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Compx\CompxSessionAck.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Vgn\VgnCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Vgn\VgnY2Codec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Vgn\VgnDevicePairing.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Vgn\VgnV98ProCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Aula\AulaG9Codec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Aula\AulaL9Codec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Haute\HauteCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Rapoo\RapooCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Cherry\CherryCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Pulsar\PulsarCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Hecate\HecateCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Delux\DeluxCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Delux\DockChargeFilter.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Razer\RazerCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Razer\RazerKrakenCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Sony\InzoneCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Ganss\GanssCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Sony\DualSenseCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Betop\BetopCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Betop\BetopDeviceIdentity.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Betop\BetopOfficialAppGuard.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Darkrim\DarkrimCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Darkrim\OfficialAppGuard.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\GameSir\GameSirCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Eweadn\EweadnKeyboardCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Eweadn\EweadnMouseCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Atk\AtkCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Atk\AtkPlugin.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Hid\HidDeviceScanner.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Devices\DeviceDisplayDeduplicator.cs" />
+    <!-- 贴片「选择显示设备」的过滤规则同样是零依赖纯逻辑，链接真源文件而非复制 -->
+    <Compile Include="..\..\VigilWatt.App\Services\TaskbarDeviceFilter.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Atk\AtkViaCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\HyperX\Cf2Codec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Logitech\HidppCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Logitech\CenturionCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Ble\ClassicDeviceName.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Ble\DualChannelId.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Ble\WatcherProps.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Models\DeviceKind.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Models\DeviceKindGuesser.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Models\ClassicDeviceKindResolver.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Models\DeviceSourceInfo.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Models\DeviceStatus.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Settings\DeviceCustomization.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Models\DeviceStatusFormatter.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Models\ChargingStateMap.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Devices\DeviceStatusMerger.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Devices\DeviceChangeDetector.cs" />
+    <!-- 删除设备后的"该不该收这条上报"判定：黑名单/删除标记四种组合，写错就是删了又复活 -->
+    <Compile Include="..\..\VigilWatt.Core\Devices\DeviceRemoval.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Settings\BlockedDevice.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Devices\RemainingTimeEstimator.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Power\SystemPowerReader.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Power\SystemBatteryWatcher.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Storage\HistoryStore.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Utils\AppPaths.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Utils\ByteSize.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Utils\Log.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Utils\LogLevel.cs" />
+    <!-- 小组件 OS 能力判定也是零依赖纯逻辑，链接真源文件而非复制 -->
+    <Compile Include="..\..\VigilWatt.App\Services\WidgetCompat.cs" />
+    <!-- 任务栏贴片的定位数学与取值收敛同样是零依赖纯逻辑（只碰 int/Math），定位算错必须能在单测里复现 -->
+    <Compile Include="..\..\VigilWatt.App\Services\TaskbarLayout.cs" />
+    <Compile Include="..\..\VigilWatt.App\Services\TaskbarBatteryMode.cs" />
+    <!-- 选屏逻辑（身份匹配 / 型号兜底 / 目标缺失降级主屏）是纯函数，换显示模式后贴片该去哪必须能单测 -->
+    <Compile Include="..\..\VigilWatt.App\Services\MonitorSelection.cs" />
+    <!-- 更新日志解析是三处消费方共用的格式契约（打包截段、Release 正文、应用内渲染），
+         解析错了只会表现为「更新内容空白」，必须能在单测里复现 -->
+    <Compile Include="..\..\VigilWatt.App\Services\ReleaseNotes.cs" />
+    <Compile Include="..\VigilWatt.ProtocolCapture\CaptureRecord.cs" />
+    <Compile Include="..\VigilWatt.ProtocolCapture\CaptureRecordFactory.cs" />
+    <Compile Include="..\VigilWatt.ProtocolCapture\UsbCaptureReader.cs" />
+    <!-- 采集功能（未知设备调查）：模型 / 分析 / 报告 / 打包 / 存储 / 会话全部零 WinRT、零 Win32，
+         只有 Capture/Hid/ 那层碰 hid.dll，故这里能直接链真源文件（见 docs/project/capture.md）。 -->
+    <Compile Include="..\..\VigilWatt.Core\Capture\CaptureEnums.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Capture\CaptureRecord.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Capture\CaptureEvent.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Capture\CaptureError.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Capture\CapabilityItem.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Capture\CaptureDeviceInfo.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Capture\HidFieldInfo.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Capture\CaptureSessionInfo.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Capture\CaptureJson.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Capture\CaptureAnalysis.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Capture\CaptureAnalyzer.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Capture\CaptureBundle.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Capture\CaptureDeviceCatalog.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Capture\DeviceGroupKey.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Capture\CaptureHex.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Capture\ICaptureWriter.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Capture\CaptureGuide.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Capture\CaptureOptions.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Capture\CaptureLimits.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Capture\CaptureJsonlWriter.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Capture\CaptureSessionStateMachine.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Capture\CaptureSession.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Capture\CaptureStore.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Capture\ICaptureSource.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Capture\IssueSummaryBuilder.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Capture\HtmlReportGenerator.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Capture\CapturePackageWriter.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Mojhon\MojhonCodec.cs" />
+  </ItemGroup>
+
+</Project>

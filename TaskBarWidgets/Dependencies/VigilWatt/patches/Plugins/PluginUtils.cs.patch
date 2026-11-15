@@ -1,0 +1,9 @@
+--- a/src/VigilWatt.Core/Plugins/PluginUtils.cs
++++ b/src/VigilWatt.Core/Plugins/PluginUtils.cs
+@@ -26,5 +26,5 @@
+     }
+ 
+     /// <summary>设备 ID 的哈希源：换 USB 口不产生新 ID（直接哈希整条路径会让同一个接收器变成两台设备）。</summary>
+-    public static string StableDeviceHash(string devicePath) => StableHash(StableDeviceKey(devicePath));
++    public static string StableDeviceHash(string devicePath) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(devicePath.ToUpperInvariant())));
+ }

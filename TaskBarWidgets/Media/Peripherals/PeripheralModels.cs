@@ -4,6 +4,18 @@ using System.Text.Json.Serialization;
 
 namespace TaskBarWidgets.Media.Peripherals;
 
+public sealed record PeripheralIdentityEvidence
+{
+    public string ContainerId { get; init; } = "";
+    public string BluetoothAddress { get; init; } = "";
+    public string UniqueSerial { get; init; } = "";
+    public string SerialScope { get; init; } = "";
+    public string UnitId { get; init; } = "";
+    public string UnitScope { get; init; } = "";
+    public string EndpointPath { get; init; } = "";
+    public bool ContainerIsDevice { get; init; }
+}
+
 public sealed record PeripheralBatteryReading
 {
     [JsonPropertyName("role")] public string Role { get; init; } = "main";
@@ -30,17 +42,21 @@ public sealed record PeripheralDeviceSnapshot
     [JsonPropertyName("compatibility")] public string Compatibility { get; init; } = "identityOnly";
     // Proven protocol/USB identities used only to retain existing local selections.
     [JsonIgnore] internal string[] LegacyIds { get; init; } = [];
+    [JsonIgnore] internal PeripheralIdentityEvidence? Identity { get; init; }
+    [JsonIgnore] internal int NameQuality { get; init; }
+    [JsonIgnore] internal int KindQuality { get; init; }
 }
 
 public sealed record PeripheralBatterySnapshot
 {
-    [JsonPropertyName("version")] public int Version { get; init; } = 1;
+    [JsonPropertyName("version")] public int Version { get; init; } = 2;
     [JsonPropertyName("revision")] public long Revision { get; init; }
     [JsonPropertyName("mode")] public string Mode { get; init; } = "compact";
     [JsonPropertyName("hideDisconnected")] public bool HideDisconnected { get; init; }
     [JsonPropertyName("refreshing")] public bool Refreshing { get; init; }
     [JsonPropertyName("error")] public string Error { get; init; } = "";
     [JsonPropertyName("devices")] public PeripheralDeviceSnapshot[] Devices { get; init; } = [];
+    [JsonPropertyName("aliases")] public Dictionary<string, string> Aliases { get; init; } = new(StringComparer.Ordinal);
 }
 
 public sealed class PeripheralBatterySettings

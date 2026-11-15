@@ -1,5 +1,8 @@
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+using Endpoint = TaskBarWidgets.Media.Peripherals.PeripheralIdentityResolver.Endpoint;
 
 namespace TaskBarWidgets.Media.Peripherals;
 
@@ -9,8 +12,15 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
 {
     private readonly IPeripheralBatteryProvider[] _providers;
     private readonly Dictionary<string, PeripheralDeviceSnapshot> _devices = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, int> _owners = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, (DateTimeOffset At, int Failures)> _attempts = new(StringComparer.Ordinal);
+    private readonly Dictionary<Endpoint, PeripheralDeviceSnapshot> _endpoints = [];
+    private Dictionary<Endpoint, string> _routes = [];
+    private readonly Dictionary<Endpoint, (DateTimeOffset At, int Failures)> _attempts = [];
+    private readonly Dictionary<Endpoint, long> _notificationVersions = [];
+    private long _notificationVersion;
+    private readonly PeripheralIdentityResolver _resolver = new();
+    private readonly Dictionary<string, PeripheralIdentityEvidence[]> _identities = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _historical = new(StringComparer.Ordinal);
+    private readonly Dictionary<(string Id, string Role), CachedReading> _readings = [];
     private readonly HashSet<string> _taskbar = new(StringComparer.Ordinal);
     private readonly object _gate = new();
     private readonly SemaphoreSlim _wake = new(0, 1);
@@ -41,9 +51,12 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
             {
                 lock (_gate)
                 {
-                    if (_disposed || !HasDemandLocked || _owners.GetValueOrDefault(reading.Id, -1) != owner || !WantedLocked(reading)) return;
-                    MergeLocked(reading, owner, false);
-                    if (reading.State == "online" && !reading.Stale && HasReading(reading)) _attempts[reading.Id] = (_clock.GetUtcNow(), 0);
+                    if (!ValidDevice(reading)) return;
+                    var endpoint = new Endpoint(owner, reading.Id);
+                    if (_disposed || !HasDemandLocked || !_routes.TryGetValue(endpoint, out var id) || !WantedLocked(id)) return;
+                    MergeEndpointLocked(reading, endpoint, false);
+                    _notificationVersions[endpoint] = ++_notificationVersion;
+                    if (reading.State == "online" && !reading.Stale && HasReading(reading)) _attempts[endpoint] = (_clock.GetUtcNow(), 0);
                     PublishLocked(Snapshot.Refreshing, Snapshot.Error);
                 }
             }
@@ -56,6 +69,42 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
     internal PeripheralBatterySnapshot Snapshot => Volatile.Read(ref _snapshot);
     internal void Start() { lock (_gate) { if (!_disposed) _run ??= Task.Run(RunAsync); } }
 
+    public string ResolveId(string id) { lock (_gate) return _resolver.ResolveId(id); }
+    public PeripheralBatterySettings NormalizeSettings(PeripheralBatterySettings settings)
+    { lock (_gate) return _resolver.NormalizeSettings(settings); }
+
+    public string ExportDiagnostics(byte[]? reportSalt = null)
+    {
+        lock (_gate)
+        {
+            var salt = reportSalt ?? RandomNumberGenerator.GetBytes(32);
+            string Hash(string value) => string.IsNullOrWhiteSpace(value) ? "" : "redacted-" +
+                Convert.ToHexString(HMACSHA256.HashData(salt, Encoding.UTF8.GetBytes(value.ToLowerInvariant()))).ToLowerInvariant()[..16];
+            object Evidence(PeripheralIdentityEvidence evidence) => new
+            {
+                containerId = Hash(evidence.ContainerId), bluetoothAddress = Hash(evidence.BluetoothAddress),
+                uniqueSerial = Hash(evidence.UniqueSerial), serialScope = Hash(evidence.SerialScope),
+                unitId = Hash(evidence.UnitId), unitScope = Hash(evidence.UnitScope), endpointPath = Hash(evidence.EndpointPath),
+                evidence.ContainerIsDevice
+            };
+            return JsonSerializer.Serialize(new
+            {
+                version = 2, aliases = _resolver.Aliases.Select(p => new { from = Hash(p.Key), to = Hash(p.Value) }),
+                decisions = _resolver.Decisions.Select(d => new { left = Hash(d.LeftId), right = Hash(d.RightId), d.Reason, d.Merged }),
+                devices = _devices.Values.Select(d => new
+                {
+                    id = Hash(d.Id), name = Hash(d.Name), d.Kind, d.Connection, d.State, d.Source,
+                    d.Compatibility, d.CanRead, d.Stale, d.UpdatedAt,
+                    roles = d.Batteries.Select(b => b.Role),
+                    evidence = _identities.GetValueOrDefault(d.Id, []).Select(Evidence),
+                    endpoints = _routes.Where(p => p.Value == d.Id).Select(p => new
+                    { provider = _providers[p.Key.Provider].GetType().Name, id = Hash(p.Key.Id),
+                        _endpoints[p.Key].CanRead, _endpoints[p.Key].Source, _endpoints[p.Key].Compatibility })
+                })
+            }, Json);
+        }
+    }
+
     internal void Configure(PeripheralBatterySettings settings, bool cardEnabled, bool visible, bool resident)
     {
         lock (_gate)
@@ -64,9 +113,10 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
             if (_settings.HeadsetControlEnabled != settings.HeadsetControlEnabled ||
                 _settings.VendorExtensionsEnabled != settings.VendorExtensionsEnabled ||
                 _settings.AirPodsAdvertisementEnabled != settings.AirPodsAdvertisementEnabled) _discoverPending = true;
-            _settings = settings.Clone(); _settings.Normalize();
+            _settings = _resolver.NormalizeSettings(settings);
             foreach (var extension in _providers.OfType<HeadsetControlProvider>()) extension.Configure(_settings);
             foreach (var native in _providers.OfType<NativePeripheralBatteryProvider>()) native.Configure(_settings);
+            foreach (var hid in _providers.OfType<HidPeripheralBatteryProvider>()) hid.Configure(_settings);
             foreach (var airpods in _providers.OfType<AirPodsAdvertisementProvider>()) airpods.Configure(_settings);
             _cardEnabled = cardEnabled; _cardVisible = visible; _resident = resident;
             if (!HasDemandLocked) _cycleStop?.Cancel();
@@ -92,7 +142,7 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
         lock (_gate)
         {
             if (_disposed) return;
-            var selected = ids.Where(PeripheralIdentity.IsValid).Take(256).ToHashSet(StringComparer.Ordinal);
+            var selected = ids.Where(PeripheralIdentity.IsValid).Take(256).Select(_resolver.ResolveId).ToHashSet(StringComparer.Ordinal);
             if (_taskbar.SetEquals(selected)) return;
             _taskbar.Clear(); _taskbar.UnionWith(selected);
             if (!HasDemandLocked) _cycleStop?.Cancel();
@@ -123,8 +173,8 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
     }
 
     private bool HasDemandLocked => _settingsActive || _taskbar.Count != 0 || (_cardEnabled && (_cardVisible || _resident));
-    private bool WantedLocked(PeripheralDeviceSnapshot item) => _settingsActive || _taskbar.Contains(item.Id) ||
-        (_cardEnabled && (_cardVisible || _resident) && _settings.CardVisibility.GetValueOrDefault(item.Id, true));
+    private bool WantedLocked(string id) => _settingsActive || _taskbar.Contains(id) ||
+        (_cardEnabled && (_cardVisible || _resident) && _settings.CardVisibility.GetValueOrDefault(id, true));
     // A powered-off wireless peripheral can still be queried through its present
     // USB receiver. Do not reconnect Bluetooth devices just to read battery state.
     private static bool CanPoll(PeripheralDeviceSnapshot item) => item.CanRead &&
@@ -132,10 +182,10 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
     private TimeSpan IntervalLocked(string id) => _settingsActive || _taskbar.Contains(id) || _cardVisible
         ? TimeSpan.FromSeconds(60) : TimeSpan.FromMinutes(5);
 
-    private DateTimeOffset NextAttemptLocked(string id)
+    private DateTimeOffset NextAttemptLocked(Endpoint endpoint)
     {
-        if (!_attempts.TryGetValue(id, out var attempt)) return DateTimeOffset.MinValue;
-        var interval = IntervalLocked(id);
+        if (!_attempts.TryGetValue(endpoint, out var attempt)) return DateTimeOffset.MinValue;
+        var interval = IntervalLocked(_routes.GetValueOrDefault(endpoint, endpoint.Id));
         if (attempt.Failures > 0) interval = TimeSpan.FromSeconds(Math.Max(interval.TotalSeconds,
             attempt.Failures switch { 1 => 60, 2 => 120, 3 => 300, _ => 900 }));
         return attempt.At + interval;
@@ -173,8 +223,8 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
                 {
                     if (_providers[index] is not IPeripheralBatteryIdle idle) continue;
                     bool active;
-                    lock (_gate) active = HasDemandLocked && _devices.Values.Any(d => d.CanRead &&
-                        _owners.GetValueOrDefault(d.Id, -1) == index && WantedLocked(d));
+                    lock (_gate) active = HasDemandLocked && _endpoints.Any(p => p.Key.Provider == index && p.Value.CanRead &&
+                        _routes.TryGetValue(p.Key, out var id) && WantedLocked(id));
                     if (!active) await idle.SuspendAsync().ConfigureAwait(false);
                 }
                 await SaveCacheAsync(false, _stop.Token).ConfigureAwait(false);
@@ -186,8 +236,9 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
                     else
                     {
                         var next = _nextDiscovery;
-                        foreach (var item in _devices.Values.Where(d => CanPoll(d) && WantedLocked(d)))
-                            if (NextAttemptLocked(item.Id) < next) next = NextAttemptLocked(item.Id);
+                        foreach (var endpoint in _endpoints.Keys.Where(e => CanPoll(_endpoints[e]) &&
+                            _routes.TryGetValue(e, out var id) && WantedLocked(id)))
+                            if (NextAttemptLocked(endpoint) < next) next = NextAttemptLocked(endpoint);
                         wait = next - _clock.GetUtcNow();
                         if (wait < TimeSpan.FromSeconds(1)) wait = TimeSpan.FromSeconds(1);
                     }
@@ -204,40 +255,72 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
         if (discover)
         {
             lock (_gate) PublishLocked(true, "");
+            var batch = new Dictionary<int, PeripheralDeviceSnapshot[]>();
+            var discoveryVersions = new Dictionary<int, long>();
             for (var index = 0; index < _providers.Length; index++)
             {
                 token.ThrowIfCancellationRequested();
                 try
                 {
+                    lock (_gate) discoveryVersions[index] = _notificationVersion;
                     var found = await _providers[index].DiscoverAsync(token).ConfigureAwait(false);
-                    lock (_gate)
-                    {
-                        found = found.Select(RetainLegacySelectionLocked).ToArray();
-                        var present = found.Select(d => d.Id).ToHashSet(StringComparer.Ordinal);
-                        foreach (var id in _owners.Where(p => p.Value == index && !present.Contains(p.Key)).Select(p => p.Key).ToArray())
-                            _devices[id] = _devices[id] with { State = "disconnected", Stale = true, CanRead = false };
-                        foreach (var item in found.OrderBy(d => d.State == "disconnected").Take(256)) MergeLocked(item, index, discovery: true);
-                        PublishLocked(true, "");
-                    }
+                    batch[index] = found.Where(ValidDevice).OrderBy(d => d.State == "disconnected").Take(256).ToArray();
                 }
                 catch (Exception error) when (error is not OperationCanceledException || !token.IsCancellationRequested)
                 { errors.Add("部分设备发现失败（" + error.GetType().Name + "）"); }
             }
-            lock (_gate) _nextDiscovery = _clock.GetUtcNow().AddMinutes(15);
+            token.ThrowIfCancellationRequested();
+            lock (_gate)
+            {
+                var protectedEndpoints = new HashSet<Endpoint>();
+                foreach (var (provider, found) in batch)
+                {
+                    var present = found.Select(d => d.Id).ToHashSet(StringComparer.Ordinal);
+                    foreach (var endpoint in _endpoints.Keys.Where(e => e.Provider == provider && !present.Contains(e.Id)).ToArray())
+                    {
+                        if (_notificationVersions.GetValueOrDefault(endpoint) > discoveryVersions[provider]) continue;
+                        _endpoints.Remove(endpoint);
+                        _attempts.Remove(endpoint);
+                        _notificationVersions.Remove(endpoint);
+                    }
+                    foreach (var item in found)
+                    {
+                        var endpoint = new Endpoint(provider, item.Id);
+                        var preserveMetadata = _notificationVersions.GetValueOrDefault(endpoint) > discoveryVersions[provider];
+                        if (preserveMetadata) protectedEndpoints.Add(endpoint);
+                        if (_endpoints.GetValueOrDefault(endpoint) is { State: "disconnected" } && item.State != "disconnected")
+                            _attempts.Remove(endpoint);
+                        // Retain endpoint samples until identity resolution has seen
+                        // every provider. A failed provider keeps its last endpoints.
+                        _endpoints[endpoint] = RetainEndpointSample(_endpoints.GetValueOrDefault(endpoint), item, true, preserveMetadata);
+                    }
+                }
+                ResolveBatchLocked();
+                foreach (var (provider, found) in batch)
+                    foreach (var item in found)
+                    {
+                        var endpoint = new Endpoint(provider, item.Id);
+                        MergeEndpointLocked(item, endpoint, true, protectedEndpoints.Contains(endpoint));
+                    }
+                foreach (var id in _devices.Keys.ToArray()) RebuildEntityLocked(id);
+                TrimStateLocked();
+                _nextDiscovery = _clock.GetUtcNow().AddMinutes(15);
+                PublishLocked(true, "");
+            }
         }
         for (var index = 0; index < _providers.Length; index++)
         {
-            HashSet<string> ids, wanted; PeripheralBatterySettings settings;
+            HashSet<string> ids, wanted; PeripheralBatterySettings settings; long readVersion;
             lock (_gate)
             {
                 if (!HasDemandLocked) break;
                 var now = _clock.GetUtcNow();
-                wanted = _devices.Values.Where(d => _owners.GetValueOrDefault(d.Id, -1) == index && CanPoll(d) &&
-                    WantedLocked(d)).Select(d => d.Id).ToHashSet(StringComparer.Ordinal);
-                ids = _devices.Values.Where(d => _owners.GetValueOrDefault(d.Id, -1) == index && CanPoll(d) &&
-                    WantedLocked(d) && (force || NextAttemptLocked(d.Id) <= now))
-                    .Select(d => d.Id).ToHashSet(StringComparer.Ordinal);
+                var endpoints = _endpoints.Where(p => p.Key.Provider == index && CanPoll(p.Value) &&
+                    _routes.TryGetValue(p.Key, out var id) && WantedLocked(id)).Select(p => p.Key).ToArray();
+                wanted = endpoints.Select(e => e.Id).ToHashSet(StringComparer.Ordinal);
+                ids = endpoints.Where(e => force || NextAttemptLocked(e) <= now).Select(e => e.Id).ToHashSet(StringComparer.Ordinal);
                 settings = _settings.Clone();
+                readVersion = _notificationVersion;
                 if (ids.Count != 0) PublishLocked(true, "");
             }
             if (_providers[index] is IPeripheralBatteryNotifications notifications)
@@ -248,7 +331,6 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
                 continue;
             }
             IReadOnlyList<PeripheralDeviceSnapshot> results = [];
-            var readStarted = _clock.GetUtcNow();
             try { results = await _providers[index].ReadAsync(ids, settings, token).ConfigureAwait(false); }
             catch (Exception error) when (error is not OperationCanceledException || !token.IsCancellationRequested)
             { errors.Add("部分设备电量暂不可读（" + error.GetType().Name + "）"); }
@@ -256,25 +338,30 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
             lock (_gate)
             {
                 var returned = new HashSet<string>(StringComparer.Ordinal);
-                foreach (var item in results.Take(256))
+                foreach (var item in results.Where(ValidDevice).Take(256))
                 {
                     if (!ids.Contains(item.Id)) continue;
+                    var endpoint = new Endpoint(index, item.Id);
                     returned.Add(item.Id);
-                    if (_devices.TryGetValue(item.Id, out var notified) && notified is { State: "online", Stale: false } &&
-                        notified.UpdatedAt > readStarted && (item.UpdatedAt is null || item.UpdatedAt < notified.UpdatedAt)) continue;
-                    MergeLocked(item, index, discovery: false);
+                    MergeEndpointLocked(item, endpoint, false, _notificationVersions.GetValueOrDefault(endpoint) > readVersion);
                 }
                 foreach (var id in ids)
                 {
+                    var endpoint = new Endpoint(index, id);
                     var result = results.FirstOrDefault(d => d.Id == id);
-                    var notified = _devices.GetValueOrDefault(id);
-                    var newerNotification = notified is { State: "online", Stale: false } && notified.UpdatedAt > readStarted;
+                    var notified = _endpoints.GetValueOrDefault(endpoint);
+                    var notificationDuringRead = _notificationVersions.GetValueOrDefault(endpoint) > readVersion;
+                    var newerNotification = notified is { State: "online", Stale: false } &&
+                        notificationDuringRead;
                     var succeeded = newerNotification || result is { State: "online", Stale: false } && HasReading(result) ||
                         result is { State: "disconnected", Connection: "wireless", CanRead: true };
-                    var failures = succeeded ? 0 : Math.Min(4, _attempts.GetValueOrDefault(id).Failures + 1);
-                    _attempts[id] = (_clock.GetUtcNow(), failures);
-                    if (!newerNotification && !returned.Contains(id) && _devices.TryGetValue(id, out var existing))
-                        _devices[id] = existing with { Stale = true, State = "unavailable" };
+                    var failures = succeeded ? 0 : Math.Min(4, _attempts.GetValueOrDefault(endpoint).Failures + 1);
+                    _attempts[endpoint] = (_clock.GetUtcNow(), failures);
+                    if (!notificationDuringRead && !returned.Contains(id) && notified is not null)
+                    {
+                        _endpoints[endpoint] = notified with { Stale = true, State = "unavailable" };
+                        if (_routes.TryGetValue(endpoint, out var entity)) RebuildEntityLocked(entity);
+                    }
                 }
                 PublishLocked(true, "");
             }
@@ -285,59 +372,204 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
     internal static bool HasReading(PeripheralDeviceSnapshot item) => item.Batteries.Any(b =>
         b.Percentage is >= 0 and <= 100 || !string.IsNullOrWhiteSpace(b.LevelText));
 
-    private PeripheralDeviceSnapshot RetainLegacySelectionLocked(PeripheralDeviceSnapshot incoming)
-    {
-        var aliases = incoming.LegacyIds.Where(PeripheralIdentity.IsValid).Where(id => id != incoming.Id).Distinct().ToArray();
-        if (aliases.Length == 0) return incoming;
-        var linked = new[] { incoming.Id }.Concat(aliases).ToArray();
-        var retained = linked.FirstOrDefault(id => _taskbar.Contains(id) || _settings.CardVisibility.ContainsKey(id) || _settings.Order.Contains(id))
-            ?? aliases.FirstOrDefault(_devices.ContainsKey) ?? incoming.Id;
-        if (!_devices.ContainsKey(retained))
-        {
-            var previous = linked.Select(id => _devices.GetValueOrDefault(id)).FirstOrDefault(d => d is not null);
-            if (previous is not null) _devices[retained] = previous with { Id = retained };
-        }
-        foreach (var redundant in linked.Where(id => id != retained))
-        {
-            _devices.Remove(redundant); _owners.Remove(redundant); _attempts.Remove(redundant);
-        }
-        return incoming with { Id = retained };
-    }
+    private static bool ValidDevice(PeripheralDeviceSnapshot item) => item is not null &&
+        PeripheralIdentity.IsValid(item.Id) && !string.IsNullOrWhiteSpace(item.Name) && item.Name.Length <= 512 &&
+        item.Source is not null && item.Kind is not null && item.Brand is not null && item.Connection is not null &&
+        item.Batteries is { Length: <= 16 } && item.Batteries.All(b => b is not null &&
+            b.Role is { Length: > 0 and <= 64 } && (b.Percentage is null or >= 0 and <= 100) && (b.LevelText?.Length ?? 0) <= 128);
 
-    private void MergeLocked(PeripheralDeviceSnapshot incoming, int provider, bool discovery)
+    private static int SourcePriority(string source) => source switch
     {
-        if (!PeripheralIdentity.IsValid(incoming.Id) || string.IsNullOrWhiteSpace(incoming.Name)) return;
-        if (_devices.Count >= 256 && !_devices.ContainsKey(incoming.Id))
-        {
-            var unused = _devices.Values.Where(d => d.State == "disconnected" && !_taskbar.Contains(d.Id) &&
-                !_settings.Order.Contains(d.Id) && !_settings.CardVisibility.ContainsKey(d.Id))
-                .OrderBy(d => d.UpdatedAt).FirstOrDefault();
-            if (unused is null) return;
-            _devices.Remove(unused.Id); _owners.Remove(unused.Id); _attempts.Remove(unused.Id);
-        }
-        if (_owners.TryGetValue(incoming.Id, out var owner) && owner != provider &&
-            _devices.TryGetValue(incoming.Id, out var readable) && readable.CanRead && readable.State != "disconnected" && !incoming.CanRead) return;
-        incoming = incoming with { Batteries = incoming.Batteries.Where(b =>
-            b.Percentage is null or >= 0 and <= 100).Take(8).ToArray() };
-        if (_devices.TryGetValue(incoming.Id, out var newer) && incoming.UpdatedAt.HasValue &&
-            newer.UpdatedAt > incoming.UpdatedAt && HasReading(incoming)) return;
-        if (_devices.TryGetValue(incoming.Id, out var existing) && !HasReading(incoming))
+        "" or "windows" => 0,
+        "windows-property" or "windows-battery" or "ble-bas" or "bluetooth-bas" or "xinput" or "winrt-battery" or "battery-report" => 1,
+        _ => source.StartsWith("windows", StringComparison.OrdinalIgnoreCase) ? 1 : 2
+    };
+    private static int NameQuality(PeripheralDeviceSnapshot item) => item.NameQuality != 0 ? item.NameQuality :
+        item.Name.StartsWith("Logitech HID++ ", StringComparison.Ordinal) ||
+        item.Name is "Peripheral" or "HID Keyboard Device" or "HID-compliant mouse" or "USB Input Device" ? 1 : 10;
+    private static int KindQuality(PeripheralDeviceSnapshot item) => item.KindQuality != 0 ? item.KindQuality :
+        item.Kind == "unknown" ? 0 : 1;
+
+    private static PeripheralDeviceSnapshot RetainEndpointSample(PeripheralDeviceSnapshot? existing,
+        PeripheralDeviceSnapshot incoming, bool discovery, bool preserveMetadata = false)
+    {
+        if (existing is null) return incoming;
+        var older = incoming.UpdatedAt.HasValue && existing.UpdatedAt > incoming.UpdatedAt;
+        preserveMetadata |= !discovery && older;
+        if (existing.Identity is { } oldIdentity && incoming.Identity is { } newIdentity &&
+            PeripheralIdentityResolver.Conflicts(oldIdentity, newIdentity)) return preserveMetadata ? existing : incoming;
+        if (!HasReading(incoming) || older)
         {
             var batteries = existing.Batteries.Select(old =>
-                incoming.Batteries.FirstOrDefault(value => value.Role == old.Role && value.Charging.HasValue) is { } status
+                !older && incoming.Batteries.FirstOrDefault(value => value.Role == old.Role && value.Charging.HasValue) is { } status
                     ? old with { Charging = status.Charging } : old).ToArray();
-            incoming = incoming with { Batteries = batteries, UpdatedAt = existing.UpdatedAt,
-                Stale = !discovery || incoming.State != "online" || existing.Stale };
+            incoming = incoming with { Batteries = batteries, UpdatedAt = older ? existing.UpdatedAt : incoming.UpdatedAt ?? existing.UpdatedAt,
+                Stale = older ? existing.Stale : !discovery || incoming.State != "online" || existing.Stale };
         }
-        // A sleeping HID++ child can be rediscovered without optional name metadata.
-        // The stable child ID was already proven by the provider; retain its real name.
-        if (existing is { Source: "hidpp20" } && incoming.Source == "hidpp20" &&
-            incoming.Name is "Logitech HID++ mouse" or "Logitech HID++ keyboard" or
-                "Logitech HID++ device" or "Logitech HID++ receiver")
-            incoming = incoming with { Name = existing.Name };
-        if (existing is { State: "disconnected" } && incoming.State != "disconnected") _attempts.Remove(incoming.Id);
-        _devices[incoming.Id] = incoming; _owners[incoming.Id] = provider;
+        if (preserveMetadata)
+            incoming = incoming with { State = existing.State, Stale = existing.Stale, CanRead = existing.CanRead,
+                Connection = existing.Connection, Source = existing.Source };
+        if (NameQuality(existing) > NameQuality(incoming))
+            incoming = incoming with { Name = existing.Name, NameQuality = NameQuality(existing) };
+        if (KindQuality(existing) > KindQuality(incoming))
+            incoming = incoming with { Kind = existing.Kind, KindQuality = KindQuality(existing) };
+        return incoming with { Identity = incoming.Identity ?? existing.Identity,
+            LegacyIds = incoming.LegacyIds is { Length: > 0 } ? incoming.LegacyIds : existing.LegacyIds };
+    }
+
+    private void ResolveBatchLocked()
+    {
+        var history = _devices.Keys.ToDictionary(id => id, id => _identities.GetValueOrDefault(id, []), StringComparer.Ordinal);
+        var previousRoutes = _routes;
+        _routes = _resolver.ResolveBatch(_endpoints.Select(p => new PeripheralIdentityResolver.Observation(p.Key, p.Value)),
+            history, _routes, _settings, _taskbar);
+        foreach (var (endpoint, id) in _routes)
+            if (previousRoutes.TryGetValue(endpoint, out var previousId) && previousId != id) _attempts.Remove(endpoint);
+        _settings = _resolver.NormalizeSettings(_settings);
+        var selected = _taskbar.Select(_resolver.ResolveId).ToArray();
+        _taskbar.Clear(); _taskbar.UnionWith(selected);
+        foreach (var (id, item) in _devices.ToArray())
+        {
+            var survivor = _resolver.ResolveId(id);
+            if (survivor == id) continue;
+            _devices.Remove(id);
+            if (!_devices.TryGetValue(survivor, out var other)) _devices[survivor] = item with { Id = survivor };
+            else _devices[survivor] = RetainEndpointSample(other, item with { Id = survivor }, true);
+        }
+        var historical = _historical.Select(_resolver.ResolveId).ToArray();
+        _historical.Clear(); _historical.UnionWith(historical);
+        foreach (var (key, reading) in _readings.ToArray())
+        {
+            var survivor = _resolver.ResolveId(key.Id);
+            if (survivor == key.Id) continue;
+            _readings.Remove(key);
+            StoreReadingLocked(survivor, reading);
+        }
+        var identities = _identities.ToArray(); _identities.Clear();
+        foreach (var (id, evidence) in identities)
+        {
+            var survivor = _resolver.ResolveId(id);
+            _identities[survivor] = _identities.GetValueOrDefault(survivor, []).Concat(evidence).Distinct().Take(16).ToArray();
+        }
+        foreach (var (endpoint, id) in _routes)
+        {
+            _historical.Remove(id);
+            if (_endpoints[endpoint].Identity is { } evidence)
+                _identities[id] = _identities.GetValueOrDefault(id, []).Append(evidence).Distinct().TakeLast(16).ToArray();
+        }
         _cacheDirty = true;
+    }
+
+    private void StoreReadingLocked(string id, CachedReading incoming)
+    {
+        var key = (id, incoming.Reading.Role);
+        if (!_readings.ContainsKey(key) && _readings.Keys.Count(k => k.Id == id) >= 8) return;
+        if (!_readings.TryGetValue(key, out var old)) { _readings[key] = incoming; return; }
+        var merged = old;
+        var freshValue = HasValue(incoming.Reading) && IsCurrent(incoming.UpdatedAt, incoming.Source, old.UpdatedAt, old.Source);
+        if (freshValue)
+            merged = merged with { Reading = incoming.Reading with { Charging = old.Reading.Charging },
+                UpdatedAt = incoming.UpdatedAt, Source = incoming.Source };
+        var chargingAt = incoming.ChargingUpdatedAt;
+        var chargingSource = incoming.ChargingSource;
+        var hasChargingUpdate = incoming.Reading.Charging.HasValue || chargingAt.HasValue || chargingSource.Length > 0;
+        if (!hasChargingUpdate && freshValue && incoming.Source == old.ChargingSource)
+        {
+            hasChargingUpdate = true; chargingAt = incoming.UpdatedAt; chargingSource = incoming.Source;
+        }
+        if (hasChargingUpdate && IsCurrent(chargingAt, chargingSource,
+            old.ChargingUpdatedAt, old.ChargingSource))
+            merged = merged with { Reading = merged.Reading with { Charging = incoming.Reading.Charging },
+                ChargingUpdatedAt = chargingAt, ChargingSource = chargingSource };
+        _readings[key] = merged;
+    }
+
+    private static bool HasValue(PeripheralBatteryReading reading) => reading.Percentage.HasValue ||
+        !string.IsNullOrWhiteSpace(reading.LevelText);
+    private static bool IsCurrent(DateTimeOffset? at, string source, DateTimeOffset? previousAt, string previousSource) =>
+        !(previousAt.HasValue && (!at.HasValue || previousAt > at) ||
+            previousAt == at && SourcePriority(previousSource) > SourcePriority(source));
+
+    private void TrimStateLocked()
+    {
+        var retained = _devices.Keys.Concat(_routes.Values).ToHashSet(StringComparer.Ordinal);
+        foreach (var id in _identities.Keys.Where(id => !retained.Contains(id)).ToArray()) _identities.Remove(id);
+        foreach (var key in _readings.Keys.Where(k => !retained.Contains(k.Id)).ToArray()) _readings.Remove(key);
+    }
+
+    private void MergeEndpointLocked(PeripheralDeviceSnapshot incoming, Endpoint endpoint, bool discovery, bool preserveMetadata = false)
+    {
+        if (!ValidDevice(incoming) || !_routes.TryGetValue(endpoint, out var id)) return;
+        var existing = _endpoints.GetValueOrDefault(endpoint);
+        if (existing?.Identity is { } oldIdentity && incoming.Identity is { } newIdentity &&
+            PeripheralIdentityResolver.Conflicts(oldIdentity, newIdentity))
+        {
+            if (!discovery) { _discoverPending = true; Signal(); }
+            return;
+        }
+        if (existing is { State: "disconnected" } && incoming.State != "disconnected") _attempts.Remove(endpoint);
+        _endpoints[endpoint] = RetainEndpointSample(existing, incoming, discovery, preserveMetadata);
+        foreach (var reading in incoming.Batteries.Take(8))
+        {
+            if (!HasValue(reading) && !reading.Charging.HasValue) continue;
+            StoreReadingLocked(id, new() { Reading = reading,
+                UpdatedAt = HasValue(reading) ? incoming.UpdatedAt : null, Source = HasValue(reading) ? incoming.Source : "",
+                ChargingUpdatedAt = reading.Charging.HasValue ? incoming.UpdatedAt : null,
+                ChargingSource = reading.Charging.HasValue ? incoming.Source : "" });
+        }
+        RebuildEntityLocked(id);
+        _cacheDirty = true;
+    }
+
+    private void RebuildEntityLocked(string id)
+    {
+        var endpoints = _routes.Where(p => p.Value == id).Select(p => _endpoints[p.Key]).ToArray();
+        var old = _devices.GetValueOrDefault(id);
+        if (endpoints.Length == 0)
+        {
+            if (old is not null) _devices[id] = old with { State = "disconnected", Stale = true, CanRead = false };
+            return;
+        }
+        if (old is null && _devices.Count >= 256)
+        {
+            var unused = _devices.Values.Where(d => d.State == "disconnected" && !_taskbar.Contains(d.Id) &&
+                (_historical.Contains(d.Id) && !_settings.CardVisibility.GetValueOrDefault(d.Id) ||
+                    !_settings.Order.Contains(d.Id) && !_settings.CardVisibility.ContainsKey(d.Id)))
+                .OrderBy(d => _settings.Order.Contains(d.Id) || _settings.CardVisibility.ContainsKey(d.Id))
+                .ThenBy(d => d.UpdatedAt).FirstOrDefault();
+            if (unused is null) return;
+            _devices.Remove(unused.Id); _identities.Remove(unused.Id); _historical.Remove(unused.Id);
+            foreach (var key in _readings.Keys.Where(k => k.Id == unused.Id).ToArray()) _readings.Remove(key);
+        }
+        var metadata = endpoints.Concat(old is null ? [] : new[] { old }).ToArray();
+        var name = metadata.OrderByDescending(NameQuality).First();
+        var kind = metadata.OrderByDescending(KindQuality).First();
+        var preferred = endpoints.OrderByDescending(d => d.CanRead).ThenByDescending(d => SourcePriority(d.Source))
+            .ThenBy(d => d.Source, StringComparer.Ordinal).First();
+        var readings = _readings.Where(p => p.Key.Id == id).Select(p => p.Value).ToArray();
+        var latest = readings.Where(r => HasValue(r.Reading)).OrderByDescending(r => r.UpdatedAt)
+            .ThenByDescending(r => SourcePriority(r.Source)).FirstOrDefault();
+        var online = endpoints.Any(d => d.State == "online");
+        _devices[id] = preferred with
+        {
+            Id = id, Name = name.Name, NameQuality = NameQuality(name), Kind = kind.Kind, KindQuality = KindQuality(kind),
+            Brand = metadata.FirstOrDefault(d => d.Brand.Length > 0)?.Brand ?? "",
+            CanRead = endpoints.Any(d => d.CanRead),
+            State = online ? "online" : endpoints.Any(d => d.State == "unavailable") ? "unavailable" : "disconnected",
+            Stale = !online || !endpoints.Any(d => d.State == "online" && !d.Stale && HasReading(d)),
+            Batteries = readings.Select(r => r.Reading).ToArray(), UpdatedAt = latest?.UpdatedAt,
+            Source = latest?.Source ?? preferred.Source,
+            Compatibility = endpoints.Any(d => d.Compatibility == "implemented") ? "implemented" : preferred.Compatibility
+        };
+    }
+
+    private sealed record CachedReading
+    {
+        public PeripheralBatteryReading Reading { get; init; } = new();
+        public DateTimeOffset? UpdatedAt { get; init; }
+        public string Source { get; init; } = "";
+        public DateTimeOffset? ChargingUpdatedAt { get; init; }
+        public string ChargingSource { get; init; } = "";
     }
 
     private void PublishLocked(bool refreshing, string error)
@@ -346,7 +578,9 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
         var rank = _settings.Order.Select((id, i) => (id, i)).ToDictionary(p => p.id, p => p.i, StringComparer.Ordinal);
         // Older caches included every HID collection. Keep configured positions,
         // but expose only devices with a battery source or an explicit selection.
-        var devices = _devices.Values.Where(d => d.CanRead || HasReading(d) || d.Compatibility == "extension" ||
+        var devices = _devices.Values.Where(d => !_historical.Contains(d.Id) || _taskbar.Contains(d.Id) ||
+            _settings.CardVisibility.GetValueOrDefault(d.Id)).Where(d =>
+            d.CanRead || HasReading(d) || d.Compatibility == "extension" ||
             _taskbar.Contains(d.Id) || _settings.CardVisibility.GetValueOrDefault(d.Id)).Select(d => d with
         {
             Brand = d.Brand.Length > 0 ? d.Brand : PeripheralIdentity.Brand(d.Name, source: d.Source),
@@ -354,26 +588,76 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
         }).OrderBy(d => rank.GetValueOrDefault(d.Id, int.MaxValue)).ThenBy(d => d.Kind, StringComparer.Ordinal)
             .ThenBy(d => d.Name, StringComparer.Ordinal).ThenBy(d => d.Id, StringComparer.Ordinal).ToArray();
         var next = new PeripheralBatterySnapshot { Mode = _settings.Mode, HideDisconnected = _settings.HideDisconnected,
-            Refreshing = refreshing, Error = error, Devices = devices };
+            Refreshing = refreshing, Error = error, Devices = devices, Aliases = _resolver.Aliases };
         var previous = Snapshot;
         if (JsonSerializer.Serialize(next, Json) == JsonSerializer.Serialize(previous with { Revision = 0 }, Json)) return;
         Volatile.Write(ref _snapshot, next with { Revision = previous.Revision + 1 });
         Changed?.Invoke();
     }
 
+    private sealed class CacheDocument
+    {
+        public int Version { get; init; } = 2;
+        public Dictionary<string, string> Aliases { get; init; } = new(StringComparer.Ordinal);
+        public CacheEntry[] Devices { get; init; } = [];
+    }
+    private sealed class CacheEntry
+    {
+        public PeripheralDeviceSnapshot Device { get; init; } = new();
+        public PeripheralIdentityEvidence[] Evidence { get; init; } = [];
+        public CachedReading[] Readings { get; init; } = [];
+        public bool Historical { get; init; }
+        public int NameQuality { get; init; }
+        public int KindQuality { get; init; }
+    }
+
+    private static bool ValidEvidence(PeripheralIdentityEvidence evidence) => evidence is not null &&
+        new[] { evidence.ContainerId, evidence.BluetoothAddress, evidence.UniqueSerial, evidence.SerialScope,
+            evidence.UnitId, evidence.UnitScope, evidence.EndpointPath }.All(s => s is { Length: <= 1024 });
+
     private async Task LoadCacheAsync(CancellationToken token)
     {
         if (_cachePath is null || !File.Exists(_cachePath)) return;
         try
         {
-            if (new FileInfo(_cachePath).Length > 1024 * 1024) return;
-            var items = JsonSerializer.Deserialize<PeripheralDeviceSnapshot[]>(await File.ReadAllTextAsync(_cachePath, token), Json) ?? [];
+            if (new FileInfo(_cachePath).Length > 4 * 1024 * 1024) return;
+            using var document = JsonDocument.Parse(await File.ReadAllTextAsync(_cachePath, token).ConfigureAwait(false));
+            CacheDocument cache;
+            if (document.RootElement.ValueKind == JsonValueKind.Array)
+                cache = new() { Devices = (document.RootElement.Deserialize<PeripheralDeviceSnapshot[]>(Json) ?? [])
+                    .Where(ValidDevice).Take(256).Select(d => new CacheEntry { Device = d, Historical = true }).ToArray() };
+            else
+            {
+                cache = document.RootElement.Deserialize<CacheDocument>(Json) ?? new();
+                if (cache.Version != 2) return;
+            }
             lock (_gate)
             {
-                foreach (var item in items.Where(d => d is not null && d.Batteries is not null && d.Batteries.Length <= 16 &&
-                    d.Batteries.All(b => b is not null && b.Role is not null && b.Role.Length <= 64 &&
-                        (b.Percentage is null or >= 0 and <= 100) && (b.LevelText?.Length ?? 0) <= 128)).Take(256))
-                    if (PeripheralIdentity.IsValid(item.Id)) _devices[item.Id] = item with { State = "disconnected", Stale = true };
+                _resolver.LoadAliases(cache.Aliases ?? []);
+                _settings = _resolver.NormalizeSettings(_settings);
+                var selected = _taskbar.Select(_resolver.ResolveId).ToArray();
+                _taskbar.Clear(); _taskbar.UnionWith(selected);
+                foreach (var entry in (cache.Devices ?? []).Where(e => e is not null && ValidDevice(e.Device)).Take(256))
+                {
+                    var id = _resolver.ResolveId(entry.Device.Id);
+                    _devices[id] = entry.Device with { Id = id, State = "disconnected", Stale = true, CanRead = false,
+                        NameQuality = entry.NameQuality, KindQuality = entry.KindQuality };
+                    if (entry.Historical) _historical.Add(id);
+                    _identities[id] = (entry.Evidence ?? []).Where(ValidEvidence).Take(16).ToArray();
+                    var readings = (entry.Readings ?? []).Where(r => r is not null && r.Reading is not null &&
+                        r.Reading.Role is { Length: > 0 and <= 64 } && (r.Reading.Percentage is null or >= 0 and <= 100) &&
+                        (r.Reading.LevelText?.Length ?? 0) <= 128 && r.Source is not null && r.ChargingSource is not null)
+                        .Take(8).Select(r => r with
+                        {
+                            ChargingUpdatedAt = r.ChargingUpdatedAt ?? (r.Reading.Charging.HasValue ? r.UpdatedAt : null),
+                            ChargingSource = r.ChargingSource.Length > 0 ? r.ChargingSource : r.Source
+                        }).ToArray();
+                    foreach (var reading in readings.Length > 0 ? readings : entry.Device.Batteries.Select(b =>
+                        new CachedReading { Reading = b, UpdatedAt = HasValue(b) ? entry.Device.UpdatedAt : null,
+                            Source = entry.Device.Source, ChargingUpdatedAt = b.Charging.HasValue ? entry.Device.UpdatedAt : null,
+                            ChargingSource = b.Charging.HasValue ? entry.Device.Source : "" }).ToArray())
+                        StoreReadingLocked(id, reading);
+                }
                 PublishLocked(false, "");
             }
         }
@@ -383,18 +667,24 @@ internal sealed class PeripheralBatteryService : IAsyncDisposable
     private async Task SaveCacheAsync(bool force, CancellationToken token)
     {
         if (_cachePath is null) return;
-        PeripheralDeviceSnapshot[] items;
+        CacheDocument cache;
         lock (_gate)
         {
             if (!_cacheDirty || (!force && _clock.GetUtcNow() < _nextCacheWrite)) return;
-            items = _devices.Values.ToArray(); _cacheDirty = false;
+            cache = new() { Aliases = _resolver.Aliases, Devices = _devices.Values.Select(d => new CacheEntry
+            {
+                Device = d, Evidence = _identities.GetValueOrDefault(d.Id, []), Historical = _historical.Contains(d.Id),
+                NameQuality = NameQuality(d), KindQuality = KindQuality(d),
+                Readings = _readings.Where(p => p.Key.Id == d.Id).Select(p => p.Value).ToArray()
+            }).ToArray() };
+            _cacheDirty = false;
             _nextCacheWrite = _clock.GetUtcNow().AddMinutes(5);
         }
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_cachePath)!);
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_cachePath))!);
             var pending = _cachePath + ".tmp";
-            await File.WriteAllTextAsync(pending, JsonSerializer.Serialize(items, Json), token).ConfigureAwait(false);
+            await File.WriteAllTextAsync(pending, JsonSerializer.Serialize(cache, Json), token).ConfigureAwait(false);
             File.Move(pending, _cachePath, true);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)

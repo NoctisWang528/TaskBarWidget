@@ -12,6 +12,7 @@ int main()
     wchar_t executable[32768]{};
     GetModuleFileNameW(nullptr, executable, 32768);
     const auto directory = std::filesystem::path(executable).parent_path();
+    const bool managedFixture = std::filesystem::path(executable).filename() == L"TaskBarWidgets.PeripheralHost.exe";
     { std::ofstream pid(directory / "fixture.pid"); pid << GetCurrentProcessId(); }
     bool discovered = false;
     const std::string child = "fixture:receiver|unit=12345678|model=000011112222";
@@ -25,6 +26,32 @@ int main()
         const int request = yyjson_get_int(yyjson_obj_get(root, "requestId"));
         const char* operation = yyjson_get_str(yyjson_obj_get(root, "operation"));
         const std::string op = operation ? operation : "";
+        if (managedFixture)
+        {
+            auto ids = yyjson_obj_get(root, "deviceIds");
+            auto queries = yyjson_obj_get(root, "queryIds");
+            auto contains = [](yyjson_val* array, const std::string& text) {
+                size_t index, count; yyjson_val* value;
+                yyjson_arr_foreach(array, index, count, value)
+                    if (yyjson_is_str(value) && text == yyjson_get_str(value)) return true;
+                return false;
+            };
+            const bool full = op == "discover" && yyjson_arr_size(ids) == 0;
+            std::cout << "{\"version\":1,\"requestId\":" << request << ",\"devices\":[";
+            bool first = true;
+            for (const std::string unit : {"first", "second"})
+            {
+                if (!full && (!contains(ids, "vigil:fixture:" + unit) || !contains(queries, "query:" + unit))) continue;
+                if (!first) std::cout << ',';
+                first = false;
+                std::cout << "{\"identity\":\"vigil:fixture:" << unit << "\",\"queryId\":\"query:" << unit
+                    << "\",\"name\":\"Synthetic " << unit
+                    << R"(","source":"vigil-watt:fixture","kind":"mouse","state":"online","canRead":true,"batteries":[{"role":"main","percentage":42}]})";
+            }
+            std::cout << "],\"claimedPaths\":[],\"diagnostics\":[],\"error\":\"\"}\n" << std::flush;
+            yyjson_doc_free(doc);
+            continue;
+        }
         std::string mode;
         { std::ifstream input(directory / "mode.txt"); input >> mode; }
         if (op == "read" && mode == "stall")
