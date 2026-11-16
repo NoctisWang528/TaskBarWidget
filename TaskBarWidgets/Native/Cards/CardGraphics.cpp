@@ -12,6 +12,7 @@ namespace
 #include "CardIcons.h"
 
 #include <cryptuiapi.h>
+#include <dxgi1_4.h>
 #include <wincrypt.h>
 
 #pragma comment(lib, "crypt32.lib")
@@ -94,6 +95,32 @@ namespace Cards
         wic.Reset();
         dxgiDevice.Reset();
         ready = false;
+    }
+
+    void Graphics::TrimResources()
+    {
+        if (d2dDevice) d2dDevice->ClearResources(0);
+        // Also submit destruction of references just dropped by card effects.
+        ComPtr<ID3D11Device> renderDevice;
+        if (dxgiDevice && SUCCEEDED(dxgiDevice.As(&renderDevice)))
+        {
+            ComPtr<ID3D11DeviceContext> immediate;
+            renderDevice->GetImmediateContext(immediate.GetAddressOf());
+            immediate->ClearState(); immediate->Flush();
+        }
+        ComPtr<IDXGIDevice3> device;
+        if (dxgiDevice && SUCCEEDED(dxgiDevice.As(&device))) device->Trim();
+    }
+
+    uint64_t Graphics::LocalVideoMemoryUsage() const
+    {
+        ComPtr<IDXGIAdapter> adapter;
+        ComPtr<IDXGIAdapter3> memoryAdapter;
+        DXGI_QUERY_VIDEO_MEMORY_INFO info{};
+        if (!dxgiDevice || FAILED(dxgiDevice->GetAdapter(adapter.GetAddressOf())) ||
+            FAILED(adapter.As(&memoryAdapter)) ||
+            FAILED(memoryAdapter->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &info))) return 0;
+        return info.CurrentUsage;
     }
 
     void Graphics::OnDeviceLost()

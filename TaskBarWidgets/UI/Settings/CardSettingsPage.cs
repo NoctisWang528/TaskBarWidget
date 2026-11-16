@@ -327,7 +327,7 @@ public sealed partial class SettingsWindow
             Changed();
         };
         motion.Children.Add(frameRate);
-        motion.Children.Add(Copy("较高帧率更流畅，也会增加动画期间的资源消耗；实际帧率受屏幕和系统负载影响。系统关闭动画时仍立即显示或隐藏。"));
+        motion.Children.Add(Copy("目标帧率也控制实时液态玻璃的背景采样频率。较高帧率更流畅，也会增加资源消耗；实际帧率受屏幕和系统负载影响。系统关闭动画时仍立即显示或隐藏。"));
 
         var performance = Section("后台资源", "程序启动后会静默预加载一次卡片。常驻模式继续在后台更新画面；按需模式完成预加载后停止隐藏绘制，闲置 10 分钟后释放窗口和绘图缓存。");
         var modes = new[] { "Resident", "OnDemand" };

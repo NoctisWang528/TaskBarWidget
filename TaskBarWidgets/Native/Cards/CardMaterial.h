@@ -66,7 +66,7 @@ namespace Cards
     // Labels stay crisp above the app-owned, refracted control surfaces.
     struct GlassControl
     {
-        enum class Kind { Button, Thumb, Segment, Toggle };
+        enum class Kind { Button, Thumb, Segment, Toggle, Cell };
         int id{};
         Kind kind{ Kind::Button };
         D2D1_RECT_F bounds{};

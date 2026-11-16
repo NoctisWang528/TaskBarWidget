@@ -514,7 +514,9 @@ namespace Cards
                 (description.kind == GlassControl::Kind::Segment
                     ? ((dark ? .22f : .34f) * (1.f - .35f * press))
                     : ((dark ? .09f : .20f) * (1.f - .25f * press))) + hover * .06f * (1.f - press);
-            control.tint.Color(UiColor({1, 1, 1, tint}));
+            control.tint.Color(UiColor(description.kind == GlassControl::Kind::Cell
+                ? Mix(description.fillColor, description.ink, .10f * hover + .18f * press)
+                : Color{1, 1, 1, tint}));
             if (fresh || control.dark != dark)
             {
                 const float alpha[]{.85f, dark ? .15f : .10f, dark ? .12f : .14f, .65f};
@@ -582,11 +584,15 @@ namespace Cards
             const auto& d = control.previous;
             const float scale = control.scale;
             const bool thumb = d.kind == GlassControl::Kind::Thumb || d.kind == GlassControl::Kind::Toggle;
+            const bool cell = d.kind == GlassControl::Kind::Cell;
             const float hover = std::clamp(d.hover, 0.f, 1.f);
             const float press = d.pressed ? 1.f : 0.f;
-            const float blur = thumb ? (8.f * (1.f - press) * (1.f - .35f * hover)) : (2.f * (1.f - .5f * press));
-            const float height = thumb ? (10.f + 2.f * press) : (d.kind == GlassControl::Kind::Segment ? 24.f : 12.f);
-            const float amount = thumb ? (4.f + 4.f * hover + 10.f * press) : (24.f + 10.f * press);
+            const float blur = thumb ? (8.f * (1.f - press) * (1.f - .35f * hover)) :
+                ((cell ? .75f : 2.f) * (1.f - .5f * press));
+            const float height = cell ? 4.f : thumb ? (10.f + 2.f * press) :
+                (d.kind == GlassControl::Kind::Segment ? 24.f : 12.f);
+            const float amount = cell ? (8.f + 2.f * hover + 4.f * press) :
+                thumb ? (4.f + 4.f * hover + 10.f * press) : (24.f + 10.f * press);
             const float depth = thumb ? (.4f + .6f * press) : (.5f + .5f * press);
             const float dispersion = thumb ? (.35f * hover + press) : (.65f + .35f * press);
             if (!control.refraction.Render(graphics, device, source,

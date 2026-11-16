@@ -137,6 +137,15 @@ namespace Cards
         mutable std::mutex backdropMutex;
         BackdropDiagnostics backdropDiagnostics;
         uint64_t backdropRenderedFrames{};
+        int backdropFpsSetting{-1};
+        int backdropTargetFps{60};
+        int backdropEffectiveFps{};
+        unsigned backdropOverBudgetTicks{};
+        bool backdropSummaryPending{};
+        uint64_t backdropCapturedAtStart{}, backdropRenderedAtStart{};
+        uint64_t backdropRestingTicks{}, backdropTickWorkUs{}, backdropMaxTickWorkUs{}, backdropLateTicks{};
+        std::chrono::steady_clock::time_point backdropTickStarted{};
+        std::chrono::nanoseconds backdropTickInterval{};
         std::wstring backdropStage{ L"inactive" };
         HRESULT backdropLastResult{ S_OK };
         bool groupMoving{};
@@ -319,17 +328,19 @@ namespace Cards
         void PlaceGroup(bool animate, bool showAll, bool reflow = false);
         void MoveGroup(float offset);
         void AnimateGroup(bool showing, bool animate);
+        int TargetFrameRate(HMONITOR monitor = nullptr) const;
         void StartGroupTimer();
         void StopGroupMotion(bool settle);
         void GroupFrame();
         void RestoreBackdropWindows();
-        void StopBackdrop(bool resetRetry = false, bool preserveDiagnostic = false);
+        void StopBackdrop(bool resetRetry = false, bool preserveDiagnostic = false, bool releaseResources = false);
         bool ArmBackdropTimer(LONGLONG delay);
         void UpdateBackdropDiagnostics(const wchar_t* stage, HRESULT result = S_OK);
         void RecordBackdropFailure(const wchar_t* operation, HRESULT result);
         void FailBackdrop(const wchar_t* operation, HRESULT result);
         void ConfigureBackdrop(bool scheduleTick = true);
         void BackdropTick();
+        void FinishBackdropTick();
         bool RenderLiveGlass(bool refreshControls);
         void UpdateEnvironment(bool force);
         void RefreshSnapshot(const Protocol::Changes& changes);
@@ -482,14 +493,47 @@ namespace Cards
         if (popup) popup->EnableLiveBackdrop(false);
     }
 
-    void CardHost::Impl::StopBackdrop(bool resetRetry, bool preserveDiagnostic)
+    void CardHost::Impl::StopBackdrop(bool resetRetry, bool preserveDiagnostic, bool releaseResources)
     {
+        // A poll/render failure can stop capture from inside the resting tick.
+        // Include that last tick before emitting the summary, exactly once.
+        FinishBackdropTick();
         if (backdropTimer) CancelWaitableTimer(backdropTimer);
         backdropTimerArmed = false;
         backdropRetryAt = 0;
         // Stop acquiring before restoring any HWND to the captured desktop.
         backdrop.Stop();
         RestoreBackdropWindows();
+        // Drop renderer effect inputs before the final D3D destruction flush.
+        if (releaseResources) backdrop.ReleaseResources();
+        const bool resourcesReleased = backdrop.TakeResourcesReleased();
+        if (releaseResources || resourcesReleased) graphics.TrimResources();
+        if (backdropSummaryPending)
+        {
+            backdropSummaryPending = false;
+            Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;
+            DXGI_ADAPTER_DESC desc{};
+            const auto dxgiDevice = graphics.DxgiDevice();
+            std::wstring adapterName = dxgiDevice && SUCCEEDED(dxgiDevice->GetAdapter(adapter.GetAddressOf())) &&
+                SUCCEEDED(adapter->GetDesc(&desc)) ? desc.Description : L"unknown";
+            std::replace(adapterName.begin(), adapterName.end(), L'\r', L' ');
+            std::replace(adapterName.begin(), adapterName.end(), L'\n', L' ');
+            wchar_t message[768]{};
+            _snwprintf_s(message, _TRUNCATE, L"TaskBarWidgets backdrop: summary target_fps=%d effective_fps=%d "
+                L"captured_frames=%llu rendered_frames=%llu resting_ticks=%llu avg_work_us=%llu max_work_us=%llu "
+                L"late_ticks=%llu render_adapter=%ls gpu_local_mb=%.2f capture_resources=%ls\n",
+                backdropTargetFps, backdropEffectiveFps,
+                static_cast<unsigned long long>(backdrop.CapturedFrames() - backdropCapturedAtStart),
+                static_cast<unsigned long long>(backdropRenderedFrames - backdropRenderedAtStart),
+                static_cast<unsigned long long>(backdropRestingTicks),
+                static_cast<unsigned long long>(backdropRestingTicks ? backdropTickWorkUs / backdropRestingTicks : 0),
+                static_cast<unsigned long long>(backdropMaxTickWorkUs),
+                static_cast<unsigned long long>(backdropLateTicks), adapterName.c_str(),
+                static_cast<double>(graphics.LocalVideoMemoryUsage()) / (1024 * 1024),
+                backdrop.ResourcesRetained() ? L"retained" : L"released");
+            OutputDebugStringW(message);
+            if (!diagnosticOffscreen) AppendBackdropLog(message);
+        }
         if (resetRetry)
         {
             backdropMonitor = nullptr;
@@ -552,7 +596,7 @@ namespace Cards
     void CardHost::Impl::FailBackdrop(const wchar_t* operation, HRESULT result)
     {
         RecordBackdropFailure(operation, result);
-        StopBackdrop(false, true);
+        StopBackdrop(false, true, true);
         // At most three attempts (initial plus two delayed retries) per open,
         // environment or display generation, even after a brief successful retry.
         if (backdropRetries >= 2)
@@ -584,7 +628,9 @@ namespace Cards
         if ((!visible && !groupMoving) || diagnosticOffscreen || highContrast || shuttingDown ||
             !graphics.Ready() || !device || (!cardGlass && !popupGlass))
         {
-            StopBackdrop();
+            const auto& material = previewMica ? previewMaterial : config.material;
+            StopBackdrop(false, false, material.kind != MaterialKind::LiquidGlass || highContrast ||
+                diagnosticOffscreen || shuttingDown || !graphics.Ready() || !device);
             return;
         }
 
@@ -597,9 +643,20 @@ namespace Cards
             : MonitorFromRect(&restBounds, MONITOR_DEFAULTTONEAREST);
         if (monitor != backdropMonitor)
         {
-            StopBackdrop(true);
+            StopBackdrop(true, false, backdrop.Monitor() && backdrop.Monitor() != monitor);
             backdropMonitor = monitor;
         }
+        const int targetFps = TargetFrameRate(backdropMonitor);
+        if (!backdropEffectiveFps || backdropTargetFps != targetFps || backdropFpsSetting != config.animationFps)
+        {
+            backdropFpsSetting = config.animationFps;
+            backdropTargetFps = backdropEffectiveFps = targetFps;
+            backdropOverBudgetTicks = 0;
+        }
+        // Set before Start as well as on the live WGC session. Animation keeps
+        // its original cadence even after the resting sampler has stepped down.
+        backdrop.SetTargetFrameInterval(groupMoving ? groupFrameInterval :
+            std::chrono::nanoseconds(1'000'000'000 / backdropEffectiveFps));
         if (backdropBlocked)
         {
             // Show() may have excluded a newly opened HWND during fallback.
@@ -640,11 +697,19 @@ namespace Cards
                 excludedWindows.push_back(card->Handle());
         if (popupGlass) excludedWindows.push_back(popup->Handle());
         // Install a changed list on a fresh WGC producer before restoring any
-        // affinity. The previous producer's queued frames are discarded with it.
+        // affinity. Drain the previous producer's queued frames before reusing its pool.
         if (!backdrop.SetExcludedWindows(excludedWindows))
         {
             FailBackdrop(backdrop.Diagnostic(), backdrop.LastResult());
             return;
+        }
+        if (backdrop.TakeResourcesReleased())
+        {
+            // A failed retained-pool restart may have replaced the source bitmap.
+            // The new WGC producer already has its list; drop old effect inputs
+            // before trimming, then re-enable the renderer exclusions below.
+            RestoreBackdropWindows();
+            graphics.TrimResources();
         }
         const auto applyExclusions = [&](bool sessionScoped)
         {
@@ -683,6 +748,7 @@ namespace Cards
             {
                 if (backdrop.LastResult() == E_PENDING)
                 {
+                    if (backdrop.TakeResourcesReleased()) graphics.TrimResources();
                     UpdateBackdropDiagnostics(L"entrance-delay");
                     if (!backdropTimerArmed && !ArmBackdropTimer(166'667))
                         FailBackdrop(L"startup timer", HRESULT_FROM_WIN32(GetLastError()));
@@ -691,6 +757,11 @@ namespace Cards
                 FailBackdrop(backdrop.Diagnostic(), backdrop.LastResult());
                 return;
             }
+            if (backdrop.TakeResourcesReleased()) graphics.TrimResources();
+            backdropSummaryPending = true;
+            backdropCapturedAtStart = backdrop.CapturedFrames();
+            backdropRenderedAtStart = backdropRenderedFrames;
+            backdropRestingTicks = backdropTickWorkUs = backdropMaxTickWorkUs = backdropLateTicks = 0;
             if (backdrop.SessionExclusion())
             {
                 exclusionResult = applyExclusions(true);
@@ -704,6 +775,9 @@ namespace Cards
                 std::to_wstring(startMs) + L"ms").c_str());
             UpdateBackdropDiagnostics(L"waiting-first-frame");
         }
+        if (backdrop.CrossAdapter()) backdropEffectiveFps = std::min(backdropEffectiveFps, 30);
+        backdrop.SetTargetFrameInterval(groupMoving ? groupFrameInterval :
+            std::chrono::nanoseconds(1'000'000'000 / backdropEffectiveFps));
         if (scheduleTick && !backdropTimerArmed && !ArmBackdropTimer(1))
             FailBackdrop(L"timer", HRESULT_FROM_WIN32(GetLastError()));
     }
@@ -719,24 +793,53 @@ namespace Cards
         // without querying settings or repainting foreground content.
         ConfigureBackdrop(false);
         if (!backdrop.Running()) return;
-        const auto interval = std::chrono::nanoseconds(1'000'000'000 / (backdrop.CrossAdapter() ? 30 : 60));
-        const auto next = tickStarted + interval;
         // During group motion GroupFrame polls and renders right after moving
         // the HWNDs, so position and refracted content share one Composition batch.
         if (!groupMoving)
         {
+            backdropTickStarted = std::chrono::steady_clock::now();
+            backdropTickInterval = std::chrono::nanoseconds(1'000'000'000 / backdropEffectiveFps);
             backdrop.Poll();
             if (!backdrop.Running()) { FailBackdrop(backdrop.Diagnostic(), backdrop.LastResult()); return; }
             // Render the cached frame even without a new desktop present: bounds,
             // control hover and popup animation can change independently of pixels.
-            if (!RenderLiveGlass(true)) return;
+            // Keep ticking after the last change so a throttled control lens
+            // catches up even when no new desktop frame arrives.
+            const bool refreshControls = backdropTickStarted - controlGlassRefreshed >=
+                std::chrono::nanoseconds(1'000'000'000 / 60);
+            if (refreshControls) controlGlassRefreshed = backdropTickStarted;
+            if (!RenderLiveGlass(refreshControls)) return;
+            FinishBackdropTick();
         }
+        const auto interval = groupMoving ? groupFrameInterval :
+            std::chrono::nanoseconds(1'000'000'000 / backdropEffectiveFps);
+        const auto next = tickStarted + interval;
         const auto now = std::chrono::steady_clock::now();
         // Recover late frames after at least 1 ms, without adding another full
         // interval after the work or spinning on an immediately signaled timer.
         const LONGLONG delay = std::max(10'000LL,
             std::chrono::duration_cast<std::chrono::nanoseconds>(next - now).count() / 100);
         if (!ArmBackdropTimer(delay)) FailBackdrop(L"timer", HRESULT_FROM_WIN32(GetLastError()));
+    }
+
+    void CardHost::Impl::FinishBackdropTick()
+    {
+        if (backdropTickStarted == std::chrono::steady_clock::time_point{}) return;
+        const auto work = std::chrono::steady_clock::now() - backdropTickStarted;
+        backdropTickStarted = {};
+        const auto workUs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(work).count());
+        ++backdropRestingTicks;
+        backdropTickWorkUs += workUs;
+        backdropMaxTickWorkUs = std::max(backdropMaxTickWorkUs, workUs);
+        const bool late = work > backdropTickInterval;
+        if (late) ++backdropLateTicks;
+        backdropOverBudgetTicks = late ? backdropOverBudgetTicks + 1 : 0;
+        if (backdropOverBudgetTicks >= 30 && backdropEffectiveFps > 30)
+        {
+            backdropEffectiveFps = std::max(30, backdropEffectiveFps / 2);
+            backdropOverBudgetTicks = 0;
+            backdrop.SetTargetFrameInterval(std::chrono::nanoseconds(1'000'000'000 / backdropEffectiveFps));
+        }
     }
 
     bool CardHost::Impl::RenderLiveGlass(bool refreshControls)
@@ -865,17 +968,22 @@ namespace Cards
         StartGroupTimer();
     }
 
+    int CardHost::Impl::TargetFrameRate(HMONITOR monitor) const
+    {
+        MONITORINFOEXW info{}; info.cbSize = sizeof(info);
+        DEVMODEW mode{}; mode.dmSize = sizeof(mode);
+        int fps = config.animationFps;
+        if (fps == 0 && GetMonitorInfoW(monitor ? monitor : MonitorFromPoint(anchor, MONITOR_DEFAULTTONEAREST), &info) &&
+            EnumDisplaySettingsW(info.szDevice, ENUM_CURRENT_SETTINGS, &mode) && mode.dmDisplayFrequency > 1)
+            fps = static_cast<int>(mode.dmDisplayFrequency);
+        return std::clamp(fps > 0 ? fps : 60, 30, 240);
+    }
+
     void CardHost::Impl::StartGroupTimer()
     {
         // The card STA waits on a high-resolution timer alongside its messages.
         // No worker callback or continuously running background frame loop.
-        MONITORINFOEXW monitor{}; monitor.cbSize = sizeof(monitor);
-        DEVMODEW mode{}; mode.dmSize = sizeof(mode);
-        int fps = config.animationFps;
-        if (fps == 0 && GetMonitorInfoW(MonitorFromPoint(anchor, MONITOR_DEFAULTTONEAREST), &monitor) &&
-            EnumDisplaySettingsW(monitor.szDevice, ENUM_CURRENT_SETTINGS, &mode) && mode.dmDisplayFrequency > 1)
-            fps = static_cast<int>(mode.dmDisplayFrequency);
-        groupFrameInterval = std::chrono::nanoseconds(1'000'000'000 / std::clamp(fps > 0 ? fps : 60, 30, 240));
+        groupFrameInterval = std::chrono::nanoseconds(1'000'000'000 / TargetFrameRate());
         if (!groupTimer) groupTimer = CreateWaitableTimerExW(nullptr, nullptr,
             CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_MODIFY_STATE | SYNCHRONIZE);
         groupLastFrame = groupNextFrame = std::chrono::steady_clock::now();
@@ -1132,7 +1240,7 @@ namespace Cards
         startupRequests.clear();
         CancelWarmup();
         StopGroupMotion(false);
-        StopBackdrop();
+        StopBackdrop(false, false, true);
         groupRestBounds.clear();
         for (auto& [kind, card] : cards)
         {
@@ -1150,6 +1258,11 @@ namespace Cards
         // Reopening during an exit keeps a running capture; the reversed motion
         // continues refracting without a restart or a blur frame.
         if (!visible && !backdrop.Running()) StopBackdrop(true);
+        if (!visible)
+        {
+            backdropEffectiveFps = 0;
+            backdropOverBudgetTicks = 0;
+        }
         startupWarmup = false;
         startupRequests.clear();
         CancelWarmup();
@@ -1380,6 +1493,7 @@ namespace Cards
             {
                 const bool restore = visible;
                 HideAll(L"device-lost", false);
+                StopBackdrop(true, false, true);
                 popup.reset(); cards.clear(); device = nullptr;
                 graphics.OnDeviceLost();
                 if (restore) ShowCards();
@@ -1924,7 +2038,7 @@ namespace Cards
                 else self->ScheduleWarmup();
                 return 0;
             case WM_DISPLAYCHANGE:
-                self->StopBackdrop(true);
+                self->StopBackdrop(true, false, true);
                 if (self->visible) self->PlaceGroup(false, false);
                 else self->ScheduleWarmup();
                 return 0;
@@ -2009,7 +2123,7 @@ namespace Cards
         }
 
         // Teardown: stop producers first, then release device-bound resources.
-        StopBackdrop(true);
+        StopBackdrop(true, false, true);
         if (backdropTimer) { CloseHandle(backdropTimer); backdropTimer = nullptr; }
         CancelWarmup();
         StopGroupMotion(false);

@@ -66,6 +66,9 @@ namespace Cards
         void Release();
         // Drops every device-bound bitmap so the caller can rebuild and repaint.
         void OnDeviceLost();
+        // Only after full capture teardown, never for an ordinary card close.
+        void TrimResources();
+        uint64_t LocalVideoMemoryUsage() const;
 
         bool Ready() const { return ready; }
         const std::wstring& Diagnostic() const { return diagnostic; }
