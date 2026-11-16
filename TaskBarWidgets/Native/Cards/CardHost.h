@@ -25,14 +25,6 @@ namespace Cards
         bool running{};
     };
 
-    struct GraphicsDiagnostics
-    {
-        bool observed{};
-        bool drawingDevice{}, composition{}, capture{}, cardResources{};
-        unsigned renderedCards{};
-        bool RetainsResources() const { return drawingDevice || composition || capture || cardResources; }
-    };
-
     class CardHost
     {
     public:
@@ -56,7 +48,6 @@ namespace Cards
         void Hide(const wchar_t* reason);
         bool Visible() const;
         BackdropDiagnostics BackdropStatus() const;
-        GraphicsDiagnostics GraphicsStatus() const;
 
         // A fresh quick-card configuration (order, columns, enabled, resource
         // mode, font, Mica tuning). Thread-safe.

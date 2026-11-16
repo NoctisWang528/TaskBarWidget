@@ -1,4 +1,4 @@
-#include "CardPch.h"
+﻿#include "CardPch.h"
 #include "CardRuntime.h"
 #include "../TrafficMonitor/WinUiDependencyCheck.h"
 #include <filesystem>
@@ -119,75 +119,6 @@ static void WaitForCards(Cards::CardHost& host, int count)
     throw std::runtime_error("host toggle did not show/hide the expected offscreen windows");
 }
 
-static void CheckHiddenGraphicsRelease()
-{
-    Cards::CardHost host;
-    Require(host.Start(nullptr, GetModuleHandleW(nullptr), true), "GPU release host bootstrap");
-    Cards::Config config;
-    config.resourceMode = L"Resident";
-    config.material.kind = Cards::MaterialKind::LiquidGlass;
-    for (auto& [id, enabled] : config.enabled) enabled = true;
-    host.ApplyConfig(config);
-    WaitForHiddenCards(4);
-    auto windows = ProbeWindows(L"TaskBarWidgetsCardWindow");
-    std::sort(windows.begin(), windows.end());
-    const POINT anchor{GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN)};
-    host.Show(anchor);
-    WaitForCards(host, 4);
-    const auto before = host.GraphicsStatus();
-    Require(before.observed && before.drawingDevice && before.composition && before.cardResources && before.renderedCards == 4,
-        "GPU fixture requires actual composition devices and painted card surfaces");
-    const auto hostWindows = ProbeWindows(L"TaskBarWidgetsCardHost");
-    Require(hostWindows.size() == 1, "GPU fixture owns one host");
-    PostMessageW(hostWindows.front(), WM_TIMER, 0xCD06, 0);
-    PumpFor(60);
-    Require(host.GraphicsStatus().renderedCards == 4, "visible/entering cards retain painted resources");
-    host.Hide(L"GPU idle fixture");
-    WaitForCards(host, 0);
-    const auto deadline = GetTickCount64() + 6500;
-    while (GetTickCount64() < deadline && host.GraphicsStatus().RetainsResources())
-    {
-        // Background changes must neither postpone the idle deadline nor rebuild
-        // GPU objects after it expires. These are real queued host operations.
-        host.ApplyConfig(config);
-        host.PreviewTheme((GetTickCount64() / 200) % 2 != 0, true);
-        host.Refresh();
-        PumpFor(200);
-    }
-    const auto released = host.GraphicsStatus();
-    Require(released.observed && !released.RetainsResources(), "hidden resident cards must release GPU resources within five seconds");
-    auto hidden = ProbeWindows(L"TaskBarWidgetsCardWindow");
-    std::sort(hidden.begin(), hidden.end());
-    Require(hidden == windows, "GPU idle release retains resident HWNDs");
-    host.ApplyConfig(config); host.PreviewTheme(false, true); host.Refresh();
-    PumpFor(400);
-    const auto dormant = host.GraphicsStatus();
-    Require(dormant.observed && !dormant.RetainsResources(), "hidden updates cannot recreate retired GPU resources");
-    host.Show(anchor);
-    WaitForCards(host, 4);
-    auto restored = ProbeWindows(L"TaskBarWidgetsCardWindow");
-    std::sort(restored.begin(), restored.end());
-    const auto after = host.GraphicsStatus();
-    Require(restored == windows && after.observed && after.drawingDevice && after.composition && after.renderedCards == 4,
-        "reopening restores real painted surfaces in the same resident HWNDs");
-    host.Hide(L"GPU interrupted exit");
-    host.Show(anchor);
-    PostMessageW(hostWindows.front(), WM_TIMER, 0xCD06, 0);
-    PumpFor(400);
-    Require(host.Visible() && host.GraphicsStatus().renderedCards == 4,
-        "reopening during exit cancels pending GPU release");
-    for (auto& [id, enabled] : config.enabled) enabled = false;
-    host.ApplyConfig(config);
-    host.Show(anchor);
-    PumpFor(350);
-    WaitForCards(host, 0);
-    const auto empty = host.GraphicsStatus();
-    Require(empty.observed && !empty.RetainsResources(), "showing a fully disabled card group leaves no GPU resources");
-    host.Stop();
-    Require(ProbeWindows(L"TaskBarWidgetsCardWindow").empty(), "GPU fixture shutdown destroys retained windows");
-    std::cout << "Hidden resident GPU objects release without losing HWNDs and repaint on reopening.\n";
-}
-
 // A process-local fake backend exercises real IPC without starting Media or the product.
 static void CheckStartupPreloadData()
 {
@@ -217,8 +148,8 @@ static void CheckStartupPreloadData()
         Require(WriteFile(pipe.handle, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr) &&
             written == bytes.size(), "send fake backend frame");
     };
-    send(JsonObject::Parse(LR"({"version":1,"type":"command","action":"cardSnapshot","payload":{"quickCards":{"revision":1,"resourceMode":"OnDemand"},"aiUsage":{"revision":1,"providerId":"codex","enabledServices":{"openai":true}}}})"));
-    WaitForHiddenCards(5);
+    send(JsonObject::Parse(LR"({"version":1,"type":"command","action":"cardSnapshot","payload":{"quickCards":{"revision":1,"resourceMode":"OnDemand"}}})"));
+    WaitForHiddenCards(4);
     std::map<std::wstring, std::wstring> requests;
     std::string incoming;
     const auto drain = [&]
@@ -254,34 +185,7 @@ static void CheckStartupPreloadData()
         send(reply);
     }
     PumpFor(350);
-    WaitForHiddenCards(5);
-    config.resourceMode = L"Resident";
-    host.ApplyConfig(config);
-    send(JsonObject::Parse(LR"({"version":1,"type":"command","action":"cardSnapshot","payload":{"aiUsage":{"revision":2,"providerId":"","status":"disabled","enabledServices":{"openai":false}}}})"));
     WaitForHiddenCards(4);
-    send(JsonObject::Parse(LR"({"version":1,"type":"command","action":"cardSnapshot","payload":{"aiUsage":{"revision":3,"providerId":"claude-web","enabledServices":{"claude":true}}}})"));
-    WaitForHiddenCards(5);
-    // The user has never opened this host. Real incoming backend snapshots
-    // must not keep its startup GPU allocation alive or wake it after release.
-    const auto gpuDeadline = GetTickCount64() + 6500;
-    unsigned hiddenUpdates{};
-    while (GetTickCount64() < gpuDeadline && host.GraphicsStatus().RetainsResources())
-    {
-        auto update = JsonObject::Parse(LR"({"version":1,"type":"command","action":"cardSnapshot","payload":{}})");
-        update.GetNamedObject(L"payload").Insert(L"statusText", JsonValue::CreateStringValue(L"hidden update " + std::to_wstring(++hiddenUpdates)));
-        send(update);
-        PumpFor(200);
-    }
-    const auto idleGraphics = host.GraphicsStatus();
-    Require(idleGraphics.observed && !idleGraphics.RetainsResources() && hiddenUpdates > 0,
-        "startup graphics release without showing, despite ongoing backend snapshots");
-    send(JsonObject::Parse(LR"({"version":1,"type":"command","action":"cardSnapshot","payload":{"statusText":"after GPU release"}})"));
-    PumpFor(350);
-    const auto lateGraphics = host.GraphicsStatus();
-    Require(lateGraphics.observed && !lateGraphics.RetainsResources(), "late backend snapshot cannot rebuild an idle GPU");
-    WaitForHiddenCards(5);
-    config.resourceMode = L"OnDemand";
-    host.ApplyConfig(config);
     const auto hosts = ProbeWindows(L"TaskBarWidgetsCardHost");
     Require(hosts.size() == 1, "single hidden IPC host");
     PostMessageW(hosts.front(), WM_TIMER, 0xCD03, 0);
@@ -331,7 +235,7 @@ static void CheckGroupMotion(Cards::CardHost& host, POINT anchor, const Cards::C
     // stay outside the virtual desktop and this host has no global input hook.
     PumpFor(350);
     const auto rest = ReadGroupBounds();
-    Require(rest.size() == 4, "default-off AI leaves four distinct ordinary windows");
+    Require(rest.size() == 4, "group has four distinct windows");
     // Enumerate the desktop once; sample only our known HWNDs during motion.
     // Repeated desktop enumeration can outlast an entire animation.
     const auto readBounds = [&rest]
@@ -397,16 +301,7 @@ static void CheckGroupMotion(Cards::CardHost& host, POINT anchor, const Cards::C
             {
                 auto expected = rest.at(window);
                 OffsetRect(&expected, 0, dy);
-                if (!EqualRect(&expected, &bounds))
-                {
-                    const auto& original = rest.at(window);
-                    std::cerr << "Group entry mismatch hwnd=" << window << " commonDy=" << dy
-                        << " rest=(" << original.left << ',' << original.top << ',' << original.right << ',' << original.bottom
-                        << ") actual=(" << bounds.left << ',' << bounds.top << ',' << bounds.right << ',' << bounds.bottom
-                        << ") expected=(" << expected.left << ',' << expected.top << ',' << expected.right << ',' << expected.bottom
-                        << ") cards=" << frame.size() << '\n';
-                }
-                Require(EqualRect(&expected, &bounds), "all complete card windows move by one common Y offset");
+                Require(EqualRect(&expected, &bounds), "all four full windows move by one common Y offset");
             }
             Require(dy >= 0, "entrance comes from below the final group position");
             entryTravel = std::max(entryTravel, dy);
@@ -423,7 +318,7 @@ static void CheckGroupMotion(Cards::CardHost& host, POINT anchor, const Cards::C
     host.Toggle(anchor); // Reverse an in-flight exit.
     WaitForCards(host, 4);
     PumpFor(350);
-    Require(SameBounds(rest, readBounds()), "reversing exit retains all card windows and final geometry");
+    Require(SameBounds(rest, readBounds()), "reversing exit retains all four windows and final geometry");
     host.Toggle(anchor);
     WaitForCards(host, 0);
     host.Toggle(anchor);
@@ -1066,13 +961,6 @@ int wmain(int argc, wchar_t** argv)
         WinUiRuntime appRuntime;
         winrt::check_hresult(appRuntime.Initialize(std::filesystem::path(executable).parent_path() /
             L"UI/Microsoft.WindowsAppRuntime.Bootstrap.dll"));
-        if (argc == 2 && wcscmp(argv[1], L"--gpu-release-check") == 0)
-        {
-            CheckHiddenGraphicsRelease();
-            appRuntime.Reset();
-            winrt::uninit_apartment();
-            return 0;
-        }
         if (argc == 2 && wcscmp(argv[1], L"--ai-usage-check") == 0)
         {
             {
@@ -1514,7 +1402,6 @@ int wmain(int argc, wchar_t** argv)
             }
         }
         CheckStartupPreloadData();
-        CheckHiddenGraphicsRelease();
         {
             Cards::CardHost host;
             std::cout << "Checking the card host toggle path...\n";
@@ -1554,10 +1441,8 @@ int wmain(int argc, wchar_t** argv)
             Require(!host.Visible(), "on-demand must not repeat startup preload after idle release");
             config.resourceMode = L"Resident";
             host.ApplyConfig(config);
-            PumpFor(400);
-            WaitForHiddenCards(0);
-            Require(!host.GraphicsStatus().RetainsResources(), "switching mode cannot wake an idle GPU");
-            std::cout << "Resident startup warmup and on-demand idle release preserve GPU dormancy until reopening.\n";
+            WaitForHiddenCards(4);
+            std::cout << "Resident hidden warmup and on-demand resource release/recovery passed.\n";
             const POINT anchor{ GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN) };
             host.Toggle(anchor);
             WaitForCards(host, 4);

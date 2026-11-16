@@ -5,37 +5,6 @@ namespace TaskbarLyrics.App.Tests;
 
 public sealed class SettingsStoreTests
 {
-    [Fact]
-    public void AiServiceOptInsDefaultOffAndRoundTripIndependently()
-    {
-        var directory = Path.Combine(AppContext.BaseDirectory, $"settings-store-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(directory);
-        try
-        {
-            var path = Path.Combine(directory, "settings.json");
-            File.WriteAllText(path, "{}");
-            var store = new SettingsStore(path);
-            var settings = store.Load();
-            Assert.Equal(4, settings.AiUsageEnabledServices.Count);
-            Assert.All(settings.AiUsageEnabledServices.Values, enabled => Assert.False(enabled));
-            settings.AiUsageEnabledServices["claude"] = true;
-            settings.AiUsageShowApi = true;
-            settings.AiUsageProviderId = "claude-api";
-            var clone = settings.Clone();
-            clone.AiUsageEnabledServices["openai"] = true;
-            Assert.False(settings.AiUsageEnabledServices["openai"]);
-            Assert.True(store.Save(settings));
-            var loaded = store.Load();
-            Assert.True(loaded.AiUsageEnabledServices["claude"]);
-            Assert.False(loaded.AiUsageEnabledServices["openai"]);
-            Assert.False(loaded.AiUsageEnabledServices["deepseek"]);
-            Assert.False(loaded.AiUsageEnabledServices["gemini"]);
-            Assert.True(loaded.AiUsageShowApi);
-            Assert.Equal("claude-api", loaded.AiUsageProviderId);
-        }
-        finally { Directory.Delete(directory, recursive: true); }
-    }
-
     [Theory]
     [InlineData(50, 0, 50, 0)]
     [InlineData(150, 30, 150, 30)]
@@ -85,9 +54,7 @@ public sealed class SettingsStoreTests
             var loaded = store.Load();
             Assert.Equal(expectedSpeedPercent, loaded.QuickCardAnimationSpeedPercent);
             Assert.Equal(expectedFps, loaded.QuickCardAnimationFps);
-            Assert.Equal(["media", "traffic", "weather", "device", "peripheralBattery", "aiUsage"], loaded.QuickCardOrder);
-            Assert.Equal(1, loaded.QuickCardColumns["aiUsage"]);
-            Assert.True(loaded.QuickCardEnabled["aiUsage"]);
+            Assert.Equal(["media", "traffic", "weather", "device", "peripheralBattery"], loaded.QuickCardOrder);
             Assert.False(loaded.QuickCardEnabled["media"]);
             Assert.True(loaded.QuickCardEnabled["weather"]);
             Assert.True(loaded.QuickCardEnabled["traffic"]);
@@ -443,9 +410,7 @@ public sealed class SettingsStoreTests
             Assert.True(loaded.QuickCardEnabled["traffic"]);
             Assert.True(loaded.QuickCardEnabled["device"]);
             Assert.True(loaded.QuickCardEnabled["media"]);
-            Assert.Equal(["weather", "device", "traffic", "media", "peripheralBattery", "aiUsage"], loaded.QuickCardOrder);
-            Assert.Equal(1, loaded.QuickCardColumns["aiUsage"]);
-            Assert.True(loaded.QuickCardEnabled["aiUsage"]);
+            Assert.Equal(["weather", "device", "traffic", "media", "peripheralBattery"], loaded.QuickCardOrder);
             Assert.Equal(150, loaded.QuickCardAnimationSpeedPercent);
             Assert.Equal(0, loaded.QuickCardAnimationFps);
         }

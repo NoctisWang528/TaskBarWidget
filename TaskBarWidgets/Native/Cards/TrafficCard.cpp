@@ -56,6 +56,8 @@ namespace Cards::Paint
         const float left = Layout::Padding;
         const float contentWidth = widthDip - Layout::Padding * 2.0f;
         const auto& traffic = snapshot.traffic;
+        const bool glassCells = interaction.glass && interaction.compositedGlass &&
+            interaction.glassControls && !environment.highContrast;
 
         Draw::Text(context, graphics, L"流量消耗", environment.fontFamily, 13.0f, 600, palette.primary,
             Draw::Rect(left, Layout::Padding, left + 200.0f, Layout::Padding + 20.0f));
@@ -85,8 +87,16 @@ namespace Cards::Paint
             {
                 const float x = gridLeft + WeekdayGutter + week * SlotSize + (SlotSize - CellSize) / 2;
                 const float y = gridTop + row * SlotSize + (SlotSize - CellSize) / 2;
-                Draw::StrokeRound(context, Draw::Rect(x, y, x + CellSize, y + CellSize),
-                    4.0f, WithAlpha(palette.secondary, 0.20f), 1.0f);
+                const auto cell = Draw::Rect(x, y, x + CellSize, y + CellSize);
+                if (glassCells)
+                {
+                    GlassControl control;
+                    control.id = 300 + week * 7 + row; control.kind = GlassControl::Kind::Cell;
+                    control.bounds = cell; control.radius = 4.0f; control.enabled = false;
+                    control.fillColor = Color{0, 0, 0, 0};
+                    interaction.glassControls->push_back(control);
+                }
+                else Draw::StrokeRound(context, cell, 4.0f, WithAlpha(palette.secondary, 0.20f), 1.0f);
             }
         }
 
@@ -111,7 +121,7 @@ namespace Cards::Paint
                     gridLeft + WeekdayGutter, gridTop + (row + 1) * SlotSize));
         }
 
-        // Draw the restrained halo under the opaque cells so it cannot wash out
+        // Draw the restrained halo under the cells so it cannot wash out
         // the heatmap levels. Keep one shared mask and blur pass; never expand
         // a cell into its four-DIP gutter before blurring.
         if (auto* mask = environment.highContrast ? nullptr : graphics.BeginMask(context))
@@ -150,24 +160,32 @@ namespace Cards::Paint
                 cellTop + CellSize);
             const Color fill = day.isFuture ? Color{ 0, 0, 0, 0 }
                 : environment.highContrast ? HighContrastLevel(day.level) : RampColor(day.level, environment.dark);
-            if (fill.a > 0.0f)
-            {
-                Draw::FillRound(context, cell, 4.0f, fill);
-                // Liquid-glass cells keep their ramp colour but gain a top
-                // reflection and a bright rim, matching the other glass surfaces.
-                if (interaction.glass)
-                {
-                    Draw::GlassSheen(context, cell, 4.0f, environment.dark ? 0.20f : 0.30f);
-                    Draw::StrokeRound(context, cell, 4.0f,
-                        Color{ 1, 1, 1, environment.dark ? 0.13f : 0.22f }, 1.0f);
-                }
-            }
             const int id = 300 + day.week * 7 + day.weekday;
-            const float opacity = interaction.pressed == id ? 0.22f : 0.16f * interaction.Hover(id);
-            if (!day.isFuture && opacity > 0)
-                Draw::FillRound(context, cell, 4.0f, WithAlpha(palette.accent, opacity));
-
             const bool selected = day.date == (traffic.selectedDate.empty() ? traffic.today : traffic.selectedDate);
+            if (glassCells)
+            {
+                const bool enabled = !day.isFuture && !day.date.empty();
+                const bool emphasized = enabled && (day.isToday || selected || interaction.focused == id);
+                GlassControl control;
+                control.id = id; control.kind = GlassControl::Kind::Cell;
+                control.bounds = cell; control.radius = 4.0f; control.enabled = enabled;
+                control.hover = enabled ? interaction.Hover(id) : 0.0f;
+                control.pressed = enabled && interaction.pressed == id;
+                control.focused = emphasized || (enabled && day.level == 0);
+                control.ink = emphasized ? palette.accent : day.level == 0 ? palette.border : palette.accent;
+                // Tint the independent refracted surface; an opaque painter fill
+                // above it would hide the real lens just like the old sheen did.
+                control.fillColor = WithAlpha(fill, fill.a * (environment.dark ? .45f : .55f));
+                interaction.glassControls->push_back(control);
+            }
+            else
+            {
+                if (fill.a > 0.0f) Draw::FillRound(context, cell, 4.0f, fill);
+                const float opacity = interaction.pressed == id ? 0.22f : 0.16f * interaction.Hover(id);
+                if (!day.isFuture && opacity > 0)
+                    Draw::FillRound(context, cell, 4.0f, WithAlpha(palette.accent, opacity));
+            }
+
             Draw::AddCell(regions, 300 + day.week * 7 + day.weekday, cell, L"selectDay:" + day.date,
                 day.date, !day.isFuture && !day.date.empty(), selected);
         }
@@ -175,7 +193,7 @@ namespace Cards::Paint
         for (const auto& day : traffic.days)
         {
             if (day.week < 0 || day.week >= Weeks || day.weekday < 0 || day.weekday >= 7) continue;
-            if (day.isFuture || day.level < 0) continue;
+            if (glassCells || day.isFuture || day.level < 0) continue;
             const int id = 300 + day.week * 7 + day.weekday;
             const float hover = interaction.Hover(id);
             const bool emphasized = day.isToday || interaction.focused == id ||

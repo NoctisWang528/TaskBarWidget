@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
@@ -9,6 +10,9 @@ namespace TaskBarWidgets.UI;
 
 public sealed partial class SettingsWindow
 {
+    [DllImport("user32.dll", EntryPoint = "SendMessageW")]
+    private static extern nint SendAiUsageProbeMessage(nint window, uint message, nuint wParam, nint lParam);
+
     internal static async Task<object> ProbeAiUsageControlsAsync(JsonObject native, JsonObject media, string outputDirectory)
     {
         using var connection = new UiConnection("TaskBarWidgets.UI.ai-probe.disconnected");
@@ -23,6 +27,9 @@ public sealed partial class SettingsWindow
         var failConfigure = false;
         var cleared = 0;
         var manualWrites = 0;
+        var globalWrites = 0;
+        TaskCompletionSource<bool>? mutationRelease = null;
+        var mutationStarted = false;
         var manualDays = new JsonArray();
         double? manualPercent = null;
         var holdNextRead = false;
@@ -38,7 +45,25 @@ public sealed partial class SettingsWindow
         var today = DateOnly.FromDateTime(DateTime.Now);
         for (var i = 0; i < 80; i++)
             if (i != 9) days.Add(new JsonObject { ["date"] = today.AddDays(-i).ToString("yyyy-MM-dd"), ["tokens"] = i == 5 ? 0 : i * 123456L });
-        window.ProbeRequestHandler = (action, payload) => {
+        window.ProbeRequestHandler = async (action, payload) => {
+            if (action == "applyNativeSettings")
+            {
+                foreach (var pair in payload!.AsObject())
+                    native["fields"]!.AsArray().OfType<JsonObject>().Single(field => Text(field["key"]) == pair.Key)["value"] = pair.Value?.DeepClone();
+                globalWrites++;
+                return (JsonObject)native.DeepClone();
+            }
+            if (action == "applyMediaSettings")
+            {
+                foreach (var pair in payload!.AsObject()) media[pair.Key] = pair.Value?.DeepClone();
+                globalWrites++;
+                return (JsonObject)media.DeepClone();
+            }
+            if (action is "configureAiUsage" or "saveAiUsageManual" or "setAiUsagePreferences" && mutationRelease is { } release)
+            {
+                mutationStarted = true;
+                await release.Task;
+            }
             if (action == "getAiUsage") reads++;
             else if (action == "setAiUsagePreferences")
             {
@@ -66,7 +91,7 @@ public sealed partial class SettingsWindow
                 manualWrites++; manualDays = (JsonArray)payload!["days"]!.DeepClone();
                 manualPercent = payload["remainingPercent"]?.GetValue<double>();
             }
-            else return Task.FromResult(new JsonObject());
+            else return new JsonObject();
             var api = providerId.EndsWith("-api", StringComparison.Ordinal);
             var catalog = new JsonArray(providerDefinitions.Select(item => (JsonNode)new JsonObject {
                 ["id"] = item.Item1, ["name"] = item.Item2, ["mode"] = item.Item3, ["serviceId"] = item.Item4 }).ToArray());
@@ -88,9 +113,9 @@ public sealed partial class SettingsWindow
             {
                 holdNextRead = false; heldSnapshot = result;
                 heldRead = new TaskCompletionSource<JsonObject>(TaskCreationOptions.RunContinuationsAsynchronously);
-                return heldRead.Task;
+                return await heldRead.Task;
             }
-            return Task.FromResult(result);
+            return result;
         };
         IEnumerable<FrameworkElement> Walk(DependencyObject root)
         {
@@ -99,11 +124,72 @@ public sealed partial class SettingsWindow
                 foreach (var child in Walk(VisualTreeHelper.GetChild(root, i))) yield return child;
         }
         T Find<T>(string id) where T : FrameworkElement => Walk(window._root).OfType<T>().Single(element => AutomationProperties.GetAutomationId(element) == id);
-        async Task Invoke(string id)
+        async Task InvokeButton(Button button)
         {
-            var peer = new Microsoft.UI.Xaml.Automation.Peers.ButtonAutomationPeer(Find<Button>(id));
+            var peer = new Microsoft.UI.Xaml.Automation.Peers.ButtonAutomationPeer(button);
             ((Microsoft.UI.Xaml.Automation.Provider.IInvokeProvider)peer.GetPattern(Microsoft.UI.Xaml.Automation.Peers.PatternInterface.Invoke)).Invoke();
             await Task.Delay(100);
+        }
+        Task Invoke(string id) => InvokeButton(Find<Button>(id));
+        async Task AssertActiveWriteGuards(Func<Task> startWrite)
+        {
+            if (window.HasPendingChanges) throw new InvalidOperationException("AI write-guard fixture must start without unrelated drafts.");
+            var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            mutationRelease = release; mutationStarted = false;
+            var pageCancellation = window._aiUsageCancellation;
+            var provider = Find<ComboBox>("ai-usage-provider");
+            try
+            {
+                await startWrite();
+                if (!mutationStarted || !window._aiUsageMutating || !window.HasPendingChanges || provider.IsEnabled || window._apply.IsEnabled)
+                    throw new InvalidOperationException("An active AI write did not guard controls and the updater's pending-changes gate.");
+                var sources = window.NavigationPages().Single(item => Equals(item.Tag, "sources"));
+                window._navigation.SelectedItem = sources;
+                window.NavigateTo("sources");
+                if (window._currentPage != "aiUsage" || !Equals((window._navigation.SelectedItem as NavigationViewItem)?.Tag, "aiUsage") ||
+                    !ReferenceEquals(pageCancellation, window._aiUsageCancellation) || pageCancellation!.IsCancellationRequested)
+                    throw new InvalidOperationException("Navigation abandoned an active AI write.");
+                window.ProbeRenderPage();
+                if (!ReferenceEquals(provider, Find<ComboBox>("ai-usage-provider")))
+                    throw new InvalidOperationException("Rerender replaced controls during an active AI write.");
+                await window.ReloadAsync();
+                await window.SaveAsync();
+                // WM_CLOSE exercises AppWindow.Closing; Window.Close bypasses it.
+                SendAiUsageProbeMessage(WinRT.Interop.WindowNative.GetWindowHandle(window), 0x0010, 0, 0);
+                await Task.Delay(80);
+                if (window._closed || window._shutdown || !window._notice.IsOpen || window._notice.Severity != InfoBarSeverity.Informational ||
+                    window._currentPage != "aiUsage" || pageCancellation.IsCancellationRequested || !window.HasPendingChanges)
+                    throw new InvalidOperationException("Normal closing or reload abandoned an active AI write.");
+            }
+            finally
+            {
+                mutationRelease = null;
+                release.TrySetResult(true);
+            }
+            for (var attempt = 0; window._aiUsageMutating && attempt < 100; attempt++) await Task.Delay(10);
+            if (window._aiUsageMutating || window.HasPendingChanges || !provider.IsEnabled)
+                throw new InvalidOperationException("AI write guards did not release after completion.");
+        }
+        async Task AssertDraftsSurviveApply()
+        {
+            var password = Find<PasswordBox>("ai-usage-credential");
+            var project = Find<TextBox>("ai-usage-project");
+            var csv = Find<TextBox>("ai-usage-manual-days");
+            var remaining = Find<TextBox>("ai-usage-manual-remaining");
+            var values = new[] { password.Password, project.Text, csv.Text, remaining.Text };
+            var cancellation = window._aiUsageCancellation;
+            var renders = window.PageRenderCount;
+            var writes = globalWrites;
+            window.Changed();
+            if (!window._apply.IsEnabled) throw new InvalidOperationException("Global Apply fixture had no pending settings.");
+            await InvokeButton(window._apply);
+            window.ProbeRenderPage();
+            if (window.HasPendingChanges || globalWrites <= writes || window.PageRenderCount != renders ||
+                !ReferenceEquals(cancellation, window._aiUsageCancellation) ||
+                !ReferenceEquals(password, Find<PasswordBox>("ai-usage-credential")) || !ReferenceEquals(project, Find<TextBox>("ai-usage-project")) ||
+                !ReferenceEquals(csv, Find<TextBox>("ai-usage-manual-days")) || !ReferenceEquals(remaining, Find<TextBox>("ai-usage-manual-remaining")) ||
+                !values.SequenceEqual(new[] { password.Password, project.Text, csv.Text, remaining.Text }))
+                throw new InvalidOperationException("Global Apply or same-page rerender replaced live AI inputs or lost their drafts.");
         }
         async Task Select(string id)
         {
@@ -141,6 +227,10 @@ public sealed partial class SettingsWindow
             finally { if (File.Exists(credentialFixture)) File.Delete(credentialFixture); }
             UiTemplateProbe.ShowOffscreen(window, 1180, 1100);
             window.LoadValidationData((JsonObject)native.DeepClone(), (JsonObject)media.DeepClone());
+            var nativeToggle = native["fields"]!.AsArray().OfType<JsonObject>().First(field =>
+                !Text(field["key"]).StartsWith("items.", StringComparison.Ordinal) && field["value"] is JsonValue value && value.TryGetValue<bool>(out _));
+            window._native.Set(Text(nativeToggle["key"]), !nativeToggle["value"]!.GetValue<bool>());
+            window._media.Set("enableQQMusic", !window._media.Bool("enableQQMusic"));
             window.ShowPage("aiUsage");
             await Task.Delay(120);
             if (Find<ComboBox>("ai-usage-provider").Items.Count != 0 || Find<Grid>("ai-usage-heatmap").Children.Count != 0 || Find<TextBlock>("ai-usage-empty").Visibility != Visibility.Visible || enabledServices.Values.Any(enabled => enabled))
@@ -219,12 +309,16 @@ public sealed partial class SettingsWindow
             await CaptureProvider("deepseek-balance", Find<StackPanel>("ai-usage-quotas"));
             var password = Find<PasswordBox>("ai-usage-credential");
             password.Password = "synthetic-write-only-key";
+            Find<TextBox>("ai-usage-manual-days").Text = "unfinished manual draft";
+            Find<TextBox>("ai-usage-manual-remaining").Text = "42";
+            await AssertDraftsSurviveApply();
             failConfigure = true;
             await Invoke("ai-usage-save-credential");
             if (password.Password != "synthetic-write-only-key" || configured != 0 || Find<TextBlock>("ai-usage-status").Text.Contains("synthetic credential"))
                 throw new InvalidOperationException("Rejected credentials were erased or internal error details were exposed.");
+            if (window._aiUsageMutating || window.HasPendingChanges) throw new InvalidOperationException("Rejected AI writes left guards active.");
             failConfigure = false;
-            await Invoke("ai-usage-save-credential");
+            await AssertActiveWriteGuards(() => Invoke("ai-usage-save-credential"));
             if (!hasCredential || password.Password.Length != 0 || configured != 1) throw new InvalidOperationException("Credential was not write-only.");
             await Invoke("ai-usage-save-credential");
             if (!hasCredential || configured != 2) throw new InvalidOperationException("Blank credential did not retain the saved value.");
@@ -260,6 +354,8 @@ public sealed partial class SettingsWindow
             await Task.Delay(2150);
             if (Find<TextBox>("ai-usage-project").Text != "" || password.Password != "unsaved-draft" || csv.Text != "unsaved CSV draft" || Find<TextBox>("ai-usage-manual-remaining").Text != "42")
                 throw new InvalidOperationException("Polling overwrote an unfinished connection or manual draft.");
+            window._media.Set("enableQQMusic", !window._media.Bool("enableQQMusic"));
+            await AssertDraftsSurviveApply();
             await Select("claude-api");
             Find<ToggleSwitch>("ai-usage-show-api").IsOn = false;
             await Task.Delay(100);
@@ -268,7 +364,7 @@ public sealed partial class SettingsWindow
             if (cleared != 1) throw new InvalidOperationException("Hiding API providers cleared their credentials.");
             Find<TextBox>("ai-usage-manual-days").Text = $"{today:yyyy-MM-dd},0\r{today.AddDays(-1):yyyy-MM-dd},12";
             Find<TextBox>("ai-usage-manual-remaining").Text = "75";
-            await Invoke("ai-usage-save-manual");
+            await AssertActiveWriteGuards(() => Invoke("ai-usage-save-manual"));
             if (manualWrites != 1 || !Find<Grid>("ai-usage-heatmap").Children.OfType<Button>().Any(cell => AutomationProperties.GetName(cell).Contains("12 次")))
             {
                 var names = Find<Grid>("ai-usage-heatmap").Children.OfType<Button>().Select(AutomationProperties.GetName).ToArray();
@@ -292,8 +388,10 @@ public sealed partial class SettingsWindow
             if (manualPercent != 75 || manualWrites != 2)
                 throw new InvalidOperationException("Editing only CSV erased the existing manual percentage.");
             await CaptureProvider("claude-manual", Find<Border>("ai-usage-manual"));
-            Find<ToggleSwitch>("ai-usage-enabled-claude").IsOn = false;
-            await Task.Delay(100);
+            await AssertActiveWriteGuards(async () => {
+                Find<ToggleSwitch>("ai-usage-enabled-claude").IsOn = false;
+                await Task.Delay(100);
+            });
             if (providerId == "claude-web" || Find<ComboBox>("ai-usage-provider").Items.OfType<ComboBoxItem>().Any(item => (item.Tag as string)?.StartsWith("claude", StringComparison.Ordinal) == true) ||
                 Find<TextBlock>("ai-usage-source-note").Text.Contains("测试服务来源"))
                 throw new InvalidOperationException("Disabling the selected service left its source or data visible.");
@@ -314,8 +412,7 @@ public sealed partial class SettingsWindow
             if (providerId != "claude-web" || Find<TextBox>("ai-usage-manual-remaining").Text != "75" || !Find<TextBox>("ai-usage-manual-days").Text.Contains($"{today.AddDays(-2):yyyy-MM-dd},3") || cleared != 1)
                 throw new InvalidOperationException("Re-enabling a service lost its stored records or cleared credentials.");
             state = "error";
-            window.ProbeRenderPage();
-            await Task.Delay(80);
+            await Invoke("ai-usage-refresh");
             if (!Find<TextBlock>("ai-usage-status").Text.Contains("模拟官方客户端尚未登录")) throw new InvalidOperationException("AI error state was not visible.");
             var cardAvailable = QuickCardDefinitions.Any(card => card.Id == "aiUsage" && card.Label == "AI 用量");
             window.ShowPage("sources");
@@ -325,6 +422,7 @@ public sealed partial class SettingsWindow
             return new { passed = true, providerCount = 4, apiProviderCount = 8, servicesDefaultOff = true, exactServiceNames = true, independentServiceVisibility = true,
                 allDisabledNoPolling = true, reenabledRecordsRetained = true, apiDefaultOff = true, apiToggleFallback = true, balanceUnitPreserved = true,
                 credentialsWriteOnly = true, credentialFileBounded = true, blankCredentialRetained = true, explicitCredentialClear = true, credentialFailureRetained = true, draftsSurvivePolling = true,
+                draftsSurviveGlobalApply = true, liveInputsRetained = true, activeWriteNavigationGuard = true, activeWriteCloseGuard = true, activeWriteUpdateGate = true, writeGuardsReleased = true,
                 geminiProjectFlow = true, utcDateAnchor = true, initialLoadPreservesDraft = true, manualRequestUnits = true, manualHistoryLoaded = true, manualPercentRoundTrip = true, staleResponseRejected = true,
                 cells = 84, squareCells = true, unchangedCellsPreserved = true, unknownDistinctFromZero = true, errorVisible = true, pollingReleased = true, cardAvailable, screenshots, providerScreenshots };
         }

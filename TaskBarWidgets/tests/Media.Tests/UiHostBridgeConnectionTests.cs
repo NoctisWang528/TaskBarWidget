@@ -193,6 +193,92 @@ public sealed class UiHostBridgeConnectionTests
         await harness.DisposeAsync();
     }
 
+    [Fact]
+    public async Task DisconnectDuringAiVerificationPreservesCredentialsAndLateCloseCannotCancelReconnect()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "tbw-ai-connection-test-" + Guid.NewGuid().ToString("N"));
+        var retiredStarted = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var replacementStarted = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var retiredResponse = new TaskCompletionSource<AiUsageSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var replacementResponse = new TaskCompletionSource<AiUsageSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var retiredFinished = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var verified = new AiUsageSnapshot("ready", null, null, [], null, null, null);
+        try
+        {
+            // Only dummy credentials in a fresh fixture directory; no CLI, real
+            // account, network reader or normal product process is involved.
+            var secrets = Path.Combine(root, "secrets");
+            var store = new AiUsageCredentialStore(secrets);
+            store.Write("deepseek-api", "dummy-previous");
+            using var hub = new AiUsageHub(secrets, Path.Combine(root, "history"), "deepseek-api", true,
+                (_, credential, _, token) =>
+                {
+                    if (credential == "dummy-retired")
+                    {
+                        retiredStarted.TrySetResult(token);
+                        return retiredResponse.Task;
+                    }
+                    replacementStarted.TrySetResult(token);
+                    return replacementResponse.Task;
+                }, AiUsageHub.ServiceIds.ToDictionary(id => id, id => id == "deepseek"));
+            var before = hub.Snapshot;
+            var name = "TaskBarWidgets.Tests.UI.Ai." + Guid.NewGuid().ToString("N");
+            await using var bridge = new UiHostBridge(async (request, generation, token) =>
+            {
+                var retired = request.GetProperty("requestId").GetString() == "retired";
+                try
+                {
+                    var snapshot = await hub.ConfigureAsync(request.GetProperty("payload"), token);
+                    if (retired) retiredFinished.TrySetResult(null);
+                    return CardSnapshotBuilder.DescribeAiUsage(snapshot);
+                }
+                catch (Exception error)
+                {
+                    if (retired) retiredFinished.TrySetResult(error);
+                    throw;
+                }
+            }, startUiProcess: false, pipeName: name);
+            try
+            {
+                using var timeout = new CancellationTokenSource(Timeout);
+                await using var oldClient = await TestClient.ConnectAsync(name, timeout.Token);
+                await oldClient.SendAsync(Request("retired", "configureAiUsage", new { providerId = "deepseek-api", credential = "dummy-retired" }), timeout.Token);
+                var retiredToken = await retiredStarted.Task.WaitAsync(timeout.Token);
+                var retiredGeneration = bridge.ConnectionGeneration;
+                await oldClient.DisposeAsync();
+
+                await using var newClient = await TestClient.ConnectAsync(name, timeout.Token);
+                Assert.True(retiredToken.IsCancellationRequested);
+                Assert.Equal("dummy-previous", store.Read("deepseek-api"));
+                // The dummy reader deliberately ignores cancellation. A late
+                // successful verification must still fail the real hub's commit.
+                retiredResponse.SetResult(verified);
+                Assert.IsAssignableFrom<OperationCanceledException>(await retiredFinished.Task.WaitAsync(timeout.Token));
+                Assert.Equal("dummy-previous", store.Read("deepseek-api"));
+                Assert.Equal(before, hub.Snapshot);
+
+                await newClient.SendAsync(Request("replacement", "configureAiUsage", new { providerId = "deepseek-api", credential = "dummy-replacement" }), timeout.Token);
+                var replacementToken = await replacementStarted.Task.WaitAsync(timeout.Token);
+                Assert.NotEqual(retiredGeneration, bridge.ConnectionGeneration);
+                bridge.EndConnection(retiredGeneration);
+                bridge.EndConnection(retiredGeneration);
+                Assert.False(replacementToken.IsCancellationRequested);
+                replacementResponse.SetResult(verified);
+                var reply = await newClient.ReadUiResultAsync("replacement", timeout.Token);
+                Assert.True(reply.GetProperty("success").GetBoolean());
+                Assert.Equal("dummy-replacement", store.Read("deepseek-api"));
+                Assert.DoesNotContain("dummy-", reply.GetRawText());
+                Assert.Equal(["replacement"], newClient.ObservedResults);
+            }
+            finally
+            {
+                retiredResponse.TrySetResult(verified);
+                replacementResponse.TrySetResult(verified);
+            }
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
     private static async Task<JsonElement> SubscribeAsync(TestClient client, BridgeHarness harness, string requestId,
         bool visible, long session, CancellationToken token)
     {

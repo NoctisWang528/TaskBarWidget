@@ -648,6 +648,12 @@ float4 main(
         return brush;
     }
 
+    void RefractionSurface::DiscardSource()
+    {
+        if (transform) transform->SetInput(0, nullptr);
+        if (border) border->SetInput(0, nullptr);
+    }
+
     void RefractionSurface::Release()
     {
         brush = nullptr; bound = nullptr; surface.Release();

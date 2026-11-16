@@ -12,6 +12,7 @@ namespace
 #include "CardIcons.h"
 
 #include <cryptuiapi.h>
+#include <dxgi1_4.h>
 #include <wincrypt.h>
 
 #pragma comment(lib, "crypt32.lib")
@@ -80,8 +81,6 @@ namespace Cards
 
     void Graphics::Release()
     {
-        if (context) context->SetTarget(nullptr);
-        if (iconContext) iconContext->SetTarget(nullptr);
         ClearPeripheralBrandCache();
         ReleaseMask();
         bitmaps.clear();
@@ -94,17 +93,34 @@ namespace Cards
         factory.Reset();
         write.Reset();
         wic.Reset();
-        // Submit releases after every surface/effect/Composition reference has
-        // been detached. Do not leave bound D3D state retaining its textures.
+        dxgiDevice.Reset();
+        ready = false;
+    }
+
+    void Graphics::TrimResources()
+    {
+        if (d2dDevice) d2dDevice->ClearResources(0);
+        // Also submit destruction of references just dropped by card effects.
         ComPtr<ID3D11Device> renderDevice;
         if (dxgiDevice && SUCCEEDED(dxgiDevice.As(&renderDevice)))
         {
             ComPtr<ID3D11DeviceContext> immediate;
             renderDevice->GetImmediateContext(immediate.GetAddressOf());
-            if (immediate) { immediate->ClearState(); immediate->Flush(); }
+            immediate->ClearState(); immediate->Flush();
         }
-        dxgiDevice.Reset();
-        ready = false;
+        ComPtr<IDXGIDevice3> device;
+        if (dxgiDevice && SUCCEEDED(dxgiDevice.As(&device))) device->Trim();
+    }
+
+    uint64_t Graphics::LocalVideoMemoryUsage() const
+    {
+        ComPtr<IDXGIAdapter> adapter;
+        ComPtr<IDXGIAdapter3> memoryAdapter;
+        DXGI_QUERY_VIDEO_MEMORY_INFO info{};
+        if (!dxgiDevice || FAILED(dxgiDevice->GetAdapter(adapter.GetAddressOf())) ||
+            FAILED(adapter.As(&memoryAdapter)) ||
+            FAILED(memoryAdapter->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &info))) return 0;
+        return info.CurrentUsage;
     }
 
     void Graphics::OnDeviceLost()
@@ -571,8 +587,6 @@ namespace Cards
 
     void Graphics::ReleaseMask()
     {
-        if (maskContext) maskContext->SetTarget(nullptr);
-        if (maskBlur) maskBlur->SetInput(0, nullptr);
         mask.Reset();
         maskContext.Reset();
         maskBlur.Reset();

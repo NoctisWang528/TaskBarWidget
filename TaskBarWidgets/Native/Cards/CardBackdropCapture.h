@@ -5,6 +5,7 @@
 #include <dxgi1_2.h>
 #include <wrl/client.h>
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -54,20 +55,26 @@ namespace Cards
         bool Start(IDXGIDevice* renderDevice, ID2D1DeviceContext* renderContext, HMONITOR monitor,
             const std::vector<HWND>& excludedWindows, bool allowSlowDevice = true);
         bool SessionExclusion() const;
-        // A changed list restarts only the WGC producer, before any affinity is
-        // restored. No queued frame from the previous list can reach the renderer.
+        // Update a live session first; restart the producer only on failure.
+        // During settling no new bitmap content is published to the renderer.
+        bool Settling() const;
         bool SetExcludedWindows(const std::vector<HWND>& windows);
+        // WGC uses about 90% of this interval; updates a live session without
+        // restarting it. Retained across Stop/Start; older systems may ignore it.
+        void SetTargetFrameInterval(std::chrono::nanoseconds interval);
         // True only when bitmap content changed. Acquisition and staging Map never
         // wait for a frame/GPU; cross-adapter delivery is pipelined across polls.
         // S_FALSE means healthy but unchanged (including timeout/busy staging).
         // A failed HRESULT stops capture and clears Frame(); caller must restart.
         bool Poll();
-        // Clears all owned images/sessions, retaining LastResult for diagnostics
-        // and the content-free cross-adapter device (released on failure/destruction).
+        // Stops the producer and clears Frame(); retains WGC allocations for reuse.
+        // Desktop Duplication still drops images and retains only its cached device.
         void Stop();
-        // Full idle/device-loss teardown, including the content-free cached
-        // cross-adapter device that ordinary hide/reopen keeps briefly warm.
-        void Release();
+        // Closes the pool and drops all capture allocations, then clears/flushes D3D.
+        void ReleaseResources();
+        bool ResourcesRetained() const;
+        // Lets the host trim shared graphics caches after an internal rebuild/failure.
+        bool TakeResourcesReleased();
         bool Running() const;
         HMONITOR Monitor() const;
         // Borrowed, mutable content, not a snapshot. Do not retain bitmap copies
@@ -77,7 +84,8 @@ namespace Cards
         HRESULT LastResult() const;
         const wchar_t* Diagnostic() const;
         bool CrossAdapter() const;
-        bool HasResources() const;
+        // Successfully published capture frames, retained across Stop/Start.
+        uint64_t CapturedFrames() const;
 
     private:
         struct Impl;

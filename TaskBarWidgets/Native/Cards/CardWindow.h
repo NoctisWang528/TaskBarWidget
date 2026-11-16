@@ -76,15 +76,11 @@ namespace Cards
         // Creates the HWND, the compositor and the empty visual tree.
         bool Create(const CardEnvironment& environment, HINSTANCE instance);
         void Destroy();
-        // Keep the HWND, accessibility and CPU snapshot while dropping all GPU
-        // resources; only an explicit group show restores the visual tree.
-        void ReleaseGraphics();
-        bool RestoreGraphics(const CardEnvironment& environment, HINSTANCE instance);
 
         // Theme, tuning and font changes. Never recreates the window.
         void ApplyEnvironment(const CardEnvironment& environment);
         bool HasLiquidGlass() const;
-        bool EnableLiveBackdrop(bool enabled, bool sessionScoped = false);
+        bool EnableLiveBackdrop(bool enabled, bool sessionScoped = false, bool preserveGlass = false);
         // Temporarily includes this HWND in the capture (under an open menu)
         // and freezes its glass; EnableLiveBackdrop(true) re-excludes it.
         bool SuspendCaptureExclusion();
@@ -146,7 +142,6 @@ namespace Cards
         const CardEnvironment& Environment() const { return environment; }
         HWND Handle() const { return window; }
         bool HasRenderedContent() const;
-        bool HasGraphicsResources() const;
         winrt::Windows::UI::Composition::CompositionBrush ContentBrush() const;
         bool HasActiveBackdropConfiguration() const;
         void RefreshBackdropConfiguration();

@@ -8,6 +8,12 @@
 namespace Cards
 {
     struct BackdropFrame;
+    // Owned by the card thread; counts actual effect renders, including paints.
+    struct GlassRenderStatistics
+    {
+        uint64_t cardUs{}, cardCount{}, controlUs{}, controlCount{}, lastControlRefresh{};
+    };
+    GlassRenderStatistics& GlassRenderStats();
     // A slight white lift in both themes; clear glass must not become a black panel.
     inline Color GlassTint(bool dark) { return {1.f, 1.f, 1.f, dark ? .025f : .06f}; }
     // Private captured-pixel refraction, with supported backdrop blur as fallback.
@@ -24,6 +30,7 @@ namespace Cards
             const winrt::Windows::UI::Composition::CompositionGraphicsDevice& device,
             const BackdropFrame& frame, RECT bounds);
         void ClearBackdrop();
+        void FreezeBackdrop() { refraction.DiscardSource(); frameSerial = 0; }
         ID2D1Bitmap1* Scene() const { return refraction.Scene(); }
         uint64_t SceneRevision() const { return sceneRevision; }
         bool LiveActive() const { return liveActive; }
@@ -66,7 +73,7 @@ namespace Cards
     // Labels stay crisp above the app-owned, refracted control surfaces.
     struct GlassControl
     {
-        enum class Kind { Button, Thumb, Segment, Toggle };
+        enum class Kind { Button, Thumb, Segment, Toggle, Cell };
         int id{};
         Kind kind{ Kind::Button };
         D2D1_RECT_F bounds{};

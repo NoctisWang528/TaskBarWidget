@@ -10,6 +10,7 @@ namespace TaskBarWidgets.UI;
 public sealed partial class SettingsWindow
 {
     private CancellationTokenSource? _aiUsageCancellation;
+    private bool _aiUsageMutating;
     private static async Task<string> ReadAiCredentialFileAsync(string path, CancellationToken token)
     {
         const int maximum = 128 * 1024;
@@ -127,7 +128,6 @@ public sealed partial class SettingsWindow
         var updating = false;
         var anyServiceEnabled = false;
         var enabledServices = serviceDefinitions.ToDictionary(service => service.Id, _ => false);
-        var mutation = false;
         var manualLoaded = false;
         var connectionLoaded = false;
         var bindingForms = false;
@@ -175,8 +175,9 @@ public sealed partial class SettingsWindow
         }
         async Task<bool> Mutate(string action, JsonObject payload)
         {
-            if (!Current() || mutation) return false;
-            mutation = true; providers.IsEnabled = showApi.IsEnabled = false;
+            if (!Current() || _aiUsageMutating) return false;
+            _aiUsageMutating = true; UpdateSaveStatus();
+            providers.IsEnabled = showApi.IsEnabled = false;
             foreach (var toggle in serviceToggles.Values) toggle.IsEnabled = false;
             if (action == "configureAiUsage") status.Text = payload["clearCredential"]?.GetValue<bool>() == true
                 ? "正在清除凭证…" : "正在验证连接…凭证仅在验证成功后保存。";
@@ -197,7 +198,8 @@ public sealed partial class SettingsWindow
             catch (Exception error) when (error is not OutOfMemoryException) { if (Current()) status.Text = "操作未完成，请检查输入与连接后重试。"; return false; }
             finally
             {
-                mutation = false;
+                _aiUsageMutating = false;
+                if (!_closed) UpdateSaveStatus();
                 if (Current())
                 {
                     providers.IsEnabled = showApi.IsEnabled = true;
@@ -232,17 +234,17 @@ public sealed partial class SettingsWindow
         credentialPanel.Children.Add(pick);
         foreach (var (serviceId, toggle) in serviceToggles)
             toggle.Toggled += async (_, _) => {
-                if (updating || mutation) return;
+                if (updating || _aiUsageMutating) return;
                 ClearService(); selected = null;
                 await Mutate("setAiUsagePreferences", new JsonObject { ["enabledServices"] = new JsonObject { [serviceId] = toggle.IsOn } });
             };
         providers.SelectionChanged += async (_, _) => {
-            if (updating || mutation || providers.SelectedItem is not ComboBoxItem item || item.Tag is not string id || id == selected) return;
+            if (updating || _aiUsageMutating || providers.SelectedItem is not ComboBoxItem item || item.Tag is not string id || id == selected) return;
             ClearService(); selected = id;
             await Mutate("setAiUsagePreferences", new JsonObject { ["providerId"] = id });
         };
         showApi.Toggled += async (_, _) => {
-            if (updating || mutation) return;
+            if (updating || _aiUsageMutating) return;
             var enabled = showApi.IsOn;
             var current = catalog.FirstOrDefault(item => item.Id == selected);
             ClearService();
@@ -293,7 +295,7 @@ public sealed partial class SettingsWindow
         manual.Children.Add(saveManual);
         async Task Read(bool force, bool afterMutation = false, JsonObject? supplied = null)
         {
-            if (busy || !Current() || (mutation && !afterMutation)) return;
+            if (busy || !Current() || (_aiUsageMutating && !afterMutation)) return;
             busy = true;
             var version = generation;
             readCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -302,7 +304,7 @@ public sealed partial class SettingsWindow
             try
             {
                 var snapshot = supplied ?? await Send("getAiUsage", new JsonObject { ["providerId"] = selected, ["force"] = force }, requestCancellation.Token);
-                if (!Current() || version != generation || (mutation && !afterMutation)) return;
+                if (!Current() || version != generation || (_aiUsageMutating && !afterMutation)) return;
                 // The provider may publish identical cached snapshots during polling.
                 // Keep realized controls (and their keyboard focus) until data changes.
                 var activityUtc = snapshot["activityUtc"]?.GetValue<bool>() == true;

@@ -100,6 +100,8 @@ namespace Cards::Paint
         if (!context || !environment.graphics) return;
         auto& graphics = *environment.graphics;
         const auto palette = Draw::Colors(environment);
+        const bool glassCells = interaction.glass && interaction.compositedGlass &&
+            interaction.glassControls && !environment.highContrast;
         auto state = snapshot.aiUsage;
         // Preferences can hide a cached selection before the next reply arrives.
         // Never render activity or monetary data for a source that is switched off.
@@ -314,25 +316,34 @@ namespace Cards::Paint
         for (size_t index = 0; index < cells.size(); ++index)
         {
             const auto& cell = cells[index];
-            if (cell.known)
+            const int id = 800 + static_cast<int>(index);
+            const Color fill = cell.known
+                ? environment.highContrast ? HighContrastLevel(cell.level) : RampColor(cell.level, environment.dark)
+                : cell.future ? Color{ 0, 0, 0, 0 } : WithAlpha(palette.secondary, 0.08f);
+            if (glassCells)
             {
-                const Color fill = environment.highContrast ? HighContrastLevel(cell.level) : RampColor(cell.level, environment.dark);
-                if (fill.a > 0)
+                // Future dates stay blank. Unknown days have a faint tint;
+                // recorded zero has a clear lens and a border, never a usage tint.
+                if (!cell.future)
                 {
-                    Draw::FillRound(context, cell.rect, 4, fill);
-                    if (interaction.glass)
-                    {
-                        Draw::GlassSheen(context, cell.rect, 4, environment.dark ? 0.20f : 0.30f);
-                        Draw::StrokeRound(context, cell.rect, 4,
-                            Color{ 1, 1, 1, environment.dark ? 0.13f : 0.22f }, 1);
-                    }
+                    GlassControl control;
+                    control.id = id; control.kind = GlassControl::Kind::Cell;
+                    control.bounds = cell.rect; control.radius = 4.0f;
+                    // These are read-only surfaces; input semantics remain AddText.
+                    control.focused = cell.isToday || (cell.known && cell.level == 0);
+                    control.ink = cell.isToday ? palette.accent : palette.border;
+                    control.fillColor = cell.known
+                        ? WithAlpha(fill, fill.a * (environment.dark ? .45f : .55f)) : fill;
+                    interaction.glassControls->push_back(control);
                 }
-                if (cell.level == 0) Draw::StrokeRound(context, cell.rect, 4, palette.border, 1);
             }
-            // No record is not zero usage: a faint tile keeps it distinct from both zero and future.
-            else if (!cell.future) Draw::FillRound(context, cell.rect, 4, WithAlpha(palette.secondary, 0.08f));
-            if (cell.isToday) Draw::StrokeRound(context, cell.rect, 4, palette.accent, 1);
-            Draw::AddText(regions, 800 + static_cast<int>(index), cell.rect, cell.key + (cell.future ? L"，未来"
+            else
+            {
+                if (fill.a > 0) Draw::FillRound(context, cell.rect, 4, fill);
+                if (cell.known && cell.level == 0) Draw::StrokeRound(context, cell.rect, 4, palette.border, 1);
+                if (cell.isToday) Draw::StrokeRound(context, cell.rect, 4, palette.accent, 1);
+            }
+            Draw::AddText(regions, id, cell.rect, cell.key + (cell.future ? L"，未来"
                 : cell.known ? L"，" + std::to_wstring(cell.tokens) + L" " + unit : L"，无记录"));
         }
 

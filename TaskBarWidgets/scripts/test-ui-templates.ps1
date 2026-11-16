@@ -89,15 +89,9 @@ foreach ($pointer in @($result.layoutChecks | Where-Object kind -eq 'modulePoint
     if (-not $pointer.available) { Write-Host "Actual pointer verification unavailable: $($pointer.reason). Desktop acceptance remains pending." }
 }
 $ai = $result.aiUsageSettings
-$apple = $result.appleMusicSettings
-foreach ($check in @('visibleWhenStopped','enabledToggle','orderPreserved','displayName','canonicalSourceId','lyricsOffsetEditable','lyricProvidersEditable','lyricProviderOrderPreserved','isOn')) {
-    if ($apple.$check -ne $true) { throw "Apple Music settings check failed: $check" }
-}
-if ($apple.sourceId -ne 'AppleMusic' -or $apple.providerCount -ne 4 -or $apple.width -le 0 -or $apple.height -le 0 -or
-    -not (Test-Path -LiteralPath $apple.png)) { throw 'Apple Music built-in settings row was not realized.' }
 foreach ($check in @('passed','unknownDistinctFromZero','errorVisible','pollingReleased','cardAvailable','squareCells','unchangedCellsPreserved',
     'servicesDefaultOff','exactServiceNames','independentServiceVisibility','allDisabledNoPolling','reenabledRecordsRetained',
-    'apiDefaultOff','apiToggleFallback','balanceUnitPreserved','credentialsWriteOnly','credentialFileBounded','blankCredentialRetained','explicitCredentialClear','credentialFailureRetained','draftsSurvivePolling','geminiProjectFlow','utcDateAnchor','initialLoadPreservesDraft','manualRequestUnits','manualHistoryLoaded','manualPercentRoundTrip','staleResponseRejected')) {
+    'apiDefaultOff','apiToggleFallback','balanceUnitPreserved','credentialsWriteOnly','credentialFileBounded','blankCredentialRetained','explicitCredentialClear','credentialFailureRetained','draftsSurvivePolling','draftsSurviveGlobalApply','liveInputsRetained','activeWriteNavigationGuard','activeWriteCloseGuard','activeWriteUpdateGate','writeGuardsReleased','geminiProjectFlow','utcDateAnchor','initialLoadPreservesDraft','manualRequestUnits','manualHistoryLoaded','manualPercentRoundTrip','staleResponseRejected')) {
     if ($ai.$check -ne $true) { throw "AI usage settings check failed: $check" }
 }
 if ($ai.providerCount -ne 4 -or $ai.apiProviderCount -ne 8 -or $ai.cells -ne 84 -or @($ai.screenshots).Count -ne 4) {

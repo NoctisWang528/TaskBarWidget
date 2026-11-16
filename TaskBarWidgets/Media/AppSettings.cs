@@ -708,7 +708,6 @@ public sealed class AppSettings
             "netease" or "neteasemusic" => "Netease",
             "kugou" => "Kugou",
             "spotify" => "Spotify",
-            "applemusic" or "apple music" => "AppleMusic",
             "browser" => "Browser",
             _ => null
         };

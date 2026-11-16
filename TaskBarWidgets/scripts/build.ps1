@@ -55,10 +55,9 @@ try {
         if (-not (Test-Path -LiteralPath $vswhere)) { throw 'Visual Studio 2022 Build Tools is required. See .vsconfig.' }
         $installation = & $vswhere -latest -products '*' -version '[17.0,18.0)' -requires Microsoft.VisualStudio.Component.VC.ATLMFC -property installationPath
         if (-not $installation) { throw 'Missing VS 2022 MFC. Run scripts/install-build-components.ps1.' }
-        # The merged native front end needs the x64-hosted optimizer for LTCG.
-        $msbuild = Join-Path $installation 'MSBuild\Current\Bin\amd64\MSBuild.exe'
+        $msbuild = Join-Path $installation 'MSBuild\Current\Bin\MSBuild.exe'
         Invoke-BuildCommand 'restore-native' 'dotnet' @('restore', 'scripts/NativePackages.csproj', '--verbosity', 'minimal')
-        Invoke-BuildCommand 'build-native' $msbuild @('Native/TaskBarWidgets.sln', '/m:1', "/p:Configuration=$Configuration", '/p:Platform=x64', '/p:PreferredToolArchitecture=x64', "/p:TaskBarWidgetsBuildVersion=$buildVersion", '/v:minimal', '/nologo')
+        Invoke-BuildCommand 'build-native' $msbuild @('Native/TaskBarWidgets.sln', '/m:1', "/p:Configuration=$Configuration", '/p:Platform=x64', "/p:TaskBarWidgetsBuildVersion=$buildVersion", '/v:minimal', '/nologo')
         $nativeOutput = Join-Path $productRoot "Native\Bin\x64\$Configuration"
         $updater = & (Join-Path $PSScriptRoot 'build-updater.ps1') -OutputDirectory $nativeOutput
         Copy-Item -LiteralPath $updater -Destination $appDirectory -Force
