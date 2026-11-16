@@ -84,7 +84,7 @@ GitHub 的干净 ZIP 不带任何个人配置或历史。全新安装首次运�
 
 登录自启统一使用当前用户的交互式最高权限计划任务。首次使用新目录，在“设置 → 常规”查看登记状态，按需“修复并启用登录启动”；程序不会在打包或仅打开设置时自动修改启动项。
 
-产品及新增整合代码沿用 [Anti 996 许可](licenses/TrafficMonitor-LICENSE)。第三方代码保留各自的 MIT、MPL、OFL 等许可；来源和完整声明见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) 及 `licenses/`。
+产品及新增整合代码沿用 [Anti 996 许可](licenses/Anti-996.txt)。第三方代码保留各自的 MIT、Apache-2.0、MPL、BSD、CC BY 等许可；来源和完整声明见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。`licenses/` 按许可族合并存放完整文本。
 
 
 ## WinUI 界面与布局

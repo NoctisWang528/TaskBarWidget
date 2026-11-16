@@ -1,0 +1,69 @@
+# MIT-licensed components
+
+This consolidated notice covers the MIT-licensed components listed below. Each component's copyright notice is reproduced in the list, and the MIT permission text follows it. The same permission text applies to every component in this file.
+
+- TaskbarLyrics (lyrics core, media session services, settings): Copyright (c) 2026 anync. https://github.com/ANYNC/TaskbarLyrics
+- AF-Media-Bar (audio endpoint policy switching): Copyright (c) 2026 AmorFate. https://github.com/Fervent-Tempo/AF-Media-Bar
+- Battery, PowerMon and WeatherPro built-in monitoring sources: Copyright (c) 2021 zhongyang219. https://github.com/zhongyang219/TrafficMonitorPlugins, https://github.com/AzulEterno/PowerMonPlugin-For-TrafficMonitor, https://github.com/Haojia521/TrafficMonitorPlugins
+- SimpleIni (compiled into WeatherPro): Copyright (c) 2006-2012, Brodie Thiesfield
+- yyjson 0.4.0 (compiled into the weather provider): Copyright (c) 2020 YaoYuan <ibireme@gmail.com>. https://github.com/ibireme/yyjson
+- token-monitor (heatmap visual and relative-intensity reference): Copyright (c) 2026 Javis. https://github.com/Javis603/token-monitor
+- Meteocons (non-packaged design reference only): Copyright (c) 2020-present Bas Milius. https://github.com/basmilius/meteocons
+- QWeather Icons project code (the distributed icon artwork is CC BY 4.0; see QWeather-CC-BY-4.0.txt): Copyright (c) 2021 QWeather 和风天气. https://github.com/qwd/Icons
+- F23.StringSimilarity 7.0.1: Copyright (c) 2015 feature[23]. https://github.com/feature23/StringSimilarity.NET
+- NAudio.Core 2.2.1 and NAudio.Wasapi 2.2.1: Copyright 2020 Mark Heath; Copyright (c) Mark Heath 2023. https://github.com/naudio/NAudio
+- Newtonsoft.Json 13.0.3: Copyright (c) 2007 James Newton-King. https://github.com/JamesNK/Newtonsoft.Json
+- OpenCC 0.1.0: Copyright (c) 2026 Will 保哥. https://github.com/doggy8088/OpenCC
+- SharpZipLib 1.4.2: Copyright © 2000-2022 SharpZipLib Contributors. https://github.com/icsharpcode/SharpZipLib
+- VigilWatt (peripheral HID protocols): Copyright (c) 2026 evren. https://github.com/evren-oct/vigil-watt, pinned revision `4df830043296760f5d5c273f4cdc0ea9456c4bc7`
+
+The Microsoft .NET MIT components are listed separately in Microsoft-DotNet.txt.
+
+## MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+## yyjson source header notice
+
+/*==============================================================================
+ * Created by Yaoyuan on 2019/3/9.
+ * Copyright (C) 2019 Yaoyuan <ibireme@gmail.com>.
+ *
+ * Released under the MIT License:
+ * https://github.com/ibireme/yyjson/blob/master/LICENSE
+ *============================================================================*/
+
+
+## VigilWatt protocol attribution
+
+Source: https://github.com/evren-oct/vigil-watt
+Pinned revision: `4df830043296760f5d5c273f4cdc0ea9456c4bc7`
+Copyright (c) 2026 evren. Original MIT license: see MIT.txt in this directory.
+Original contributor acknowledgments: Dependencies/VigilWatt/upstream/CONTRIBUTORS.md in the product source tree.
+
+TaskBarWidgets selectively compiles reviewed HID protocol code in a separate .NET 8 process. The original snapshot and SHA-256 provenance, adaptation sources/patches, and developer update script are preserved in the product source tree under Dependencies/VigilWatt, PeripheralHost and scripts/sync-vigil-watt.ps1.
+
+Local adaptations: host-owned lifecycle and demand, memory-only configuration, endpoint-preserving identities, stricter response checks and transaction correlation, Basilisk V4 Pro descriptors, target model names, and diagnostic metadata. The upstream application UI, history database, startup registration and updater are not included. Native fallback protocols retain their separate notices.
+
+Basilisk V4 protocol facts were cross-checked with publicly reported descriptors and test results, not copied from the GPL OpenRazer implementation:
+https://github.com/openrazer/openrazer/issues/2958
+https://github.com/openrazer/openrazer/pull/2975
+
+Protocol implementation and automated replay tests do not establish physical hardware validation. New Viper V4 Pro and Basilisk V4 Pro integrations await TaskBarWidgets hardware acceptance.

@@ -70,7 +70,7 @@ The standing user instruction is not to auto-start the normal product. Do not ru
 
 Keep builds, dependencies, caches, crash dumps, logs and personal runtime data ignored; source assets, language INIs, pinned binary dependencies and license notices are intentional inputs. Public instructions must not contain a contributor's personal absolute paths. Publish a clean package without user configuration, weather credentials, history, local backups or probe logs/images.
 
-The product and new integration code inherit the root Anti 996 license. Preserve original authorship and the separate MIT/MPL/OFL and other third-party terms in THIRD-PARTY-NOTICES.md and licenses/. Include these notices in release packages; do not describe the whole product as GPL or relicense third-party code.
+The product and new integration code inherit the root Anti 996 license. Preserve original authorship and the separate MIT, Apache-2.0, MPL, BSD, CC BY and other third-party terms in THIRD-PARTY-NOTICES.md and licenses/. License texts are consolidated by license family; keep each component's copyright and notice lines when adding or removing a dependency. Include these notices in release packages; do not describe the whole product as GPL or relicense third-party code.
 
 Routine retirement covers the immediate previous build; the 2026-10-18 cleanup additionally authorizes historical local artifacts. Verify absolute paths and personal-data backups first; refuse live processes, locked drivers, links, unsafe paths or data conflicts. Never unload a driver or kill user applications to force cleanup. NVIDIA/other overlays are external; do not change global gaming settings or undocumented driver profiles.
 

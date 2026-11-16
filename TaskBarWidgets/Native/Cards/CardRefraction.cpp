@@ -1,6 +1,6 @@
 // Distance/normal, circular lens profile and 7-tap spectral chromatic dispersion
 // adapted from AndroidLiquidGlass, Copyright 2025 Kyant (Apache-2.0).
-// See licenses/AndroidLiquidGlass-NOTICE.md.
+// See licenses/Apache-2.0.txt.
 #include "CardPch.h"
 #include "CardRefraction.h"
 #include "CardMaterial.h"

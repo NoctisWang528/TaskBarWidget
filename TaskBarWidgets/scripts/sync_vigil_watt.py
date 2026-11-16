@@ -177,7 +177,7 @@ def required_follow_up(previous, candidate):
     for item in (
         "Review actual admitted PluginRegistry and every adaptation diff; regenerate Dependencies/VigilWatt/admitted-plugins.json and COMPATIBILITY.md.",
         "Update source revision in Media/Peripherals/PeripheralDiagnostics.cs, docs/外设电量.md, and Dependencies/VigilWatt/README.md.",
-        "Update licenses/VigilWatt/NOTICE.md and copy upstream/LICENSE and upstream/CONTRIBUTORS.md byte-for-byte into licenses/VigilWatt/.",
+        "Update the VigilWatt entry and notice in licenses/MIT.txt and keep upstream/LICENSE and upstream/CONTRIBUTORS.md byte-for-byte in Dependencies/VigilWatt/upstream/.",
         "Rebuild host and run --self-test, lifecycle_test.py, synchronization checks, and integrated package acceptance.",
     ):
         print("  - " + item)

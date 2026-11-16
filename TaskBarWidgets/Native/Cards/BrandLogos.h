@@ -1,7 +1,7 @@
 #pragma once
 // ROG/Razer/Xiaomi: unmodified Simple Icons 15.0.0 (CC0-1.0).
 // Logitech G HUB: source-backed monochrome redraw of its Windows icon.
-// See licenses/Simple-Icons-NOTICE.md and licenses/Logitech-GHUB-NOTICE.md.
+// See licenses/Brand-Artwork.txt.
 // Embedded at compile time; no runtime file or network dependency.
 
 namespace Cards::BrandLogos

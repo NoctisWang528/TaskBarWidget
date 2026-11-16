@@ -1,4 +1,64 @@
-# CC0 1.0 Universal
+# Brand artwork and attribution
+
+This file covers the peripheral brand marks and the Logitech G HUB mark. The Simple Icons artwork is CC0 1.0 Universal; the Logitech mark is proprietary and is reproduced for identification only.
+
+## Peripheral brand artwork
+
+The ROG, Razer, Xiaomi and Apple SVG strings embedded in `Native/Cards/BrandLogos.h` are byte-for-byte copies of the following Simple Icons 15.0.0 files (including their final newline). They are rendered with a theme foreground fill and uniform scaling; the paths are not redrawn or simplified.
+
+Simple Icons: https://github.com/simple-icons/simple-icons/tree/15.0.0
+License: CC0 1.0 Universal; see the CC0 text in this file.
+
+Brand source URLs below are recorded by the pinned upstream `data/simple-icons.json`:
+
+### Republic of Gamers
+
+- SVG: https://raw.githubusercontent.com/simple-icons/simple-icons/15.0.0/icons/republicofgamers.svg
+- Brand source: https://rog.asus.com
+- SHA-256: `f798f92d517fe34e8a458614cb6d946954861e925507581167b182a7289572f2`
+
+### Razer
+
+- SVG: https://raw.githubusercontent.com/simple-icons/simple-icons/15.0.0/icons/razer.svg
+- Brand source: https://press.razer.com
+- SHA-256: `e68b802b643535039c2cc4d50e0c4e9ee7811561b93c634876e9478e0886948b`
+
+### Xiaomi
+
+- SVG: https://raw.githubusercontent.com/simple-icons/simple-icons/15.0.0/icons/xiaomi.svg
+- Brand source: https://www.mi.com/global
+- SHA-256: `8866d12a70d85ab43acd3b9c80f1b37792d91160d8273efffdf817af5fd608cb`
+
+### Apple
+
+- SVG: https://raw.githubusercontent.com/simple-icons/simple-icons/15.0.0/icons/apple.svg
+- Brand source: https://www.apple.com
+- SHA-256: `2a1509dccd25e6d2bc7a11a8e52941077e1a48555e192ce638699b9f083c2a7c`
+
+### Trademark notice
+
+Simple Icons makes its contributed icon artwork available under CC0. CC0 does not grant trademark rights. ROG / Republic of Gamers, Razer, Xiaomi and Apple names and marks remain the property of their respective owners. These marks identify the peripheral brand only; no affiliation, sponsorship or endorsement is implied. Unknown brands receive no mark.
+
+The Logitech G HUB mark has a separate source and rights notice: the Logitech notice in this file. It is not a Simple Icons / CC0 asset.
+
+
+## Logitech G HUB brand artwork
+
+The Logitech mark in `Native/Cards/BrandLogos.h` is a monochrome vector redraw of the white G mark in the locally installed Logitech G HUB system tray executable's Windows icon resource. It replaces the former Simple Icons Logitech / Logi wordmark.
+
+- Source executable: `%ProgramFiles%/LGHUB/system_tray/lghub_system_tray.exe`
+- File version: `2026.7.1011216`
+- Executable SHA-256: `d5a150db14204b30c0217e7f6457cbd6849f30d99d54e7429656a24cfa77dab1`
+- Resource group: `IDI_ICON1`; `RT_ICON` ID `1`, 256 x 256, 32-bit DIB.
+- Raw RT_ICON SHA-256: `743180184d0ebcc498f112c36845909496a1048793ba392294ef4660acfa9a08`
+- Extraction date: 2026-11-10. The executable was opened as a data/image-resource file only; it was not executed or modified.
+
+The redraw preserves the source mark's semicircular band and right-angle arm proportions using clean SVG arcs and straight edges. It omits the dark application-icon disc, raster antialiasing and padding, centers the mark in a 24 x 24 viewBox, and uses the existing theme foreground color and 16-DIP brand slot. The source executable, icon resources and PNG inspection copies are not shipped or required at build/runtime.
+
+The G HUB / Logitech G logo is proprietary Logitech brand artwork; no CC0 or other open-content license is asserted for this redraw. All copyright and trademark rights in the mark remain with Logitech and its respective rights holders. Use here identifies Logitech peripherals; it does not imply affiliation, sponsorship or endorsement. The Simple Icons CC0 notice applies only to the remaining ROG, Razer and Xiaomi assets.
+
+
+## CC0 1.0 Universal
 
 ## Statement of Purpose
 

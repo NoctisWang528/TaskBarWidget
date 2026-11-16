@@ -3,7 +3,7 @@
 // Windows adaptation: private Direct2D refraction, theme scrim and cached rim,
 // with one supported backdrop blur as fallback.
 // Never transform a backdrop or feed it through a zero-radius sampling workaround.
-// See licenses/AndroidLiquidGlass-NOTICE.md and AndroidLiquidGlass-LICENSE.
+// See licenses/Apache-2.0.txt.
 #include "CardPch.h"
 #include "CardMaterial.h"
 #include "CardBackdropCapture.h"

@@ -1,3 +1,11 @@
+# LibreHardwareMonitor
+
+`LibreHardwareMonitorLib.dll` reports version `0.9.4+b8077435b898d57539956388cddf49f7dacb86f7` and is used unmodified. Corresponding source is available at the pinned upstream commit: https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/tree/b8077435b898d57539956388cddf49f7dacb86f7
+
+The library contains WinRing0 and InpOut; their notices are reproduced in BSD.txt. The wrapper sources in this product are adapted from the copied OpenHardwareMonitorApi wrapper and remain under the same terms.
+
+## Mozilla Public License 2.0
+
 Mozilla Public License Version 2.0
 ==================================
 

@@ -23,6 +23,5 @@
     <Compile Include="../tests/PeripheralHost.Tests/SelfTest.cs" Link="SelfTest.cs" />
     <EmbeddedResource Include="$(VigilRoot)/upstream/src/VigilWatt.Core/Plugins/Logitech/logitech-hidpp.json"
                       LogicalName="VigilWatt.Core.Plugins.Logitech.logitech-hidpp.json" />
-    <None Include="$(VigilRoot)/upstream/LICENSE" Link="licenses/VigilWatt-MIT.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

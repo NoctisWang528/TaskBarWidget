@@ -10,4 +10,4 @@ The native executable compiles these three providers directly. `ITMPlugin` is an
 
 Only display resources are embedded. Plugin options windows and update/download controls are omitted; allowlisted options are edited through unified Hardware settings. Active configuration lives in `Data/config/battery.ini`, `power.ini` and `weather.ini`; legacy `plugins/Battery.dll.ini`, `PowerMonPlugin.dll.ini` and `WeatherPro.ini` names remain migration inputs only. Weather credentials never enter IPC and are stored as current-user DPAPI ciphertext outside the INI.
 
-Battery and PowerMon retain their MIT upstream notices; WeatherPro retains the upstream license copied with its snapshot. `Weather/SimpleIni.h` carries its MIT notice; `utilities/yyjson/yyjson.[ch]` carries its MIT notice. See the packaged `licenses/` directory and `THIRD-PARTY-NOTICES.md`.
+Battery, PowerMon and WeatherPro retain their upstream MIT copyright notices; `Weather/SimpleIni.h` and `utilities/yyjson/yyjson.[ch]` carry their MIT notices. See `licenses/MIT.txt` and `THIRD-PARTY-NOTICES.md` in the packaged product.

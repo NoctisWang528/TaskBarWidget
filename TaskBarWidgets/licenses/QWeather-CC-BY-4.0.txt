@@ -1,3 +1,11 @@
+# QWeather Icons 1.8.0 — CC BY 4.0
+
+The taskbar weather symbols under `Native/Builtins/Weather/res/weather_icons_*` are QWeather artwork from https://github.com/qwd/Icons, version 1.8.0. QWeather and 和风天气 are credited for the icon artwork under the Creative Commons Attribution 4.0 International license. The project code itself is MIT; see MIT.txt.
+
+Attribution: Weather icons by QWeather (和风天气), https://www.qweather.com, licensed under CC BY 4.0. The symbols are distributed as the upstream blue, white, fill and hollow raster variants and are embedded as native resources without artwork changes. The quick-card symbols in `UI/Cards/WeatherIconArt.cs` are original two-tone vector geometry and carry no QWeather artwork.
+
+## Attribution 4.0 International
+
 Attribution 4.0 International
 
 =======================================================================
@@ -393,4 +401,3 @@ the avoidance of doubt, this paragraph does not form part of the
 public licenses.
 
 Creative Commons may be contacted at creativecommons.org.
-
