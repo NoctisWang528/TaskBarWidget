@@ -40,6 +40,9 @@ public sealed record PeripheralDeviceSnapshot
     [JsonPropertyName("canRead")] public bool CanRead { get; init; }
     [JsonPropertyName("source")] public string Source { get; init; } = "";
     [JsonPropertyName("compatibility")] public string Compatibility { get; init; } = "identityOnly";
+    [JsonPropertyName("modelIdentity"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ModelIdentity { get; init; }
+    [JsonIgnore] internal bool ModelIdentityConfirmed { get; init; }
     // Proven protocol/USB identities used only to retain existing local selections.
     [JsonIgnore] internal string[] LegacyIds { get; init; } = [];
     [JsonIgnore] internal PeripheralIdentityEvidence? Identity { get; init; }
@@ -116,6 +119,13 @@ internal interface IPeripheralBatteryProvider : IAsyncDisposable
 internal interface IPeripheralBatteryIdle
 {
     Task SuspendAsync();
+}
+
+internal interface IPeripheralBatteryRetirements
+{
+    // Exact identities disproven by the most recent successful discovery.
+    // Retires cached presentation only; user selections remain untouched.
+    IReadOnlySet<string> RetiredDeviceIds { get; }
 }
 
 internal interface IPeripheralBatteryNotifications

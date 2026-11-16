@@ -47,6 +47,21 @@ public sealed class PeripheralIdentityResolverTests
     }
 
     [Fact]
+    public void DockPairSerialSeparatesReceiverAndReplacementWhileSurvivingAnotherDock()
+    {
+        var receiver = new PeripheralIdentityEvidence { EndpointPath = @"hid\dock-one", ContainerId = "dock-one", ContainerIsDevice = false };
+        var paired = receiver with { UnitId = "pid=00e3;serial=4142434431323334", UnitScope = "razer:paired-pid-serial" };
+        var moved = paired with { EndpointPath = @"hid\dock-two", ContainerId = "dock-two" };
+        var replaced = paired with { UnitId = "pid=00e3;serial=5152535435363738" };
+        var routes = Resolve(new(), [EndpointDevice(0, "receiver", receiver), EndpointDevice(0, "paired", paired),
+            EndpointDevice(1, "moved", moved), EndpointDevice(1, "replacement", replaced)]);
+        Assert.Equal(3, routes.Values.Distinct().Count());
+        Assert.Equal(routes[new(0, Id("paired"))], routes[new(1, Id("moved"))]);
+        Assert.NotEqual(routes[new(0, Id("receiver"))], routes[new(0, Id("paired"))]);
+        Assert.NotEqual(routes[new(1, Id("replacement"))], routes[new(0, Id("paired"))]);
+    }
+
+    [Fact]
     public void CompleteBatchUsesBridgeEvidenceBeforeChoosingTheSurvivor()
     {
         var serial = new PeripheralIdentityEvidence { UniqueSerial = "unique", SerialScope = "usb:0001:0002" };

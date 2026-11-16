@@ -106,14 +106,16 @@ namespace Cards::Protocol
             if (!order.empty()) config.order = order;
             if (std::find(config.order.begin(), config.order.end(), L"peripheralBattery") == config.order.end())
                 config.order.push_back(L"peripheralBattery");
+            if (std::find(config.order.begin(), config.order.end(), L"aiUsage") == config.order.end())
+                config.order.push_back(L"aiUsage");
             if (const auto columns = Object(quickCards, L"columns"))
             {
-                for (const wchar_t* id : { L"weather", L"traffic", L"device", L"media", L"peripheralBattery" })
+                for (const wchar_t* id : { L"weather", L"traffic", L"device", L"media", L"peripheralBattery", L"aiUsage" })
                     config.columns[id] = Integer(columns, id, config.columns[id]);
             }
             if (const auto enabled = Object(quickCards, L"enabled"))
             {
-                for (const wchar_t* id : { L"weather", L"traffic", L"device", L"media", L"peripheralBattery" })
+                for (const wchar_t* id : { L"weather", L"traffic", L"device", L"media", L"peripheralBattery", L"aiUsage" })
                     config.enabled[id] = Boolean(enabled, id, config.enabled[id]);
             }
             const auto mode = Text(quickCards, L"resourceMode");
@@ -509,6 +511,86 @@ namespace Cards::Protocol
             return true;
         }
 
+        std::optional<long long> TokenCount(const JsonObject& object, const wchar_t* key)
+        {
+            const double value = Number(object, key, -1);
+            if (!std::isfinite(value) || value < 0 || value > 9007199254740991.0 || std::floor(value) != value) return {};
+            return static_cast<long long>(value);
+        }
+        std::wstring AiText(const JsonObject& object, const wchar_t* key, size_t limit = 256)
+        {
+            auto value = Text(object, key);
+            if (value.size() > limit) value.resize(limit);
+            return value;
+        }
+
+        bool AiUsageFrom(const JsonObject& object, AiUsageState& target)
+        {
+            if (!object) return false;
+            const auto revision = TokenCount(object, L"revision");
+            if (!revision || *revision <= target.revision) return false;
+            AiUsageState state;
+            state.revision = *revision;
+            state.providerId = AiText(object, L"providerId", 64);
+            if (!state.providerId.empty() && !IsAiProviderId(state.providerId)) return false;
+            state.providerName = AiText(object, L"providerName", 128);
+            state.status = AiText(object, L"status", 16); state.error = AiText(object, L"error", 1024); state.updatedAt = AiText(object, L"updatedAt", 64);
+            state.showApi = Boolean(object, L"showApi");
+            if (const auto enabled = Object(object, L"enabledServices"))
+                for (const wchar_t* id : { L"openai", L"deepseek", L"gemini", L"claude" })
+                    state.enabledServices[id] = Boolean(enabled, id);
+            state.activityUtc = Boolean(object, L"activityUtc");
+            state.sourceLabel = AiText(object, L"sourceLabel");
+            state.historyNote = AiText(object, L"historyNote", 1024);
+            state.quotaNote = AiText(object, L"quotaNote", 1024);
+            state.activityUnit = Text(object, L"activityUnit") == L"requests" ? L"requests" : L"tokens";
+            if (const auto providers = Array(object, L"providers")) for (const auto& entry : providers)
+            {
+                if (entry.ValueType() != JsonValueType::Object || state.providers.size() >= 8) continue;
+                const auto item = entry.GetObject();
+                AiProvider provider;
+                provider.id = AiText(item, L"id", 64);
+                if (!IsAiProviderId(provider.id) || std::any_of(state.providers.begin(), state.providers.end(),
+                    [&](const auto& prior) { return prior.id == provider.id; })) continue;
+                provider.mode = AiText(item, L"mode", 16);
+                if (provider.mode != (IsAiApiProviderId(provider.id) ? L"api" : L"subscription")) continue;
+                provider.name = AiText(item, L"name", 128); provider.serviceId = AiServiceId(provider.id);
+                state.providers.push_back(std::move(provider));
+            }
+            if (const auto balances = Array(object, L"balances")) for (const auto& entry : balances)
+            {
+                if (entry.ValueType() != JsonValueType::Object || state.balances.size() >= 16) continue;
+                const auto item = entry.GetObject();
+                AiBalance balance;
+                balance.currency = Text(item, L"currency"); balance.available = Text(item, L"available");
+                // Monetary values remain exact strings. Reject oversize values
+                // instead of truncating digits into a different amount.
+                if (balance.currency.size() > 16 || balance.available.size() > 128) continue;
+                balance.label = AiText(item, L"label", 128);
+                if (!balance.available.empty() && !balance.currency.empty()) state.balances.push_back(std::move(balance));
+            }
+            state.lifetimeTokens = TokenCount(object, L"lifetimeTokens"); state.peakDailyTokens = TokenCount(object, L"peakDailyTokens");
+            if (const auto quotas = Array(object, L"quotas")) for (const auto& entry : quotas)
+            {
+                if (entry.ValueType() != JsonValueType::Object || state.quotas.size() >= 16) continue;
+                const auto item = entry.GetObject();
+                const double used = Number(item, L"usedPercent", -1);
+                if (!std::isfinite(used) || used < 0 || used > 100) continue;
+                AiQuota quota;
+                quota.id = AiText(item, L"id", 64); quota.label = AiText(item, L"label", 128); quota.usedPercent = used;
+                quota.windowMinutes = static_cast<int>(std::clamp(Number(item, L"windowMinutes"), 0.0, 525600.0));
+                quota.resetsAt = TokenCount(item, L"resetsAt"); state.quotas.push_back(std::move(quota));
+            }
+            if (const auto days = Array(object, L"days")) for (const auto& entry : days)
+            {
+                if (entry.ValueType() != JsonValueType::Object) continue;
+                const auto item = entry.GetObject(); const auto date = Text(item, L"date"); const auto tokens = TokenCount(item, L"tokens");
+                if (tokens && date.size() == 10 && date[4] == L'-' && date[7] == L'-') state.days[date] = *tokens;
+                if (state.days.size() >= 4096) break;
+            }
+            target = std::move(state); return true;
+        }
+
         bool UpdateFrom(const JsonObject& update, UpdateState& state)
         {
             if (!update) return false;
@@ -594,6 +676,7 @@ namespace Cards::Protocol
         target.weather.revision = -1;
         target.update.revision = -1;
         target.peripheralBattery.revision = -1;
+        target.aiUsage.revision = -1;
     }
 
     bool ApplySnapshot(Snapshot& target, const std::wstring& payloadJson, Changes& changes)
@@ -618,6 +701,8 @@ namespace Cards::Protocol
                 changes.update = UpdateFrom(update, target.update);
             if (const auto peripherals = Object(payload, L"peripheralBattery"))
                 changes.peripheralBattery = PeripheralFrom(peripherals, target.peripheralBattery);
+            if (const auto aiUsage = Object(payload, L"aiUsage"))
+                changes.aiUsage = AiUsageFrom(aiUsage, target.aiUsage);
             const auto status = Text(payload, L"statusText");
             if (status != target.statusText) { target.statusText = status; changes.status = true; }
             const int theme = std::clamp(Integer(payload, L"toolWindowTheme", target.toolWindowTheme), 0, 2);
@@ -688,6 +773,12 @@ namespace Cards::Protocol
     bool ApplyPeripheralBatteryReply(PeripheralBatteryState& target, const std::wstring& payloadJson)
     {
         try { return PeripheralFrom(JsonObject::Parse(payloadJson), target); }
+        catch (...) { return false; }
+    }
+
+    bool ApplyAiUsageReply(AiUsageState& target, const std::wstring& payloadJson)
+    {
+        try { return AiUsageFrom(JsonObject::Parse(payloadJson), target); }
         catch (...) { return false; }
     }
 

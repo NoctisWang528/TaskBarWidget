@@ -42,7 +42,9 @@ if ($Mode -eq 'Measure') {
     $launch.ArgumentList = @('--liquid-glass')
 }
 $process = Start-Process @launch
-if (-not $process.WaitForExit(45000)) { Stop-Process -Id $process.Id; throw 'Isolated card probe did not exit in 45 seconds.' }
+# The full regression includes all-card pixel comparisons before the host lifecycle checks.
+$timeoutSeconds = if ($Mode -eq 'Regression') { 90 } else { 45 }
+if (-not $process.WaitForExit($timeoutSeconds * 1000)) { Stop-Process -Id $process.Id; throw "Isolated card probe did not exit in $timeoutSeconds seconds." }
 $process.Refresh()
 Get-Content -LiteralPath $launch.RedirectStandardOutput
 Get-Content -LiteralPath $launch.RedirectStandardError

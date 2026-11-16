@@ -30,6 +30,7 @@ public partial class App : System.Windows.Application
     private CardSnapshotBuilder? _cardSnapshot;
     private PeripheralBatteryService? _peripherals;
     private HidPeripheralBatteryProvider? _hidPeripherals;
+    private AiUsageHub _aiUsage = null!;
     private int _peripheralPublishPending;
     private AudioSnapshot? _lastAudio;
     private readonly SemaphoreSlim _audioRequests = new(1, 1);
@@ -70,6 +71,8 @@ public partial class App : System.Windows.Application
             FactoryDefaults.EnsureSeeded(settingsPath);
             _store = new SettingsStore(settingsPath);
             Settings = _store.Load(IsApplicationUsingLightTheme());
+            _aiUsage = new AiUsageHub(AppDataPaths.SecretsDirectory, AppDataPaths.HistoryDirectory, Settings.AiUsageProviderId, Settings.AiUsageShowApi,
+                enabledServices: Settings.AiUsageEnabledServices);
             Settings.UseFloatingWindow = false;
             Settings.StartWithWindows = false;
             Settings.AutoCheckUpdates = false;
@@ -90,6 +93,11 @@ public partial class App : System.Windows.Application
             // this one implementation of audio/media/weather/history so the two
             // front-ends can never disagree about device state.
             _cardSnapshot = new CardSnapshotBuilder();
+            _aiUsage.Changed += () =>
+            {
+                if (!_shutdownRequested && !Dispatcher.HasShutdownStarted)
+                    _ = Dispatcher.BeginInvoke(() => _cards?.PublishSnapshot());
+            };
             _cards = new NativeCardBridge($"TaskBarWidgets.Cards.{_host.Id}",
                 token => Dispatcher.InvokeAsync(BuildCardSnapshot, System.Windows.Threading.DispatcherPriority.Background, token).Task,
                 (request, generation, token) => Dispatcher.InvokeAsync(() =>
@@ -229,7 +237,8 @@ public partial class App : System.Windows.Application
     // ---- native card channel -------------------------------------------------
 
     internal object BuildCardSnapshot() => _cardSnapshot?.Build(Settings, _media!, _lastAudio,
-        _updates?.Snapshot ?? _updateUnavailable, _cards?.Connected == true, (int)Settings.ToolWindowTheme, _peripherals?.Snapshot)
+        _updates?.Snapshot ?? _updateUnavailable, _cards?.Connected == true, (int)Settings.ToolWindowTheme, _peripherals?.Snapshot,
+        _aiUsage.Snapshot)
         ?? new { connected = false };
 
     // The native card front-end only gets the actions its widgets need: audio,
@@ -250,6 +259,9 @@ public partial class App : System.Windows.Application
         {
             case "getPeripheralDiagnostics": return new { report = PeripheralDiagnostics.Export(
                 salt => _peripherals?.ExportDiagnostics(salt) ?? "{}", _hidPeripherals?.Diagnostics ?? []) };
+            case "setAiUsagePreferences": return SetAiUsagePreferences(payload);
+            case "getAiUsage": return CardSnapshotBuilder.DescribeAiUsage(_aiUsage.Read(
+                AiUsageHub.Text(payload, "providerId") is { Length: > 0 } aiId ? aiId : null, payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("force", out var forceAi) && forceAi.ValueKind == JsonValueKind.True));
             case "getPeripheralBatteries": return _peripherals?.Snapshot ?? new PeripheralBatterySnapshot();
             case "refreshPeripheralBatteries":
                 _peripherals?.Refresh();
@@ -493,6 +505,11 @@ public partial class App : System.Windows.Application
         {
             case "getPeripheralDiagnostics": return new { report = PeripheralDiagnostics.Export(
                 salt => _peripherals?.ExportDiagnostics(salt) ?? "{}", _hidPeripherals?.Diagnostics ?? []) };
+            case "setAiUsagePreferences": return SetAiUsagePreferences(payload);
+            case "configureAiUsage": return CardSnapshotBuilder.DescribeAiUsage(await _aiUsage.ConfigureAsync(payload, token));
+            case "saveAiUsageManual": return CardSnapshotBuilder.DescribeAiUsage(await _aiUsage.SaveManualAsync(payload, token));
+            case "getAiUsage": return CardSnapshotBuilder.DescribeAiUsage(_aiUsage.Read(
+                AiUsageHub.Text(payload, "providerId") is { Length: > 0 } aiId ? aiId : null, payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("force", out var forceAi) && forceAi.ValueKind == JsonValueKind.True));
             case "getPeripheralBatteries": return _peripherals?.Snapshot ?? new PeripheralBatterySnapshot();
             case "refreshPeripheralBatteries":
                 _peripherals?.Refresh();
@@ -777,6 +794,33 @@ public partial class App : System.Windows.Application
         });
     }
 
+    private object SetAiUsagePreferences(JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object) throw new ArgumentException("AI 设置格式无效。");
+        var updated = Settings.Clone();
+        if (payload.TryGetProperty("showApi", out var showApi))
+        {
+            if (showApi.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw new ArgumentException("API 开关格式无效。");
+            updated.AiUsageShowApi = showApi.GetBoolean();
+        }
+        var selected = AiUsageHub.Text(payload, "providerId");
+        if (selected.Length > 0 && !AiUsageHub.Catalog.Any(provider => provider.Id == selected)) throw new ArgumentException("未知的 AI 服务。");
+        if (payload.TryGetProperty("enabledServices", out var enabledServices))
+        {
+            if (enabledServices.ValueKind != JsonValueKind.Object) throw new ArgumentException("服务开关格式无效。");
+            foreach (var service in enabledServices.EnumerateObject())
+            {
+                if (!AiUsageHub.ServiceIds.Contains(service.Name, StringComparer.Ordinal) || service.Value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                    throw new ArgumentException("只接受四项服务的布尔开关。");
+                updated.AiUsageEnabledServices[service.Name] = service.Value.GetBoolean();
+            }
+        }
+        updated.AiUsageProviderId = AiUsageHub.NormalizeSelection(selected.Length > 0 ? selected : updated.AiUsageProviderId,
+            updated.AiUsageShowApi, updated.AiUsageEnabledServices);
+        if (!SaveSettings(updated)) throw new IOException("无法保存 AI 用量设置。");
+        return CardSnapshotBuilder.DescribeAiUsage(_aiUsage.Read());
+    }
+
     internal bool SaveSettings(AppSettings settings)
     {
         settings.UseFloatingWindow = false; settings.StartWithWindows = false; settings.AutoCheckUpdates = false;
@@ -784,6 +828,7 @@ public partial class App : System.Windows.Application
         var updated = settings.Clone();
         if (_store?.Save(updated) != true) return false;
         Settings = updated;
+        _aiUsage?.SetPreferences(Settings.AiUsageProviderId, Settings.AiUsageShowApi, Settings.AiUsageEnabledServices);
         ApplyPeripheralDemand();
         if (_updates is not null && _updates.Snapshot.AutomaticEnabled != Settings.ProductAutomaticUpdatesEnabled)
             _updates.SetAutomatic(Settings.ProductAutomaticUpdatesEnabled);
@@ -820,6 +865,7 @@ public partial class App : System.Windows.Application
     protected override void OnExit(ExitEventArgs args)
     {
         FootprintMetrics.Stop();
+        _aiUsage?.Dispose();
         _nativeSettings?.Dispose();
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
         _cardTimer?.Stop();
@@ -841,6 +887,7 @@ public partial class App : System.Windows.Application
     {
         if (_shutdownRequested) return;
         _shutdownRequested = true;
+        _aiUsage?.Dispose();
         _nativeSettings?.Dispose();
         _cardTimer?.Stop();
         _stop.Cancel();

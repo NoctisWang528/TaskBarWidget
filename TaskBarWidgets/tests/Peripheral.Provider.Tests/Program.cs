@@ -64,6 +64,8 @@ if (args.Length == 3 && args[0] == "--hardware-report")
 if (args.Length != 1) throw new ArgumentException("Pass the isolated fixture directory.");
 var directory = Path.GetFullPath(args[0]);
 var transcript = Path.Combine(directory, "requests.jsonl");
+await VerifyDockChildrenAsync(directory);
+await VerifyRogNamesAsync(directory);
 File.WriteAllText(transcript, "");
 File.WriteAllText(Path.Combine(directory, "mode.txt"), "normal");
 await using var provider = new NativePeripheralBatteryProvider(directory);
@@ -135,7 +137,7 @@ File.WriteAllText(Path.Combine(directory, "mode.txt"), "normal");
 reading = await provider.ReadAsync(ids, new(), CancellationToken.None);
 Require(reading.Single().Batteries.Single().Percentage == 42, "Demand recovers after the retained worker exits.");
 await provider.SuspendAsync();
-Console.WriteLine("Peripheral provider process contract passed: identity filtering, restart, demand cancellation, timeout, initialization journal, quarantine, extension discovery and broken-pipe suspension recovery.");
+Console.WriteLine("Peripheral provider process contract passed: dock child filtering/replacement, Omni name retention/refresh/retirement, identity filtering, restart, demand cancellation, timeout, initialization journal, quarantine, extension discovery and broken-pipe suspension recovery.");
 
 var managedDirectory = Path.Combine(directory, "Media", "PeripheralHost");
 Directory.CreateDirectory(managedDirectory);
@@ -165,6 +167,80 @@ await using (var managed = new NativePeripheralBatteryProvider(directory, vigilW
 Console.WriteLine("Managed peripheral restart demand boundary passed.");
 
 static JsonElement Parse(string line) { using var document = JsonDocument.Parse(line); return document.RootElement.Clone(); }
+static async Task VerifyDockChildrenAsync(string directory)
+{
+    var mode = Path.Combine(directory, "mode.txt");
+    File.WriteAllText(mode, "dock-normal");
+    await using var provider = new NativePeripheralBatteryProvider(directory);
+    var found = await provider.DiscoverAsync(default);
+    Require(found.Count == 1 && found[0].Name == "Razer Basilisk V4 Pro",
+        "A Razer dock must expose only its own proven paired mouse, never the receiver or unrelated/malformed children.");
+    var id = found[0].Id;
+    var read = await provider.ReadAsync(new HashSet<string> { id }, new(), default);
+    Require(read.Single().Id == id && read.Single().Batteries.Single().Percentage == 73, "A proven Razer dock child must remain readable.");
+    File.WriteAllText(mode, "dock-sleep");
+    found = await provider.DiscoverAsync(default);
+    Require(found.Single().Id == id && found[0].Stale && found[0].State == "unavailable",
+        "A present dock with no fresh child reply preserves only its previously proven mouse as stale.");
+    File.WriteAllText(mode, "dock-changed");
+    found = await provider.DiscoverAsync(default);
+    var replacement = found.Single(d => !d.Stale);
+    Require(replacement.Id != id && found.Single(d => d.Id == id).Stale,
+        "A different paired serial creates a different identity and cannot inherit the previous mouse's state.");
+    File.WriteAllText(mode, "dock-absent");
+    found = await provider.DiscoverAsync(default);
+    Require(found.Count == 0, "An absent dock must not keep its children present.");
+}
+static async Task VerifyRogNamesAsync(string directory)
+{
+    var mode = Path.Combine(directory, "mode.txt");
+    File.WriteAllText(mode, "rog-named");
+    await using var provider = new NativePeripheralBatteryProvider(directory);
+    var discovered = await provider.DiscoverAsync(default);
+    Require(discovered.Single().Name == "ROG Omni keyboard", "An unread receiver must not invent its paired keyboard model.");
+    Require(provider.RetiredDeviceIds.SetEquals(new[] { PeripheralIdentity.FromKey(
+        "hid:v1|serial=41424344|vid=0b05|pid=1ace|mi=2|usage=ff01:0001|channel=rog-report3") }),
+        "Retirement replies may retire only an exact legacy Omni endpoint, not unrelated hardware or the live keyboard.");
+    var ids = discovered.Select(d => d.Id).ToHashSet();
+    var read = await provider.ReadAsync(ids, new(), default);
+    Require(read.Single().Name == "ROG AZOTH EXTREME", "The successful native reading supplies the confirmed paired model.");
+    Require(read.Single().ModelIdentity == "6978" && read.Single().ModelIdentityConfirmed, "Only validated native paired-model proof reaches the snapshot.");
+    discovered = await provider.DiscoverAsync(default);
+    Require(discovered.Single().Name == "ROG AZOTH EXTREME", "ROG rediscovery must retain the proven name for the exact same identity and source.");
+    Require(discovered.Single().ModelIdentity == "6978" && !discovered.Single().ModelIdentityConfirmed, "Rediscovery retains model context without claiming a fresh identity query.");
+    await provider.SuspendAsync();
+    File.WriteAllText(mode, "rog-unavailable");
+    read = await provider.ReadAsync(ids, new(), default);
+    Require(read.Single().Name == "ROG AZOTH EXTREME", "Worker restart and unavailable reads must retain the proven same-device name.");
+    File.WriteAllText(mode, "rog-changed");
+    read = await provider.ReadAsync(ids, new(), default);
+    Require(read.Single().Name == "ROG AZOTH", "A newly confirmed paired model must replace the old display name.");
+    discovered = await provider.DiscoverAsync(default);
+    Require(discovered.Single().Name == "ROG AZOTH", "Rediscovery must retain the latest confirmed model, not the original model.");
+    File.WriteAllText(mode, "rog-unknown-model");
+    read = await provider.ReadAsync(ids, new(), default);
+    Require(read.Single().Name == "ROG Omni keyboard", "A fresh valid read of an unmapped model must clear the previous model name.");
+    discovered = await provider.DiscoverAsync(default);
+    Require(discovered.Single().Name == "ROG Omni keyboard", "Rediscovery must not resurrect a superseded model name.");
+    File.WriteAllText(mode, "rog-offline-confirmed");
+    read = await provider.ReadAsync(ids, new(), default);
+    Require(read.Single().Name == "ROG AZOTH EXTREME SPECIAL EDITION" && read.Single().ModelIdentity == "7409" &&
+        read.Single().ModelIdentityConfirmed && read.Single().Batteries.Length == 0,
+        "A coherent unavailable response can confirm a model without fabricating battery data.");
+    File.WriteAllText(mode, "rog-invalid-model");
+    read = await provider.ReadAsync(ids, new(), default);
+    Require(read.Single().Name == "ROG AZOTH EXTREME SPECIAL EDITION" && !read.Single().ModelIdentityConfirmed,
+        "An unrecognized paired PID cannot overwrite previously confirmed model metadata.");
+    File.WriteAllText(mode, "rog-offline-unknown");
+    read = await provider.ReadAsync(ids, new(), default);
+    Require(read.Single().Name == "ROG Omni keyboard" && read.Single().ModelIdentity == "6918" && read.Single().ModelIdentityConfirmed,
+        "A confirmed but unnamed new model clears the old name even when battery data is unavailable.");
+    File.WriteAllText(mode, "rog-named");
+    _ = await provider.ReadAsync(ids, new(), default);
+    File.WriteAllText(mode, "rog-other-source");
+    discovered = await provider.DiscoverAsync(default);
+    Require(discovered.Single().Name == "ROG Omni keyboard", "Name retention must not cross provider sources even when identity text matches.");
+}
 static string[] ReadTranscript(string file)
 {
     using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);

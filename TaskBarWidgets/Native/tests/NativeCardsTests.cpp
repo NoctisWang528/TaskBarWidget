@@ -674,6 +674,119 @@ static void CheckPeripheralBattery(Cards::CardEnvironment environment)
     card.Hide(false);
 }
 
+static void CheckAiUsage(Cards::CardEnvironment environment)
+{
+    using namespace Cards;
+    static_assert(static_cast<int>(Kind::AiUsage) == 6);
+    Kind parsed{};
+    Require(KindFromId(L"aiUsage", parsed) && parsed == Kind::AiUsage && Config{}.IsEnabled(parsed), "AI stable id/default");
+    Snapshot snapshot;
+    Require(!snapshot.aiUsage.Visible() && snapshot.aiUsage.VisibleProviders().empty(), "AI services default to opt-in");
+    Protocol::Changes changes;
+    Require(Protocol::ApplySnapshot(snapshot, LR"({"quickCards":{"revision":1,"order":["media","traffic"],"enabled":{"traffic":false}},"aiUsage":{"revision":10,"providerId":"codex","status":"partial","quotas":[{"id":"weekly","label":"weekly","usedPercent":19,"windowMinutes":10080,"resetsAt":1800000000}],"days":[{"date":"2026-11-14","tokens":23000000},{"date":"2026-11-13","tokens":0}],"lifetimeTokens":2976664580,"peakDailyTokens":null}})", changes) && changes.aiUsage, "AI snapshot parse");
+    Require(snapshot.aiUsage.lifetimeTokens == 2976664580LL && snapshot.aiUsage.days.at(L"2026-11-13") == 0 && !snapshot.aiUsage.days.contains(L"2026-11-12") && !snapshot.aiUsage.peakDailyTokens, "AI 64-bit, zero and unknown remain distinct");
+    Require(snapshot.config.order.front() == L"media" && snapshot.config.order.back() == L"aiUsage" && !snapshot.config.IsEnabled(Kind::Traffic), "AI migration preserves ordering and visibility");
+    Require(!Protocol::ApplyAiUsageReply(snapshot.aiUsage, LR"({"revision":9,"lifetimeTokens":0})"), "stale AI reply ignored");
+    Require(Protocol::ApplyAiUsageReply(snapshot.aiUsage, LR"({"revision":11,"status":"error","error":"unavailable","days":null,"quotas":[{"usedPercent":101}],"lifetimeTokens":null})") && snapshot.aiUsage.days.empty() && snapshot.aiUsage.quotas.empty() && !snapshot.aiUsage.lifetimeTokens, "AI unavailable data does not become zero");
+    Protocol::ResetRevisions(snapshot);
+    Require(snapshot.aiUsage.revision == -1, "AI reconnect revision reset");
+    struct Services : CardHostServices
+    {
+        void OnRequest(const std::wstring&, const std::wstring&) override {}
+        void OnHideCards(const std::wstring&) override {}
+        void OnOpenSettings() override {}
+        void OnLayoutInvalidated() override {}
+    } services;
+    CardWindow card(Kind::AiUsage, services);
+    Require(card.Create(environment, GetModuleHandleW(nullptr)), "AI native window");
+    card.SetSnapshot(snapshot);
+    card.Place({-1000,-1000,-616,-600}, 1);
+    card.Paint();
+    Require(card.Regions().Find(700) && card.Regions().Find(701) && card.Regions().Find(701)->action == L"openAiUsageSettings" && card.Regions().Find(883), "AI refresh, details and 84 accessible day cells");
+    Require(Protocol::ApplyAiUsageReply(snapshot.aiUsage, LR"({"revision":20,"providerId":"codex","providerName":"ChatGPT","showApi":false,"enabledServices":{"openai":true,"deepseek":true,"gemini":true,"claude":true},"activityUtc":true,"activityUnit":"requests","providers":[
+        {"id":"codex","name":"ChatGPT","mode":"subscription","serviceId":"openai"},
+        {"id":"openai-api","name":"ChatGPT API","mode":"api","serviceId":"openai"},
+        {"id":"deepseek-web","name":"DeepSeek","mode":"subscription","serviceId":"deepseek"},
+        {"id":"deepseek-api","name":"DeepSeek API","mode":"api","serviceId":"deepseek"},
+        {"id":"gemini-web","name":"Gemini","mode":"subscription","serviceId":"gemini"},
+        {"id":"gemini-api","name":"Gemini API","mode":"api","serviceId":"gemini"},
+        {"id":"claude-web","name":"Claude","mode":"subscription","serviceId":"claude"},
+        {"id":"claude-api","name":"Claude API","mode":"api","serviceId":"claude"},
+        {"id":"untrusted","name":"Bad","mode":"subscription"}],"balances":[{"currency":"CNY","available":"0.00","label":"official available"},{"currency":"USD","available":"12.34567890123456789","label":"credit"},{"currency":"USD","available":0}],"sourceLabel":"official","historyNote":"history unavailable","quotaNote":"quota unknown","days":[{"date":"2026-11-14","tokens":3}]})"), "multi-provider AI snapshot");
+    const auto& ai = snapshot.aiUsage;
+    Require(ai.providers.size() == 8 && ai.VisibleProviders().size() == 4 && ai.AdjacentProviderId(1) == L"deepseek-web" &&
+        ai.AdjacentProviderId(-1) == L"claude-web", "AI catalog whitelist and subscription-only cycling");
+    Require(ai.balances.size() == 2 && ai.balances[0].available == L"0.00" && ai.balances[1].available == L"12.34567890123456789" &&
+        ai.activityUnit == L"requests" && ai.activityUtc && ai.quotaNote == L"quota unknown", "API monetary strings and activity unit preserved");
+    snapshot.aiUsage.showApi = true;
+    Require(ai.VisibleProviders().size() == 8 && ai.AdjacentProviderId(1) == L"openai-api", "API toggle enables all eight fixed identities");
+    snapshot.aiUsage.providerId = L"deepseek-api";
+    snapshot.aiUsage.providerName = L"DeepSeek API";
+    card.SetSnapshot(snapshot); card.Paint();
+    Require(card.Regions().Find(702)->enabled && card.Regions().Find(703)->enabled &&
+        card.Regions().Find(703)->action == L"aiUsageProvider:next" && card.Regions().Find(730)->name.find(L"CNY 0.00") != std::wstring::npos,
+        "native chooser and unmodified monetary balance");
+    Require(card.AccessibleSummary().find(L"DeepSeek API") != std::wstring::npos, "AI accessibility follows selected provider");
+    Require(card.Regions().Find(740)->name.find(L"UTC") != std::wstring::npos &&
+        card.Regions().Find(741)->name.starts_with(L"今日 UTC "), "UTC calendar and daily total labels are explicit");
+    SYSTEMTIME utc{}; GetSystemTime(&utc);
+    wchar_t utcDate[16]{}; swprintf_s(utcDate, L"%04u-%02u-%02u", utc.wYear, utc.wMonth, utc.wDay);
+    Require(std::any_of(card.Regions().All().begin(), card.Regions().All().end(), [&](const auto& region)
+        { return region.id >= 800 && region.id < 884 && region.name.starts_with(utcDate) && region.name.find(L"未来") == std::wstring::npos; }),
+        "current UTC date remains in the calendar and is never future");
+    snapshot.aiUsage.showApi = false;
+    card.SetSnapshot(snapshot); card.Paint();
+    Require(!card.Regions().Find(730) && snapshot.aiUsage.AdjacentProviderId(1) == L"codex", "hidden API data is suppressed and selection recovers to subscription");
+    snapshot.aiUsage.showApi = true;
+    snapshot.aiUsage.enabledServices[L"deepseek"] = false;
+    card.SetSnapshot(snapshot); card.Paint();
+    Require(ai.VisibleProviders().size() == 6 && !ai.ProviderVisible(L"deepseek-web") && !ai.ProviderVisible(L"deepseek-api") &&
+        !card.Regions().Find(730) && !card.Regions().Find(700)->enabled, "service switch hides both modes and suppresses cached money and refresh");
+    for (auto& [service, enabled] : snapshot.aiUsage.enabledServices) enabled = false;
+    Require(!ai.Visible() && ai.VisibleProviders().empty() && ai.AdjacentProviderId(1).empty(), "all services off removes native card and choices");
+    snapshot.aiUsage.enabledServices[L"claude"] = true;
+    Require(ai.Visible() && ai.VisibleProviders().size() == 2 && ai.AdjacentProviderId(1) == L"claude-web", "only enabled service can recover selection");
+    Require(Protocol::ApplyAiUsageReply(snapshot.aiUsage, LR"({"revision":21,"providerId":"gemini-web","providerName":"Gemini","enabledServices":{"gemini":true,"openai":"true","untrusted":true},"status":"idle","days":null,"lifetimeTokens":null})") &&
+        snapshot.aiUsage.days.empty() && snapshot.aiUsage.balances.empty() && !snapshot.aiUsage.lifetimeTokens && !snapshot.aiUsage.activityUtc,
+        "provider switch clears prior provider activity, balances and UTC mode");
+    Require(ai.ProviderVisible(L"gemini-web") && !ai.ProviderVisible(L"codex") && !ai.enabledServices.contains(L"untrusted"), "service flags require known keys and booleans");
+    Require(!Protocol::ApplyAiUsageReply(snapshot.aiUsage, LR"({"revision":20,"providerId":"codex","days":[{"date":"2026-11-14","tokens":99}]})") &&
+        snapshot.aiUsage.providerId == L"gemini-web", "global revision rejects late previous-provider reply");
+    Require(!Protocol::ApplyAiUsageReply(snapshot.aiUsage, LR"({"revision":22,"providerId":"evil\\id"})"), "unknown provider cannot enter native preference command");
+    snapshot.aiUsage.quotas = {{L"manual", L"手动记录", 20, 0, std::nullopt}};
+    card.SetSnapshot(snapshot); card.Paint();
+    const auto* manualQuota = card.Regions().Find(710);
+    Require(manualQuota && manualQuota->name.find(L"窗口未知") != std::wstring::npos &&
+        manualQuota->name.find(L"0 分钟") == std::wstring::npos, "manual unknown window never becomes zero minutes");
+    snapshot.aiUsage.quotas = {{L"primary", L"5 小时额度", 10, 300, 1800000000},
+        {L"weekly", L"每周额度", 19, 10080, 1800000000}};
+    card.SetSnapshot(snapshot); card.Paint();
+    const auto* primaryQuota = card.Regions().Find(710);
+    const auto* weeklyQuota = card.Regions().Find(711);
+    Require(primaryQuota && weeklyQuota && primaryQuota->bounds.top == weeklyQuota->bounds.top &&
+        primaryQuota->bounds.right < weeklyQuota->bounds.left && primaryQuota->bounds.left >= Layout::Padding &&
+        weeklyQuota->bounds.right <= Layout::CardWidth - Layout::Padding &&
+        primaryQuota->name.find(L"剩余 90%") != std::wstring::npos && weeklyQuota->name.find(L"剩余 81%") != std::wstring::npos,
+        "two quota windows retain separate values and nonoverlapping in-card columns");
+
+    SYSTEMTIME local{}; GetLocalTime(&local);
+    wchar_t currentDate[16]{}; swprintf_s(currentDate, L"%04u-%02u-%02u", local.wYear, local.wMonth, local.wDay);
+    snapshot.aiUsage.activityUnit = L"tokens";
+    snapshot.aiUsage.days = {{currentDate, 0}, {L"9999-12-31", 99999}};
+    card.SetSnapshot(snapshot); card.Paint();
+    Require(card.Regions().Find(742) && card.Regions().Find(742)->name == L"峰值 0",
+        "known zero peak is zero and ignores future records");
+    Require(std::any_of(card.Regions().All().begin(), card.Regions().All().end(), [&](const auto& region) {
+        return region.id >= 800 && region.id < 884 && region.name == std::wstring(currentDate) + L"，0 tokens";
+    }) && std::any_of(card.Regions().All().begin(), card.Regions().All().end(), [](const auto& region) {
+        return region.id >= 800 && region.id < 884 && region.name.find(L"无记录") != std::wstring::npos;
+    }), "known zero activity remains distinct from missing days");
+    snapshot.aiUsage.days.erase(currentDate);
+    card.SetSnapshot(snapshot); card.Paint();
+    Require(card.Regions().Find(742) && card.Regions().Find(742)->name == L"峰值 —",
+        "future-only records cannot make an unknown visible peak become zero or nonzero");
+}
+
 static void CheckCardMotion(Cards::CardEnvironment environment, const Cards::Snapshot& snapshot)
 {
     Services services;
@@ -848,6 +961,43 @@ int wmain(int argc, wchar_t** argv)
         WinUiRuntime appRuntime;
         winrt::check_hresult(appRuntime.Initialize(std::filesystem::path(executable).parent_path() /
             L"UI/Microsoft.WindowsAppRuntime.Bootstrap.dll"));
+        if (argc == 2 && wcscmp(argv[1], L"--ai-usage-check") == 0)
+        {
+            {
+                Cards::Runtime runtime;
+                winrt::check_hresult(runtime.Initialize());
+                Cards::Graphics graphics;
+                Require(graphics.Initialize(), "AI graphics initialization");
+                auto compositor = winrt::Windows::UI::Composition::Compositor();
+                std::wstring error;
+                auto device = graphics.CreateGraphicsDevice(compositor, error);
+                Require(device != nullptr, "AI composition device");
+                Cards::CardEnvironment environment;
+                environment.graphics = &graphics; environment.compositor = compositor; environment.device = device;
+                environment.reducedMotion = true;
+                for (bool dark : {true, false})
+                {
+                    environment.dark = dark;
+                    CheckAiUsage(environment);
+                }
+                Require(Cards::Layout::DefaultHeightDip(Cards::Kind::AiUsage) == 400 &&
+                    Cards::Layout::WidthDip(Cards::Kind::AiUsage) == Cards::Layout::CardWidth,
+                    "AI ordinary card geometry");
+                Cards::Config config;
+                config.enabled[L"weather"] = false;
+                const auto placement = Cards::Layout::PlaceGroup(config, {}, POINT{0,0}, nullptr, false);
+                Require(placement.valid && std::any_of(placement.slots.begin(), placement.slots.end(),
+                    [](const auto& slot) { return slot.kind == Cards::Kind::AiUsage; }), "AI joins ordinary group layout");
+                config.enabled[L"aiUsage"] = false;
+                const auto hidden = Cards::Layout::PlaceGroup(config, {}, POINT{0,0}, nullptr, false);
+                Require(hidden.valid && std::none_of(hidden.slots.begin(), hidden.slots.end(),
+                    [](const auto& slot) { return slot.kind == Cards::Kind::AiUsage; }), "disabled AI card leaves layout");
+            }
+            appRuntime.Reset();
+            winrt::uninit_apartment();
+            std::cout << "Isolated AI usage parser, configuration, geometry and native rendering checks passed.\n";
+            return 0;
+        }
         if (argc == 3 && wcscmp(argv[1], L"--measure-cards") == 0)
         {
             MeasureCardPerformance(argv[2]);
@@ -976,6 +1126,7 @@ int wmain(int argc, wchar_t** argv)
             TestCardMaterials(environment, snapshot);
             CheckCardPaging(environment);
             CheckPeripheralBattery(environment);
+            CheckAiUsage(environment);
             CheckCardMotion(environment, snapshot);
             TestMediaRedraw(environment);
             TestCardRenderingStability(graphics);

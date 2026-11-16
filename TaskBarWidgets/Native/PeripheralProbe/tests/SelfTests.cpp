@@ -24,6 +24,114 @@ Candidate Mouse(Protocol protocol)
 }
 void Tests()
 {
+    Check(!RequiresInputDrain(Transport::Feature), "feature-only controls never read a nonexistent Input queue");
+    Check(!RequiresInputDrain(Transport::Passive) && !RequiresInputDrain(Transport::Standard), "passive and standard transports do not drain input");
+    Check(RequiresInputDrain(Transport::Output) && RequiresInputDrain(Transport::ControlOutput) &&
+        RequiresInputDrain(Transport::Hidpp), "request/reply Input transports still drain stale packets");
+    {
+        Candidate mouse; mouse.path="viper-control"; mouse.physical="viper-receiver";
+        mouse.vid=0x1532; mouse.pid=0x00e6; mouse.mi=3; mouse.page=0x0c; mouse.usage=1;
+        mouse.feature=91; mouse.layout.valid=true; mouse.layout.bytes[{Report::Feature,0}]=90;
+        mouse.usbProduct="Razer Viper V4 Pro"; mouse.name="HID-compliant consumer control device";
+        Check(Classify(mouse)==Protocol::Razer && mouse.name=="Razer Viper V4 Pro", "Razer model survives the battery profile classification");
+        auto identity=CanonicalIdentity(mouse);
+        mouse.usbProduct="Razer Viper V4 Pro - White";
+        Check(Classify(mouse)==Protocol::Razer && mouse.name==mouse.usbProduct && CanonicalIdentity(mouse)==identity,
+            "actual Razer product name is preserved without becoming identity");
+        mouse.usbProduct="Razer mouse";
+        Check(Classify(mouse)==Protocol::Razer && mouse.name=="Razer Viper V4 Pro", "generic USB product uses precise known model");
+        mouse.usbProduct="Razer bad\nname";
+        Check(Classify(mouse)==Protocol::Razer && mouse.name=="Razer Viper V4 Pro", "control characters cannot enter Razer display names");
+        mouse.pid=0x00e5;mouse.usbProduct.clear();
+        Check(Classify(mouse)==Protocol::Razer && mouse.wired, "Viper V4 wired transport stays distinct");
+        mouse.pid=0x00cd;mouse.mi=0;mouse.page=1;mouse.usage=2;
+        Check(Classify(mouse)==Protocol::Razer && mouse.name=="Razer Basilisk V3 Pro 35K", "old Basilisk receiver is not renamed to V4");
+        mouse.pid=0xffff;
+        Check(Classify(mouse)==Protocol::None, "Razer product metadata never grants unknown device access");
+    }
+    {
+        Candidate receiver; receiver.path="omni-mi_02&col03"; receiver.physical="omni-container";
+        receiver.vid=0x0b05; receiver.pid=0x1ace; receiver.mi=2; receiver.page=0xff01; receiver.usage=1;
+        receiver.input=receiver.output=64; receiver.layout.valid=true;
+        receiver.layout.bytes[{Report::Input,3}]=64; receiver.layout.bytes[{Report::Output,3}]=64;
+        Check(Classify(receiver)==Protocol::None, "OMNI report3 alone cannot invent a paired mouse");
+        receiver.pid=0x1ad0;
+        Check(Classify(receiver)==Protocol::ExtraMouse && receiver.adapter=="rog_8k", "separate 1AD0 8K adapter retains its existing admission");
+    }
+    {
+        Candidate dock; dock.path="dock-v2-control"; dock.physical="dock-v2-container";
+        dock.serial="DOCK12345678901"; dock.vid=0x1532; dock.pid=0x00f1;
+        dock.mi=3; dock.page=0x0c; dock.usage=1; dock.feature=91;
+        dock.layout=ParseDescriptor({0x05,0x0c,0x09,0x01,0xa1,0x01,0x06,0x00,0xff,0x09,0x02,
+            0x15,0x00,0x25,0x01,0x75,0x08,0x95,0x5a,0xb1,0x02,0xc0});
+        Check(Classify(dock)==Protocol::RazerDock && dock.kind=="unknown", "captured Dock V2 control is a receiver, never a mouse");
+        auto wrong=dock;wrong.mi=0;
+        Check(Classify(wrong)==Protocol::None, "Dock V2 pointer collection cannot grant control access");
+        wrong=dock;wrong.input=1;
+        Check(Classify(wrong)==Protocol::None, "Dock V2 requires the captured feature-only geometry");
+        wrong=dock;wrong.pid=0x00f2;
+        Check(Classify(wrong)==Protocol::None, "Dock V2 does not grant family-wide access");
+        const std::string serial="SN1234567890123";
+        auto reply = [&](unsigned command, Bytes payload) {
+            Bytes b(91,0);b[1]=2;b[2]=0x1f;b[6]=command==0x82?22:command==0xbf?31:2;
+            b[7]=command==0x80?7:0;b[8]=static_cast<unsigned char>(command);
+            std::copy(payload.begin(),payload.end(),b.begin()+9);
+            for(unsigned i=3;i<9+payload.size();++i)b[89]^=b[i];
+            // Captured Dock V2 firmware reuses unused bytes for RGB reports.
+            if(command!=0xbf)for(unsigned i=9+static_cast<unsigned>(payload.size());i<38;++i)b[i]=static_cast<unsigned char>(0x80+i);
+            return b;
+        };
+        Bytes paired(31,0);paired[0]=2;paired[1]=1;paired[3]=0xe3;paired[5]=paired[6]=0xff;
+        auto serialReport=reply(0x82,Bytes(serial.begin(),serial.end()));
+        auto power=reply(0x80,{0,0x94});
+        Check(RazerDockPayload(serialReport,0x82)->size()==15 && RazerDockPayload(power,0x80)==std::optional<Bytes>(Bytes{0,0x94}),
+            "Dock identity and power validate the active-field CRC despite reused RGB padding");
+        auto corrupted=power;corrupted[10]^=1;
+        Check(!RazerDockPayload(corrupted,0x80), "Dock battery corruption cannot bypass CRC");
+        corrupted=serialReport;corrupted[9]^=1;
+        Check(!RazerDockPayload(corrupted,0x82), "Dock serial corruption cannot bypass CRC");
+        for(unsigned offset : {1u,2u,6u,7u,8u,89u,90u})
+        {corrupted=power;corrupted[offset]^=1;Check(!RazerDockPayload(corrupted,0x80), "Dock command, status and CRC correlation");}
+        Check(!RazerDockPayload(Bytes(power.begin(),power.end()-1),0x80), "Dock short replies rejected");
+        unsigned calls=0,serialCalls=0;
+        bool replaceSerial=false,corruptBattery=false,invalidIdentity=false,dualPair=false;
+        RazerDockCall call = [&](unsigned transaction,unsigned commandClass,unsigned command,unsigned size) {
+            ++calls;
+            Check(transaction==0x1f && commandClass==(command==0x80?7u:0u) &&
+                size==(command==0x82?22u:command==0xbf?31u:2u), "Dock sends only the captured read commands");
+            if(command==0xbf){auto p=paired;if(dualPair){p[4]=1;p[5]=2;p[6]=1;}return reply(command,p);}
+            if(command==0x82){++serialCalls;std::string value=invalidIdentity?"000000000000000":replaceSerial&&serialCalls>1?"SN9876543210987":serial;return reply(command,Bytes(value.begin(),value.end()));}
+            Check(command==0x80, "Dock never sends an unapproved query");
+            auto b=power;if(corruptBattery)b[10]^=1;return b;
+        };
+        auto found=ReadRazerDockUnits(dock,call);
+        Check(found.size()==1 && found[0].first.name=="Razer Basilisk V4 Pro" && found[0].second &&
+            found[0].second->percentage==58 && !found[0].second->charging && calls==5,
+            "Dock reports the verified paired Basilisk and its exact battery without inferring charging");
+        Check(ValidRazerDockUnitIdentity(found[0].first.unit) &&
+            found[0].first.identity==CanonicalIdentity(dock)+"|unit="+found[0].first.unit, "Dock child is bound to real unit and exact receiver");
+        auto oldIdentity=found[0].first.identity;
+        calls=serialCalls=0;
+        auto identified=ReadRazerDockUnits(dock,call,false);
+        Check(identified.size()==1 && !identified[0].second && calls==4, "Dock identify never requests a battery");
+        calls=serialCalls=0;replaceSerial=true;
+        Check(ReadRazerDockUnits(dock,call).empty(), "Dock pairing change during a sample cannot inherit old battery");
+        replaceSerial=false;invalidIdentity=true;calls=serialCalls=0;
+        Check(ReadRazerDockUnits(dock,call).empty() && calls==2, "placeholder serial cannot become a Dock child");
+        invalidIdentity=false;dualPair=true;calls=serialCalls=0;
+        Check(ReadRazerDockUnits(dock,call).empty() && calls==1, "unverified multi-device routing remains unknown");
+        dualPair=false;corruptBattery=true;calls=serialCalls=0;
+        auto unavailable=ReadRazerDockUnits(dock,call);
+        Check(unavailable.size()==1 && unavailable[0].first.identity==oldIdentity && !unavailable[0].second,
+            "invalid battery retains proven identity without inventing a zero reading");
+        corruptBattery=false;calls=serialCalls=0;auto stale=dock;stale.unit="pid=00e3;serial=534e39383736353433323130393837";
+        Check(ReadRazerDockUnits(stale,call).empty() && calls==2, "read cannot retarget an old configured child after replacement");
+        calls=serialCalls=0;auto self=dock;self.serial=serial;
+        Check(ReadRazerDockUnits(self,call).empty(), "Dock's own serial is not a downstream mouse identity");
+        Check(!ValidRazerDockUnitIdentity("pid=00e3;serial=30303030") &&
+            !ValidRazerDockUnitIdentity("pid=00e3;serial=554e4b574e313233") &&
+            !ValidRazerDockUnitIdentity("pid=ffff;serial=534e31323334"), "Dock child validation rejects placeholders and unknown models");
+    }
     {
         std::set<std::string> journal;
         unsigned events = 0;

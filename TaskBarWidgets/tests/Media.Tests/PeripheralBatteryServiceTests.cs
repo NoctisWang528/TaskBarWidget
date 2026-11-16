@@ -258,6 +258,202 @@ public sealed class PeripheralBatteryServiceTests
         finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExactRetiredReceiverDropsOnlyPhantomCacheAndPreservesSettingsAndHistory(bool hadReading)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "tbw-battery-test-" + Guid.NewGuid().ToString("N"));
+        var cache = Path.Combine(directory, "cache.json");
+        var retiredId = PeripheralIdentity.FromKey("hid:v1|serial=41424344|vid=0b05|pid=1ace|mi=2|usage=ff01:0001|channel=rog-report3");
+        var unrelatedId = PeripheralIdentity.FromKey("another:physical-receiver");
+        var obsolete = Device(hadReading ? 61 : null) with { Id = retiredId, Name = "ROG receiver", Source = "rog-report3" };
+        var unrelated = Device() with { Id = unrelatedId, Name = "ROG receiver", Source = "rog-report3" };
+        var settings = new PeripheralBatterySettings { Order = [retiredId], CardVisibility = new() { [retiredId] = false } };
+        try
+        {
+            Directory.CreateDirectory(directory);
+            await File.WriteAllTextAsync(cache, JsonSerializer.Serialize(new[] { obsolete, unrelated }));
+            var provider = new FakeProvider { Present = false, RetiredDeviceIds = new HashSet<string> { retiredId } };
+            await using (var service = new PeripheralBatteryService([provider], cache))
+            {
+                service.Configure(settings, true, false, false);
+                service.SetTaskbarDemand([retiredId, unrelatedId]);
+                service.SetSettingsActive(true); service.Start();
+                await Until(() => provider.DiscoveryCalls > 0 && !service.Snapshot.Refreshing);
+                Assert.Contains(service.Snapshot.Devices, d => d.Id == unrelatedId);
+                if (hadReading)
+                {
+                    var retained = Assert.Single(service.Snapshot.Devices, d => d.Id == retiredId);
+                    Assert.False(retained.CanRead);
+                    Assert.Equal("disconnected", retained.State);
+                    Assert.Equal(61, Assert.Single(retained.Batteries).Percentage);
+                    Assert.Equal(obsolete.UpdatedAt, retained.UpdatedAt);
+                }
+                else Assert.DoesNotContain(service.Snapshot.Devices, d => d.Id == retiredId);
+                Assert.Equal(new[] { retiredId }, settings.Order);
+                Assert.False(settings.CardVisibility[retiredId]);
+            }
+            using var savedDocument = JsonDocument.Parse(await File.ReadAllTextAsync(cache));
+            var saved = savedDocument.RootElement.GetProperty("devices").EnumerateArray()
+                .Select(e => e.GetProperty("device").Deserialize<PeripheralDeviceSnapshot>()!).ToArray();
+            Assert.Equal(hadReading, saved.Any(d => d.Id == retiredId));
+            Assert.Contains(saved, d => d.Id == unrelatedId);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Theory]
+    [InlineData(null, "7409", false)]
+    [InlineData("6978", "7409", false)]
+    [InlineData("7409", "7409", true)]
+    [InlineData("7409", "6918", false)]
+    [InlineData("7409", null, true)]
+    public async Task OmniPairedModelChangesCannotInheritAnotherModelsCachedBattery(string? cachedModel, string? currentModel, bool retainsReading)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "tbw-battery-test-" + Guid.NewGuid().ToString("N"));
+        var cache = Path.Combine(directory, "cache.json");
+        var previous = Device(61) with { Source = "rog_omni_keyboard", Name = "Previously confirmed keyboard", ModelIdentity = cachedModel };
+        var metadata = Device() with { Source = "rog_omni_keyboard", State = "unavailable", ModelIdentity = currentModel,
+            ModelIdentityConfirmed = currentModel is not null, Name = currentModel is null or "6918" ? "ROG Omni keyboard" : "Newly confirmed keyboard" };
+        try
+        {
+            Directory.CreateDirectory(directory);
+            await File.WriteAllTextAsync(cache, JsonSerializer.Serialize(new[] { previous }));
+            var provider = new FakeProvider { DiscoveryResult = metadata, Result = metadata };
+            await using (var service = new PeripheralBatteryService([provider], cache))
+            {
+                service.SetTaskbarDemand([Id]); service.SetSettingsActive(true); service.Start();
+                await Until(() => provider.ReadCalls > 0 && !service.Snapshot.Refreshing);
+                var result = Assert.Single(service.Snapshot.Devices);
+                Assert.Equal(currentModel ?? cachedModel, result.ModelIdentity);
+                Assert.Equal(currentModel is null ? previous.Name : metadata.Name, result.Name);
+                if (retainsReading)
+                {
+                    Assert.Equal(61, Assert.Single(result.Batteries).Percentage);
+                    Assert.Equal(previous.UpdatedAt, result.UpdatedAt);
+                }
+                else { Assert.Empty(result.Batteries); Assert.Null(result.UpdatedAt); }
+            }
+            using var restoredDocument = JsonDocument.Parse(await File.ReadAllTextAsync(cache));
+            var restored = restoredDocument.RootElement.GetProperty("devices").EnumerateArray()
+                .Select(e => e.GetProperty("device").Deserialize<PeripheralDeviceSnapshot>()!).ToArray();
+            Assert.Equal(currentModel ?? cachedModel, Assert.Single(restored).ModelIdentity);
+            Assert.False(restored[0].ModelIdentityConfirmed);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Theory]
+    [InlineData("7409", true)]
+    [InlineData("6918", false)]
+    public async Task OmniModelProofSurvivesEntityAliasingAndWindowsReadingPriority(string nextModel, bool retainsReading)
+    {
+        var nativeId = PeripheralIdentity.FromKey("omni-native-endpoint");
+        var evidence = new PeripheralIdentityEvidence { EndpointPath = @"hid\omni-keyboard" };
+        var at = DateTimeOffset.UtcNow;
+        var original = Device(61) with { Id = nativeId, Source = "rog_omni_keyboard", ModelIdentity = "7409",
+            ModelIdentityConfirmed = true, Name = "ROG AZOTH EXTREME SPECIAL EDITION", NameQuality = 50, Identity = evidence, UpdatedAt = at };
+        var windowsSample = Device(72) with { Identity = evidence, Source = "windows-property", CanRead = false,
+            Name = "Old Windows model", NameQuality = 40, UpdatedAt = at.AddSeconds(1) };
+        var windows = new FakeProvider { DiscoveryResult = windowsSample };
+        var native = new FakeProvider { DiscoveryResult = original, Result = original };
+        await using var service = new PeripheralBatteryService([windows, native], null);
+        service.SetTaskbarDemand([Id]); service.Start();
+        await Until(() => native.ReadCalls == 1 && !service.Snapshot.Refreshing);
+        Assert.Equal("7409", Assert.Single(service.Snapshot.Devices).ModelIdentity);
+        Assert.Equal("windows-property", service.Snapshot.Devices[0].Source);
+        var unavailable = original with { Batteries = [], UpdatedAt = null, State = "unavailable", Stale = true,
+            ModelIdentity = nextModel, Name = nextModel == "6918" ? "ROG Omni keyboard" : original.Name,
+            NameQuality = nextModel == "6918" ? 10 : 50 };
+        native.Notify(unavailable);
+        var result = Assert.Single(service.Snapshot.Devices);
+        Assert.Equal(Id, result.Id); Assert.Equal(Id, service.Snapshot.Aliases[nativeId]);
+        Assert.Equal(nextModel, result.ModelIdentity); Assert.Equal(unavailable.Name, result.Name);
+        if (retainsReading) { Assert.Equal(72, Assert.Single(result.Batteries).Percentage); Assert.Equal(at.AddSeconds(1), result.UpdatedAt); }
+        else { Assert.Empty(result.Batteries); Assert.Null(result.UpdatedAt); }
+    }
+
+    [Fact]
+    public async Task LateOldModelReadCannotReplaceNewModelNotification()
+    {
+        var original = Device(61) with { Source = "rog_omni_keyboard", ModelIdentity = "6978", ModelIdentityConfirmed = true,
+            Name = "ROG AZOTH EXTREME", NameQuality = 50 };
+        var provider = new FakeProvider { DiscoveryResult = original, Result = original,
+            FinishRead = new(TaskCreationOptions.RunContinuationsAsynchronously) };
+        await using var service = new PeripheralBatteryService([provider], null);
+        service.SetTaskbarDemand([Id]); service.Start();
+        await provider.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        provider.Notify(original with { Batteries = [], UpdatedAt = null, ModelIdentity = "6918", Name = "ROG Omni keyboard",
+            NameQuality = 10, State = "unavailable", Stale = true });
+        provider.FinishRead.SetResult();
+        await Until(() => !service.Snapshot.Refreshing);
+        var result = Assert.Single(service.Snapshot.Devices);
+        Assert.Equal("6918", result.ModelIdentity); Assert.Equal("ROG Omni keyboard", result.Name);
+        Assert.Empty(result.Batteries); Assert.Null(result.UpdatedAt);
+    }
+
+    [Fact]
+    public async Task DiscoveryBatchCannotRestoreModelReplacedByNewerNotification()
+    {
+        var original = Device(61) with { Source = "rog_omni_keyboard", ModelIdentity = "6978", ModelIdentityConfirmed = true,
+            Name = "ROG AZOTH EXTREME", NameQuality = 50 };
+        var native = new FakeProvider { DiscoveryResult = original, Result = original };
+        var slow = new FakeProvider { Present = false };
+        await using var service = new PeripheralBatteryService([native, slow], null);
+        service.SetTaskbarDemand([Id]); service.Start();
+        await Until(() => native.ReadCalls == 1 && !service.Snapshot.Refreshing);
+        slow.FinishDiscovery = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        slow.DiscoveryEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        native.Notify();
+        await slow.DiscoveryEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        native.Notify(original with { Batteries = [], UpdatedAt = null, ModelIdentity = "6918", Name = "ROG Omni keyboard",
+            NameQuality = 10, State = "unavailable", Stale = true });
+        slow.FinishDiscovery.SetResult();
+        await Until(() => slow.DiscoveryCalls == 2 && !service.Snapshot.Refreshing);
+        var result = Assert.Single(service.Snapshot.Devices);
+        Assert.Equal("6918", result.ModelIdentity); Assert.Equal("ROG Omni keyboard", result.Name);
+        Assert.Empty(result.Batteries); Assert.Null(result.UpdatedAt);
+    }
+
+    [Fact]
+    public async Task RetiredEndpointCannotRemoveItsProvenActiveAlias()
+    {
+        var retired = PeripheralIdentity.FromKey("old-rogreceiver-endpoint");
+        var evidence = new PeripheralIdentityEvidence { EndpointPath = @"hid\proven-endpoint" };
+        var real = Device(61) with { Identity = evidence };
+        var obsolete = real with { Id = retired, Source = "rog-report3", CanRead = false, Batteries = [] };
+        var provider = new FakeProvider { DiscoveryResults = [obsolete, real], Result = real };
+        await using var service = new PeripheralBatteryService([provider], null);
+        service.SetTaskbarDemand([Id]); service.Start();
+        await Until(() => provider.ReadCalls == 1 && !service.Snapshot.Refreshing);
+        Assert.Equal(Id, service.Snapshot.Aliases[retired]);
+        provider.DiscoveryResults = [real]; provider.RetiredDeviceIds = new HashSet<string> { retired }; provider.Notify();
+        await Until(() => provider.DiscoveryCalls == 2 && !service.Snapshot.Refreshing);
+        var result = Assert.Single(service.Snapshot.Devices);
+        Assert.Equal(Id, result.Id); Assert.Equal(61, Assert.Single(result.Batteries).Percentage);
+        Assert.Equal(Id, service.Snapshot.Aliases[retired]); Assert.True(result.CanRead);
+    }
+
+    [Fact]
+    public async Task ConfirmedOmniPairWithUnavailableBatteryKeepsNormalPollingForRecovery()
+    {
+        var clock = new ManualClock();
+        var metadata = Device() with { Source = "rog_omni_keyboard", State = "unavailable", ModelIdentity = "7409", ModelIdentityConfirmed = true };
+        var provider = new FakeProvider { DiscoveryResult = metadata, Result = metadata };
+        await using var service = new PeripheralBatteryService([provider], null, clock);
+        var settings = new PeripheralBatterySettings();
+        service.Configure(settings, true, true, true); service.Start();
+        await Until(() => provider.ReadCalls == 1 && !service.Snapshot.Refreshing);
+        for (var count = 2; count <= 6; count++)
+        {
+            clock.Utc += TimeSpan.FromSeconds(61);
+            service.Configure(settings, true, true, true);
+            await Until(() => provider.ReadCalls == count && !service.Snapshot.Refreshing);
+            Assert.Empty(Assert.Single(service.Snapshot.Devices).Batteries);
+        }
+    }
+
     [Fact]
     public void SettingsMigrationAppendsRightCardAndKeepsExistingPositionsAndExplicitChoices()
     {
@@ -265,8 +461,10 @@ public sealed class PeripheralBatteryServiceTests
             QuickCardColumns = new() { ["media"] = 0, ["traffic"] = 0, ["weather"] = 1, ["device"] = 1 },
             PeripheralBattery = new() { Mode = "detailed", CardVisibility = new() { [Id] = false }, Order = [Id] } };
         settings.NormalizeQuickCards();
-        Assert.Equal(new[] { "media", "traffic", "weather", "device", "peripheralBattery" }, settings.QuickCardOrder);
+        Assert.Equal(new[] { "media", "traffic", "weather", "device", "peripheralBattery", "aiUsage" }, settings.QuickCardOrder);
         Assert.Equal(1, settings.QuickCardColumns["peripheralBattery"]);
+        Assert.Equal(1, settings.QuickCardColumns["aiUsage"]);
+        Assert.True(settings.QuickCardEnabled["aiUsage"]);
         var clone = settings.Clone(); clone.PeripheralBattery.CardVisibility[Id] = true;
         Assert.False(settings.PeripheralBattery.CardVisibility[Id]);
         using var adapter = MediaSettingsServiceTestFactory.Create(settings, saveSettings: _ => true, getDisplays: () => [],
@@ -303,6 +501,29 @@ public sealed class PeripheralBatteryServiceTests
     [InlineData("receiver|unit=12345678|model=001122334455|extra=1", false)]
     public void HidppUnitsRequireTheRequestedReceiverAndARealUnitModelIdentity(string identity, bool accepted) =>
         Assert.Equal(accepted, NativePeripheralBatteryProvider.IsHidppChild("receiver", identity));
+
+    [Theory]
+    [InlineData("receiver|unit=pid=00e3;serial=4142434431323334", true)]
+    [InlineData("other|unit=pid=00e3;serial=4142434431323334", false)]
+    [InlineData("receiver|unit=pid=00e2;serial=4142434431323334", false)]
+    [InlineData("receiver|unit=pid=00e3;serial=414243", false)]
+    [InlineData("receiver|unit=pid=00e3;serial=41424344ff", false)]
+    [InlineData("receiver|unit=pid=00e3;serial=30303030", false)]
+    [InlineData("receiver|unit=pid=00e3;serial=554e4b574e313233", false)]
+    [InlineData("receiver|unit=pid=00e3;serial=4142434431323334|extra=1", false)]
+    public void DockChildRequiresTheExactReceiverSupportedModelAndRealSerial(string identity, bool accepted) =>
+        Assert.Equal(accepted, NativePeripheralBatteryProvider.IsRazerDockChild("receiver", identity));
+
+    [Theory]
+    [InlineData("hid:v1|serial=41424344|vid=0b05|pid=1ace|mi=2|usage=ff01:0001|channel=rog-report3", true)]
+    [InlineData("hid:v1|container={533529bb-8f25-5ff3-8159-744243565b01}|vid=0b05|pid=1ace|mi=2|usage=ff01:0001|channel=rog-report3", true)]
+    [InlineData("hid:v1|serial=41424344|vid=0b05|pid=1ad0|mi=2|usage=ff01:0001|channel=rog-report3", false)]
+    [InlineData("hid:v1|serial=41424344|vid=0b05|pid=1a85|mi=2|usage=ff01:0001|channel=rog-report3", false)]
+    [InlineData("hid:v1|serial=41424344|vid=0b05|pid=1ace|mi=2|usage=ff00:0001|channel=rog_omni_keyboard", false)]
+    [InlineData("hid:v1|serial=41424344|vid=0b05|pid=1ace|mi=2|usage=ff01:0001|channel=rog-report3|unit=1", false)]
+    [InlineData("ROG receiver", false)]
+    public void RetirementRequiresAnExactLegacyOmniEndpointIdentity(string identity, bool accepted) =>
+        Assert.Equal(accepted, NativePeripheralBatteryProvider.IsRetiredRogReceiverIdentity(identity));
 
     [Theory]
     [InlineData(false)]
@@ -756,8 +977,9 @@ public sealed class PeripheralBatteryServiceTests
         while (!ready()) await Task.Delay(10, timeout.Token);
     }
 
-    private sealed class FakeProvider : IPeripheralBatteryProvider, IPeripheralBatteryNotifications
+    private sealed class FakeProvider : IPeripheralBatteryProvider, IPeripheralBatteryNotifications, IPeripheralBatteryRetirements
     {
+        public IReadOnlySet<string> RetiredDeviceIds { get; set; } = new HashSet<string>();
         public TaskCompletionSource? FinishRead;
         public TaskCompletionSource? FinishDiscovery;
         public TaskCompletionSource DiscoveryEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);

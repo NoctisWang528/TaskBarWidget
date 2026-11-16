@@ -62,6 +62,7 @@ namespace Cards
         constexpr UINT WM_CARD_TASK = WM_APP + 0x211;
         constexpr UINT_PTR IdleTimer = 0xCD03;
         constexpr UINT_PTR WarmupTimer = 0xCD04;
+        constexpr UINT_PTR AiUsageTimer = 0xCD05;
         constexpr UINT IdleMilliseconds = 10 * 60 * 1000;
         constexpr UINT WarmupMilliseconds = 250;
 
@@ -425,6 +426,7 @@ namespace Cards
         client.Request(L"getState", "{\"artworkDelta\":true}", L"state");
         client.Request(L"getUpdateState", {}, L"update");
         client.Request(L"getPeripheralBatteries", {}, L"peripheral");
+        if (config.IsEnabled(Kind::AiUsage)) client.Request(L"getAiUsage", {}, L"aiUsage");
         client.Request(L"subscribeCardLyrics", "{\"visible\":true,\"session\":1}", L"lyrics");
     }
 
@@ -444,10 +446,11 @@ namespace Cards
         environment.material = previewMica ? previewMaterial : config.material;
         if (previewMica) environment.mica.vivid = previewVivid;
         environment.fontFamily = config.font.empty() ? L"Microsoft YaHei UI" : config.font;
-        for (Kind kind : { Kind::Weather, Kind::Traffic, Kind::Device, Kind::Media, Kind::Update, Kind::PeripheralBattery })
+        for (Kind kind : { Kind::Weather, Kind::Traffic, Kind::Device, Kind::Media, Kind::Update, Kind::PeripheralBattery, Kind::AiUsage })
         {
             const bool enabled = kind == Kind::Update ? snapshot.update.Visible() : config.IsEnabled(kind) &&
-                (kind != Kind::PeripheralBattery || snapshot.peripheralBattery.Visible());
+                (kind != Kind::PeripheralBattery || snapshot.peripheralBattery.Visible()) &&
+                (kind != Kind::AiUsage || snapshot.aiUsage.Visible());
             if (!enabled) { cards.erase(kind); continue; }
             if (cards.find(kind) != cards.end()) continue;
             auto card = std::make_unique<CardWindow>(kind, *this);
@@ -1124,6 +1127,7 @@ namespace Cards
         const bool updateVisible = snapshot.update.Visible();
         auto visibleConfig = config;
         visibleConfig.enabled[L"peripheralBattery"] = config.IsEnabled(Kind::PeripheralBattery) && snapshot.peripheralBattery.Visible();
+        visibleConfig.enabled[L"aiUsage"] = config.IsEnabled(Kind::AiUsage) && snapshot.aiUsage.Visible();
         const auto placement = Layout::PlaceGroup(visibleConfig, heights, anchor, owner, updateVisible,
             Paint::MeasureHeight(Kind::Update, snapshot, environment, Layout::UpdateCardWidth));
         if (!placement.valid)
@@ -1227,6 +1231,8 @@ namespace Cards
         if (!window) return;
         if (visible || resident) KillTimer(window, IdleTimer);
         else SetTimer(window, IdleTimer, IdleMilliseconds, nullptr);
+        if (visible && config.IsEnabled(Kind::AiUsage) && snapshot.aiUsage.Visible()) SetTimer(window, AiUsageTimer, 60000, nullptr);
+        else KillTimer(window, AiUsageTimer);
     }
 
     void CardHost::Impl::CancelWarmup()
@@ -1337,6 +1343,7 @@ namespace Cards
         if (!diagnosticOffscreen)
             if (auto* card = Card(Kind::Media); card && card->Visible()) SetForegroundWindow(card->Handle());
         InstallHooks();
+        UpdateIdleTimer();
         RequestInitialState();
     }
 
@@ -1360,6 +1367,8 @@ namespace Cards
 
     void CardHost::Impl::RefreshSnapshot(const Protocol::Changes& changes)
     {
+        const bool aiLayout = changes.aiUsage &&
+            ((Card(Kind::AiUsage) != nullptr) != (config.IsEnabled(Kind::AiUsage) && snapshot.aiUsage.Visible()));
         const auto* peripheral = Card(Kind::PeripheralBattery);
         const bool peripheralLayout = changes.peripheralBattery &&
             ((peripheral != nullptr) != (config.IsEnabled(Kind::PeripheralBattery) && snapshot.peripheralBattery.Visible()) ||
@@ -1371,7 +1380,8 @@ namespace Cards
                 (kind == Kind::Media && (changes.media || changes.lyrics)) ||
                 (kind == Kind::Device && changes.audio) || (kind == Kind::Traffic && changes.traffic) ||
                 (kind == Kind::Weather && changes.weather) || (kind == Kind::Update && changes.update) ||
-                (kind == Kind::PeripheralBattery && changes.peripheralBattery);
+                (kind == Kind::PeripheralBattery && changes.peripheralBattery) ||
+                (kind == Kind::AiUsage && changes.aiUsage);
             if (!changed) continue;
             card->SetSnapshot(snapshot);
         }
@@ -1384,13 +1394,14 @@ namespace Cards
             UpdateEnvironment(true);
         }
         else if (changes.theme) UpdateEnvironment(true);
-        if (visible && (changes.config || changes.update || peripheralLayout))
+        if (changes.aiUsage) UpdateIdleTimer();
+        if (visible && (changes.config || changes.update || peripheralLayout || aiLayout))
         {
             if (!device) { std::wstring error; device = graphics.CreateGraphicsDevice(compositor, error); }
             if (device) CreateCards();
         }
-        if (visible && (changes.config || changes.update || changes.weather || changes.audio || peripheralLayout))
-            PlaceGroup(false, true, peripheralLayout || !groupReflowFrom.empty());
+        if (visible && (changes.config || changes.update || changes.weather || changes.audio || peripheralLayout || aiLayout))
+            PlaceGroup(false, true, peripheralLayout || aiLayout || !groupReflowFrom.empty());
         // A ready update must never open the group by itself: the update card only
         // joins the layout while the user already has cards open.
         if (changes.update && !snapshot.update.Visible() && visible)
@@ -1428,6 +1439,7 @@ namespace Cards
                     accumulated.weather |= changes.weather;
                     accumulated.update |= changes.update;
                     accumulated.peripheralBattery |= changes.peripheralBattery;
+                    accumulated.aiUsage |= changes.aiUsage;
                     accumulated.status |= changes.status;
                 }
             }
@@ -1479,6 +1491,11 @@ namespace Cards
                     if (Protocol::ApplyPeripheralBatteryReply(snapshot.peripheralBattery, reply.payloadJson))
                     { accumulated.peripheralBattery = true; changed = true; }
                 }
+                else if (reply.requestId.rfind(L"aiUsage", 0) == 0)
+                {
+                    if (Protocol::ApplyAiUsageReply(snapshot.aiUsage, reply.payloadJson))
+                    { accumulated.aiUsage = true; changed = true; }
+                }
                 else if (reply.requestId.rfind(L"media", 0) == 0)
                 {
                     if (Protocol::ApplyMediaReply(snapshot.media, reply.payloadJson))
@@ -1502,6 +1519,7 @@ namespace Cards
                         accumulated.weather |= stateChanges.weather;
                         accumulated.update |= stateChanges.update;
                         accumulated.peripheralBattery |= stateChanges.peripheralBattery;
+                        accumulated.aiUsage |= stateChanges.aiUsage;
                         accumulated.status |= stateChanges.status;
                         changed = true;
                     }
@@ -1851,6 +1869,20 @@ namespace Cards
             payload = L"{\"mode\":" + quote(action.substr(15)) + L"}";
             kind = L"peripheral";
         }
+        else if (action == L"aiUsageProvider:previous" || action == L"aiUsageProvider:next")
+        {
+            const auto selected = snapshot.aiUsage.AdjacentProviderId(action == L"aiUsageProvider:previous" ? -1 : 1);
+            if (selected.empty() || !IsAiProviderId(selected)) return;
+            request = L"setAiUsagePreferences";
+            payload = L"{\"providerId\":" + quote(selected) + L"}";
+            kind = L"aiUsage";
+        }
+        else if (action == L"refreshAiUsage")
+        {
+            request = L"getAiUsage";
+            payload = L"{\"force\":true}";
+            kind = L"aiUsage";
+        }
         else if (action == L"refreshWeather")
         {
             request = L"weatherCommand";
@@ -1860,6 +1892,12 @@ namespace Cards
         else if (action == L"openSettings")
         {
             OnOpenSettings();
+            return;
+        }
+        else if (action == L"openAiUsageSettings")
+        {
+            HideAll(L"ai-usage-settings", false);
+            client.Request(L"openSettings", "{\"page\":\"aiUsage\"}");
             return;
         }
         else if (action == L"openWeatherSettings")
@@ -2186,6 +2224,12 @@ namespace Cards
                     self->OnIdle();
                 }
                 else if (keys == WarmupTimer) self->WarmHiddenCards();
+                else if (keys == AiUsageTimer)
+                {
+                    if (self->visible && self->config.IsEnabled(Kind::AiUsage) && self->snapshot.aiUsage.Visible())
+                        self->client.Request(L"getAiUsage", {}, L"aiUsage");
+                    else KillTimer(window, AiUsageTimer);
+                }
                 return 0;
             default:
                 return DefWindowProcW(window, message, keys, position);

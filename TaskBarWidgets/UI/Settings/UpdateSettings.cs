@@ -17,7 +17,7 @@ public sealed partial class SettingsWindow
     private bool _bindingUpdates, _updateCommandBusy;
     internal event Action<JsonElement>? UpdateStateReceived;
     internal event Action? InstallUpdateRequested;
-    public bool HasPendingChanges => _native.Pending.Count > 0 || _media.Pending.Count > 0 || _busy || HasWeatherDraft() ||
+    public bool HasPendingChanges => _native.Pending.Count > 0 || _media.Pending.Count > 0 || _busy || _aiUsageMutating || HasWeatherDraft() ||
         _weatherPage is { Committing: true } or { Searching: true } or { LoadingStatus: true };
     private bool HasWeatherDraft() => _weatherPage is { } weather &&
         (weather.Provider.SelectedIndex != weather.SavedProvider || weather.SelectedCity is not null || WeatherCredentialsPending(weather));
@@ -110,7 +110,7 @@ public sealed partial class SettingsWindow
         return await new ContentDialog {
             XamlRoot = _root.XamlRoot, RequestedTheme = _root.RequestedTheme,
             Title = pending ? "请先处理设置更改" : "安装更新？",
-            Content = pending ? "有尚未应用的设置或天气操作。请先在设置中应用、完成或自行放弃更改，再安装更新。" :
+            Content = pending ? "有尚未应用的设置或正在进行的天气、AI 用量操作。请先在设置中应用、完成或自行放弃更改，再安装更新。" :
                 $"将安装版本 {version}。应用会正常退出、备份配置与历史并重新启动。请等待更新完成。",
             PrimaryButtonText = pending ? "" : "安装并重启", CloseButtonText = pending ? "返回设置" : "取消", DefaultButton = ContentDialogButton.Close
         }.ShowAsync();

@@ -5,7 +5,7 @@ namespace TaskBarWidgets.Media.Peripherals;
 
 // The two helpers share an ownership boundary. A failed/retiring helper must
 // release its handles before an interface is assigned to another implementation.
-internal sealed class HidPeripheralBatteryProvider(string applicationRoot) : IPeripheralBatteryProvider, IPeripheralBatteryIdle
+internal sealed class HidPeripheralBatteryProvider(string applicationRoot) : IPeripheralBatteryProvider, IPeripheralBatteryIdle, IPeripheralBatteryRetirements
 {
     private readonly NativePeripheralBatteryProvider _vigil = new(applicationRoot, vigilWatt: true);
     private readonly NativePeripheralBatteryProvider _native = new(applicationRoot);
@@ -16,6 +16,7 @@ internal sealed class HidPeripheralBatteryProvider(string applicationRoot) : IPe
     internal string[] OwnedPaths => Volatile.Read(ref _ownedPaths);
     private JsonElement[] _diagnostics = [];
     public event Action? DevicesChanged;
+    public IReadOnlySet<string> RetiredDeviceIds => _native.RetiredDeviceIds;
 
     internal JsonElement[] Diagnostics => Volatile.Read(ref _diagnostics);
     internal void Configure(PeripheralBatterySettings settings) => _native.Configure(settings);

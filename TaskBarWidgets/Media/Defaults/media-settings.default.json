@@ -14,6 +14,13 @@
   "EnableSpotify": true,
   "EnableAppleMusic": true,
   "EnableBrowser": true,
+  "AiUsageShowApi": false,
+  "AiUsageEnabledServices": {
+    "openai": false,
+    "deepseek": false,
+    "gemini": false,
+    "claude": false
+  },
   "PlayerSources": {
     "QQMusic": {
       "LyricOffsetMilliseconds": 0,
@@ -155,21 +162,24 @@
     "device",
     "media",
     "weather",
-    "peripheralBattery"
+    "peripheralBattery",
+    "aiUsage"
   ],
   "QuickCardColumns": {
     "traffic": 0,
     "device": 0,
     "media": 0,
     "weather": 1,
-    "peripheralBattery": 1
+    "peripheralBattery": 1,
+    "aiUsage": 1
   },
   "QuickCardEnabled": {
     "weather": true,
     "traffic": true,
     "device": true,
     "media": true,
-    "peripheralBattery": true
+    "peripheralBattery": true,
+    "aiUsage": true
   },
   "PeripheralBattery": {
     "Mode": "compact",

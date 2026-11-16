@@ -128,7 +128,10 @@ namespace
         {
             if (!ok) throw std::runtime_error(std::string("Weather preview layout: ") + message);
         };
-        require(height >= 350 && height <= 390, "card height outside the stacking budget");
+        // Fixed fixtures: empty, alert+error, one optional footer row, or no footer.
+        const float expectedHeight = variant == 7 ? 152.f : variant == 6 ? 370.f :
+            variant == 0 || variant == 1 || variant == 5 || variant == 10 ? 356.f : 340.f;
+        require(height == expectedHeight, "weather natural height differs from its fixture's content rows");
         Cards::Snapshot snapshot; snapshot.weather = weather;
         snapshot.weather.forecastView = !weather.forecastView;
         snapshot.weather.forecastOffset = 999;
@@ -233,9 +236,10 @@ void WriteTrafficPreviews(Cards::Graphics& graphics, const wchar_t* directory)
     winrt::check_hresult(graphics.Wic()->CreateImageEncoder(device.Get(), imageEncoder.GetAddressOf()));
     std::map<int, RECT> weatherControls;
     for (bool dark : {true, false})
-    for (int visual = 0; visual < 3; ++visual)
-    for (int variant = 0; variant < (visual == 2 ? 14 : 3); ++variant)
+    for (int visual = 0; visual < 4; ++visual)
+    for (int variant = 0; variant < (visual == 2 ? 14 : visual == 3 ? 10 : 3); ++variant)
     {
+        const bool ai = visual == 3;
         const bool media = visual == 1;
         const bool weather = visual == 2;
         auto painted = snapshot;
@@ -245,7 +249,7 @@ void WriteTrafficPreviews(Cards::Graphics& graphics, const wchar_t* directory)
         environment.graphics = &graphics; environment.dark = dark;
         environment.highContrast = weather && variant == 12;
         constexpr UINT width = 480;
-        const float heightDip = media ? Cards::Layout::HeightMedia : weather ?
+        const float heightDip = ai ? 400.0f : media ? Cards::Layout::HeightMedia : weather ?
             Cards::Paint::WeatherHeight(painted, environment, 384) : Cards::Layout::HeightTraffic;
         const UINT height = static_cast<UINT>(std::ceil(heightDip * 1.25f));
         constexpr float dpi = 96.0f;
@@ -262,7 +266,80 @@ void WriteTrafficPreviews(Cards::Graphics& graphics, const wchar_t* directory)
             environment.highContrast ? Cards::Draw::Colors(environment).panel :
                 Cards::ParseColor(dark ? L"#30262B" : L"#F3EFF1", {}));
         Cards::Layout::Table regions;
-        if (media)
+        if (ai)
+        {
+            auto& usage = painted.aiUsage;
+            usage.status = variant == 1 ? L"partial" : variant == 2 ? L"error" : L"ready";
+            usage.error = variant == 1 ? L"部分额度未返回，Token 记录来自官方统计" : variant == 2 ? L"未检测到 Codex，请登录后刷新" : L"";
+            usage.updatedAt = L"2026-11-14T18:42:00-05:00";
+            usage.providerId = L"codex"; usage.providerName = L"ChatGPT";
+            usage.enabledServices = {{L"openai", true}, {L"deepseek", true}, {L"gemini", true}, {L"claude", true}};
+            usage.sourceLabel = variant > 0 && variant < 3 ? L"未连接" : L"官方数据";
+            usage.providers = {{L"codex",L"ChatGPT",L"subscription",L"openai"},
+                {L"openai-api",L"ChatGPT API",L"api",L"openai"},
+                {L"deepseek-web",L"DeepSeek",L"subscription",L"deepseek"},
+                {L"deepseek-api",L"DeepSeek API",L"api",L"deepseek"},
+                {L"gemini-web",L"Gemini",L"subscription",L"gemini"},
+                {L"gemini-api",L"Gemini API",L"api",L"gemini"},
+                {L"claude-web",L"Claude",L"subscription",L"claude"},
+                {L"claude-api",L"Claude API",L"api",L"claude"}};
+            if (variant != 2)
+            {
+                usage.lifetimeTokens = 2976664580LL;
+                if (!variant) usage.quotas.push_back({L"weekly", L"每周额度", 19, 10080, 1800000000});
+                SYSTEMTIME now{}; GetLocalTime(&now);
+                const std::chrono::sys_days today = std::chrono::year{now.wYear}/std::chrono::month{now.wMonth}/std::chrono::day{now.wDay};
+                for (int i = 0; i < 84; ++i)
+                {
+                    if (i % 7 == 2) continue;
+                    const std::chrono::year_month_day date{today - std::chrono::days{i}};
+                    wchar_t key[16]{}; swprintf_s(key, L"%04d-%02u-%02u", int(date.year()), unsigned(date.month()), unsigned(date.day()));
+                    usage.days[key] = i % 11 == 0 ? 0 : 1000000LL * (i % 23 + 1);
+                }
+            }
+            if (variant == 3)
+            {
+                usage.providerId = L"deepseek-api"; usage.providerName = L"DeepSeek API"; usage.showApi = true;
+                usage.balances = {{L"CNY",L"0.00",L"可用余额"},{L"USD",L"12.3456789",L"赠送余额"}};
+                usage.quotaNote = L"API 无订阅额度数据";
+            }
+            if (variant == 4)
+            {
+                usage.providerId = L"claude-web"; usage.providerName = L"Claude";
+                usage.activityUnit = L"requests"; usage.sourceLabel = L"手动记录";
+                usage.quotaNote = L"未提供额度 · 查看详情";
+                usage.historyNote = L"仅包含手动记录的请求次数";
+                for (auto& [date, count] : usage.days) count /= 1000000;
+                usage.lifetimeTokens = 502;
+            }
+            if (variant == 5)
+            {
+                usage.providerId = L"gemini-api"; usage.providerName = L"Gemini API"; usage.showApi = true; usage.activityUtc = true;
+                usage.days.clear(); usage.lifetimeTokens.reset();
+                usage.quotaNote = L"官方暂未提供可用额度接口";
+                usage.historyNote = L"尚未连接 · 历史未知不代表零";
+            }
+            if (variant == 6)
+            {
+                usage.providerId = L"gemini-api"; usage.providerName = L"Gemini API"; usage.showApi = false;
+                usage.balances = {{L"USD",L"88.00",L"隐藏金额不可见"}};
+            }
+            if (variant == 7 || variant == 9)
+                usage.quotas = {{L"primary", L"5 小时额度", 10, 300, 1800000000},
+                    {L"weekly", L"每周额度", 19, 10080, 1800000000}};
+            if (variant == 8)
+            {
+                for (auto& [date, tokens] : usage.days) tokens = 0;
+                usage.lifetimeTokens = 0;
+                usage.days[L"9999-12-31"] = 99999;
+            }
+            Cards::Paint::Interaction interaction;
+            interaction.glass = variant == 9;
+            interaction.dark = dark;
+            if (interaction.glass) environment.material.kind = Cards::MaterialKind::LiquidGlass;
+            Cards::Paint::AiUsage(context, painted, environment, regions, 384, heightDip, interaction);
+        }
+        else if (media)
         {
             painted.media.title = variant ? L"示例歌曲" : L"没有媒体";
             painted.media.artist = variant ? L"示例艺术家" : L"";
@@ -294,7 +371,7 @@ void WriteTrafficPreviews(Cards::Graphics& graphics, const wchar_t* directory)
             L"weather-forecast-page2", L"weather-hourly-page4", L"weather-no-hourly", L"weather-stale",
             L"weather-empty", L"weather-invalid-data", L"weather-extreme-temperatures", L"weather-updating",
             L"weather-hourly-partial-page", L"weather-high-contrast", L"weather-invalid-times" };
-        const auto path = folder / (std::wstring(media ? (variant == 2 ? L"media-hover" : variant == 1 ? L"media" : L"media-empty") :
+        const auto path = folder / (std::wstring(ai ? (variant == 9 ? L"ai-usage-glass" : variant == 8 ? L"ai-usage-known-zero" : variant == 7 ? L"ai-usage-two-quotas" : variant == 6 ? L"ai-usage-api-hidden" : variant == 5 ? L"ai-usage-api-unknown" : variant == 4 ? L"ai-usage-requests" : variant == 3 ? L"ai-usage-balances" : variant == 2 ? L"ai-usage-error" : variant == 1 ? L"ai-usage-partial" : L"ai-usage") : media ? (variant == 2 ? L"media-hover" : variant == 1 ? L"media" : L"media-empty") :
             weather ? weatherNames[variant] :
             variant == 1 ? L"traffic-hover" : variant == 2 ? L"traffic-loading" : L"traffic") +
             (dark ? L"-dark.png" : L"-light.png"));

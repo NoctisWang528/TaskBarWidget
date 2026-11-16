@@ -295,7 +295,8 @@ bool Excluded(const std::set<std::string>& excluded, const Candidate& c)
     }
     return false;
 }
-std::vector<Channel> Discover(yyjson_val* requestId, const std::set<std::string>& excluded, const std::vector<Channel>& previous)
+std::vector<Channel> Discover(yyjson_val* requestId, const std::set<std::string>& excluded, const std::vector<Channel>& previous,
+    std::set<std::string>* retired = nullptr)
 {
     Event(requestId, "progress", "pnp:hid-enumeration");
     GUID hidGuid{}; HidD_GetHidGuid(&hidGuid);
@@ -366,6 +367,16 @@ std::vector<Channel> Discover(yyjson_val* requestId, const std::set<std::string>
     for (auto& ch : channels)
     {
         if (ch.c.presentUnreadable) { candidates.push_back(ch.c); continue; }
+        // This shared receiver endpoint used to be advertised as a mouse without
+        // a paired mouse identity. Retire only its exact, re-enumerated old key.
+        if (retired && ch.c.vid == 0x0b05 && ch.c.pid == 0x1ace && ch.c.mi == 2 &&
+            ch.c.page == 0xff01 && ch.c.usage == 1 && ch.c.input == 64 && ch.c.output == 64 &&
+            ch.c.path.find("mi_02&col03") != std::string::npos &&
+            ch.c.layout.Has(Report::Input, 3, 64) && ch.c.layout.Has(Report::Output, 3, 64))
+        {
+            auto legacy = ch.c; legacy.protocol = Protocol::Rog; legacy.adapter.clear(); legacy.unit.clear();
+            retired->insert(CanonicalIdentity(legacy));
+        }
         bool mouse = ch.c.pointer, keyboard = ch.c.keyboard;
         for (const auto& peer : channels) if (peer.c.physical == ch.c.physical)
         { mouse |= peer.c.pointer; keyboard |= peer.c.keyboard; }
@@ -390,6 +401,14 @@ std::vector<Channel> Discover(yyjson_val* requestId, const std::set<std::string>
     channels.erase(std::remove_if(channels.begin(), channels.end(), [&](const auto& ch) {
         return ch.c.protocol == Protocol::None || Excluded(excluded, ch.c);
     }), channels.end());
+    for (auto& channel : channels) if (channel.c.adapter == "rog_omni_keyboard")
+    {
+        const auto old = std::find_if(previous.begin(), previous.end(), [&](const auto& cached) {
+            return cached.c.identity == channel.c.identity && cached.c.adapter == channel.c.adapter;
+        });
+        if (old != previous.end() && !old->c.name.empty() && old->c.name != "ROG Omni keyboard")
+            channel.c.name = old->c.name;
+    }
     return channels;
 }
 bool Revalidate(const Channel& channel)
@@ -471,14 +490,17 @@ std::optional<Reading> Exchange(hid_device* hid, const Candidate& c, unsigned fi
     }
     ULONGLONG end = GetTickCount64() + q.waitMs;
     unsigned featureAttempts = 0;
+    const bool fastFeature = c.protocol == Protocol::Razer && c.vid == 0x1532 && c.pid == 0x00e6 && !c.input;
     do
     {
         Bytes bytes(std::max(q.replyLength, 65u), 0);
         int count = 0;
         if (q.transport == Transport::Feature)
         {
-            if (++featureAttempts > 4) break;
-            Sleep(c.protocol == Protocol::Razer ? 100 : 30);
+            if (++featureAttempts > (fastFeature ? 40u : 4u)) break;
+            if (fastFeature && featureAttempts == 21 &&
+                hid_send_feature_report(hid, q.packet.data(), q.packet.size()) != int(q.packet.size())) return {};
+            Sleep(fastFeature ? 5 : c.protocol == Protocol::Razer ? 100 : 30);
             bytes.resize(q.replyLength); bytes[0] = q.packet[0];
             count = hid_get_feature_report(hid, bytes.data(), bytes.size());
         }
@@ -558,6 +580,43 @@ public:
         return results;
     }
 };
+std::vector<std::pair<Candidate, std::optional<Reading>>> ReadRazerDock(
+    hid_device* handle, const Candidate& receiver, bool readBattery, const std::function<void()>& progress)
+{
+    const ULONGLONG deadline = GetTickCount64() + 12000;
+    // A local high-resolution wait avoids missing the short control-response
+    // window while another installed application streams RGB updates. It does
+    // not change the system timer resolution or the device's lighting settings.
+    Handle pollTimer(CreateWaitableTimerExW(nullptr, nullptr, 0x00000002, TIMER_ALL_ACCESS));
+    const auto pause = [&] {
+        LARGE_INTEGER due{}; due.QuadPart = -20000;
+        if (pollTimer.value && SetWaitableTimer(pollTimer.value, &due, 0, nullptr, nullptr, FALSE))
+            WaitForSingleObject(pollTimer.value, 25);
+        else Sleep(1);
+    };
+    return ReadRazerDockUnits(receiver, [&](unsigned transaction, unsigned commandClass, unsigned command, unsigned size) {
+        Bytes request(91); request[2] = static_cast<unsigned char>(transaction);
+        request[6] = static_cast<unsigned char>(size); request[7] = static_cast<unsigned char>(commandClass);
+        request[8] = static_cast<unsigned char>(command);
+        for (unsigned i = 3; i < 89; ++i) request[89] ^= request[i];
+        for (unsigned attempt = 0; attempt < 3 && GetTickCount64() < deadline; ++attempt)
+        {
+            if (progress) progress();
+            if (hid_send_feature_report(handle, request.data(), request.size()) != 91) return Bytes{};
+            const ULONGLONG end = std::min(deadline, GetTickCount64() + 200);
+            while (GetTickCount64() < end)
+            {
+                Bytes reply(91);
+                if (hid_get_feature_report(handle, reply.data(), reply.size()) != 91) return Bytes{};
+                // The protocol validator checks the known response fields and
+                // their checksum; RGB traffic can reuse the unused tail bytes.
+                if (RazerDockPayload(reply, command)) return reply;
+                pause();
+            }
+        }
+        return Bytes{};
+    }, readBattery);
+}
 std::optional<Reading> Read(Channel& channel, yyjson_val* id, std::set<std::string>& initialized, std::string& failure)
 {
     auto& c = channel.c;
@@ -595,7 +654,9 @@ std::optional<Reading> Read(Channel& channel, yyjson_val* id, std::set<std::stri
         send = BeginInitialization(initialized, c.identity, [&] { Event(id, "initialized", c.identity); });
     }
     auto query = BatteryQuery(c);
-    if (query.transport != Transport::Passive && !Drain(hid.value, c.input)) return fail("input-drain-failed");
+    // Feature reports use a control transfer and need no interrupt-input queue.
+    // Feature-only collections can reject ReadFile even though GetFeature works.
+    if (RequiresInputDrain(query.transport) && !Drain(hid.value, c.input)) return fail("input-drain-failed");
     std::optional<Reading> result;
     for (unsigned round = 0; round < 2; ++round)
     {
@@ -622,7 +683,8 @@ void Device(Response& response, yyjson_mut_val* devices, const Candidate& c, con
     const bool genericName = c.name.empty() || c.name == "Razer mouse" || c.name == "HID peripheral";
     const auto name = genericName && !c.usbProduct.empty() ? c.usbProduct : c.name.empty() ? "HID peripheral" : c.name;
     response.String(item, "name", name);
-    yyjson_mut_obj_add_int(d, item, "nameQuality", c.protocol == Protocol::Hidpp && !c.unit.empty() ? 50 : genericName ? (c.usbProduct.empty() ? 0 : 40) : 30);
+    yyjson_mut_obj_add_int(d, item, "nameQuality", (c.protocol == Protocol::Hidpp || c.protocol == Protocol::RazerDock) && !c.unit.empty() ? 50 :
+        c.adapter == "rog_omni_keyboard" ? (name == "ROG Omni keyboard" ? 10 : 50) : genericName ? (c.usbProduct.empty() ? 0 : 40) : 30);
     yyjson_mut_obj_add_int(d, item, "kindQuality", c.protocol == Protocol::Standard ? 10 : 40);
     auto evidence = yyjson_mut_obj(d); yyjson_mut_obj_add_val(d, item, "identityEvidence", evidence);
     response.String(evidence, "endpointPath", c.path);
@@ -631,8 +693,8 @@ void Device(Response& response, yyjson_mut_val* devices, const Candidate& c, con
     // Receiver identities never become target serials. HID++ has a separately
     // queried hardware unit/model identity, stable across receiver slots.
     response.String(evidence, "unitId", c.unit);
-    response.String(evidence, "unitScope", c.unit.empty() ? "" : "logitech:hidpp-unit-model");
-    const bool targetContainer = c.protocol != Protocol::Hidpp && c.adapter != "rog_omni_keyboard";
+    response.String(evidence, "unitScope", c.unit.empty() ? "" : c.protocol == Protocol::RazerDock ? "razer:paired-pid-serial" : "logitech:hidpp-unit-model");
+    const bool targetContainer = c.protocol != Protocol::Hidpp && c.protocol != Protocol::RazerDock && c.adapter != "rog_omni_keyboard";
     yyjson_mut_obj_add_bool(d, evidence, "containerIsDevice", targetContainer);
     const bool targetSerial = targetContainer && c.unit.empty() && !c.uniqueSerial.empty();
     response.String(evidence, "uniqueSerial", targetSerial ? c.uniqueSerial : "");
@@ -643,7 +705,7 @@ void Device(Response& response, yyjson_mut_val* devices, const Candidate& c, con
         auto aliases = yyjson_mut_arr(d); yyjson_mut_obj_add_val(d, item, "legacyIdentities", aliases);
         for (const auto& alias : legacy) yyjson_mut_arr_add_strcpy(d, aliases, alias.c_str());
     }
-    if (c.protocol == Protocol::Hidpp)
+    if (c.protocol == Protocol::Hidpp || c.protocol == Protocol::RazerDock)
     {
         yyjson_mut_obj_add_bool(d, item, "receiverProbe", c.unit.empty());
         if (!c.unit.empty())
@@ -652,12 +714,19 @@ void Device(Response& response, yyjson_mut_val* devices, const Candidate& c, con
             response.String(item, "discoveryParentIdentity", CanonicalIdentity(parent));
         }
     }
-    bool wireless = (c.protocol == Protocol::Hidpp && c.pid == 0xc547) || c.adapter == "blackshark_v2_hs" ||
+    bool wireless = (c.protocol == Protocol::Hidpp && c.pid == 0xc547) || c.protocol == Protocol::RazerDock ||
+        (c.protocol == Protocol::Razer && c.vid == 0x1532 && c.pid == 0x00e6) || c.adapter == "blackshark_v2_hs" ||
         c.adapter == "rog_omni_keyboard" || (c.adapter == "rog_azoth_x" && (c.pid == 0x1a85 || c.pid == 0x1c25));
     response.String(item, "kind", c.kind); response.String(item, "connection", c.wired ? "usb" : wireless ? "wireless" : "unknown");
     response.String(item, "state", reading ? reading->state : c.presentUnreadable ? "unavailable" : c.protocol == Protocol::None || c.identityOnly ? "unsupported" : "unavailable");
     response.String(item, "source", c.adapter.empty() ? ProtocolName(c.protocol) : c.adapter);
-    response.String(item, "compatibility", c.protocol == Protocol::None || c.identityOnly || (c.protocol == Protocol::Hidpp && c.unit.empty()) ? "identityOnly" : c.protocol == Protocol::OHub ? "extension" : "implemented");
+    if (c.adapter == "rog_omni_keyboard")
+    {
+        yyjson_mut_obj_add_bool(d, item, "modelIdentityConfirmed", reading && !reading->peer.empty());
+        if (reading && !reading->peer.empty()) response.String(item, "modelIdentity", reading->peer);
+    }
+    response.String(item, "compatibility", c.protocol == Protocol::None || c.identityOnly ||
+        ((c.protocol == Protocol::Hidpp || c.protocol == Protocol::RazerDock) && c.unit.empty()) ? "identityOnly" : c.protocol == Protocol::OHub ? "extension" : "implemented");
     yyjson_mut_obj_add_bool(d, item, "canRead", c.protocol != Protocol::None && !c.identityOnly && !c.presentUnreadable && (c.protocol != Protocol::OHub || extensions));
     auto batteries = yyjson_mut_arr(d); yyjson_mut_obj_add_val(d, item, "batteries", batteries);
     // Only successful fresh replies carry timestamps and battery values.
@@ -735,7 +804,11 @@ void Process(const std::string& line, std::vector<Channel>& channels, std::set<s
         // The extension flag never permits unknown IDs or configuration/firmware commands.
         if (op == "discover")
         {
-            channels = Discover(id, excluded, channels);
+            std::set<std::string> retired;
+            channels = Discover(id, excluded, channels, &retired);
+            auto removed = yyjson_mut_arr(response.doc);
+            yyjson_mut_obj_add_val(response.doc, response.root, "retiredIdentities", removed);
+            for (const auto& identity : retired) yyjson_mut_arr_add_strcpy(response.doc, removed, identity.c_str());
             for (const auto& ch : channels)
             {
                 Device(response, devices, ch.c, {}, true, extensions && yyjson_get_bool(extensions));
@@ -749,7 +822,8 @@ void Process(const std::string& line, std::vector<Channel>& channels, std::set<s
             if (identifying) for (const auto& identity : ids)
             {
                 auto rootChannel = std::find_if(channels.begin(), channels.end(), [&](const auto& ch) { return ch.c.identity == identity; });
-                if (rootChannel == channels.end() || rootChannel->c.protocol != Protocol::Hidpp || !rootChannel->c.unit.empty())
+                if (rootChannel == channels.end() ||
+                    (rootChannel->c.protocol != Protocol::Hidpp && rootChannel->c.protocol != Protocol::RazerDock) || !rootChannel->c.unit.empty())
                     throw std::runtime_error("invalid-identify-target");
             }
             for (const auto& attempt : attempts) if (initialized.size() < 4096) initialized.insert(attempt);
@@ -763,13 +837,15 @@ void Process(const std::string& line, std::vector<Channel>& channels, std::set<s
                 {
                     for (const auto& rootChannel : channels)
                     {
-                        if (rootChannel.c.protocol != Protocol::Hidpp || rootChannel.c.presentUnreadable) continue;
+                        if ((rootChannel.c.protocol != Protocol::Hidpp && rootChannel.c.protocol != Protocol::RazerDock) || rootChannel.c.presentUnreadable) continue;
                         std::string prefix = rootChannel.c.identity + "|unit=";
                         if (identity.rfind(prefix, 0) != 0) continue;
                         std::string unit = identity.substr(prefix.size());
-                        if (!ValidHidppUnitIdentity(unit)) continue;
+                        if (rootChannel.c.protocol == Protocol::Hidpp ? !ValidHidppUnitIdentity(unit) : !ValidRazerDockUnitIdentity(unit)) continue;
                         routed = rootChannel; routed->c.unit = unit; routed->c.identity = identity;
-                        routed->c.name = "Logitech HID++ device"; break;
+                        routed->c.name = rootChannel.c.protocol == Protocol::Hidpp ? "Logitech HID++ device" : "Razer Basilisk V4 Pro";
+                        if (rootChannel.c.protocol == Protocol::RazerDock) routed->c.kind = "mouse";
+                        break;
                     }
                 }
                 if (found == channels.end())
@@ -782,7 +858,7 @@ void Process(const std::string& line, std::vector<Channel>& channels, std::set<s
                 }
                 Channel active = routed ? *routed : *found;
                 if (Excluded(excluded, active.c)) continue;
-                if (active.c.protocol == Protocol::Hidpp && !active.c.presentUnreadable)
+                if ((active.c.protocol == Protocol::Hidpp || active.c.protocol == Protocol::RazerDock) && !active.c.presentUnreadable)
                 {
                     Event(id, "progress", "hid-path:v1|" + active.c.path);
                     std::vector<std::pair<Candidate, std::optional<Reading>>> results;
@@ -793,8 +869,10 @@ void Process(const std::string& line, std::vector<Channel>& channels, std::set<s
                         failure = "endpoint-open-failed";
                         if (handle.value)
                         {
-                            results = Hidpp(handle.value, [&] { Event(id, "progress", "hid-path:v1|" + active.c.path); }).Read(active.c, !identifying);
-                            failure = "hidpp-unit-unconfirmed";
+                            const auto progress = [&] { Event(id, "progress", "hid-path:v1|" + active.c.path); };
+                            results = active.c.protocol == Protocol::Hidpp ? Hidpp(handle.value, progress).Read(active.c, !identifying) :
+                                ReadRazerDock(handle.value, active.c, !identifying, progress);
+                            failure = active.c.protocol == Protocol::Hidpp ? "hidpp-unit-unconfirmed" : "razer-dock-unit-unconfirmed";
                         }
                     }
                     if (results.empty())
@@ -807,7 +885,7 @@ void Process(const std::string& line, std::vector<Channel>& channels, std::set<s
                         {
                             Device(response, devices, result.first, result.second, false);
                             if (!identifying && !result.second)
-                                Diagnostic(response, diagnostics, result.first, "unavailable", "hidpp-battery-unconfirmed");
+                                Diagnostic(response, diagnostics, result.first, "unavailable", active.c.protocol == Protocol::Hidpp ? "hidpp-battery-unconfirmed" : "razer-dock-battery-unconfirmed");
                         }
                     continue;
                 }
@@ -818,6 +896,17 @@ void Process(const std::string& line, std::vector<Channel>& channels, std::set<s
                 }
                 std::string failure;
                 auto reading = Read(active, id, initialized, failure);
+                if (reading)
+                {
+                    auto name = keyboard_advanced::ConfirmedModelName(active.c, *reading);
+                    if (name.empty() && active.c.adapter == "rog_omni_keyboard" && !reading->peer.empty())
+                        name = "ROG Omni keyboard";
+                    if (!name.empty())
+                    {
+                        active.c.name = name;
+                        if (found != channels.end()) found->c.name = name;
+                    }
+                }
                 Device(response, devices, active.c, reading, false, extensions && yyjson_get_bool(extensions));
                 if (!reading) Diagnostic(response, diagnostics, active.c, "unavailable", failure);
             }
@@ -836,7 +925,7 @@ int InspectHid()
     for (auto item = all; item; item = item->next)
     {
         if (item->vendor_id != 0x0b05 && !(item->vendor_id == 0x046d && item->product_id == 0xc547) &&
-            !(item->vendor_id == 0x1532 && item->product_id == 0x0565)) continue;
+            item->vendor_id != 0x1532) continue;
         Channel ch; ch.c.path = Lower(item->path); ParsePath(ch.c);
         bool metadata = Metadata(ch, true);
         Response r(nullptr); auto d = r.doc; auto o = r.root;

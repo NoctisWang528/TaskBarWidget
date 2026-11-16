@@ -608,6 +608,42 @@ bool OmniConnected(const Bytes& b)
 {
     return b.size() == 64 && Prefix(b, {2, 0x12, 3, 0, 0}) && b != Packet(64, {2, 0x12, 3}) && b[5] <= 2;
 }
+bool OmniNegativeReply(const Bytes& b)
+{
+    return b.size() == 64 && Prefix(b, {2, 0xff, 0xaa});
+}
+enum class OmniRequest { Identity, Power, Connection };
+std::optional<Reading> ReadOmniTransaction(unsigned receiver, const std::function<Value(OmniRequest)>& query)
+{
+    const auto identify = [&]() -> std::optional<unsigned>
+    {
+        const auto reply = query(OmniRequest::Identity);
+        return reply ? OmniIdentity(*reply, receiver) : std::nullopt;
+    };
+    const auto model = identify(); if (!model) return {};
+    const auto connected = [&]
+    {
+        if (receiver != 0x1ad0) return true;
+        const auto reply = query(OmniRequest::Connection);
+        return reply && OmniConnected(*reply);
+    };
+    if (!connected()) return {};
+    std::optional<Reading> result;
+    for (int i = 0; i < 2; ++i)
+    {
+        const auto reply = query(OmniRequest::Power);
+        if (!reply) return {};
+        if (OmniNegativeReply(*reply))
+        {
+            // The receiver still knows the paired model when its keyboard cannot
+            // answer. A negative reply supplies neither a battery nor a sleep state.
+            result = Reading{}; result->state = "unavailable"; break;
+        }
+        if (!(result = OmniBattery(*reply, receiver, *model))) return {};
+    }
+    if (identify() != model || !connected()) return {};
+    result->peer = std::to_string(*model); return result;
+}
 std::optional<Reading> ReadOmni(Session& s)
 {
     // Central discovery must bind/revalidate the report-1 sibling from the same
@@ -619,33 +655,26 @@ std::optional<Reading> ReadOmni(Session& s)
     Layout observed;
     if (!identity.Revalidate(&observed)) return {};
     peer.layout = std::move(observed);
-    const auto identify = [&]() -> std::optional<unsigned>
+    const auto query = [&](OmniRequest request) -> Value
     {
-        const auto b = identity.Exchange(Packet(64, {1, 0xa0}), [&](const Bytes& raw) -> Value
-        { if (raw.size() != 64 || !Prefix(raw, {1, 0xa0}) || raw == Packet(64, {1, 0xa0})) return {}; return raw; });
-        return b ? OmniIdentity(*b, s.c.pid) : std::nullopt;
-    };
-    const auto model = identify(); if (!model) return {};
-    const auto connected = [&]
-    {
-        if (s.c.pid != 0x1ad0) return true;
-        const auto reply = s.Exchange(Packet(64, {2, 0x12, 3}), [](const Bytes& b) -> Value
+        if (request == OmniRequest::Identity)
+            return identity.Exchange(Packet(64, {1, 0xa0}), [](const Bytes& raw) -> Value
+            { if (raw.size() != 64 || !Prefix(raw, {1, 0xa0}) || raw == Packet(64, {1, 0xa0})) return {}; return raw; });
+        if (request == OmniRequest::Connection)
+            return s.Exchange(Packet(64, {2, 0x12, 3}), [](const Bytes& raw) -> Value
+            { if (raw.size() != 64 || !Prefix(raw, {2, 0x12, 3}) || raw == Packet(64, {2, 0x12, 3})) return {}; return raw; });
+        return s.Exchange(Packet(64, {2, 0x12, 1}), [](const Bytes& raw) -> Value
         {
-            if (b.size() != 64 || !Prefix(b, {2, 0x12, 3}) || b == Packet(64, {2, 0x12, 3})) return {};
-            return b;
+            // Stop as soon as the endpoint rejects this read. Waiting for an
+            // additional timeout cannot turn its explicit NAK into fresh data.
+            if (OmniNegativeReply(raw)) return raw;
+            if (raw.size() != 64 || !Prefix(raw, {2, 0x12, 1}) || raw == Packet(64, {2, 0x12, 1})) return {};
+            return raw;
         });
-        return reply && OmniConnected(*reply);
     };
-    if (!connected()) return {};
-    std::optional<Reading> result;
-    for (int i = 0; i < 2; ++i)
-    {
-        const auto b = s.Exchange(Packet(64, {2, 0x12, 1}), [&](const Bytes& raw) -> Value
-        { if (raw.size() != 64 || !Prefix(raw, {2, 0x12, 1}) || raw == Packet(64, {2, 0x12, 1})) return {}; return raw; });
-        if (!b || !(result = OmniBattery(*b, s.c.pid, *model))) return {};
-    }
-    if (identify() != model || !connected() || !identity.Revalidate()) return {};
-    result->peer = std::to_string(*model); return result;
+    auto result = ReadOmniTransaction(s.c.pid, query);
+    if (!result || !identity.Revalidate()) return {};
+    return result;
 }
 }
 
@@ -698,6 +727,7 @@ bool Admit(Candidate& c)
     if (c.vid == 0x388d && c.page == 0xff1c && c.usage == 0x92 && Pair(c, 4, 32)) adapter = "lofree";
     if (adapter.empty()) return false;
     c.adapter = adapter; c.kind = "keyboard"; c.protocol = Protocol::KeyboardAdvanced;
+    if (adapter == "rog_omni_keyboard") c.name = "ROG Omni keyboard";
     c.wired = (c.vid == 0x260d && c.pid == 0x51) || (c.vid == 0x388d && c.pid == 0x24);
     return true;
 }
@@ -718,6 +748,28 @@ std::optional<Reading> Read(const Candidate& c, const std::function<void()>& pro
     else if (c.adapter == "rog_omni_keyboard") result = ReadOmni(session);
     if (!result || !session.Revalidate()) return {};
     return result;
+}
+
+std::string ConfirmedModelName(const Candidate& c, const Reading& reading)
+{
+    if (c.protocol != Protocol::KeyboardAdvanced || c.adapter != "rog_omni_keyboard" ||
+        c.vid != 0x0b05 || (c.pid != 0x1ace && c.pid != 0x1ad0) ||
+        (reading.state != "online" && reading.state != "unavailable") ||
+        (reading.percentage && (*reading.percentage < 0 || *reading.percentage > 100))) return {};
+    // Product facts only, independently represented from the pinned source in
+    // KeyboardAdvanced-evidence.md. This is not an admission/protocol expansion.
+    static constexpr std::pair<unsigned, const char*> names[] = {
+        {0x1a85, "ROG AZOTH"},
+        {0x1ab0, "ROG STRIX SCOPE II 96 WIRELESS"},
+        {0x1b42, "ROG AZOTH EXTREME"},
+        {0x1c12, "ROG AZOTH 96 HE / LITE"},
+        {0x1c25, "ROG AZOTH X"},
+        {0x1cf1, "ROG AZOTH EXTREME SPECIAL EDITION"},
+        {0x1da4, "ROG Azoth Extreme Edition 20"},
+    };
+    for (const auto& [product, name] : names)
+        if (OmniModel(c.pid, product) && reading.peer == std::to_string(product)) return name;
+    return {};
 }
 
 void OfflineSelfTests()
@@ -893,5 +945,84 @@ void OfflineSelfTests()
     auto connection = Packet(64, {2, 0x12, 3, 0, 0, 1});
     check(OmniConnected(connection), "Omni modern connection");
     connection[5] = 255; check(!OmniConnected(connection), "Omni disconnected sentinel");
+
+    auto omniDevice = fixture(0x0b05, 0x1ace, 2, 0xff00, 1, 2, 64);
+    omniDevice.path = "fixture#mi_02&col02";
+    omniDevice.name = "HID-compliant vendor-defined device";
+    omniDevice.usbProduct = "ROG OMNI RECEIVER";
+    check(Admit(omniDevice) && omniDevice.name == "ROG Omni keyboard",
+        "Omni discovery cannot expose a generic HID collection or claim a paired model");
+    omni = Packet(64, {1, 0xa0, 0, 0, 0, 0x42, 0x1b});
+    const auto extremeModel = OmniIdentity(omni, omniDevice.pid);
+    check(extremeModel == 0x1b42, "Omni Azoth Extreme paired model");
+    power = Packet(64, {2, 0x12, 1}); power[6] = 100;
+    auto namedPower = OmniBattery(power, omniDevice.pid, *extremeModel);
+    check(namedPower && namedPower->percentage == 100, "Omni Azoth Extreme battery uses the standard model field");
+    namedPower->peer = std::to_string(*extremeModel);
+    check(ConfirmedModelName(omniDevice, *namedPower) == "ROG AZOTH EXTREME",
+        "Omni proven paired model determines the displayed name");
+    namedPower->percentage = 0;
+    check(ConfirmedModelName(omniDevice, *namedPower) == "ROG AZOTH EXTREME", "Omni zero battery retains model name");
+    namedPower->peer.clear();
+    check(ConfirmedModelName(omniDevice, *namedPower).empty(), "Omni receiver alone does not prove a model");
+    namedPower->peer = std::to_string(0x1ace);
+    check(ConfirmedModelName(omniDevice, *namedPower).empty(), "Omni receiver PID cannot name a keyboard");
+    namedPower->peer = std::to_string(0x1b06);
+    check(ConfirmedModelName(omniDevice, *namedPower).empty(), "Unverified legacy model name is not guessed as Azoth Extreme");
+    namedPower->peer = std::to_string(0x1c25);
+    check(ConfirmedModelName(omniDevice, *namedPower).empty(), "Model naming does not widen legacy receiver support");
+    omniDevice.pid = 0x1ad0;
+    check(ConfirmedModelName(omniDevice, *namedPower) == "ROG AZOTH X", "Modern receiver proven model name");
+    namedPower->state = "unavailable";
+    namedPower->percentage.reset();
+    check(ConfirmedModelName(omniDevice, *namedPower) == "ROG AZOTH X", "Confirmed pair metadata remains meaningful without battery data");
+    namedPower->peer.clear();
+    check(ConfirmedModelName(omniDevice, *namedPower).empty(), "Missing battery alone cannot grant model identity");
+    namedPower->peer = std::to_string(0x1c25); namedPower->state = "disconnected";
+    check(ConfirmedModelName(omniDevice, *namedPower).empty(), "Unproven disconnection state cannot grant model identity");
+    namedPower->state = "online";
+    namedPower->percentage = 100; omniDevice.adapter = "other";
+    check(ConfirmedModelName(omniDevice, *namedPower).empty(), "Other adapters cannot consume Omni model metadata");
+
+    // Replays the observed 1ACE + 8K booster transaction: the paired model
+    // answers on report 1 while its keyboard rejects the power read on report 2.
+    const auto pairedSpecial = Packet(64, {1, 0xa0, 0, 1, 0, 0xf1, 0x1c, 2, 4});
+    const auto negativePower = Packet(64, {2, 0xff, 0xaa});
+    check(OmniNegativeReply(negativePower) && !OmniNegativeReply(Packet(63, {2, 0xff, 0xaa})) &&
+        !OmniNegativeReply(Packet(64, {3, 0xff, 0xaa})), "Omni NAK requires the exact endpoint and report size");
+    unsigned identityCalls = 0, powerCalls = 0;
+    const auto transaction = [&](int scenario)
+    {
+        identityCalls = powerCalls = 0;
+        return ReadOmniTransaction(0x1ace, [&](OmniRequest request) -> Value
+        {
+            if (request == OmniRequest::Identity)
+            {
+                ++identityCalls;
+                if (scenario == 2 && identityCalls == 2) return Packet(64, {1, 0xa0, 0, 1, 0, 0x42, 0x1b, 2, 4});
+                return pairedSpecial;
+            }
+            check(request == OmniRequest::Power, "Legacy receiver does not gain speculative status queries");
+            ++powerCalls;
+            if (scenario == 3) return {};
+            if (scenario == 0 || scenario == 2 || (scenario == 4 && powerCalls == 2)) return negativePower;
+            auto reply = Packet(64, {2, 0x12, 1}); reply[6] = 100; return reply;
+        });
+    };
+    auto unavailable = transaction(0);
+    check(unavailable && unavailable->state == "unavailable" && !unavailable->percentage &&
+        unavailable->peer == std::to_string(0x1cf1) && identityCalls == 2 && powerCalls == 1,
+        "Explicit NAK retains only a twice-proven paired model without waiting or retrying power");
+    omniDevice.pid = 0x1ace; omniDevice.adapter = "rog_omni_keyboard";
+    check(ConfirmedModelName(omniDevice, *unavailable) == "ROG AZOTH EXTREME SPECIAL EDITION",
+        "Initial unavailable keyboard still has its protocol-confirmed model name");
+    auto available = transaction(1);
+    check(available && available->percentage == 100 && available->state == "online" &&
+        identityCalls == 2 && powerCalls == 2, "Fresh battery still requires two power replies and stable paired identity");
+    check(!transaction(2), "Pair replacement during NAK discards model metadata");
+    check(!transaction(3), "Timeout does not masquerade as an explicit negative response");
+    unavailable = transaction(4);
+    check(unavailable && !unavailable->percentage && unavailable->state == "unavailable" && powerCalls == 2,
+        "A later NAK cannot publish an earlier unconfirmed battery reading");
 }
 }

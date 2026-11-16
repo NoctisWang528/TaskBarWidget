@@ -18,7 +18,8 @@ public sealed partial class SettingsWindow
         ("traffic", "流量消耗", "\uE9D9"),
         ("device", "音频设备", "\uE7F5"),
         ("media", "媒体", "\uE8D6"),
-        ("peripheralBattery", "外设电量", "\uE996")
+        ("peripheralBattery", "外设电量", "\uE996"),
+        ("aiUsage", "AI 用量", "\uE9D9")
     ];
     private static readonly (string Id, string Label)[] CardMaterials = [("LiquidGlass", "液态玻璃"), ("Mica", "Mica"), ("Solid", "纯色")];
     private readonly List<(Border Cell, int Column, int Slot)> _cardOrderCells = [];

@@ -1418,6 +1418,9 @@ namespace Cards
                 case Kind::Device:
                     Paint::Device(context, painted, environment, regions, widthDip, heightDip, interaction);
                     break;
+                case Kind::AiUsage:
+                    Paint::AiUsage(context, painted, environment, regions, widthDip, heightDip, interaction);
+                    break;
                 case Kind::Traffic:
                     Paint::Traffic(context, painted, environment, regions, widthDip, heightDip, interaction);
                     break;
@@ -1833,6 +1836,8 @@ namespace Cards
         switch (kind)
         {
         case Kind::Weather: name = L"天气"; break;
+        case Kind::AiUsage: return L"AI用量，" + (!snapshot.aiUsage.ProviderVisible(snapshot.aiUsage.providerId)
+            ? std::wstring(L"选择已开启的服务") : snapshot.aiUsage.providerName);
         case Kind::Traffic: name = L"流量"; break;
         case Kind::Device: name = L"音频设备"; break;
         case Kind::Media: name = L"媒体"; break;

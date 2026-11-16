@@ -88,4 +88,23 @@ if (-not $result.weatherControls.airQualityWarning -or -not $result.weatherContr
 foreach ($pointer in @($result.layoutChecks | Where-Object kind -eq 'modulePointerMessages')) {
     if (-not $pointer.available) { Write-Host "Actual pointer verification unavailable: $($pointer.reason). Desktop acceptance remains pending." }
 }
+$ai = $result.aiUsageSettings
+foreach ($check in @('passed','unknownDistinctFromZero','errorVisible','pollingReleased','cardAvailable','squareCells','unchangedCellsPreserved',
+    'servicesDefaultOff','exactServiceNames','independentServiceVisibility','allDisabledNoPolling','reenabledRecordsRetained',
+    'apiDefaultOff','apiToggleFallback','balanceUnitPreserved','credentialsWriteOnly','credentialFileBounded','blankCredentialRetained','explicitCredentialClear','credentialFailureRetained','draftsSurvivePolling','draftsSurviveGlobalApply','liveInputsRetained','activeWriteNavigationGuard','activeWriteCloseGuard','activeWriteUpdateGate','writeGuardsReleased','geminiProjectFlow','utcDateAnchor','initialLoadPreservesDraft','manualRequestUnits','manualHistoryLoaded','manualPercentRoundTrip','staleResponseRejected')) {
+    if ($ai.$check -ne $true) { throw "AI usage settings check failed: $check" }
+}
+if ($ai.providerCount -ne 4 -or $ai.apiProviderCount -ne 8 -or $ai.cells -ne 84 -or @($ai.screenshots).Count -ne 4) {
+    throw 'AI usage settings provider, heatmap, or theme/width coverage failed.'
+}
+foreach ($layout in $ai.screenshots) {
+    if ($layout.heatmapWidth -le 0 -or -not $layout.heatmapVisible -or
+        -not (Test-Path -LiteralPath $layout.png) -or -not (Test-Path -LiteralPath $layout.heatmapPng)) {
+        throw 'AI usage settings heatmap or screenshot was not realized.'
+    }
+}
+if (@($ai.providerScreenshots).Count -ne 4) { throw 'AI provider screenshot coverage was incomplete.' }
+foreach ($surface in $ai.providerScreenshots) {
+    if (-not (Test-Path -LiteralPath $surface.png)) { throw 'AI provider screenshot was not captured.' }
+}
 Write-Host "Published settings templates loaded successfully without activation. Report: $report"

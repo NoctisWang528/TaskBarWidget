@@ -51,7 +51,8 @@ internal sealed class CardSnapshotBuilder
     internal void BumpConfiguration() => Interlocked.Increment(ref _configurationRevision);
 
     internal object Build(AppSettings settings, MediaCoordinator media, AudioSnapshot? audio,
-        UpdateSnapshot? update, bool connected, int theme, PeripheralBatterySnapshot? peripherals = null)
+        UpdateSnapshot? update, bool connected, int theme, PeripheralBatterySnapshot? peripherals = null,
+        AiUsageSnapshot? aiUsage = null)
     {
         var quickCards = DescribeConfiguration(settings);
 
@@ -71,8 +72,28 @@ internal sealed class CardSnapshotBuilder
             ["weather"] = _lastWeather,
             ["update"] = DescribeUpdate(update),
             ["peripheralBattery"] = peripherals ?? new PeripheralBatterySnapshot(),
+            ["aiUsage"] = aiUsage is null ? null : DescribeAiUsage(aiUsage),
         };
     }
+
+    internal static object DescribeAiUsage(AiUsageSnapshot snapshot) => new
+    {
+        revision = snapshot.Revision, providerId = snapshot.ProviderId, providerName = snapshot.ProviderName,
+        status = snapshot.Status, error = snapshot.Error, updatedAt = snapshot.UpdatedAt,
+        quotas = snapshot.Quotas.Select(quota => new { id = quota.Id, label = quota.Label,
+            usedPercent = quota.UsedPercent, windowMinutes = quota.WindowMinutes, resetsAt = quota.ResetsAt }).ToArray(),
+        days = snapshot.Days?.Select(day => new { date = day.Date, tokens = day.Tokens }).ToArray(),
+        lifetimeTokens = snapshot.LifetimeTokens, peakDailyTokens = snapshot.PeakDailyTokens,
+        providers = snapshot.Providers.Select(provider => new { id = provider.Id, name = provider.Name,
+            mode = provider.Mode, serviceId = provider.ServiceId }).ToArray(),
+        showApi = snapshot.ShowApi,
+        enabledServices = snapshot.EnabledServices,
+        balances = snapshot.Balances.Select(balance => new { currency = balance.Currency, available = balance.Available, label = balance.Label }).ToArray(),
+        sourceLabel = snapshot.SourceLabel, historyNote = snapshot.HistoryNote, quotaNote = snapshot.QuotaNote,
+        activityUnit = snapshot.ActivityUnit, hasCredential = snapshot.HasCredential,
+        activityUtc = snapshot.ActivityUtc,
+        credentialKind = snapshot.CredentialKind, projectId = snapshot.ProjectId,
+    };
 
     internal object DescribeConfiguration(AppSettings settings) => new
         {

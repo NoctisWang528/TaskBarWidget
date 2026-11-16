@@ -12,6 +12,10 @@ internal sealed class UiHostBridge : IAsyncDisposable
 {
     private readonly MediaPipeServer _server;
     private readonly UiRequestDispatcher _requests;
+    private readonly Func<JsonElement, long, CancellationToken, Task<object?>> _execute;
+    // The card gate also serializes connection-token capture and retirement.
+    private CancellationTokenSource? _connectionCancellation;
+    private long _connectionOwner;
     private Process? _process;
     private volatile bool _disposed;
     private int _timingLogs;
@@ -88,13 +92,21 @@ internal sealed class UiHostBridge : IAsyncDisposable
     internal void BeginConnection(long generation)
     {
         var released = false;
+        CancellationTokenSource? previous;
         lock (_cardGate)
         {
-            if (_cardLyricsOwner == generation) return;
-            _cardLyricsOwner = 0;
-            _cardLyricsSession = 0;
-            if (_cardLyricsVisible) { _cardLyricsVisible = false; released = true; }
+            if (_disposed || !_server.IsConnectionCurrent(generation) || _connectionOwner == generation) return;
+            previous = _connectionCancellation;
+            _connectionCancellation = new CancellationTokenSource();
+            _connectionOwner = generation;
+            if (_cardLyricsOwner != generation)
+            {
+                _cardLyricsOwner = 0;
+                _cardLyricsSession = 0;
+                if (_cardLyricsVisible) { _cardLyricsVisible = false; released = true; }
+            }
         }
+        CancelConnection(previous);
         if (released) CardLyricsReleased?.Invoke();
     }
     // A delayed close callback is scoped to the connection that produced it. It
@@ -102,14 +114,32 @@ internal sealed class UiHostBridge : IAsyncDisposable
     internal void EndConnection(long generation)
     {
         var released = false;
+        CancellationTokenSource? connection = null;
         lock (_cardGate)
         {
-            if (_cardLyricsOwner == 0 || _cardLyricsOwner > generation) return;
-            _cardLyricsOwner = 0;
-            _cardLyricsSession = 0;
-            if (_cardLyricsVisible) { _cardLyricsVisible = false; released = true; }
+            if (_connectionOwner == generation)
+            {
+                connection = _connectionCancellation;
+                _connectionCancellation = null;
+                _connectionOwner = 0;
+            }
+            if (_cardLyricsOwner != 0 && _cardLyricsOwner <= generation)
+            {
+                _cardLyricsOwner = 0;
+                _cardLyricsSession = 0;
+                if (_cardLyricsVisible) { _cardLyricsVisible = false; released = true; }
+            }
         }
+        CancelConnection(connection);
         if (released) CardLyricsReleased?.Invoke();
+    }
+    private static void CancelConnection(CancellationTokenSource? connection)
+    {
+        if (connection is null) return;
+        // Cancellation callbacks may re-enter the bridge; never run them under
+        // the gate or dispose a source while an executor is linking its token.
+        try { connection.Cancel(); }
+        finally { connection.Dispose(); }
     }
     internal void ReleaseCardLyrics()
     {
@@ -160,7 +190,8 @@ internal sealed class UiHostBridge : IAsyncDisposable
             () => new { version = 1, type = "command", action = "uiReady" },
             () => new { version = 1, type = "command", action = "uiReady" }, HandleRequestAsync,
             OnConnectionChanged);
-        _requests = new UiRequestDispatcher(request, RecordTiming, isCurrent: IsConnectionCurrent);
+        _execute = request;
+        _requests = new UiRequestDispatcher(ExecuteRequestAsync, RecordTiming, isCurrent: IsConnectionCurrent);
         _server.Start();
         if (startUiProcess) EnsureProcess();
     }
@@ -214,6 +245,21 @@ internal sealed class UiHostBridge : IAsyncDisposable
         if (_process is { HasExited: false }) AllowSetForegroundWindow(_process.Id);
         return _server.SendCommandAsync(new { version = 1, type = "command", action, x, y, page, entryWindow, gestureId, toolWindowTheme, quickCards });
     }
+    private async Task<object?> ExecuteRequestAsync(JsonElement message, long generation, CancellationToken token)
+    {
+        CancellationTokenSource linked;
+        lock (_cardGate)
+        {
+            if (_disposed || !_server.IsConnectionCurrent(generation) || _connectionOwner != generation || _connectionCancellation is null)
+                throw new OperationCanceledException("界面连接已失效。");
+            linked = CancellationTokenSource.CreateLinkedTokenSource(token, _connectionCancellation.Token);
+        }
+        using (linked)
+        {
+            linked.Token.ThrowIfCancellationRequested();
+            return await _execute(message, generation, linked.Token).ConfigureAwait(false);
+        }
+    }
     private Task HandleRequestAsync(JsonElement message, long generation)
     {
         if (_disposed || !message.TryGetProperty("requestId", out var id) || id.ValueKind != JsonValueKind.String || id.GetString() is not { Length: > 0 and <= 128 } requestId) return Task.CompletedTask;
@@ -245,6 +291,14 @@ internal sealed class UiHostBridge : IAsyncDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        CancellationTokenSource? connection;
+        lock (_cardGate)
+        {
+            connection = _connectionCancellation;
+            _connectionCancellation = null;
+            _connectionOwner = 0;
+        }
+        CancelConnection(connection);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
         try { await _server.SendCommandAsync(new { version = 1, type = "command", action = "shutdown" }, timeout.Token); }
         catch (OperationCanceledException) { }

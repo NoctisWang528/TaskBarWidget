@@ -41,13 +41,14 @@ namespace Cards
         case Kind::Media: return L"media";
         case Kind::Update: return L"update";
         case Kind::PeripheralBattery: return L"peripheralBattery";
+        case Kind::AiUsage: return L"aiUsage";
         }
         return L"media";
     }
 
     bool KindFromId(const std::wstring& id, Kind& kind)
     {
-        for (Kind candidate : { Kind::Weather, Kind::Traffic, Kind::Device, Kind::Media, Kind::PeripheralBattery })
+        for (Kind candidate : { Kind::Weather, Kind::Traffic, Kind::Device, Kind::Media, Kind::PeripheralBattery, Kind::AiUsage })
         {
             if (id == IdOf(candidate)) { kind = candidate; return true; }
         }
@@ -81,6 +82,67 @@ namespace Cards
         animationFps = 0;
         for (const int option : {30, 60, 90, 120, 144, 165, 240})
             if (fps == option) { animationFps = option; break; }
+    }
+
+    bool IsAiProviderId(const std::wstring& id)
+    {
+        for (const wchar_t* known : { L"codex", L"openai-api", L"deepseek-web", L"deepseek-api",
+            L"gemini-web", L"gemini-api", L"claude-web", L"claude-api" })
+            if (id == known) return true;
+        return false;
+    }
+
+    bool IsAiApiProviderId(const std::wstring& id)
+    {
+        return id == L"openai-api" || id == L"deepseek-api" || id == L"gemini-api" || id == L"claude-api";
+    }
+
+    std::wstring AiServiceId(const std::wstring& id)
+    {
+        if (id == L"codex" || id == L"openai-api") return L"openai";
+        if (id == L"deepseek-web" || id == L"deepseek-api") return L"deepseek";
+        if (id == L"gemini-web" || id == L"gemini-api") return L"gemini";
+        if (id == L"claude-web" || id == L"claude-api") return L"claude";
+        return {};
+    }
+
+    bool AiUsageState::ProviderVisible(const std::wstring& id) const
+    {
+        const auto service = enabledServices.find(AiServiceId(id));
+        return IsAiProviderId(id) && service != enabledServices.end() && service->second &&
+            (!IsAiApiProviderId(id) || showApi);
+    }
+
+    bool AiUsageState::Visible() const
+    {
+        for (const wchar_t* id : { L"codex", L"deepseek-web", L"gemini-web", L"claude-web" })
+            if (ProviderVisible(id)) return true;
+        return false;
+    }
+
+    std::vector<const AiProvider*> AiUsageState::VisibleProviders() const
+    {
+        std::vector<const AiProvider*> visible;
+        for (const auto& provider : providers)
+        {
+            if (!ProviderVisible(provider.id)) continue;
+            const bool api = IsAiApiProviderId(provider.id);
+            if (provider.mode != (api ? L"api" : L"subscription") || (api && !showApi)) continue;
+            visible.push_back(&provider);
+        }
+        return visible;
+    }
+
+    std::wstring AiUsageState::AdjacentProviderId(int direction) const
+    {
+        const auto visible = VisibleProviders();
+        if (visible.empty()) return {};
+        const auto found = std::find_if(visible.begin(), visible.end(),
+            [&](const auto* provider) { return provider->id == providerId; });
+        if (found == visible.end()) return visible.front()->id;
+        const auto index = static_cast<int>(found - visible.begin());
+        const auto count = static_cast<int>(visible.size());
+        return visible[(index + (direction < 0 ? count - 1 : 1)) % count]->id;
     }
 
     const TrafficDay* TrafficState::Selected() const

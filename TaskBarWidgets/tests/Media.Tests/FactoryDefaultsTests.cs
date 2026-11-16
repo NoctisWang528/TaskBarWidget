@@ -61,6 +61,10 @@ public sealed class FactoryDefaultsTests
             Assert.Empty(settings.LocalMusicFolders);
             Assert.Empty(settings.SelectedDisplayIds);
             Assert.Empty(settings.CustomPlayerSources);
+            Assert.True(settings.EnableAppleMusic);
+            Assert.Contains("AppleMusic", settings.SourceRecognitionOrder);
+            Assert.Contains("AppleMusic", settings.PlayerSources.Keys);
+            Assert.Equal(PlayerSourceSettings.CreateDefaultLyricProviders(), settings.GetPlayerLyricProviders("AppleMusic"));
             Assert.Null(settings.LastUpdateCheckUtc);
             Assert.False(settings.SpectrumAudioAccessGranted);
         }

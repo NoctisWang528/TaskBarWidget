@@ -103,6 +103,7 @@ namespace
         {
         case Kind::Weather: Paint::Weather(context.Get(), snapshot, environment, frame.regions, width, height, interaction); break;
         case Kind::Traffic: Paint::Traffic(context.Get(), snapshot, environment, frame.regions, width, height, interaction); break;
+        case Kind::AiUsage: Paint::AiUsage(context.Get(), snapshot, environment, frame.regions, width, height, interaction); break;
         case Kind::Device: Paint::Device(context.Get(), snapshot, environment, frame.regions, width, height, interaction); break;
         case Kind::Media: Paint::Media(context.Get(), snapshot, coverTransition, {}, environment, frame.regions, width, height, interaction); break;
         case Kind::PeripheralBattery: Paint::PeripheralBattery(context.Get(), snapshot, environment, frame.regions, width, height, interaction, peripheralPage); break;
@@ -352,6 +353,21 @@ namespace
             snapshot.traffic.days.push_back(day);
         }
         snapshot.traffic.today = snapshot.traffic.selectedDate = snapshot.traffic.days.back().date;
+        snapshot.aiUsage.providerId = L"codex";
+        snapshot.aiUsage.providerName = L"ChatGPT";
+        snapshot.aiUsage.enabledServices[L"openai"] = true;
+        snapshot.aiUsage.providers = {{L"codex", L"ChatGPT", L"subscription", L"openai"}};
+        snapshot.aiUsage.quotas = {{L"primary", L"5 hours", 10, 300, 1800000000},
+            {L"weekly", L"Weekly", 19, 10080, 1800000000}};
+        SYSTEMTIME now{}; GetLocalTime(&now);
+        const std::chrono::sys_days today = std::chrono::year{now.wYear}/std::chrono::month{now.wMonth}/std::chrono::day{now.wDay};
+        for (int i = 0; i < 84; ++i)
+        {
+            if (i % 7 == 2) continue;
+            const std::chrono::year_month_day date{today - std::chrono::days{i}};
+            wchar_t key[16]{}; swprintf_s(key, L"%04d-%02u-%02u", int(date.year()), unsigned(date.month()), unsigned(date.day()));
+            snapshot.aiUsage.days[key] = i % 3 == 0 ? 0 : 1000;
+        }
         const wchar_t* peripheralKinds[] = {L"mouse", L"keyboard", L"earbuds", L"headset", L"gamepad", L"pen", L"unknown"};
         for (int i = 0; i < 7; ++i)
         {
@@ -732,6 +748,131 @@ namespace
             "hover/press/focus/disabled, stable hit geometry and reduced motion. Not Composition backdrop acceptance.\n";
     }
 
+    void CheckAiUsageGlassCollection(Graphics& graphics)
+    {
+        auto snapshot = Fixture();
+        SYSTEMTIME calendar{}; GetLocalTime(&calendar);
+        using namespace std::chrono;
+        const sys_days today = year{calendar.wYear}/month{calendar.wMonth}/day{calendar.wDay};
+        const auto dateKey = [](sys_days day)
+        {
+            const year_month_day date{day};
+            wchar_t text[16]{};
+            swprintf_s(text, L"%04d-%02u-%02u", int(date.year()), unsigned(date.month()), unsigned(date.day()));
+            return std::wstring(text);
+        };
+        snapshot.aiUsage.activityUtc = false;
+        snapshot.aiUsage.activityUnit = L"tokens";
+        snapshot.aiUsage.days = {{dateKey(today), 0}, {dateKey(today - days{1}), 1000},
+            {dateKey(today - days{2}), 0}, {dateKey(today + days{1}), 1000000}};
+        const auto first = today - days{weekday{today}.iso_encoding() - 1} - weeks{11};
+        const auto sameRegions = [](const Frame& before, const Frame& after, const std::string& label)
+        {
+            Require(before.regions.All().size() == after.regions.All().size(), label + ": region count changed");
+            for (const auto& region : before.regions.All())
+            {
+                const auto* next = after.regions.Find(region.id);
+                Require(next && EqualRect(&region.bounds, &next->bounds) && region.type == next->type &&
+                    region.enabled == next->enabled && region.focusable == next->focusable &&
+                    region.selected == next->selected && region.action == next->action && region.name == next->name,
+                    label + ": input/accessibility changed id=" + std::to_string(region.id));
+            }
+        };
+        const auto closeValue = [](float a, float b) { return std::abs(a - b) < .0001f; };
+        for (bool dark : {false, true})
+        for (bool reduced : {false, true})
+        for (float scale : {1.f, 1.5f})
+        {
+            const auto label = Label(Kind::AiUsage, scale, dark, {}) + (reduced ? " reduced" : " motion");
+            std::vector<GlassControl> controls;
+            Paint::Interaction glass;
+            glass.glass = true; glass.compositedGlass = true; glass.dark = dark;
+            glass.reducedMotion = reduced; glass.glassControls = &controls;
+            const auto render = [&](const Paint::Interaction& interaction, bool contrast = false)
+            { return Render(graphics, Kind::AiUsage, snapshot, dark, scale, {}, interaction, {}, true, 0, contrast, reduced); };
+            auto unavailable = glass; unavailable.compositedGlass = false;
+            const auto fallback = render(unavailable);
+            Require(controls.empty(), label + ": unavailable composition collected controls");
+            const auto collected = render(glass);
+            sameRegions(fallback, collected, label);
+            size_t expectedCells = 0, unknownCells = 0, zeroCells = 0, busyCells = 0;
+            for (int index = 0; index < 84; ++index)
+            {
+                const int id = 800 + index;
+                const auto* region = collected.regions.Find(id);
+                Require(region && region->type == Layout::RegionType::Text && !region->focusable &&
+                    region->action.empty(), label + ": day must remain read-only text");
+                const auto day = first + days{index};
+                const auto count = std::count_if(controls.begin(), controls.end(),
+                    [&](const auto& control) { return control.id == id; });
+                if (day > today)
+                {
+                    Require(count == 0 && region->name.find(L"未来") != std::wstring::npos,
+                        label + ": future day acquired a lens or lost its accessible label");
+                    continue;
+                }
+                ++expectedCells;
+                Require(count == 1, label + ": missing/duplicate day lens");
+                const auto& control = *std::find_if(controls.begin(), controls.end(),
+                    [&](const auto& item) { return item.id == id; });
+                const float x = 54.f + (index / 7) * 25.f, y = 159.f + (index % 7) * 25.f;
+                Require(control.kind == GlassControl::Kind::Cell && control.bounds.left == x &&
+                    control.bounds.top == y && control.bounds.right == x + 21 && control.bounds.bottom == y + 21 &&
+                    control.radius == 4 && control.bounds.left == region->bounds.left &&
+                    control.bounds.top == region->bounds.top && control.bounds.right == region->bounds.right &&
+                    control.bounds.bottom == region->bounds.bottom && !control.pressed && control.hover == 0,
+                    label + ": lens geometry/state differs from the 21-DIP calendar tile");
+                const auto value = snapshot.aiUsage.days.find(dateKey(day));
+                CardEnvironment environment; environment.dark = dark;
+                environment.material.kind = MaterialKind::LiquidGlass;
+                const auto palette = Draw::Colors(environment);
+                Color expected{0, 0, 0, 0}, ink = palette.border;
+                bool emphasized = day == today;
+                if (value == snapshot.aiUsage.days.end())
+                {
+                    ++unknownCells; expected = WithAlpha(palette.secondary, .08f);
+                    Require(region->name.find(L"无记录") != std::wstring::npos, label + ": unknown became zero");
+                }
+                else if (value->second == 0)
+                {
+                    ++zeroCells; emphasized = true;
+                    Require(region->name.find(L"，0 tokens") != std::wstring::npos, label + ": zero became unknown");
+                }
+                else
+                {
+                    ++busyCells;
+                    expected = WithAlpha(ParseColor(dark ? L"#B4E6FF" : L"#2365AA", Color{}), dark ? .45f : .55f);
+                    const auto px = static_cast<UINT>((x + 10) * scale), py = static_cast<UINT>((y + 10) * scale);
+                    Require(collected.Pixel(px, py)[3] < 255 && fallback.Pixel(px, py)[3] == 255,
+                        label + ": opaque painter fill hides the collected lens");
+                }
+                if (day == today) ink = palette.accent;
+                Require(closeValue(control.fillColor.a, expected.a) && (expected.a == 0 ||
+                    (closeValue(control.fillColor.r, expected.r) && closeValue(control.fillColor.g, expected.g) && closeValue(control.fillColor.b, expected.b))) &&
+                    control.focused == emphasized && (!emphasized || (closeValue(control.ink.r, ink.r) &&
+                        closeValue(control.ink.g, ink.g) && closeValue(control.ink.b, ink.b) && closeValue(control.ink.a, ink.a))),
+                    label + ": heatmap tint/zero border/today emphasis changed");
+            }
+            Require(expectedCells == 77 + weekday{today}.iso_encoding() && unknownCells > 0 && zeroCells == 2 && busyCells == 1 &&
+                std::count_if(controls.begin(), controls.end(), [](const auto& c) { return c.kind == GlassControl::Kind::Cell; }) == expectedCells,
+                label + ": calendar collection contains unexpected cells");
+
+            // The shared button helper omits foreground backgrounds with a null collector;
+            // the calendar must still use its full D2D fallback outside that header.
+            auto noCollector = glass; noCollector.glassControls = nullptr;
+            const auto nullFrame = render(noCollector);
+            sameRegions(fallback, nullFrame, label + " null collector");
+            Compare(fallback, nullFrame, scale, label + " null collector fallback", D2D1::RectF(0, 0, 384, 48));
+            controls.clear();
+            const auto contrast = render(glass, true);
+            Require(std::none_of(controls.begin(), controls.end(), [](const auto& c) { return c.kind == GlassControl::Kind::Cell; }),
+                label + ": high contrast collected a day lens");
+            sameRegions(fallback, contrast, label + " high contrast");
+            Compare(contrast, render(unavailable, true), scale, label + " high contrast fallback", D2D1::RectF(0, 0, 384, 48));
+        }
+        std::cout << "AI glass collection passed: read-only calendar geometry/tints, zero/unknown/future, fallback, light/dark, reduced motion and 100/150% DPI. Not Composition backdrop acceptance.\n";
+    }
+
     void CheckHalo(const Frame& zero, const Frame& half, const Frame& full,
         const Layout::Region& region, float scale, const std::string& label)
     {
@@ -884,6 +1025,7 @@ void TestCardRenderingStability(Cards::Graphics& graphics)
 {
     Require(graphics.Ready(), "Graphics must already be initialized in the caller's apartment");
     CheckGlassControls(graphics);
+    CheckAiUsageGlassCollection(graphics);
     CheckCoverCrossfade(graphics);
     CheckPeripheralAppearance(graphics);
     const Snapshot snapshot = Fixture();
@@ -909,7 +1051,8 @@ void TestCardRenderingStability(Cards::Graphics& graphics)
     // Automatic snapshot delivery with unchanged visible data must be pixel-stable.
     ++revised.weather.revision; ++revised.traffic.revision; ++revised.audio.revision;
     ++revised.media.revision; ++revised.lyrics.revision; ++revised.update.revision; ++revised.peripheralBattery.revision;
-    const Kind kinds[] = {Kind::Weather, Kind::Device, Kind::Media, Kind::Traffic, Kind::Update, Kind::PeripheralBattery};
+    ++revised.aiUsage.revision;
+    const Kind kinds[] = {Kind::Weather, Kind::Device, Kind::Media, Kind::Traffic, Kind::Update, Kind::PeripheralBattery, Kind::AiUsage};
     for (bool dark : {false, true})
     for (float dpi : {1.0f, 1.25f, 1.5f, 2.0f})
     for (float fit : {1.0f, 0.93f})
@@ -935,6 +1078,16 @@ void TestCardRenderingStability(Cards::Graphics& graphics)
             const auto baseline = Render(graphics, kind, snapshot, dark, scale, origin);
             const auto kindLabel = Label(kind, scale, dark, origin);
             Compare(baseline, Render(graphics, kind, revised, dark, scale, origin), scale, kindLabel + " repeat/revision");
+            if (kind == Kind::AiUsage)
+            {
+                Paint::Interaction glass;
+                glass.glass = true; glass.dark = dark;
+                const auto reflected = Render(graphics, kind, snapshot, dark, scale, origin, glass);
+                Compare(reflected, Render(graphics, kind, revised, dark, scale, origin, glass), scale,
+                    kindLabel + " glass repeat/revision");
+                Compare(reflected, Render(graphics, kind, snapshot, dark, scale, {17, 29}, glass), scale,
+                    kindLabel + " glass atlas translation", {}, 1);
+            }
             for (const auto offset : {D2D1::Point2F(17, 29), D2D1::Point2F(111, 7)})
             {
                 const auto translated = Render(graphics, kind, snapshot, dark, scale, offset);
@@ -949,7 +1102,8 @@ void TestCardRenderingStability(Cards::Graphics& graphics)
 
             const std::vector<int> ids = kind == Kind::Device ? std::vector<int>{200, 201, 202} :
                 kind == Kind::Media ? std::vector<int>{100} : kind == Kind::Traffic ? std::vector<int>{340} :
-                kind == Kind::Weather ? std::vector<int>{400} : kind == Kind::PeripheralBattery ? std::vector<int>{600, 601, 603} : std::vector<int>{500};
+                kind == Kind::Weather ? std::vector<int>{400} : kind == Kind::PeripheralBattery ? std::vector<int>{600, 601, 603} :
+                kind == Kind::AiUsage ? std::vector<int>{700, 701} : std::vector<int>{500};
             for (int id : ids)
             {
                 const auto* region = baseline.regions.Find(id);

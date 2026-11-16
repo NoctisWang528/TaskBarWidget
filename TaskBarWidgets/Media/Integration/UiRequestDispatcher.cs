@@ -106,7 +106,7 @@ internal sealed class UiRequestDispatcher : IAsyncDisposable
         request.TryGetProperty("action", out var action) && action.ValueKind == JsonValueKind.String ? action.GetString() ?? "unknown" : "unknown";
     private static bool IsAudio(string action) => action is "getAudio" or "selectDevice" or "setVolume" or "setMute";
     private static bool IsControl(string action) => action is "cardSnapshot" or "subscribeCardLyrics" or "mediaCommand" or
-        "getUpdateState" or "reportUiReady" or "openSettings" or "hideCards" or "previewCardMica" or "previewCardTheme";
+        "getUpdateState" or "getAiUsage" or "setAiUsagePreferences" or "reportUiReady" or "openSettings" or "hideCards" or "previewCardMica" or "previewCardTheme";
     private static bool IsWeather(string action) => action == "weatherCommand";
     private static string SafeAction(string action) => IsAudio(action) || IsWeather(action) || action is "getState" or "getNativeSettings" or "applyNativeSettings" or "getTrafficHistory" or "getMediaSettings" or "applyMediaSettings" or "getFonts" or "settingsCommand" or "mediaCommand" or "openPanel" or "getDataStatus" or "storageCommand" ? action : "other";
     public async ValueTask DisposeAsync()

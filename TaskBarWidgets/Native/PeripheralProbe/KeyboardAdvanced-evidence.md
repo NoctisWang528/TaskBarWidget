@@ -64,3 +64,71 @@ Protocol facts were read from MouseDock DB179 `devices.json` and the local
 copied. The source database marks most hardware paths unverified; fixture success
 does not establish hardware support. Build/execution is reserved for the main
 integration slot. No hardware queries or normal product launch were performed.
+
+## 2026-11-15 Omni paired model display
+
+Omni discovery previously retained the Windows vendor-defined HID collection
+name. The successful read already verified the paired model before and after
+the battery requests, but its `Reading.peer` metadata was discarded by the
+display path. `ConfirmedModelName` now derives display metadata from that exact
+decimal paired-model field. It requires the Omni adapter, supported receiver,
+and a model proven by matching paired-identity replies. This proof can survive
+an explicit negative battery reply without claiming a fresh battery reading.
+It never uses the receiver product string or receiver PID as a keyboard model,
+changes identities, or expands protocol admission. Until a confirmed model,
+discovery uses `ROG Omni keyboard`.
+
+The model/PID facts come from the independently maintained ROG-Battery device
+table at commit `0c2b51ba96c7ad537f27339f73a2969c4c144b90`:
+[pinned devices.rs](https://github.com/youmikk/ROG-Battery/blob/0c2b51ba96c7ad537f27339f73a2969c4c144b90/src/devices.rs#L76-L106).
+Only name/PID facts were used; no source implementation was copied. `1B42`
+names AZOTH EXTREME; `1B06` is not assumed to be that model. Existing supported
+model IDs without an independently confirmed display name retain the neutral
+fallback. A name mapping also cannot authorize a model on a receiver which
+the existing Omni protocol allowlist excludes.
+
+Offline regression cases cover the legacy paired-model packet `1B42`, its
+standard battery field, the resulting AZOTH EXTREME name, zero battery,
+receiver-only metadata, missing identity proof, unmapped models,
+modern/legacy receiver boundaries and unrelated adapters. Main integration
+owns execution and actual-hardware acceptance; these fixtures do not by
+themselves establish hardware support or charging semantics.
+
+## 2026-11-15 paired model while battery is unavailable
+
+On the user's `1ACE` receiver plus 8K booster, a five-read trace consistently
+returned paired model `1CF1`, report 2/type 4, followed by a 64-byte `02 FF AA`
+negative reply to the existing `02 12 01` battery request. The old reader waited
+for a further timeout and discarded the already known model: five attempts
+took 1051–1062 ms and displayed the neutral name. The receiver's selected report
+matched the paired-list route; this did not establish a routing failure.
+
+The updated transaction ends the power query immediately on the exact negative
+report, then confirms the paired model again and revalidates the HID channel.
+If the model agrees, it returns `unavailable` with model metadata and no battery
+or charging value. A timeout, mismatched model or invalid response cannot grant
+that metadata. Two effective power replies are still required for a fresh
+battery reading; a later negative reply discards the earlier provisional value.
+Five subsequent real-device reads reported `ROG AZOTH EXTREME SPECIAL EDITION`
+in 46–51 ms, all without a fabricated battery value. The hardware was still
+rejecting battery requests, so this is not evidence that its current battery
+became readable, nor proof that its exact state was sleep rather than another
+temporary unavailable state.
+
+The negative acknowledgement fact is corroborated by
+[ROG-Battery's pinned HID implementation](https://github.com/youmikk/ROG-Battery/blob/0c2b51ba96c7ad537f27339f73a2969c4c144b90/src/hid.rs#L20-L23).
+The paired-list route matches the documented packet facts in
+[RIGStats' pinned Omni reader](https://github.com/dvalfrid/rigstats/blob/63e2297f03c344a5260b2bc5398f55e4dd0280b2/sensor-sidecar/Control/Lighting/OmniMouse.cs#L90-L110).
+Only protocol facts were used, without copying their implementation. A temporary
+read-only presence diagnostic was removed; the production reader adds no new
+hardware command, pairing change, forced wake, lighting write or driver change.
+
+The pure transaction fixtures cover explicit NAK, the exact report size/channel,
+paired-model change during a query, timeout, successful two-reply battery reads
+and a NAK after the first provisional value. Native offline tests, the managed
+pipe contract and 50 battery-service tests passed. The managed cache records the
+confirmed model separately from its display name: same-model unavailable reads
+retain the last real value, while a newly proven different model cannot inherit
+the previous model's battery. A valid paired-model response keeps the existing
+normal demand interval; actual query failures retain the existing backoff.
+Raw traces remain under ignored local artifacts and are excluded from packages.

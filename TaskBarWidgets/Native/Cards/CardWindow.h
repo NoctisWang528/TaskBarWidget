@@ -263,6 +263,9 @@ namespace Cards
         void Device(ID2D1DeviceContext* context, const Snapshot& snapshot,
             const CardEnvironment& environment, Layout::Table& regions, float widthDip, float heightDip,
             const Interaction& interaction = {});
+        void AiUsage(ID2D1DeviceContext* context, const Snapshot& snapshot,
+            const CardEnvironment& environment, Layout::Table& regions, float widthDip, float heightDip,
+            const Interaction& interaction = {});
         void Traffic(ID2D1DeviceContext* context, const Snapshot& snapshot,
             const CardEnvironment& environment, Layout::Table& regions, float widthDip, float heightDip,
             const Interaction& interaction = {});

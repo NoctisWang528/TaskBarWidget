@@ -21,6 +21,7 @@ namespace Cards
         Media = 3,
         Update = 4,
         PeripheralBattery = 5,
+        AiUsage = 6,
     };
 
     const wchar_t* IdOf(Kind kind);
@@ -52,9 +53,9 @@ namespace Cards
     // parameters all come from here; none of it is re-derived natively.
     struct Config
     {
-        std::vector<std::wstring> order{ L"weather", L"traffic", L"device", L"media", L"peripheralBattery" };
-        std::map<std::wstring, int> columns{ { L"weather", 0 }, { L"traffic", 1 }, { L"device", 0 }, { L"media", 1 }, { L"peripheralBattery", 0 } };
-        std::map<std::wstring, bool> enabled{ { L"weather", false }, { L"traffic", true }, { L"device", true }, { L"media", true }, { L"peripheralBattery", true } };
+        std::vector<std::wstring> order{ L"weather", L"traffic", L"device", L"media", L"peripheralBattery", L"aiUsage" };
+        std::map<std::wstring, int> columns{ { L"weather", 0 }, { L"traffic", 1 }, { L"device", 0 }, { L"media", 1 }, { L"peripheralBattery", 0 }, { L"aiUsage", 1 } };
+        std::map<std::wstring, bool> enabled{ { L"weather", false }, { L"traffic", true }, { L"device", true }, { L"media", true }, { L"peripheralBattery", true }, { L"aiUsage", true } };
         std::wstring resourceMode{ L"Resident" };
         int animationSpeedPercent{150};
         int animationFps{0}; // 0 follows the monitor refresh rate.
@@ -315,6 +316,43 @@ namespace Cards
         bool SameAppearance(const PeripheralBatteryState& other, int page = 0) const;
     };
 
+    struct AiQuota
+    {
+        std::wstring id, label;
+        double usedPercent{ 0 };
+        int windowMinutes{ 0 };
+        std::optional<long long> resetsAt;
+    };
+    bool IsAiProviderId(const std::wstring& id);
+    bool IsAiApiProviderId(const std::wstring& id);
+    std::wstring AiServiceId(const std::wstring& providerId);
+    struct AiProvider
+    {
+        std::wstring id, name, mode, serviceId;
+    };
+    struct AiBalance
+    {
+        std::wstring currency, available, label;
+    };
+    struct AiUsageState
+    {
+        long long revision{ -1 };
+        std::wstring providerId, providerName, status{ L"idle" }, error, updatedAt;
+        std::vector<AiQuota> quotas;
+        std::vector<AiProvider> providers;
+        std::vector<AiBalance> balances;
+        bool showApi{ false };
+        std::map<std::wstring, bool> enabledServices;
+        bool activityUtc{ false };
+        std::wstring sourceLabel, historyNote, quotaNote, activityUnit{ L"tokens" };
+        std::vector<const AiProvider*> VisibleProviders() const;
+        bool ProviderVisible(const std::wstring& id) const;
+        bool Visible() const;
+        std::wstring AdjacentProviderId(int direction) const;
+        std::map<std::wstring, long long> days;
+        std::optional<long long> lifetimeTokens, peakDailyTokens;
+    };
+
     struct UpdateState
     {
         long long revision{ -1 };
@@ -343,6 +381,7 @@ namespace Cards
         WeatherState weather;
         UpdateState update;
         PeripheralBatteryState peripheralBattery;
+        AiUsageState aiUsage;
         std::wstring statusText;
         int toolWindowTheme{ 0 }; // AppSettings: System=0, Light=1, Dark=2.
         bool connected{ false };

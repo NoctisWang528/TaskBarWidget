@@ -118,7 +118,7 @@ public sealed partial class SettingsWindow : Window
             if (page.Id == "quickCards")
             {
                 item.SelectsOnInvoked = false;
-                foreach (var child in new[] { ("quickCards", "卡片与顺序"), ("quickCardsWeather", "天气"), ("peripheralBattery", "外设电量") })
+                foreach (var child in new[] { ("quickCards", "卡片与顺序"), ("quickCardsWeather", "天气"), ("peripheralBattery", "外设电量"), ("aiUsage", "AI 用量") })
                     item.MenuItems.Add(new NavigationViewItem { Content = child.Item2, Tag = child.Item1 });
             }
             _navigation.MenuItems.Add(item);
@@ -202,6 +202,7 @@ public sealed partial class SettingsWindow : Window
         Closed += (_, _) => {
             DeactivateCardMicaPreview();
             _closed = true;
+            LeaveAiUsagePage();
             LeavePeripheralBatteryPage();
             _cardMicaPreviewBackdrop.StatusChanged -= OnMicaStatusChanged;
             CancelWeatherPage();
@@ -272,6 +273,12 @@ public sealed partial class SettingsWindow : Window
 
     private void EnterPage(string page, bool explicitEntry)
     {
+        if (_aiUsageMutating && page != _currentPage)
+        {
+            SelectNavigationItem(NavigationPages().FirstOrDefault(item => (string)item.Tag == _currentPage));
+            ShowNotice("正在保存 AI 用量设置，请完成后再切换页面。", InfoBarSeverity.Informational);
+            return;
+        }
         if (_currentPage == "trackOffsets" && page != "trackOffsets")
             LeaveOffsetsPage();
         if (page != "trackOffsets")
@@ -309,7 +316,7 @@ public sealed partial class SettingsWindow : Window
     private async Task CloseWithPendingChangesAsync()
     {
         if (_closeDialogOpen) return;
-        if (_busy || _weatherPage is { Committing: true })
+        if (_busy || _aiUsageMutating || _weatherPage is { Committing: true })
         {
             ShowNotice("正在保存或刷新，请完成后再关闭；当前草稿会保留。", InfoBarSeverity.Informational);
             return;
@@ -349,7 +356,7 @@ public sealed partial class SettingsWindow : Window
         }
         // A save could have started while the confirmation was open. Never
         // cancel an active write merely because the user chose to discard drafts.
-        if (_busy || _weatherPage is { Committing: true }) return;
+        if (_busy || _aiUsageMutating || _weatherPage is { Committing: true }) return;
         _native.Pending.Clear();
         _media.Pending.Clear();
         CloseConfirmed();
@@ -401,7 +408,7 @@ public sealed partial class SettingsWindow : Window
     }
     private async Task ReloadAsync()
     {
-        if (_busy || _weatherPage?.Committing == true) return;
+        if (_busy || _aiUsageMutating || _weatherPage?.Committing == true) return;
         if (ReloadWithoutPrompt)
         {
             ReloadWithoutPrompt = false;
@@ -421,6 +428,7 @@ public sealed partial class SettingsWindow : Window
             };
             if (await dialog.ShowAsync() != ContentDialogResult.Secondary) return;
         }
+        if (_aiUsageMutating) return;
         CancelModulePointerDrag();
         _busy = true; UpdateSaveStatus();
         var nativeRevision = _native.Capture(); var mediaRevision = _media.Capture();
@@ -448,7 +456,7 @@ public sealed partial class SettingsWindow : Window
     }
     private async Task SaveAsync()
     {
-        if (_busy || !_loaded || _weatherPage is { Committing: true } or { Searching: true } or { LoadingStatus: true }) return;
+        if (_busy || _aiUsageMutating || !_loaded || _weatherPage is { Committing: true } or { Searching: true } or { LoadingStatus: true }) return;
         if (_weatherPage is { } weather && HasWeatherDraft() && !await SaveWeatherDraftAsync(weather)) return;
         if (_native.Pending.Count + _media.Pending.Count == 0) { UpdateSaveStatus(); return; }
         CancelModulePointerDrag();
@@ -648,14 +656,18 @@ public sealed partial class SettingsWindow : Window
         var count = _native.Pending.Count + _media.Pending.Count + (HasWeatherDraft() ? 1 : 0);
         var empty = _loaded && _layout is not null && !_layout.Modules.Any(module => _layout.Enabled(module.Id));
         var weatherSaving = _weatherPage?.Committing == true;
-        _apply.IsEnabled = !_busy && !weatherSaving && _weatherPage is not { Searching: true } and not { LoadingStatus: true } && count > 0;
-        _saveStatus.Text = _busy ? "正在保存或读取；新的编辑会保留在草稿中…" : weatherSaving ? "正在保存或刷新天气…" : empty ? "请至少添加一个显示模块再应用。" : count > 0 ? $"{count} 项更改待应用" : "配置已同步";
+        _apply.IsEnabled = !_busy && !_aiUsageMutating && !weatherSaving && _weatherPage is not { Searching: true } and not { LoadingStatus: true } && count > 0;
+        _saveStatus.Text = _busy ? "正在保存或读取；新的编辑会保留在草稿中…" : _aiUsageMutating ? "正在保存 AI 用量设置…" : weatherSaving ? "正在保存或刷新天气…" : empty ? "请至少添加一个显示模块再应用。" : count > 0 ? $"{count} 项更改待应用" : "配置已同步";
         if (_weatherPage is not null) UpdateWeatherButtons(_weatherPage);
     }
     private void Changed() { if (_notice.Severity == InfoBarSeverity.Success) _notice.IsOpen = false; UpdateSaveStatus(); RenderPreview(); }
     private void RenderPage()
     {
         UpdatePeripheralSampling();
+        // Global Apply/readback must retain live AI forms, including write-only
+        // credentials and selected service-account contents, only in memory.
+        if (_loaded && _currentPage == "aiUsage" && _aiUsageCancellation is not null) return;
+        LeaveAiUsagePage();
         if (_loaded && _currentPage == "peripheralBattery" && _peripheralPage is { } peripheral)
         {
             UpdatePeripheralControls(peripheral);
@@ -673,6 +685,7 @@ public sealed partial class SettingsWindow : Window
         if (_currentPage == "taskbar") RenderTaskbar();
         else if (_currentPage is "quickCards" or "quickCardsWeather") RenderQuickCards();
         else if (_currentPage == "peripheralBattery") RenderPeripheralBattery();
+        else if (_currentPage == "aiUsage") RenderAiUsage();
         else if (_currentPage is "hardware" or "general") { RenderNativeGroups(_currentPage); if (_currentPage == "general") RenderGeneral(); }
         else RenderMediaPage(_currentPage);
     }

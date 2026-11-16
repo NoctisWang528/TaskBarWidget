@@ -60,7 +60,7 @@ public enum QuickCardResourceMode
 
 public sealed class AppSettings
 {
-    public static readonly string[] QuickCardIds = ["weather", "traffic", "device", "media", "peripheralBattery"];
+    public static readonly string[] QuickCardIds = ["weather", "traffic", "device", "media", "peripheralBattery", "aiUsage"];
     public const int MinimumPlayerLyricOffsetMilliseconds = -5000;
     public const int MaximumPlayerLyricOffsetMilliseconds = 5000;
     public const double ExtendedFontSizeMin = 6;
@@ -155,7 +155,13 @@ public sealed class AppSettings
     // Product updater only. The inherited lyrics project's updater stays disabled.
     public bool ProductAutomaticUpdatesEnabled { get; set; } = true;
 
-    public List<string> QuickCardOrder { get; set; } = ["weather", "traffic", "device", "media", "peripheralBattery"];
+    public List<string> QuickCardOrder { get; set; } = ["weather", "traffic", "device", "media", "peripheralBattery", "aiUsage"];
+    public string AiUsageProviderId { get; set; } = "codex";
+    public bool AiUsageShowApi { get; set; }
+    public Dictionary<string, bool> AiUsageEnabledServices { get; set; } = new(StringComparer.Ordinal)
+    {
+        ["openai"] = false, ["deepseek"] = false, ["gemini"] = false, ["claude"] = false
+    };
     public PeripheralBatterySettings PeripheralBattery { get; set; } = new();
 
     // Free two-column card layout: 0 = left column, 1 = right column. Cards keep
@@ -168,7 +174,8 @@ public sealed class AppSettings
         ["traffic"] = true,
         ["device"] = true,
         ["media"] = true,
-        ["peripheralBattery"] = true
+        ["peripheralBattery"] = true,
+        ["aiUsage"] = true
     };
 
     public QuickCardResourceMode QuickCardResourceMode { get; set; } = QuickCardResourceMode.Resident;
@@ -307,6 +314,8 @@ public sealed class AppSettings
         cloned.QuickCardOrder = (QuickCardOrder ?? []).ToList();
         cloned.QuickCardColumns = new Dictionary<string, int>(QuickCardColumns ?? [], StringComparer.Ordinal);
         cloned.QuickCardEnabled = new Dictionary<string, bool>(QuickCardEnabled ?? [], StringComparer.Ordinal);
+        cloned.AiUsageEnabledServices = new[] { "openai", "deepseek", "gemini", "claude" }.ToDictionary(
+            id => id, id => AiUsageEnabledServices?.GetValueOrDefault(id) == true, StringComparer.Ordinal);
         cloned.PeripheralBattery = (PeripheralBattery ?? new()).Clone();
         return cloned;
     }

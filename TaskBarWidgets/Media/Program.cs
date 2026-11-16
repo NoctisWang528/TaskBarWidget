@@ -11,6 +11,7 @@ internal static class Program
     private static int Main(string[] args)
     {
         if (args.Length == 2 && args[0] == "--validate-package") return PackageProbe.Run(args[1]);
+        if (args.Length == 2 && args[0] == "--probe-ai-usage") return ProbeAiUsageAsync(args[1]).GetAwaiter().GetResult();
         if (args.Length == 5 && args[0] == "--validate-update-package") return PackageProbe.ValidateUpdateAsync(args[1], args[2], args[3], args[4]).GetAwaiter().GetResult();
         if (args.Length == 2 && args[0] == "--migrate-data")
             return RunMigration(args[1]);
@@ -38,6 +39,15 @@ internal static class Program
             try { Console.Error.WriteLine(error.Message); } catch { }
             return 3;
         }
+    }
+
+    private static async Task<int> ProbeAiUsageAsync(string report)
+    {
+        using var service = new CodexUsageService();
+        var snapshot = await service.WaitForRefreshAsync();
+        await File.WriteAllTextAsync(report, System.Text.Json.JsonSerializer.Serialize(
+            CardSnapshotBuilder.DescribeAiUsage(snapshot)));
+        return snapshot.Status is "ready" or "partial" ? 0 : 1;
     }
 
     private static int RunMigration(string dataRoot)
