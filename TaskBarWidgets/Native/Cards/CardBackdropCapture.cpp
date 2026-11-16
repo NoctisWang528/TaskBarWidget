@@ -53,6 +53,30 @@ namespace Cards
             virtual HRESULT STDMETHODCALLTYPE GetWindowExclusionList(void** windows) = 0;
         };
 
+        auto ExclusionList(const std::vector<HWND>& windows)
+        {
+            // Resolve the public export missing from the pinned SDK import library.
+            struct ModuleScope
+            {
+                HMODULE value{LoadLibraryExW(L"Windows.UI.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32)};
+                ~ModuleScope() { if (value) FreeLibrary(value); }
+            } module;
+            winrt::check_bool(module.value != nullptr);
+            auto getWindowId = reinterpret_cast<decltype(&GetWindowIdFromWindow)>(
+                GetProcAddress(module.value, "GetWindowIdFromWindow"));
+            winrt::check_bool(getWindowId != nullptr);
+            std::vector<winrt::Windows::UI::WindowId> ids;
+            for (HWND window : windows)
+            {
+                ABI::Windows::UI::WindowId id{};
+                winrt::check_hresult(getWindowId(window, &id));
+                ids.push_back({id.Value});
+            }
+            auto list = winrt::single_threaded_vector<winrt::Windows::UI::WindowId>(std::move(ids))
+                .as<winrt::Windows::Foundation::Collections::IIterable<winrt::Windows::UI::WindowId>>();
+            return list;
+        }
+
         // Permit an 8K monitor, but bound allocations and pitch arithmetic even
         // if a driver reports an unusable mode. Each pixel occupies four bytes.
         constexpr uint64_t MaxPixels = 40000000;
@@ -159,6 +183,9 @@ namespace Cards
         capture::GraphicsCaptureSession captureSession{nullptr};
         std::chrono::nanoseconds targetFrameInterval{1'000'000'000 / 60};
         bool sessionExclusion{};
+        unsigned settlingFrames{};
+        int64_t exclusionTime{};
+        ULONGLONG settlingStarted{};
         bool poolSessionExclusion{};
         std::vector<HWND> excludedWindows;
         ULONGLONG captureStarted{};
@@ -187,6 +214,7 @@ namespace Cards
             frame = {};
             receivedImage = false;
             captureStarted = 0;
+            settlingFrames = 0; settlingStarted = 0; exclusionTime = 0;
             sessionExclusion = false; excludedWindows.clear();
             HRESULT result = S_OK;
             try { if (captureSession) captureSession.Close(); }
@@ -420,27 +448,7 @@ namespace Cards
                 {
                     stage = L"capture/wgc-session-exclusion-query";
                     auto displaySession = captureSession.as<DisplayCaptureSession>();
-                    // The 26100.0 SDK declares this public function but omits
-                    // its import-library entry. Resolve the named system export.
-                    stage = L"capture/wgc-session-exclusion-window-id";
-                    struct ModuleScope
-                    {
-                        HMODULE value{LoadLibraryExW(L"Windows.UI.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32)};
-                        ~ModuleScope() { if (value) FreeLibrary(value); }
-                    } module;
-                    winrt::check_bool(module.value != nullptr);
-                    auto getWindowId = reinterpret_cast<decltype(&GetWindowIdFromWindow)>(
-                        GetProcAddress(module.value, "GetWindowIdFromWindow"));
-                    winrt::check_bool(getWindowId != nullptr);
-                    std::vector<winrt::Windows::UI::WindowId> ids;
-                    for (HWND window : *exclusions)
-                    {
-                        ABI::Windows::UI::WindowId id{};
-                        winrt::check_hresult(getWindowId(window, &id));
-                        ids.push_back({id.Value});
-                    }
-                    auto list = winrt::single_threaded_vector<winrt::Windows::UI::WindowId>(std::move(ids))
-                        .as<winrt::Windows::Foundation::Collections::IIterable<winrt::Windows::UI::WindowId>>();
+                    auto list = ExclusionList(*exclusions);
                     stage = L"capture/wgc-session-exclusion-set";
                     uint64_t iteration{};
                     winrt::check_hresult(displaySession->SetWindowExclusionList(winrt::get_abi(list), &iteration));
@@ -488,10 +496,24 @@ namespace Cards
                 ~FrameScope() { try { if (value) value.Close(); } catch (...) {} }
             } acquired{framePool.TryGetNextFrame()};
             if (!acquired.value)
-                return !receivedImage && GetTickCount64() - captureStarted > 3000 ? DXGI_ERROR_WAIT_TIMEOUT : S_FALSE;
+                return ((!receivedImage && GetTickCount64() - captureStarted > 3000) ||
+                    (settlingFrames && GetTickCount64() - settlingStarted > 3000)) ? DXGI_ERROR_WAIT_TIMEOUT : S_FALSE;
+            // Count each post-update frame, including a frame superseded in this
+            // poll. QPC timestamps reject frames already in flight at the update.
+            const auto countSettled = [&](const auto& value)
+            {
+                if (settlingFrames && value.SystemRelativeTime().count() > exclusionTime) --settlingFrames;
+            };
+            countSettled(acquired.value);
             // At most two queued frames; prefer the newest without any waits.
             auto newer = framePool.TryGetNextFrame();
-            if (newer) { acquired.value.Close(); acquired.value = std::move(newer); }
+            if (newer)
+            {
+                countSettled(newer);
+                acquired.value.Close(); acquired.value = std::move(newer);
+            }
+            if (settlingFrames) return GetTickCount64() - settlingStarted > 3000 ? DXGI_ERROR_WAIT_TIMEOUT : S_FALSE;
+            if (exclusionTime && acquired.value.SystemRelativeTime().count() <= exclusionTime) return S_FALSE;
             const auto size = acquired.value.ContentSize();
             if (size.Width != bounds.right - bounds.left || size.Height != bounds.bottom - bounds.top)
                 return DXGI_ERROR_ACCESS_LOST; // Restart the pool on a mode change.
@@ -706,6 +728,7 @@ namespace Cards
     }
 
     bool DesktopBackdrop::Poll() { return impl->Poll(); }
+    bool DesktopBackdrop::Settling() const { return impl->settlingFrames != 0; }
     bool DesktopBackdrop::SessionExclusion() const { return impl->sessionExclusion; }
     void DesktopBackdrop::SetTargetFrameInterval(std::chrono::nanoseconds interval)
     {
@@ -717,6 +740,30 @@ namespace Cards
     bool DesktopBackdrop::SetExcludedWindows(const std::vector<HWND>& windows)
     {
         if (!impl->sessionExclusion || windows == impl->excludedWindows) return true;
+        try
+        {
+            auto displaySession = impl->captureSession.as<DisplayCaptureSession>();
+            auto list = ExclusionList(windows);
+            uint64_t iteration{};
+            winrt::check_hresult(displaySession->SetWindowExclusionList(winrt::get_abi(list), &iteration));
+            LARGE_INTEGER now{}, frequency{};
+            QueryPerformanceCounter(&now); QueryPerformanceFrequency(&frequency);
+            impl->exclusionTime = (now.QuadPart / frequency.QuadPart) * 10'000'000 +
+                (now.QuadPart % frequency.QuadPart) * 10'000'000 / frequency.QuadPart;
+            // Drain only the two pool slots, with no wait for the producer.
+            for (int i = 0; i < 2; ++i)
+            {
+                auto queued = impl->framePool.TryGetNextFrame();
+                if (!queued) break;
+                queued.Close();
+            }
+            impl->excludedWindows = windows;
+            impl->settlingFrames = 2;
+            impl->settlingStarted = GetTickCount64();
+            impl->lastResult = S_OK;
+            return true;
+        }
+        catch (...) {} // Retain the producer restart fallback for older/failed sessions.
         ComPtr<IDXGIDevice> device;
         HRESULT result = impl->renderDevice.As(&device);
         auto context = impl->renderContext;

@@ -45,7 +45,7 @@ namespace Cards
         bool Visible() const;
         HWND Handle() const;
         bool HasLiquidGlass() const;
-        bool EnableLiveBackdrop(bool enabled, bool sessionScoped = false);
+        bool EnableLiveBackdrop(bool enabled, bool sessionScoped = false, bool preserveGlass = false);
         bool RenderBackdrop(const BackdropFrame& frame);
         HRESULT MaterialResult() const;
         const std::wstring& MaterialDiagnostic() const;

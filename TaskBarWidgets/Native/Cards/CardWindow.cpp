@@ -587,7 +587,7 @@ namespace Cards
     bool CardWindow::LiveBackdropActive() const { return impl->glassActive && impl->glass.LiveActive(); }
     uint64_t CardWindow::BackdropFrameCount() const { return impl->glass.RenderedFrames(); }
 
-    bool CardWindow::EnableLiveBackdrop(bool enabled, bool sessionScoped)
+    bool CardWindow::EnableLiveBackdrop(bool enabled, bool sessionScoped, bool preserveGlass)
     {
         if (enabled && impl->glassActive && environment.allowLiveCapture)
         {
@@ -598,10 +598,15 @@ namespace Cards
             impl->resumeSerial = 0;
             return true;
         }
-        impl->captureSuspended = impl->resumePending = false;
+        impl->captureSuspended = preserveGlass;
+        impl->resumePending = false;
         impl->resumeSerial = 0;
-        impl->glassControls.ClearBackdrop();
-        impl->glass.ClearBackdrop();
+        if (preserveGlass) impl->glass.FreezeBackdrop();
+        else
+        {
+            impl->glassControls.ClearBackdrop();
+            impl->glass.ClearBackdrop();
+        }
         impl->captureExclusion.Restore();
         return !enabled;
     }

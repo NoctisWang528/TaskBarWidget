@@ -49,6 +49,16 @@ namespace Cards
         }
 
         constexpr UINT WM_CARD_WHEEL = WM_APP + 0x218;
+        constexpr UINT WM_CARD_POINTER = WM_APP + 0x219;
+        constexpr UINT WM_CARD_KEY = WM_APP + 0x21B;
+        constexpr UINT WM_CARD_BACKDROP = WM_APP + 0x21C;
+
+        static_assert(sizeof(WPARAM) == sizeof(uint64_t), "Card hook messages require 64-bit Windows.");
+
+        uint64_t PackPoint(POINT point)
+        { return uint64_t(static_cast<uint32_t>(point.x)) | (uint64_t(static_cast<uint32_t>(point.y)) << 32); }
+        POINT UnpackPoint(uint64_t point)
+        { return {static_cast<LONG>(point), static_cast<LONG>(point >> 32)}; }
         constexpr UINT WM_CARD_TASK = WM_APP + 0x211;
         constexpr UINT_PTR IdleTimer = 0xCD03;
         constexpr UINT_PTR WarmupTimer = 0xCD04;
@@ -115,9 +125,24 @@ namespace Cards
         std::atomic<bool> visible{ false };
         bool started{ false };
         bool diagnosticOffscreen{ false };
-        HHOOK mouseHook{};
+        std::atomic<HHOOK> mouseHook{};
+        std::thread hookThread;
+        DWORD hookThreadId{};
+        bool backdropConfigurePending{};
+        struct HookBounds
+        {
+            HWND weather{}, peripheral{};
+            RECT menu{};
+            bool menuVisible{};
+        };
+        std::unique_ptr<HookBounds> hookBoundsOwner, retiredHookBounds;
+        std::atomic<HookBounds*> hookBounds{}, hookBoundsReader{};
+        static_assert(std::atomic<HookBounds*>::is_always_lock_free && std::atomic<HWND>::is_always_lock_free &&
+            std::atomic<Impl*>::is_always_lock_free && std::atomic<bool>::is_always_lock_free);
+        HWND hookWheelTarget{}; // Hook-thread only, reset after joining.
+        uint32_t hookWheelGeneration{};
+        uint32_t dispatchedWheelGeneration{};
         Layout::PageWheel pageWheel;
-        HWND observedWheelTarget{};
         HHOOK keyboardHook{};
         bool shuttingDown{ false };
         bool dark{ true };
@@ -140,7 +165,7 @@ namespace Cards
         int backdropFpsSetting{-1};
         int backdropTargetFps{60};
         int backdropEffectiveFps{};
-        unsigned backdropOverBudgetTicks{};
+        unsigned backdropOverBudgetTicks{}, backdropBudgetTicks{};
         bool backdropSummaryPending{};
         uint64_t backdropCapturedAtStart{}, backdropRenderedAtStart{};
         uint64_t backdropRestingTicks{}, backdropTickWorkUs{}, backdropMaxTickWorkUs{}, backdropLateTicks{};
@@ -332,8 +357,8 @@ namespace Cards
         void StartGroupTimer();
         void StopGroupMotion(bool settle);
         void GroupFrame();
-        void RestoreBackdropWindows();
-        void StopBackdrop(bool resetRetry = false, bool preserveDiagnostic = false, bool releaseResources = false);
+        void RestoreBackdropWindows(bool preserveGlass = false);
+        void StopBackdrop(bool resetRetry = false, bool preserveDiagnostic = false, bool releaseResources = false, bool preserveGlass = false);
         bool ArmBackdropTimer(LONGLONG delay);
         void UpdateBackdropDiagnostics(const wchar_t* stage, HRESULT result = S_OK);
         void RecordBackdropFailure(const wchar_t* operation, HRESULT result);
@@ -367,6 +392,8 @@ namespace Cards
         void ActivateMenu();
         void CloseMenu(bool animate = true);
         bool MenuContains(POINT point) const;
+        void PublishHookBounds();
+        HWND HookWheelTarget(POINT point);
         void InstallHooks();
         void UninstallHooks();
         void OnGlobalPointer(POINT point, bool leftButton);
@@ -487,13 +514,13 @@ namespace Cards
         ConfigureBackdrop();
     }
 
-    void CardHost::Impl::RestoreBackdropWindows()
+    void CardHost::Impl::RestoreBackdropWindows(bool preserveGlass)
     {
-        for (auto& [kind, card] : cards) card->EnableLiveBackdrop(false);
-        if (popup) popup->EnableLiveBackdrop(false);
+        for (auto& [kind, card] : cards) card->EnableLiveBackdrop(false, false, preserveGlass);
+        if (popup) popup->EnableLiveBackdrop(false, false, preserveGlass);
     }
 
-    void CardHost::Impl::StopBackdrop(bool resetRetry, bool preserveDiagnostic, bool releaseResources)
+    void CardHost::Impl::StopBackdrop(bool resetRetry, bool preserveDiagnostic, bool releaseResources, bool preserveGlass)
     {
         // A poll/render failure can stop capture from inside the resting tick.
         // Include that last tick before emitting the summary, exactly once.
@@ -503,7 +530,7 @@ namespace Cards
         backdropRetryAt = 0;
         // Stop acquiring before restoring any HWND to the captured desktop.
         backdrop.Stop();
-        RestoreBackdropWindows();
+        RestoreBackdropWindows(preserveGlass);
         // Drop renderer effect inputs before the final D3D destruction flush.
         if (releaseResources) backdrop.ReleaseResources();
         const bool resourcesReleased = backdrop.TakeResourcesReleased();
@@ -518,17 +545,22 @@ namespace Cards
                 SUCCEEDED(adapter->GetDesc(&desc)) ? desc.Description : L"unknown";
             std::replace(adapterName.begin(), adapterName.end(), L'\r', L' ');
             std::replace(adapterName.begin(), adapterName.end(), L'\n', L' ');
-            wchar_t message[768]{};
+            const auto& renderStats = GlassRenderStats();
+            wchar_t message[1024]{};
             _snwprintf_s(message, _TRUNCATE, L"TaskBarWidgets backdrop: summary target_fps=%d effective_fps=%d "
                 L"captured_frames=%llu rendered_frames=%llu resting_ticks=%llu avg_work_us=%llu max_work_us=%llu "
-                L"late_ticks=%llu render_adapter=%ls gpu_local_mb=%.2f capture_resources=%ls\n",
+                L"late_ticks=%llu card_glass_us=%llu card_glass_count=%llu control_lens_us=%llu control_lens_count=%llu "
+                L"last_refresh_lenses=%llu render_adapter=%ls gpu_local_mb=%.2f capture_resources=%ls\n",
                 backdropTargetFps, backdropEffectiveFps,
                 static_cast<unsigned long long>(backdrop.CapturedFrames() - backdropCapturedAtStart),
                 static_cast<unsigned long long>(backdropRenderedFrames - backdropRenderedAtStart),
                 static_cast<unsigned long long>(backdropRestingTicks),
                 static_cast<unsigned long long>(backdropRestingTicks ? backdropTickWorkUs / backdropRestingTicks : 0),
                 static_cast<unsigned long long>(backdropMaxTickWorkUs),
-                static_cast<unsigned long long>(backdropLateTicks), adapterName.c_str(),
+                static_cast<unsigned long long>(backdropLateTicks),
+                static_cast<unsigned long long>(renderStats.cardUs), static_cast<unsigned long long>(renderStats.cardCount),
+                static_cast<unsigned long long>(renderStats.controlUs), static_cast<unsigned long long>(renderStats.controlCount),
+                static_cast<unsigned long long>(renderStats.lastControlRefresh), adapterName.c_str(),
                 static_cast<double>(graphics.LocalVideoMemoryUsage()) / (1024 * 1024),
                 backdrop.ResourcesRetained() ? L"retained" : L"released");
             OutputDebugStringW(message);
@@ -596,7 +628,7 @@ namespace Cards
     void CardHost::Impl::FailBackdrop(const wchar_t* operation, HRESULT result)
     {
         RecordBackdropFailure(operation, result);
-        StopBackdrop(false, true, true);
+        StopBackdrop(false, true, true, visible && !shuttingDown && backdropRetries < 2);
         // At most three attempts (initial plus two delayed retries) per open,
         // environment or display generation, even after a brief successful retry.
         if (backdropRetries >= 2)
@@ -620,6 +652,14 @@ namespace Cards
 
     void CardHost::Impl::ConfigureBackdrop(bool scheduleTick)
     {
+        // A sent input message cannot make outgoing COM/WinRT calls. Always
+        // resume from our own posted dispatch, including synchronous HWND paths.
+        if (InSendMessageEx(nullptr) & (ISMEX_SEND | ISMEX_NOTIFY | ISMEX_CALLBACK))
+        {
+            if (!backdropConfigurePending)
+                backdropConfigurePending = PostMessageW(window, WM_CARD_BACKDROP, 0, 0) != FALSE;
+            return;
+        }
         const bool popupGlass = popup && IsWindowVisible(popup->Handle()) && popup->HasLiquidGlass();
         const bool cardGlass = std::any_of(cards.begin(), cards.end(), [](const auto& entry) {
             return entry.second->Visible() && entry.second->HasLiquidGlass();
@@ -651,7 +691,7 @@ namespace Cards
         {
             backdropFpsSetting = config.animationFps;
             backdropTargetFps = backdropEffectiveFps = targetFps;
-            backdropOverBudgetTicks = 0;
+            backdropOverBudgetTicks = backdropBudgetTicks = 0;
         }
         // Set before Start as well as on the live WGC session. Animation keeps
         // its original cadence even after the resting sampler has stepped down.
@@ -667,7 +707,7 @@ namespace Cards
         const ULONGLONG now = GetTickCount64();
         if (backdropRetryAt && now < backdropRetryAt)
         {
-            RestoreBackdropWindows();
+            RestoreBackdropWindows(true);
             UpdateBackdropDiagnostics(L"retry-backoff", backdropLastResult);
             if (!ArmBackdropTimer(static_cast<LONGLONG>(backdropRetryAt - now) * 10000))
             {
@@ -696,8 +736,8 @@ namespace Cards
             if (card->Visible() && card->HasLiquidGlass() && !underMenu(*card))
                 excludedWindows.push_back(card->Handle());
         if (popupGlass) excludedWindows.push_back(popup->Handle());
-        // Install a changed list on a fresh WGC producer before restoring any
-        // affinity. Drain the previous producer's queued frames before reusing its pool.
+        // Update the live WGC list before changing renderer exclusions. Its
+        // settling gate rejects queued/in-flight frames from the previous list.
         if (!backdrop.SetExcludedWindows(excludedWindows))
         {
             FailBackdrop(backdrop.Diagnostic(), backdrop.LastResult());
@@ -706,9 +746,8 @@ namespace Cards
         if (backdrop.TakeResourcesReleased())
         {
             // A failed retained-pool restart may have replaced the source bitmap.
-            // The new WGC producer already has its list; drop old effect inputs
-            // before trimming, then re-enable the renderer exclusions below.
-            RestoreBackdropWindows();
+            // Drop old capture inputs but keep completed glass during recovery.
+            RestoreBackdropWindows(true);
             graphics.TrimResources();
         }
         const auto applyExclusions = [&](bool sessionScoped)
@@ -758,6 +797,7 @@ namespace Cards
                 return;
             }
             if (backdrop.TakeResourcesReleased()) graphics.TrimResources();
+            GlassRenderStats() = {};
             backdropSummaryPending = true;
             backdropCapturedAtStart = backdrop.CapturedFrames();
             backdropRenderedAtStart = backdropRenderedFrames;
@@ -833,17 +873,27 @@ namespace Cards
         backdropMaxTickWorkUs = std::max(backdropMaxTickWorkUs, workUs);
         const bool late = work > backdropTickInterval;
         if (late) ++backdropLateTicks;
-        backdropOverBudgetTicks = late ? backdropOverBudgetTicks + 1 : 0;
-        if (backdropOverBudgetTicks >= 30 && backdropEffectiveFps > 30)
+        if (late) ++backdropOverBudgetTicks;
+        if (++backdropBudgetTicks == 120)
         {
-            backdropEffectiveFps = std::max(30, backdropEffectiveFps / 2);
-            backdropOverBudgetTicks = 0;
-            backdrop.SetTargetFrameInterval(std::chrono::nanoseconds(1'000'000'000 / backdropEffectiveFps));
+            if (backdropOverBudgetTicks > 30 && backdropEffectiveFps > 30)
+            {
+                backdropEffectiveFps = std::max(30, backdropEffectiveFps / 2);
+                backdrop.SetTargetFrameInterval(std::chrono::nanoseconds(1'000'000'000 / backdropEffectiveFps));
+            }
+            backdropOverBudgetTicks = backdropBudgetTicks = 0;
         }
     }
 
     bool CardHost::Impl::RenderLiveGlass(bool refreshControls)
     {
+        if (backdrop.Settling())
+        {
+            UpdateBackdropDiagnostics(L"exclusion-settling");
+            return true; // Keep the last rendered surfaces, including card controls.
+        }
+        auto& renderStats = GlassRenderStats();
+        const auto controlsBefore = renderStats.controlCount;
         const auto& frame = backdrop.Frame();
         if (!frame.bitmap)
         {
@@ -864,6 +914,8 @@ namespace Cards
                 popup->MaterialResult());
             return false;
         }
+        if (refreshControls || menuGlass)
+            renderStats.lastControlRefresh = renderStats.controlCount - controlsBefore;
         ++backdropRenderedFrames;
         // Stage changes are logged once, so menu open/close shows whether the
         // menu itself received live refraction.
@@ -1261,7 +1313,7 @@ namespace Cards
         if (!visible)
         {
             backdropEffectiveFps = 0;
-            backdropOverBudgetTicks = 0;
+            backdropOverBudgetTicks = backdropBudgetTicks = 0;
         }
         startupWarmup = false;
         startupRequests.clear();
@@ -1581,62 +1633,131 @@ namespace Cards
         if (!visible) DestroyIdleCards();
     }
 
+    void CardHost::Impl::PublishHookBounds()
+    {
+        HookBounds next;
+        if (visible)
+        {
+            if (auto* card = Card(Kind::Weather); card && card->Visible()) next.weather = card->Handle();
+            if (auto* card = Card(Kind::PeripheralBattery); card && card->Visible()) next.peripheral = card->Handle();
+            if (popup && popup->Visible()) { next.menuVisible = true; next.menu = popup->Bounds(); }
+        }
+        if (hookBoundsOwner && hookBoundsOwner->weather == next.weather && hookBoundsOwner->peripheral == next.peripheral &&
+            hookBoundsOwner->menuVisible == next.menuVisible && EqualRect(&hookBoundsOwner->menu, &next.menu)) return;
+        auto replacement = std::make_unique<HookBounds>(next);
+        auto previous = std::move(hookBoundsOwner);
+        hookBoundsOwner = std::move(replacement);
+        hookBounds.store(hookBoundsOwner.get());
+        // One reader, one hazard slot: retain at most the current snapshot and
+        // the single older snapshot still in use. No callback shares a lock.
+        const auto reader = hookBoundsReader.load();
+        if (retiredHookBounds.get() != reader) retiredHookBounds.reset();
+        if (previous.get() == reader) retiredHookBounds = std::move(previous);
+    }
+
+    HWND CardHost::Impl::HookWheelTarget(POINT point)
+    {
+        HookBounds* bounds{};
+        do
+        {
+            bounds = hookBounds.load();
+            hookBoundsReader.store(bounds);
+        } while (bounds != hookBounds.load());
+        // Copy before releasing the hazard; HWND queries never use card objects.
+        const HookBounds snapshot = bounds ? *bounds : HookBounds{};
+        hookBoundsReader = nullptr;
+        const auto hit = WindowFromPoint(point);
+        if (snapshot.menuVisible && PtInRect(&snapshot.menu, point))
+        {
+            DWORD process{};
+            GetWindowThreadProcessId(hit, &process);
+            return process == GetCurrentProcessId() ? window.load() : nullptr;
+        }
+        return hit && (hit == snapshot.weather || hit == snapshot.peripheral) ? hit : nullptr;
+    }
+
     void CardHost::Impl::InstallHooks()
     {
-        if (diagnosticOffscreen) return;
-        if (mouseHook || keyboardHook) return;
-        Impl::activeHook = this;
-        mouseHook = SetWindowsHookExW(WH_MOUSE_LL, [](int code, WPARAM keys, LPARAM data) -> LRESULT
+        if (diagnosticOffscreen || hookThread.joinable()) return;
+        PublishHookBounds();
+        std::promise<void> ready;
+        auto initialized = ready.get_future();
+        hookThread = std::thread([this, ready = std::move(ready)]() mutable
         {
-            if (code == HC_ACTION && (keys == WM_MOUSEWHEEL || keys == WM_MOUSEMOVE))
+            hookThreadId = GetCurrentThreadId();
+            MSG message{};
+            PeekMessageW(&message, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
+            Impl::activeHook = this;
+            mouseHook = SetWindowsHookExW(WH_MOUSE_LL, [](int code, WPARAM keys, LPARAM data) -> LRESULT
             {
                 auto* self = Impl::activeHook.load();
-                const auto* info = reinterpret_cast<MSLLHOOKSTRUCT*>(data);
-                if (self && self->visible)
+                if (code == HC_ACTION && self && self->visible)
                 {
-                    const auto target = self->WheelTarget(info->pt);
-                    if (keys == WM_MOUSEWHEEL || target != self->observedWheelTarget)
+                    const auto* info = reinterpret_cast<MSLLHOOKSTRUCT*>(data);
+                    const auto point = PackPoint(info->pt);
+                    if (keys == WM_MOUSEMOVE || keys == WM_MOUSEWHEEL)
                     {
-                        self->observedWheelTarget = target;
-                        PostMessageW(self->window, WM_CARD_WHEEL,
-                            keys == WM_MOUSEWHEEL ? info->mouseData : 0,
-                            reinterpret_cast<LPARAM>(target));
+                        const auto target = self->HookWheelTarget(info->pt);
+                        if (target != self->hookWheelTarget)
+                        {
+                            self->hookWheelTarget = target;
+                            ++self->hookWheelGeneration;
+                        }
                     }
+                    // Moves only reset partial wheel detents. Carry their target
+                    // transition generation with the next wheel instead of posting
+                    // moves: no backlog, and no coalesced future move can overtake
+                    // an already queued wheel and erase its partial detent early.
+                    if (keys == WM_MOUSEWHEEL)
+                        PostMessageW(self->window, WM_CARD_WHEEL,
+                            static_cast<WPARAM>(uint64_t(info->mouseData) | (uint64_t(self->hookWheelGeneration) << 32)),
+                            reinterpret_cast<LPARAM>(self->hookWheelTarget));
+                    else if (keys == WM_LBUTTONDOWN || keys == WM_RBUTTONDOWN)
+                        PostMessageW(self->window, WM_CARD_POINTER, keys == WM_LBUTTONDOWN, static_cast<LPARAM>(point));
                 }
-            }
-            if (code == HC_ACTION && (keys == WM_LBUTTONDOWN || keys == WM_RBUTTONDOWN))
+                // These hooks have always passed every global event through.
+                return CallNextHookEx(nullptr, code, keys, data);
+            }, nullptr, 0);
+            keyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, [](int code, WPARAM keys, LPARAM data) -> LRESULT
             {
                 auto* self = Impl::activeHook.load();
-                if (self && self->visible) self->OnGlobalPointer(
-                    reinterpret_cast<MSLLHOOKSTRUCT*>(data)->pt, keys == WM_LBUTTONDOWN);
-            }
-            return CallNextHookEx(nullptr, code, keys, data);
-        }, nullptr, 0);
-        keyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, [](int code, WPARAM keys, LPARAM data) -> LRESULT
-        {
-            if (code == HC_ACTION && (keys == WM_KEYDOWN || keys == WM_SYSKEYDOWN))
-            {
-                auto* self = Impl::activeHook.load();
-                const auto* info = reinterpret_cast<KBDLLHOOKSTRUCT*>(data);
-                if (self && self->visible && info->vkCode == VK_ESCAPE &&
+                if (code == HC_ACTION && (keys == WM_KEYDOWN || keys == WM_SYSKEYDOWN) && self && self->visible &&
+                    reinterpret_cast<KBDLLHOOKSTRUCT*>(data)->vkCode == VK_ESCAPE &&
                     GetWindowThreadProcessId(GetForegroundWindow(), nullptr) != self->threadId)
-                {
-                    auto command = std::make_unique<Command>();
-                    command->kind = COMMAND_ESCAPE;
-                    self->Post(std::move(command));
-                }
+                    PostMessageW(self->window, WM_CARD_KEY, VK_ESCAPE, 0);
+                return CallNextHookEx(nullptr, code, keys, data);
+            }, nullptr, 0);
+            ready.set_value();
+            while (GetMessageW(&message, nullptr, 0, 0) > 0)
+            {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
             }
-            return CallNextHookEx(nullptr, code, keys, data);
-        }, nullptr, 0);
+            Impl::activeHook = nullptr;
+            if (auto hook = mouseHook.exchange(nullptr)) UnhookWindowsHookEx(hook);
+            if (keyboardHook) { UnhookWindowsHookEx(keyboardHook); keyboardHook = nullptr; }
+        });
+        // Only hook installation/queue creation is awaited, never card dispatch.
+        initialized.get();
     }
 
     void CardHost::Impl::UninstallHooks()
     {
-        Impl::activeHook = nullptr;
+        if (hookThread.joinable())
+        {
+            PostThreadMessageW(hookThreadId, WM_QUIT, 0, 0);
+            hookThread.join();
+            hookThreadId = 0;
+        }
+        // No callbacks remain. Discard events from the previous visible group.
+        MSG message{};
+        if (window)
+            while (PeekMessageW(&message, window, WM_CARD_WHEEL, WM_CARD_KEY, PM_REMOVE)) {}
+        hookBounds = nullptr; hookBoundsReader = nullptr;
+        hookBoundsOwner.reset(); retiredHookBounds.reset();
+        hookWheelTarget = nullptr;
+        hookWheelGeneration = dispatchedWheelGeneration = 0;
         pageWheel.Reset();
-        observedWheelTarget = nullptr;
-        if (mouseHook) { UnhookWindowsHookEx(mouseHook); mouseHook = nullptr; }
-        if (keyboardHook) { UnhookWindowsHookEx(keyboardHook); keyboardHook = nullptr; }
     }
 
     void CardHost::Impl::OnGlobalPointer(POINT point, bool leftButton)
@@ -2025,7 +2146,24 @@ namespace Cards
                 self->OnPipeMessages();
                 return 0;
             case WM_CARD_WHEEL:
-                self->RouteWheel(reinterpret_cast<HWND>(position), GET_WHEEL_DELTA_WPARAM(keys));
+                if (self->visible)
+                {
+                    const auto generation = static_cast<uint32_t>(uint64_t(keys) >> 32);
+                    if (generation != self->dispatchedWheelGeneration) self->pageWheel.Reset();
+                    self->dispatchedWheelGeneration = generation;
+                    const auto target = reinterpret_cast<HWND>(position);
+                    self->RouteWheel(target, GET_WHEEL_DELTA_WPARAM(keys));
+                }
+                return 0;
+            case WM_CARD_POINTER:
+                if (self->visible) self->OnGlobalPointer(UnpackPoint(static_cast<uint64_t>(position)), keys != 0);
+                return 0;
+            case WM_CARD_KEY:
+                if (self->visible && !self->EscapeCard()) self->HideAll(L"escape", true);
+                return 0;
+            case WM_CARD_BACKDROP:
+                self->backdropConfigurePending = false;
+                self->ConfigureBackdrop();
                 return 0;
             case WM_CARD_TASK:
                 self->OnTask();
@@ -2114,10 +2252,15 @@ namespace Cards
                 if (message.message == WM_QUIT) { quit = true; break; }
                 TranslateMessage(&message);
                 DispatchMessageW(&message);
+                if (hookThread.joinable()) PublishHookBounds();
             }
             if (quit) break;
             if (groupMoving && (result == WAIT_OBJECT_0 + groupIndex ||
-                WaitForSingleObject(groupTimer, 0) == WAIT_OBJECT_0)) GroupFrame();
+                WaitForSingleObject(groupTimer, 0) == WAIT_OBJECT_0))
+            {
+                GroupFrame();
+                if (hookThread.joinable()) PublishHookBounds();
+            }
             if (backdropTimerArmed && (result == WAIT_OBJECT_0 + backdropIndex ||
                 WaitForSingleObject(backdropTimer, 0) == WAIT_OBJECT_0)) BackdropTick();
         }

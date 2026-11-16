@@ -272,6 +272,27 @@ namespace Cards
         if (SUCCEEDED(result)) diagnostic = L"fallback-blur";
     }
 
+    GlassRenderStatistics& GlassRenderStats()
+    {
+        static thread_local GlassRenderStatistics stats;
+        return stats;
+    }
+
+    namespace
+    {
+        struct RenderMeasure
+        {
+            uint64_t& microseconds;
+            std::chrono::steady_clock::time_point start{std::chrono::steady_clock::now()};
+            RenderMeasure(uint64_t& time, uint64_t& count) : microseconds(time) { ++count; }
+            ~RenderMeasure()
+            {
+                microseconds += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - start).count());
+            }
+        };
+    }
+
     bool LiquidGlassBrush::RenderBackdrop(Graphics& graphics, const Compositor& compositor,
         const CompositionGraphicsDevice& device, const BackdropFrame& frame, RECT bounds)
     {
@@ -282,6 +303,8 @@ namespace Cards
             diagnostic = L"live-refraction";
             return true;
         }
+        auto& stats = GlassRenderStats();
+        RenderMeasure measure(stats.cardUs, stats.cardCount);
         const auto size = frame.bitmap->GetPixelSize();
         auto rotate = D2D1::Matrix3x2F::Identity();
         switch (frame.rotation)
@@ -377,6 +400,9 @@ namespace Cards
             DrawingSurface iconSurface;
             RefractionSurface refraction;
             uint64_t sourceRevision{};
+            ID2D1Bitmap1* sourceBitmap{}; // Identity only; source lifetime belongs to the parent.
+            bool lensDirty{true};
+            std::chrono::steady_clock::time_point cellRefreshed{};
             GlassControl previous;
             bool hasPrevious{};
             int glyph{-1};
@@ -396,11 +422,19 @@ namespace Cards
         const CompositionGraphicsDevice& device, const std::vector<GlassControl>& descriptions,
         float scale, bool dark, bool reducedMotion)
     {
-        const auto appearance = [](const GlassControl& c)
+        const auto color = [](Color c) { return std::make_tuple(c.r, c.g, c.b, c.a); };
+        const auto appearance = [&](const GlassControl& c)
         {
             return std::make_tuple(c.kind, c.bounds.left, c.bounds.top, c.bounds.right, c.bounds.bottom,
                 c.radius, c.hover, c.pressed, c.focused, c.on, c.enabled, c.track.left, c.track.top, c.track.right, c.track.bottom,
-                c.ratio, UiColor(c.trackColor), UiColor(c.fillColor), UiColor(c.ink), c.glyph);
+                c.ratio, color(c.trackColor), color(c.fillColor), color(c.ink), c.glyph);
+        };
+        const auto lensAppearance = [&](const GlassControl& c)
+        {
+            const bool rail = c.track.bottom > c.track.top;
+            return std::make_tuple(c.kind, c.bounds.left, c.bounds.top, c.bounds.right, c.bounds.bottom,
+                c.radius, c.hover, c.pressed, c.track.left, c.track.top, c.track.right, c.track.bottom,
+                rail ? c.ratio : 0.f, color(rail ? c.trackColor : Color{}), color(rail ? c.fillColor : Color{}));
         };
         if (!impl->root)
         {
@@ -469,7 +503,8 @@ namespace Cards
             const float width = (bounds.right - bounds.left) * scale, height = (bounds.bottom - bounds.top) * scale;
             const float hover = std::clamp(description.hover, 0.f, 1.f);
             const float press = description.pressed ? 1.f : 0.f;
-            control.sourceRevision = 0;
+            control.lensDirty = control.lensDirty || !control.hasPrevious || control.scale != scale ||
+                control.dark != dark || lensAppearance(control.previous) != lensAppearance(description);
             control.root.Opacity(description.enabled ? 1.f : .45f);
             if (fresh || control.motion == reducedMotion)
             {
@@ -577,11 +612,21 @@ namespace Cards
         const CompositionGraphicsDevice& device, ID2D1Bitmap1* source, uint64_t revision)
     {
         if (!source) return false;
+        auto& stats = GlassRenderStats();
+        stats.lastControlRefresh = 0;
+        const auto now = std::chrono::steady_clock::now();
         for (auto& [id, pointer] : impl->controls)
         {
             auto& control = *pointer;
-            if (control.sourceRevision == revision && control.refraction.Scene()) continue;
+            if (!control.lensDirty && control.sourceBitmap == source &&
+                control.sourceRevision == revision && control.refraction.Scene()) continue;
             const auto& d = control.previous;
+            // Cells retain their individual optics and state. Bound their source
+            // refresh even when a foreground paint bypasses the host sampler.
+            if (d.kind == GlassControl::Kind::Cell && control.refraction.Scene() &&
+                now - control.cellRefreshed < std::chrono::nanoseconds(1'000'000'000 / 30)) continue;
+            RenderMeasure measure(stats.controlUs, stats.controlCount);
+            ++stats.lastControlRefresh;
             const float scale = control.scale;
             const bool thumb = d.kind == GlassControl::Kind::Thumb || d.kind == GlassControl::Kind::Toggle;
             const bool cell = d.kind == GlassControl::Kind::Cell;
@@ -604,6 +649,9 @@ namespace Cards
             control.lens.Brush(control.refraction.Brush(compositor));
             control.sample.IsVisible(false);
             control.sourceRevision = revision;
+            control.sourceBitmap = source;
+            control.lensDirty = false;
+            if (cell) control.cellRefreshed = now;
         }
         return true;
     }
@@ -620,6 +668,7 @@ namespace Cards
             }
             catch (...) {}
             control.refraction.Release(); control.sourceRevision = 0;
+            control.sourceBitmap = nullptr; control.lensDirty = true; control.cellRefreshed = {};
         }
     }
 }

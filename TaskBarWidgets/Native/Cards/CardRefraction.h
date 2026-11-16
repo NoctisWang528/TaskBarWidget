@@ -21,6 +21,7 @@ namespace Cards
         ID2D1Bitmap1* Scene() const { return scene.Get(); }
         bool LiveActive() const { return scene != nullptr; }
         void Release();
+        void DiscardSource(); // Keep completed surfaces while capture is retried.
         HRESULT LastResult() const { return result; }
         const wchar_t* LastStage() const { return stage; }
 

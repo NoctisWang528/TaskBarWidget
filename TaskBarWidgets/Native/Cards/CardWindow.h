@@ -80,7 +80,7 @@ namespace Cards
         // Theme, tuning and font changes. Never recreates the window.
         void ApplyEnvironment(const CardEnvironment& environment);
         bool HasLiquidGlass() const;
-        bool EnableLiveBackdrop(bool enabled, bool sessionScoped = false);
+        bool EnableLiveBackdrop(bool enabled, bool sessionScoped = false, bool preserveGlass = false);
         // Temporarily includes this HWND in the capture (under an open menu)
         // and freezes its glass; EnableLiveBackdrop(true) re-excludes it.
         bool SuspendCaptureExclusion();

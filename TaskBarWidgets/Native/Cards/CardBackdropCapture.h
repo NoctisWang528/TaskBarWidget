@@ -55,8 +55,9 @@ namespace Cards
         bool Start(IDXGIDevice* renderDevice, ID2D1DeviceContext* renderContext, HMONITOR monitor,
             const std::vector<HWND>& excludedWindows, bool allowSlowDevice = true);
         bool SessionExclusion() const;
-        // A changed list restarts only the WGC producer, before any affinity is
-        // restored. No queued frame from the previous list can reach the renderer.
+        // Update a live session first; restart the producer only on failure.
+        // During settling no new bitmap content is published to the renderer.
+        bool Settling() const;
         bool SetExcludedWindows(const std::vector<HWND>& windows);
         // WGC uses about 90% of this interval; updates a live session without
         // restarting it. Retained across Stop/Start; older systems may ignore it.
