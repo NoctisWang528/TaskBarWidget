@@ -110,6 +110,9 @@ int main(int argc, char** argv)
     ::CreateDirectoryW(extracted.c_str(), nullptr);
     Check(DumpResource(IDR_DEFAULT_CONFIG, extracted + L"\\app.default.ini", module),
         "the factory config resource could not be dumped for comparison");
+    Check(::GetPrivateProfileIntW(L"task_bar", L"double_click_action", 0,
+        (extracted + L"\\app.default.ini").c_str()) == 7,
+        "a new installation must leave taskbar double-click actions disabled");
 
     const std::wstring target = work + L"\\Data\\config\\app.ini";
     ::DeleteFileW(target.c_str());

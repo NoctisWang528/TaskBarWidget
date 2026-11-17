@@ -32,6 +32,7 @@ internal static class UiTemplateProbe
         object? materialControls = null;
         object? peripheralSettings = null;
         object? aiUsageSettings = null;
+        object? settingsAutoSync = null;
         string? error = null;
         try
         {
@@ -67,6 +68,7 @@ internal static class UiTemplateProbe
                 offsetSettings = await OffsetSettingsProbe.RunAsync(settings);
             }
             weatherControls = await SettingsWindow.ProbeWeatherControlsAsync();
+            settingsAutoSync = await SettingsWindow.ProbeSettingsAutoSyncAsync();
             GetWindowThreadProcessId(GetForegroundWindow(), out var foregroundProcess);
             if (activated || foregroundProcess == Environment.ProcessId) throw new InvalidOperationException("Probe unexpectedly activated one of its windows.");
         }
@@ -79,7 +81,7 @@ internal static class UiTemplateProbe
             var result = resultIndex >= 0 && resultIndex + 1 < args.Length ? args[resultIndex + 1] : Path.Combine(AppContext.BaseDirectory, "template-probe.json");
             var winUiModule = System.Diagnostics.Process.GetCurrentProcess().Modules.Cast<System.Diagnostics.ProcessModule>()
                 .FirstOrDefault(module => string.Equals(module.ModuleName, "Microsoft.ui.xaml.dll", StringComparison.OrdinalIgnoreCase))?.FileName;
-            File.WriteAllText(result, JsonSerializer.Serialize(new { success = error is null, error, runtimeDirectory = RuntimeEnvironment.GetRuntimeDirectory(), winUiModule, checks, weatherControls, offsetSettings, reorderControls, themeControls, materialControls, peripheralSettings, aiUsageSettings, layoutChecks, probeActivated = activated, externalForegroundChanged = GetForegroundWindow() != before }, new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(result, JsonSerializer.Serialize(new { success = error is null, error, runtimeDirectory = RuntimeEnvironment.GetRuntimeDirectory(), winUiModule, checks, weatherControls, offsetSettings, reorderControls, themeControls, materialControls, peripheralSettings, aiUsageSettings, settingsAutoSync, layoutChecks, probeActivated = activated, externalForegroundChanged = GetForegroundWindow() != before }, new JsonSerializerOptions { WriteIndented = true }));
             Environment.ExitCode = error is null ? 0 : 1;
             app.Exit();
         }

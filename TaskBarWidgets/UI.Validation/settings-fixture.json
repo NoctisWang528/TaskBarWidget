@@ -2,6 +2,11 @@
   "native": {
     "groups": [
       {
+        "id": "doubleClick",
+        "label": "任务栏双击",
+        "page": "taskbar"
+      },
+      {
         "id": "placement",
         "label": "任务栏位置与布局",
         "page": "taskbar"
@@ -18,6 +23,26 @@
       }
     ],
     "fields": [
+      {
+        "key": "taskbar.double_click_action",
+        "label": "双击操作",
+        "type": "select",
+        "value": 7,
+        "group": "doubleClick",
+        "options": [
+          { "value": 7, "label": "关闭" },
+          { "value": 4, "label": "任务管理器" },
+          { "value": 8, "label": "运行（Win+R）" },
+          { "value": 5, "label": "指定应用程序" }
+        ]
+      },
+      {
+        "key": "taskbar.double_click_exe",
+        "label": "应用程序路径",
+        "type": "text",
+        "value": "",
+        "group": "doubleClick"
+      },
       {
         "key": "taskbar.horizontal_arrange",
         "label": "水平单行排列",

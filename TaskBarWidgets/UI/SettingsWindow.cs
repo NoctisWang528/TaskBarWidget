@@ -36,7 +36,6 @@ public sealed partial class SettingsWindow : Window
     private readonly StackPanel _properties = new() { Spacing = 12, Margin = new Thickness(20) };
     private readonly TextBlock _heading = new() { FontSize = 26, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
     private readonly InfoBar _notice = new() { IsOpen = true, IsClosable = false, Message = "正在读取设置…" };
-    private readonly Button _apply = new() { Content = "应用更改", IsEnabled = false };
     private readonly TextBlock _saveStatus = new() { Text = "正在连接…", FontSize = 12, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap };
     private ModuleLayout? _layout;
     private StackPanel? _preview;
@@ -53,7 +52,6 @@ public sealed partial class SettingsWindow : Window
     private bool _offsetEntryPending;
     private int _pageGeneration;
     private CardMicaTuning _pendingMicaPreview;
-    internal bool ReloadWithoutPrompt;
     internal Func<string, JsonNode?, Task<JsonObject>>? ProbeRequestHandler;
     internal int PageRenderCount { get; private set; }
     internal void ProbeRenderPage() => RenderPage();
@@ -131,11 +129,9 @@ public sealed partial class SettingsWindow : Window
         var toolbar = new Grid { ColumnSpacing = 12, Margin = new Thickness(24, 8, 24, 8) };
         toolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         toolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        toolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var reload = ActionButton("重新读取", () => ReloadAsync());
-        ToolTipService.SetToolTip(reload, "重新读取会放弃尚未应用的草稿");
-        toolbar.Children.Add(_saveStatus); Grid.SetColumn(reload, 1); toolbar.Children.Add(reload);
-        Grid.SetColumn(_apply, 2); toolbar.Children.Add(_apply); _apply.Click += async (_, _) => await GuardAsync(SaveAsync);
+        toolbar.Children.Add(_saveStatus);
+        Grid.SetColumn(_retrySync, 1); toolbar.Children.Add(_retrySync);
+        InitializeSettingsSync();
         var body = new Grid { HorizontalAlignment = HorizontalAlignment.Stretch, Tag = "settings-page-viewport" };
         void UpdateNavigationInset(NavigationViewDisplayMode mode) => body.Margin = new Thickness(0, mode == NavigationViewDisplayMode.Minimal ? 40 : 0, 0, 0);
         _navigation.DisplayModeChanged += (_, args) => UpdateNavigationInset(args.DisplayMode);
@@ -184,13 +180,14 @@ public sealed partial class SettingsWindow : Window
         InitializeModuleGestures();
         _root.ActualThemeChanged += (_, _) => { UpdateTitleBarTheme(); UpdateMicaStatus(); };
         _root.Loaded += (_, _) => { TrySubscribeSettingsHighContrast(); UpdateTitleBarTheme(); };
-        Activated += (_, _) => {
+        Activated += (_, args) => {
             if (_closed) return;
             UpdateTitleBarTheme();
+            if (args.WindowActivationState != WindowActivationState.Deactivated) QueueSettingsSync(read: true);
         };
         _navigation.Loaded += async (_, _) => {
             SelectNavigationItem(NavigationPages().FirstOrDefault(item => (string)item.Tag == _currentPage));
-            if (!_loaded && _connection.IsConnected) await GuardAsync(() => ReloadAsync());
+            if (!_loaded && _connection.IsConnected) await FlushSettingsAsync();
         };
         _connection.ConnectionChanged += OnConnectionChanged;
         AppWindow.Closing += (_, args) => {
@@ -202,6 +199,8 @@ public sealed partial class SettingsWindow : Window
         Closed += (_, _) => {
             DeactivateCardMicaPreview();
             _closed = true;
+            _settingsSyncTimer?.Stop();
+            _settingReadbacks.Clear();
             LeaveAiUsagePage();
             LeavePeripheralBatteryPage();
             _cardMicaPreviewBackdrop.StatusChanged -= OnMicaStatusChanged;
@@ -273,10 +272,10 @@ public sealed partial class SettingsWindow : Window
 
     private void EnterPage(string page, bool explicitEntry)
     {
-        if (_aiUsageMutating && page != _currentPage)
+        if ((_aiUsageMutating || _weatherPage?.Committing == true) && page != _currentPage)
         {
             SelectNavigationItem(NavigationPages().FirstOrDefault(item => (string)item.Tag == _currentPage));
-            ShowNotice("正在保存 AI 用量设置，请完成后再切换页面。", InfoBarSeverity.Informational);
+            ShowNotice("正在保存，请稍后切换页面。", InfoBarSeverity.Informational);
             return;
         }
         if (_currentPage == "trackOffsets" && page != "trackOffsets")
@@ -316,50 +315,42 @@ public sealed partial class SettingsWindow : Window
     private async Task CloseWithPendingChangesAsync()
     {
         if (_closeDialogOpen) return;
-        if (_busy || _aiUsageMutating || _weatherPage is { Committing: true })
-        {
-            ShowNotice("正在保存或刷新，请完成后再关闭；当前草稿会保留。", InfoBarSeverity.Informational);
-            return;
-        }
-        var pending = _native.Pending.Count + _media.Pending.Count > 0 || HasWeatherDraft();
-        if (!pending)
-        {
-            CloseConfirmed();
-            return;
-        }
-        if (_root.XamlRoot is null) return;
         _closeDialogOpen = true;
-        var dialog = new ContentDialog
+        try
         {
-            XamlRoot = _root.XamlRoot,
-            RequestedTheme = _root.RequestedTheme,
-            Title = "有尚未应用的设置",
-            Content = "设置中还有未应用的更改。要应用后关闭、丢弃更改，还是继续编辑？",
-            PrimaryButtonText = "应用并关闭",
-            SecondaryButtonText = "丢弃更改",
-            CloseButtonText = "继续编辑",
-            DefaultButton = ContentDialogButton.Close
-        };
-        ContentDialogResult result;
-        try { result = await dialog.ShowAsync(); }
+            // Commit text/number editors before draining the debounced write.
+            _navigation.Focus(FocusState.Programmatic);
+            await Task.Yield();
+            _settingsSyncTimer?.Stop();
+            await _settingsSyncTask;
+            await FlushSettingsAsync();
+            if (_busy || _aiUsageMutating || _weatherPage is { Committing: true })
+            {
+                ShowNotice("正在保存，请稍后关闭。", InfoBarSeverity.Informational);
+                return;
+            }
+            if (_native.Pending.Count + _media.Pending.Count == 0 && !HasWeatherDraft())
+            {
+                CloseConfirmed();
+                return;
+            }
+            if (_root.XamlRoot is null) return;
+            var dialog = new ContentDialog
+            {
+                XamlRoot = _root.XamlRoot,
+                RequestedTheme = _root.RequestedTheme,
+                Title = "部分设置尚未保存",
+                Content = "请继续编辑以重试保存或完成连接验证，也可以放弃这些更改。",
+                SecondaryButtonText = "放弃并关闭",
+                CloseButtonText = "继续编辑",
+                DefaultButton = ContentDialogButton.Close
+            };
+            if (await dialog.ShowAsync() != ContentDialogResult.Secondary) return;
+            if (_busy || _aiUsageMutating || _weatherPage is { Committing: true }) return;
+            _native.Pending.Clear(); _media.Pending.Clear();
+            CloseConfirmed();
+        }
         finally { _closeDialogOpen = false; }
-        if (result == ContentDialogResult.Primary)
-        {
-            await GuardAsync(SaveAsync);
-            if (HasPendingChanges || _notice is { IsOpen: true, Severity: InfoBarSeverity.Error } ||
-                _weatherPage?.Message is { IsOpen: true, Severity: InfoBarSeverity.Error }) return;
-        }
-        else if (result == ContentDialogResult.None)
-        {
-            Activate();
-            return;
-        }
-        // A save could have started while the confirmation was open. Never
-        // cancel an active write merely because the user chose to discard drafts.
-        if (_busy || _aiUsageMutating || _weatherPage is { Committing: true }) return;
-        _native.Pending.Clear();
-        _media.Pending.Clear();
-        CloseConfirmed();
     }
     private void CloseConfirmed()
     {
@@ -372,6 +363,7 @@ public sealed partial class SettingsWindow : Window
     }
     internal void LoadValidationData(JsonObject native, JsonObject media)
     {
+        _settingsSyncEnabled = false; // Component probes explicitly opt into timers when testing autosave.
         SetNativeReadback(native); _media.Readback(MediaValues(media)); _loaded = true;
         _notice.IsOpen = false; ApplyTheme(); RenderPage(); CompletePendingOffsetsEntry(); UpdateSaveStatus();
     }
@@ -382,14 +374,15 @@ public sealed partial class SettingsWindow : Window
         DispatcherQueue.TryEnqueue(async () => {
             if (_closed || version != _peripheralConnectionVersion) return;
             PeripheralConnectionChanged(connected);
-            if (!connected) ShowError("主程序连接已断开；草稿仍保留，请恢复连接后应用。");
-            else if (!_loaded) await GuardAsync(() => ReloadAsync());
+            if (!connected) ShowError("主程序连接已断开；更改将在连接恢复后自动保存。");
+            else if (!_loaded) await FlushSettingsAsync();
             else
             {
                 // Media clears previews on disconnect. Re-send current drafts,
                 // without reloading over edits made while disconnected.
                 ApplyTheme();
                 UpdateCardMicaPreviewSurface();
+                QueueSettingsSync(read: true);
             }
         });
     }
@@ -409,40 +402,28 @@ public sealed partial class SettingsWindow : Window
     private async Task ReloadAsync()
     {
         if (_busy || _aiUsageMutating || _weatherPage?.Committing == true) return;
-        if (ReloadWithoutPrompt)
-        {
-            ReloadWithoutPrompt = false;
-        }
-        else
-        if (HasPendingChanges && _root.XamlRoot is not null)
-        {
-            var dialog = new ContentDialog
-            {
-                XamlRoot = _root.XamlRoot,
-                RequestedTheme = _root.RequestedTheme,
-                Title = "重新读取设置？",
-                Content = "当前有尚未保存的更改。重新读取会丢弃这些更改。",
-                PrimaryButtonText = "继续编辑",
-                SecondaryButtonText = "丢弃并重新读取",
-                DefaultButton = ContentDialogButton.Primary
-            };
-            if (await dialog.ShowAsync() != ContentDialogResult.Secondary) return;
-        }
-        if (_aiUsageMutating) return;
-        CancelModulePointerDrag();
-        _busy = true; UpdateSaveStatus();
+        _busy = true;
+        var initial = !_loaded;
+        if (initial) UpdateSaveStatus();
         var nativeRevision = _native.Capture(); var mediaRevision = _media.Capture();
-        try {
+        try
+        {
             var native = await RequestAsync("getNativeSettings");
             var media = await RequestAsync("getMediaSettings");
-            await LoadFontsAsync();
-            SetNativeReadback(native, nativeRevision); _media.Readback(MediaValues(media), mediaRevision);
-            LeavePeripheralBatteryPage();
-            _loaded = true; ApplyTheme(); RefreshCardMicaAfterReadback(); RenderPage();
-            CompletePendingOffsetsEntry();
+            if (initial) await LoadFontsAsync();
+            SetNativeReadback(native, nativeRevision, preservePending: true);
+            _media.Readback(MediaValues(media), mediaRevision, preservePending: true);
+            _loaded = true; ApplyTheme(); RefreshCardMicaAfterReadback();
+            if (initial) { RenderPage(); CompletePendingOffsetsEntry(); }
+            else RefreshSettingControls();
             _notice.IsOpen = false;
         }
         finally { _busy = false; UpdateSaveStatus(); }
+        if (_weatherPage is { Committing: false, Searching: false } page)
+        {
+            page.HasStatus = false;
+            await ReadWeatherStatusAsync(page);
+        }
     }
     private void SetNativeReadback(JsonObject schema, SettingsDraft.SaveSnapshot? saved = null, bool preservePending = false)
     {
@@ -457,12 +438,16 @@ public sealed partial class SettingsWindow : Window
     private async Task SaveAsync()
     {
         if (_busy || _aiUsageMutating || !_loaded || _weatherPage is { Committing: true } or { Searching: true } or { LoadingStatus: true }) return;
-        if (_weatherPage is { } weather && HasWeatherDraft() && !await SaveWeatherDraftAsync(weather)) return;
+        if (_weatherPage is { } weather && !WeatherCredentialsPending(weather) &&
+            (weather.SelectedCity is not null || CanSwitchWeatherProvider(weather)) && !await SaveWeatherDraftAsync(weather))
+        {
+            _syncFailed = true;
+            return;
+        }
         if (_native.Pending.Count + _media.Pending.Count == 0) { UpdateSaveStatus(); return; }
-        CancelModulePointerDrag();
+        if (_pointerReorder?.IsActive == true) return;
         _busy = true; UpdateSaveStatus();
         var native = _native.Capture(); var media = _media.Capture();
-        var themeOnly = native.Values.Count == 0 && media.Values.Count == 1 && media.Values.ContainsKey("toolWindowTheme");
         try {
             if (native.Values.Count > 0) {
                 if (native.Values.ContainsKey("taskbar.horizontal_arrange") || native.Values.Keys.Any(key => key.StartsWith("items.") && (key.EndsWith(".show") || key.EndsWith(".row") || key.EndsWith(".order")))) _layout?.IncludeWholeLayout(native.Values);
@@ -477,14 +462,11 @@ public sealed partial class SettingsWindow : Window
                 media.Values.ContainsKey("cardMicaDarkTintOpacity") ||
                 media.Values.ContainsKey("cardMicaDarkLuminosityOpacity"))
                 RefreshCardMicaAfterReadback();
-            _notice.Severity = InfoBarSeverity.Success; _notice.Message = "已保存并读回主程序配置。"; _notice.IsOpen = true;
+            _notice.IsOpen = false;
         }
         finally {
             _busy = false;
-            if (!themeOnly) {
-                if (_weatherPage is { } page) { page.HasStatus = false; await ReadWeatherStatusAsync(page); }
-                else RenderPage();
-            }
+            RefreshSettingControls();
             UpdateSaveStatus();
         }
     }
@@ -651,18 +633,30 @@ public sealed partial class SettingsWindow : Window
     }
     private void ShowError(string message) { _notice.Message = message; _notice.Severity = InfoBarSeverity.Error; _notice.IsOpen = true; }
     private void ShowNotice(string message, InfoBarSeverity severity) { _notice.Message = message; _notice.Severity = severity; _notice.IsOpen = true; }
+    private bool CanSaveSettings => !_busy && !_aiUsageMutating && _loaded &&
+        _weatherPage is not { Committing: true } and not { Searching: true } and not { LoadingStatus: true } &&
+        (_native.Pending.Count + _media.Pending.Count > 0 || HasWeatherDraft());
     private void UpdateSaveStatus()
     {
-        var count = _native.Pending.Count + _media.Pending.Count + (HasWeatherDraft() ? 1 : 0);
+        var pending = _native.Pending.Count + _media.Pending.Count > 0;
         var empty = _loaded && _layout is not null && !_layout.Modules.Any(module => _layout.Enabled(module.Id));
-        var weatherSaving = _weatherPage?.Committing == true;
-        _apply.IsEnabled = !_busy && !_aiUsageMutating && !weatherSaving && _weatherPage is not { Searching: true } and not { LoadingStatus: true } && count > 0;
-        _saveStatus.Text = _busy ? "正在保存或读取；新的编辑会保留在草稿中…" : _aiUsageMutating ? "正在保存 AI 用量设置…" : weatherSaving ? "正在保存或刷新天气…" : empty ? "请至少添加一个显示模块再应用。" : count > 0 ? $"{count} 项更改待应用" : "配置已同步";
+        _retrySync.Visibility = _syncFailed ? Visibility.Visible : Visibility.Collapsed;
+        _retrySync.IsEnabled = !_busy && !_aiUsageMutating && _weatherPage is not { Committing: true };
+        _saveStatus.Text = _busy || _aiUsageMutating || _weatherPage?.Committing == true ? "正在同步…"
+            : _syncFailed ? "未保存，请重试" : empty ? "请至少保留一个显示模块。"
+            : pending ? "等待自动保存…" : HasWeatherDraft() ? "请完成城市选择或连接验证" : "已自动保存";
         if (_weatherPage is not null) UpdateWeatherButtons(_weatherPage);
     }
-    private void Changed() { if (_notice.Severity == InfoBarSeverity.Success) _notice.IsOpen = false; UpdateSaveStatus(); RenderPreview(); }
+    private void Changed()
+    {
+        if (_refreshingControls) return;
+        if (_notice.Severity == InfoBarSeverity.Success) _notice.IsOpen = false;
+        _syncFailed = false;
+        UpdateSaveStatus(); RenderPreview(); QueueSettingsSync();
+    }
     private void RenderPage()
     {
+        if (_refreshingControls) return;
         UpdatePeripheralSampling();
         // Global Apply/readback must retain live AI forms, including write-only
         // credentials and selected service-account contents, only in memory.
@@ -675,6 +669,7 @@ public sealed partial class SettingsWindow : Window
             return;
         }
         PageRenderCount++;
+        _settingReadbacks.Clear();
         CancelModulePointerDrag();
         if (_currentPage != "quickCardsWeather") CancelWeatherPage();
         if (_currentPage != "peripheralBattery") _peripheralPage = null;
@@ -696,6 +691,7 @@ public sealed partial class SettingsWindow : Window
             var fields = NativeFields().Where(field => Text(field["group"]) == Text(group["id"]) && Text(field["key"]) != "taskbar.horizontal_arrange").ToList();
             if (fields.Count == 0) continue;
             if (Text(group["id"]) == "appearance") { RenderAppearanceGroup(fields); continue; }
+            if (Text(group["id"]) == "doubleClick") { RenderTaskbarDoubleClick(fields); continue; }
             var content = Section(Text(group["label"]));
             content.Children.Add(ResponsiveFields(fields.Select(field => FieldEditor(field, _native))));
         }
@@ -704,10 +700,12 @@ public sealed partial class SettingsWindow : Window
     private FrameworkElement FieldEditor(JsonObject field, SettingsDraft draft, Action? after = null)
     {
         var key = Text(field["key"]); var label = Text(field["label"]); var type = Text(field["type"]);
-        void Change(object? value) { draft.Set(key, value); Changed(); after?.Invoke(); if (key == "taskbar.horizontal_arrange") RenderPage(); }
+        void Change(object? value) { if (_refreshingControls) return; draft.Set(key, value); Changed(); after?.Invoke(); if (key == "taskbar.horizontal_arrange") RenderPage(); }
         if (type == "boolean") {
             var description = Text(field["description"]); if (field["restartRequired"]?.ToString() == "true") description += " 重启后生效";
-            return SettingsToggle.Row(label, description.Length > 0 ? description : null, draft.Bool(key), label, "setting-" + key, value => Change(value));
+            var toggle = SettingsToggle.Compact(draft.Bool(key), label, "setting-" + key, changed: value => Change(value));
+            RegisterSettingReadback(toggle, draft, key, () => toggle.IsOn = draft.Bool(key));
+            return SettingsToggle.WithLabel(label, description.Length > 0 ? description : null, toggle);
         }
         var row = new Grid { ColumnSpacing = 16, RowSpacing = 6, MinHeight = 40, Margin = new Thickness(0, 2, 0, 2) };
         var labels = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
@@ -718,6 +716,7 @@ public sealed partial class SettingsWindow : Window
         if (type == "number") {
             var number = new NumberBox { Value = draft.Number(key), Minimum = Number(field["min"], -1000000), Maximum = Number(field["max"], 1000000), SmallChange = Number(field["step"], 1), SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact, MinHeight = 32 };
             number.ValueChanged += (_, args) => { if (double.IsFinite(args.NewValue)) Change(args.NewValue); }; control = number;
+            RegisterSettingReadback(number, draft, key, () => number.Value = draft.Number(key));
             number.KeyUp += (_, _) => {
                 if (double.TryParse(number.Text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.CurrentCulture, out var value) && double.IsFinite(value) && value >= number.Minimum && value <= number.Maximum) Change(value);
             };
@@ -726,7 +725,8 @@ public sealed partial class SettingsWindow : Window
             var combo = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, MinHeight = 32 };
             foreach (var option in (field["options"] as JsonArray)?.OfType<JsonObject>() ?? []) combo.Items.Add(new ComboBoxItem { Content = Text(option["label"]), Tag = option["value"]?.DeepClone() });
             combo.SelectedItem = combo.Items.OfType<ComboBoxItem>().FirstOrDefault(item => SameChoice(item.Tag as JsonNode, draft.Get(key)));
-            combo.SelectionChanged += (_, _) => { if (combo.SelectedItem is ComboBoxItem selected) { draft.SetNode(key, (selected.Tag as JsonNode)?.DeepClone()); if (key == "toolWindowTheme") ApplyTheme(); Changed(); after?.Invoke(); } }; control = combo;
+            combo.SelectionChanged += (_, _) => { if (_refreshingControls) return; if (combo.SelectedItem is ComboBoxItem selected) { draft.SetNode(key, (selected.Tag as JsonNode)?.DeepClone()); if (key == "toolWindowTheme") ApplyTheme(); Changed(); after?.Invoke(); } }; control = combo;
+            RegisterSettingReadback(combo, draft, key, () => combo.SelectedItem = combo.Items.OfType<ComboBoxItem>().FirstOrDefault(item => SameChoice(item.Tag as JsonNode, draft.Get(key))));
         }
         else {
             var text = new TextBox { Text = draft.Text(key), MinHeight = 32, PlaceholderText = type == "color" ? "#RRGGBB" : "" };
@@ -736,11 +736,17 @@ public sealed partial class SettingsWindow : Window
                 if (type == "color" && !System.Text.RegularExpressions.Regex.IsMatch(text.Text, pattern)) { ShowError(ReferenceEquals(draft, _native) ? "颜色请输入 #RRGGBB。" : "颜色请输入 #RRGGBB 或 #AARRGGBB。"); return; }
             };
             control = text;
+            RegisterSettingReadback(text, draft, key, () => text.Text = draft.Text(key));
             if (type == "color") {
                 var picker = new ColorPicker { Color = ParseColor(text.Text), IsAlphaEnabled = !ReferenceEquals(draft, _native), IsAlphaSliderVisible = !ReferenceEquals(draft, _native), IsAlphaTextInputVisible = !ReferenceEquals(draft, _native) };
                 var colorButton = new Button { Content = new Border { Width = 18, Height = 18, Background = new SolidColorBrush(picker.Color) }, Padding = new Thickness(6), Flyout = ThemeFlyout(new Flyout { Content = picker }) };
                 AutomationProperties.SetName(colorButton, label + "取色器");
+                RegisterSettingReadback(colorButton, draft, key, () => {
+                    picker.Color = ParseColor(draft.Text(key));
+                    ((Border)colorButton.Content).Background = new SolidColorBrush(picker.Color);
+                });
                 picker.ColorChanged += (_, args) => {
+                    if (_refreshingControls) return;
                     var color = args.NewColor;
                     text.Text = ReferenceEquals(draft, _native) ? $"#{color.R:x2}{color.G:x2}{color.B:x2}" : $"#{color.A:x2}{color.R:x2}{color.G:x2}{color.B:x2}";
                     ((Border)colorButton.Content).Background = new SolidColorBrush(color); Change(text.Text);

@@ -79,8 +79,8 @@ foreach ($layout in @($result.layoutChecks | Where-Object { $_.kind -eq 'setting
         throw 'Settings title bar, viewport or directly expanded advanced fields were not verified at every width.'
     }
 }
-foreach ($spectrum in @($result.layoutChecks | Where-Object { $_.kind -eq 'settingsSpectrumAdvancedFields' })) {
-    if ($spectrum.fieldCount -lt 1) { throw 'Spectrum tuning fields were not directly realized.' }
+foreach ($spectrum in @($result.layoutChecks | Where-Object { $_.kind -eq 'settingsSpectrumPresets' })) {
+    if ($spectrum.presetCount -ne 3) { throw 'Spectrum preset selector was not realized.' }
 }
 if (-not $result.weatherControls.airQualityWarning -or -not $result.weatherControls.connectionDraftPreserved) {
     throw 'Weather settings did not verify partial air-quality errors and connection draft preservation.'
@@ -107,4 +107,9 @@ if (@($ai.providerScreenshots).Count -ne 4) { throw 'AI provider screenshot cove
 foreach ($surface in $ai.providerScreenshots) {
     if (-not (Test-Path -LiteralPath $surface.png)) { throw 'AI provider screenshot was not captured.' }
 }
+$sync = $result.settingsAutoSync
+foreach ($check in @('coalescedEdits','newerEditsPreserved','inPlaceReadback','failureRetainsDraft','closeFlushesChanges')) {
+    if ($sync.$check -ne $true) { throw "Settings autosync check failed: $check" }
+}
+if ($sync.realSettingsTouched -ne $false) { throw 'Settings autosync probe touched real settings.' }
 Write-Host "Published settings templates loaded successfully without activation. Report: $report"

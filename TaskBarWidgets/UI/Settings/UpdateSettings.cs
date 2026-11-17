@@ -36,7 +36,6 @@ public sealed partial class SettingsWindow
         _automaticUpdates = SettingsToggle.Compact(_updateState.AutomaticEnabled, "自动检查并下载更新", "update-automatic");
         _automaticUpdates.Toggled += async (_, _) => { if (!_bindingUpdates) await RunUpdateCommandAsync("setAutomaticUpdates", new { enabled = _automaticUpdates.IsOn }); };
         section.Children.Add(SettingsToggle.WithLabel("自动检查并下载更新", null, _automaticUpdates));
-        section.Children.Add(Copy("此选项立即保存，无需点击“应用更改”。"));
         _updateStatus = Copy("", 14); section.Children.Add(_updateStatus);
         _updateProgress = new ProgressBar { Minimum = 0, Maximum = 100, Visibility = Visibility.Collapsed };
         AutomationProperties.SetName(_updateProgress, "更新下载进度"); section.Children.Add(_updateProgress);

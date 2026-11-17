@@ -24,6 +24,7 @@ public sealed partial class SettingsWindow
     private static readonly (string Id, string Label)[] CardMaterials = [("LiquidGlass", "液态玻璃"), ("Mica", "Mica"), ("Solid", "纯色")];
     private readonly List<(Border Cell, int Column, int Slot)> _cardOrderCells = [];
     private TextBlock? _micaStatus;
+    private InfoBar? _quickCardDisabledWarning;
     private void UpdateMicaStatus()
     {
         if (_currentPage != "quickCards" || _micaStatus is null) return;
@@ -96,6 +97,7 @@ public sealed partial class SettingsWindow
 
     private void ToggleQuickCard(string id, bool enabled)
     {
+        if (_refreshingControls) return;
         var values = _media.Get("quickCardEnabled") as JsonObject ?? new JsonObject();
         var current = QuickCardDefinitions.ToDictionary(
             card => card.Id,
@@ -105,8 +107,8 @@ public sealed partial class SettingsWindow
         foreach (var card in QuickCardDefinitions)
             values[card.Id] = current[card.Id];
         _media.SetNode("quickCardEnabled", values);
+        if (_quickCardDisabledWarning is not null) _quickCardDisabledWarning.IsOpen = QuickCardDefinitions.All(card => !QuickCardEnabled(card.Id));
         Changed();
-        RenderPage();
     }
 
     private void RenderQuickCards()
@@ -117,7 +119,6 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        var (left, right) = QuickCardLayout();
         var appearance = Section("卡片字体", "所有快捷卡片的文字使用同一套系统字体。");
         var font = new ComboBox { IsEditable = true, IsTextSearchEnabled = true, HorizontalAlignment = HorizontalAlignment.Stretch, MinWidth = 0 };
         AutomationProperties.SetName(font, "卡片字体");
@@ -128,175 +129,178 @@ public sealed partial class SettingsWindow
         if (selectedFont is null) { selectedFont = new ComboBoxItem { Content = current, Tag = current }; font.Items.Add(selectedFont); }
         font.SelectedItem = selectedFont;
         font.Text = selectedFont.Content?.ToString() ?? current;
+        var displayedFont = font.Text;
+        RegisterSettingReadback(font, _media, "cardFontFamily", () => {
+            var value = _media.Text("cardFontFamily", "Microsoft YaHei UI");
+            var item = font.Items.OfType<ComboBoxItem>().FirstOrDefault(option => string.Equals(option.Tag as string, value, StringComparison.OrdinalIgnoreCase));
+            if (item is null) { item = new ComboBoxItem { Content = value, Tag = value }; font.Items.Add(item); }
+            font.SelectedItem = item; font.Text = item.Content?.ToString() ?? value;
+            displayedFont = font.Text;
+        });
         void CommitCardFont(string value)
         {
+            if (_refreshingControls) return;
             value = value.Trim();
+            var known = _fontOptions.FirstOrDefault(option => string.Equals(option.Value, value, StringComparison.OrdinalIgnoreCase) || string.Equals(option.Label, value, StringComparison.OrdinalIgnoreCase));
+            value = known.Value ?? value;
             if (value.Length is 0 or >= 32) { ShowError("请选择字体或输入不超过 31 个字符的字体名称。"); return; }
+            displayedFont = known.Label ?? value;
             _media.Set("cardFontFamily", value); Changed();
         }
         font.SelectionChanged += (_, _) => { if (font.SelectedItem is ComboBoxItem item && item.Tag is string name) CommitCardFont(name); };
         font.TextSubmitted += (_, args) => { CommitCardFont(args.Text); args.Handled = true; };
-        font.LostFocus += (_, _) => CommitCardFont(font.Text);
+        font.LostFocus += (_, _) => { if (font.Text != displayedFont) CommitCardFont(font.Text); };
         appearance.Children.Add(new TextBlock { Text = "卡片字体", FontSize = 14 });
         appearance.Children.Add(font);
         appearance.Children.Add(Copy("字体列表不可用时仍可输入系统已安装字体名称。"));
 
-        var material = Section("卡片材质", "材质支持浅色与深色主题，点击“应用更改”后保存。");
+        var material = Section("卡片材质", "材质支持浅色与深色主题，更改后自动保存。");
         var materialPicker = new ComboBox { Header = "材质", HorizontalAlignment = HorizontalAlignment.Stretch };
         foreach (var option in CardMaterials) materialPicker.Items.Add(new ComboBoxItem { Content = option.Label, Tag = option.Id });
         materialPicker.SelectedItem = materialPicker.Items.OfType<ComboBoxItem>().First(item => (string)item.Tag == DraftCardMaterial);
         AutomationProperties.SetName(materialPicker, "卡片材质");
         AutomationProperties.SetAutomationId(materialPicker, "setting-cardMaterial");
-        materialPicker.SelectionChanged += (_, _) => {
-            if (materialPicker.SelectedItem is ComboBoxItem item) { _media.Set("cardMaterial", (string)item.Tag); Changed(); RenderPage(); }
-        };
         material.Children.Add(materialPicker);
-        if (DraftCardMaterial == "LiquidGlass")
-        {
-            var blur = new Slider { Header = "透明 — 模糊", Minimum = 0, Maximum = 100, StepFrequency = 1, Value = DraftCardGlassBlur * 100, HorizontalAlignment = HorizontalAlignment.Stretch };
-            AutomationProperties.SetName(blur, "液态玻璃透明到模糊");
-            AutomationProperties.SetAutomationId(blur, "setting-cardGlassBlur");
-            blur.ValueChanged += (_, _) => { _media.Set("cardGlassBlur", blur.Value / 100); Changed(); PreviewCardMica(DraftCardMicaTuning); };
-            material.Children.Add(blur);
-            material.Children.Add(Copy("两种主题共用此调节。打开快捷卡片查看真实材质；设置窗口背景保持 Mica。"));
-            material.Children.Add(Copy("若截图或录屏中不显示卡片，可切换为 Mica 或纯色。"));
-        }
+        var glass = new StackPanel { Spacing = 10 };
+        var blur = new Slider { Header = "透明 — 模糊", Minimum = 0, Maximum = 100, StepFrequency = 1, Value = DraftCardGlassBlur * 100, HorizontalAlignment = HorizontalAlignment.Stretch };
+        AutomationProperties.SetName(blur, "液态玻璃透明到模糊");
+        AutomationProperties.SetAutomationId(blur, "setting-cardGlassBlur");
+        blur.ValueChanged += (_, _) => { if (_refreshingControls) return; _media.Set("cardGlassBlur", blur.Value / 100); Changed(); PreviewCardMica(DraftCardMicaTuning); };
+        RegisterSettingReadback(blur, _media, "cardGlassBlur", () => blur.Value = DraftCardGlassBlur * 100);
+        glass.Children.Add(blur);
+        glass.Children.Add(Copy("两种主题共用此调节。打开快捷卡片查看真实材质；设置窗口背景保持 Mica。"));
+        glass.Children.Add(Copy("若截图或录屏中不显示卡片，可切换为 Mica 或纯色。"));
+        material.Children.Add(glass);
         AutomationProperties.SetAutomationId(material, "section-cardMica");
-        var canPreview = CanPreviewCardMaterial;
-        if (canPreview) ActivateCardMicaPreview(DraftCardMicaTuning);
+        if (CanPreviewCardMaterial) ActivateCardMicaPreview(DraftCardMicaTuning);
         _micaStatus = Copy("");
         AutomationProperties.SetAutomationId(_micaStatus, "cardMicaStatus");
         material.Children.Add(_micaStatus);
-        UpdateMicaStatus();
-        if (DraftCardMaterial == "Mica")
+        var mica = new StackPanel { Spacing = 10 };
+        material.Children.Add(mica);
+        mica.Children.Add(Copy("Mica 使用壁纸颜色，不透出后方窗口。中性色遮罩和明暗调和不代表透明度。"));
+        var vivid = SettingsToggle.Compact(DraftCardMicaVivid, "自定义 Mica", "setting-cardMicaVivid");
+        mica.Children.Add(SettingsToggle.WithLabel("自定义 Mica", "关闭后卡片改用系统默认 Mica 材质，下面四项调节暂不生效，原参数仍会保留。", vivid));
+        Slider MicaSlider(string name, string key)
         {
-            material.Children.Add(Copy("Mica 使用壁纸颜色，不透出后方窗口。中性色遮罩和明暗调和不代表透明度。"));
-            var initialMica = DraftCardMicaTuning;
-            var initialVivid = DraftCardMicaVivid;
-            var vivid = SettingsToggle.Row("自定义 Mica", "关闭后卡片改用系统默认 Mica 材质，下面四项调节暂不生效，原参数仍会保留。",
-                initialVivid, "自定义 Mica", "setting-cardMicaVivid",
-                value => { _media.Set("cardMicaVivid", value); Changed(); RenderPage(); });
-            material.Children.Add(vivid);
-            Slider MicaSlider(string name, string automationId, double value)
+            var slider = new Slider
             {
-                var slider = new Slider
-                {
-                    Minimum = 0,
-                    Maximum = 100,
-                    StepFrequency = 1,
-                    SnapsTo = SliderSnapsTo.StepValues,
-                    IsThumbToolTipEnabled = true,
-                    IsEnabled = !CardHighContrast && VividMicaBackdrop.IsSupported && initialVivid,
-                    HorizontalAlignment = HorizontalAlignment.Stretch,
-                    Value = Math.Round(value)
-                };
-                AutomationProperties.SetName(slider, name);
-                AutomationProperties.SetAutomationId(slider, automationId);
-                return slider;
-            }
-
-            var lightTint = MicaSlider("浅色模式卡片 Mica 中性色遮罩", "setting-cardMicaTintOpacity", initialMica.LightTintOpacity * 100);
-            var lightLuminosity = MicaSlider("浅色模式卡片 Mica 明暗调和", "setting-cardMicaLuminosityOpacity", initialMica.LightLuminosityOpacity * 100);
-            var darkTint = MicaSlider("深色模式卡片 Mica 中性色遮罩", "setting-cardMicaDarkTintOpacity", initialMica.DarkTintOpacity * 100);
-            var darkLuminosity = MicaSlider("深色模式卡片 Mica 明暗调和", "setting-cardMicaDarkLuminosityOpacity", initialMica.DarkLuminosityOpacity * 100);
-
-            var suppressMicaEvents = false;
-            void UpdateMicaLabels()
-            {
-                lightTint.Header = $"中性色遮罩 · {lightTint.Value:0}%";
-                lightLuminosity.Header = $"明暗调和 · {lightLuminosity.Value:0}%";
-                darkTint.Header = $"中性色遮罩 · {darkTint.Value:0}%";
-                darkLuminosity.Header = $"明暗调和 · {darkLuminosity.Value:0}%";
-            }
-            void BindMicaSlider(Slider slider, string key)
-            {
-                slider.ValueChanged += (_, _) =>
-                {
-                    if (suppressMicaEvents) return;
-                    UpdateMicaLabels();
-                    // Only the edited value changes. Other theme values can have
-                    // finer precision than the integer slider and must survive.
-                    _media.Set(key, slider.Value / 100);
-                    Changed();
-                    PreviewCardMica(DraftCardMicaTuning);
-                };
-            }
-
-            suppressMicaEvents = true;
-            lightTint.Value = Math.Round(initialMica.LightTintOpacity * 100);
-            lightLuminosity.Value = Math.Round(initialMica.LightLuminosityOpacity * 100);
-            darkTint.Value = Math.Round(initialMica.DarkTintOpacity * 100);
-            darkLuminosity.Value = Math.Round(initialMica.DarkLuminosityOpacity * 100);
-            suppressMicaEvents = false;
-            UpdateMicaLabels();
-            BindMicaSlider(lightTint, "cardMicaTintOpacity");
-            BindMicaSlider(lightLuminosity, "cardMicaLuminosityOpacity");
-            BindMicaSlider(darkTint, "cardMicaDarkTintOpacity");
-            BindMicaSlider(darkLuminosity, "cardMicaDarkLuminosityOpacity");
-
-            var lightGroup = new StackPanel { Spacing = 8 };
-            lightGroup.Children.Add(new TextBlock { Text = "浅色模式", FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-            lightGroup.Children.Add(lightTint);
-            lightGroup.Children.Add(lightLuminosity);
-            material.Children.Add(lightGroup);
-            var darkGroup = new StackPanel { Spacing = 8 };
-            darkGroup.Children.Add(new TextBlock { Text = "深色模式", FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-            darkGroup.Children.Add(darkTint);
-            darkGroup.Children.Add(darkLuminosity);
-            material.Children.Add(darkGroup);
-            if (CardHighContrast || !VividMicaBackdrop.IsSupported)
-            {
-                material.Children.Add(new InfoBar
-                {
-                    Severity = InfoBarSeverity.Informational,
-                    IsOpen = true,
-                    IsClosable = false,
-                    Title = CardHighContrast ? "高对比度模式已启用" : "当前系统不支持 Mica",
-                    Message = "材质调节暂不可用；卡片会继续使用系统回退色，文字和控件保持可读。"
-                });
-            }
-            material.Children.Add(Copy("设置窗口背景实时预览当前主题；打开快捷卡片时会继承本页草稿。离开本页恢复已保存值，再次进入可继续预览草稿。"));
-
+                Minimum = 0, Maximum = 100, StepFrequency = 1,
+                SnapsTo = SliderSnapsTo.StepValues, IsThumbToolTipEnabled = true,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Value = Math.Round(_media.Number(key, DefaultMicaValue(key)) * 100)
+            };
+            AutomationProperties.SetName(slider, name);
+            AutomationProperties.SetAutomationId(slider, "setting-" + key);
+            void UpdateLabel() => slider.Header = $"{(key.Contains("Luminosity") ? "明暗调和" : "中性色遮罩")} · {slider.Value:0}%";
+            UpdateLabel();
+            slider.ValueChanged += (_, _) => {
+                UpdateLabel();
+                if (_refreshingControls) return;
+                // Preserve the finer precision of every value the user did not edit.
+                _media.Set(key, slider.Value / 100); Changed(); PreviewCardMica(DraftCardMicaTuning);
+            };
+            RegisterSettingReadback(slider, _media, key, () => {
+                slider.Value = Math.Round(_media.Number(key, DefaultMicaValue(key)) * 100);
+                UpdateLabel();
+            });
+            return slider;
         }
+        var lightTint = MicaSlider("浅色模式卡片 Mica 中性色遮罩", "cardMicaTintOpacity");
+        var lightLuminosity = MicaSlider("浅色模式卡片 Mica 明暗调和", "cardMicaLuminosityOpacity");
+        var darkTint = MicaSlider("深色模式卡片 Mica 中性色遮罩", "cardMicaDarkTintOpacity");
+        var darkLuminosity = MicaSlider("深色模式卡片 Mica 明暗调和", "cardMicaDarkLuminosityOpacity");
+        var lightGroup = new StackPanel { Spacing = 8 };
+        lightGroup.Children.Add(new TextBlock { Text = "浅色模式", FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        lightGroup.Children.Add(lightTint); lightGroup.Children.Add(lightLuminosity); mica.Children.Add(lightGroup);
+        var darkGroup = new StackPanel { Spacing = 8 };
+        darkGroup.Children.Add(new TextBlock { Text = "深色模式", FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        darkGroup.Children.Add(darkTint); darkGroup.Children.Add(darkLuminosity); mica.Children.Add(darkGroup);
+        if (CardHighContrast || !VividMicaBackdrop.IsSupported)
+            mica.Children.Add(new InfoBar {
+                Severity = InfoBarSeverity.Informational, IsOpen = true, IsClosable = false,
+                Title = CardHighContrast ? "高对比度模式已启用" : "当前系统不支持 Mica",
+                Message = "材质调节暂不可用；卡片会继续使用系统回退色，文字和控件保持可读。"
+            });
+        mica.Children.Add(Copy("设置窗口实时预览当前主题；更改会自动保存并同步至快捷卡片。"));
+        void RefreshMaterial()
+        {
+            glass.Visibility = DraftCardMaterial == "LiquidGlass" ? Visibility.Visible : Visibility.Collapsed;
+            mica.Visibility = DraftCardMaterial == "Mica" ? Visibility.Visible : Visibility.Collapsed;
+            foreach (var slider in new[] { lightTint, lightLuminosity, darkTint, darkLuminosity })
+                slider.IsEnabled = !CardHighContrast && VividMicaBackdrop.IsSupported && DraftCardMicaVivid;
+            UpdateCardMicaPreviewSurface();
+            UpdateMicaStatus();
+        }
+        materialPicker.SelectionChanged += (_, _) => {
+            if (_refreshingControls || materialPicker.SelectedItem is not ComboBoxItem item) return;
+            _media.Set("cardMaterial", (string)item.Tag); Changed(); RefreshMaterial();
+        };
+        vivid.Toggled += (_, _) => {
+            if (_refreshingControls) return;
+            _media.Set("cardMicaVivid", vivid.IsOn); Changed(); RefreshMaterial();
+        };
+        RegisterSettingReadback(materialPicker, _media, "cardMaterial", () => {
+            materialPicker.SelectedItem = materialPicker.Items.OfType<ComboBoxItem>().First(item => (string)item.Tag == DraftCardMaterial);
+            RefreshMaterial();
+        });
+        RegisterSettingReadback(vivid, _media, "cardMicaVivid", () => { vivid.IsOn = DraftCardMicaVivid; RefreshMaterial(); });
+        RefreshMaterial();
 
         var section = Section("卡片与顺序", "卡片可独立启用。拖动手柄把卡片放进左/右任意一列的任意位置，每列数量不限；关闭的卡片仍保留。");
-        _cardOrderCells.Clear();
         var list = new Grid { ColumnSpacing = 10 };
         list.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         list.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        foreach (var (columnIds, column) in new[] { (left, 0), (right, 1) })
+        void RefreshOrder()
         {
-            var panel = new StackPanel { Spacing = 10, VerticalAlignment = VerticalAlignment.Top };
-            for (var slot = 0; slot < columnIds.Count; slot++)
+            var focused = _root.XamlRoot is null ? null : FocusManager.GetFocusedElement(_root.XamlRoot) as FrameworkElement;
+            var focusId = focused is Control && _cardOrderCells.Any(cell => cell.Cell.Child is Grid row && row.Children.Contains(focused))
+                ? AutomationProperties.GetAutomationId(focused) : "";
+            _cardOrderCells.Clear(); list.Children.Clear();
+            var (left, right) = QuickCardLayout();
+            foreach (var (columnIds, column) in new[] { (left, 0), (right, 1) })
             {
-                var surface = BuildQuickCardCell(columnIds[slot], column, slot);
-                _cardOrderCells.Add((surface, column, slot));
-                panel.Children.Add(surface);
+                var panel = new StackPanel { Spacing = 10, VerticalAlignment = VerticalAlignment.Top };
+                for (var slot = 0; slot < columnIds.Count; slot++)
+                {
+                    var surface = BuildQuickCardCell(columnIds[slot], column, slot);
+                    _cardOrderCells.Add((surface, column, slot));
+                    panel.Children.Add(surface);
+                }
+                var empty = BuildQuickCardEmptyCell(column);
+                _cardOrderCells.Add((empty, column, columnIds.Count));
+                panel.Children.Add(empty);
+                Grid.SetColumn(panel, column);
+                list.Children.Add(panel);
             }
-            var empty = BuildQuickCardEmptyCell(column);
-            _cardOrderCells.Add((empty, column, columnIds.Count));
-            panel.Children.Add(empty);
-            Grid.SetColumn(panel, column);
-            list.Children.Add(panel);
+            if (focusId.Length > 0)
+            {
+                FrameworkElement? Find(DependencyObject parent) {
+                    if (parent is FrameworkElement element && AutomationProperties.GetAutomationId(element) == focusId) return element;
+                    for (var index = 0; index < Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(parent); index++) {
+                        var found = Find(Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(parent, index)); if (found is not null) return found;
+                    }
+                    return null;
+                }
+                DispatcherQueue.TryEnqueue(() => (Find(list) as Control)?.Focus(FocusState.Programmatic));
+            }
         }
+        RefreshOrder();
+        RegisterReadback(list, () => new JsonArray(_media.Get("quickCardOrder"), _media.Get("quickCardColumns")).ToJsonString(), RefreshOrder);
         section.Children.Add(list);
         section.Children.Add(Copy("Alt + ↑ / ↓ 可在本列内调整顺序。更新提示卡不属于普通卡片，不在此列表中，并固定显示在最右侧。"));
 
-        var enabledCount = QuickCardDefinitions.Count(card => QuickCardEnabled(card.Id));
-        if (enabledCount == 0)
-        {
-            var warning = new InfoBar
-            {
-                Severity = InfoBarSeverity.Warning,
-                IsOpen = true,
-                IsClosable = false,
-                Title = "所有普通卡片均已关闭",
-                Message = "保存后，点击任务栏入口不会显示卡片。可以随时在这里重新启用任意一张。"
-            };
-            section.Children.Add(warning);
-        }
+        var warning = new InfoBar {
+            Severity = InfoBarSeverity.Warning, IsClosable = false,
+            IsOpen = QuickCardDefinitions.All(card => !QuickCardEnabled(card.Id)),
+            Title = "所有普通卡片均已关闭",
+            Message = "点击任务栏入口不会显示卡片。可以随时在这里重新启用任意一张。"
+        };
+        _quickCardDisabledWarning = warning;
+        section.Children.Add(warning);
+        RegisterSettingReadback(warning, _media, "quickCardEnabled", () => warning.IsOpen = QuickCardDefinitions.All(card => !QuickCardEnabled(card.Id)));
 
-        var motion = Section("进出动画", "控制整组卡片从屏幕底部进入和退出的动画，保存后生效。");
+        var motion = Section("进出动画", "控制整组卡片从屏幕底部进入和退出的动画。");
         var speed = new Slider
         {
             Minimum = 50, Maximum = 300, StepFrequency = 10, SmallChange = 10, LargeChange = 50,
@@ -309,9 +313,14 @@ public sealed partial class SettingsWindow
         speed.ValueChanged += (_, _) =>
         {
             speed.Header = $"动画速度 · {speed.Value / 100:0.0}×";
+            if (_refreshingControls) return;
             _media.Set("quickCardAnimationSpeedPercent", (int)Math.Round(speed.Value));
             Changed();
         };
+        RegisterSettingReadback(speed, _media, "quickCardAnimationSpeedPercent", () => {
+            speed.Value = Math.Clamp(_media.Number("quickCardAnimationSpeedPercent", 150), 50, 300);
+            speed.Header = $"动画速度 · {speed.Value / 100:0.0}×";
+        });
         motion.Children.Add(speed);
         motion.Children.Add(Copy("0.5× 更慢，3× 更快；默认 1.5×。"));
         var frameRates = new[] { 0, 30, 60, 90, 120, 144, 165, 240 };
@@ -323,10 +332,14 @@ public sealed partial class SettingsWindow
         AutomationProperties.SetAutomationId(frameRate, "setting-quickCardAnimationFps");
         frameRate.SelectionChanged += (_, _) =>
         {
-            if (frameRate.SelectedIndex < 0) return;
+            if (_refreshingControls || frameRate.SelectedIndex < 0) return;
             _media.Set("quickCardAnimationFps", frameRates[frameRate.SelectedIndex]);
             Changed();
         };
+        RegisterSettingReadback(frameRate, _media, "quickCardAnimationFps", () => {
+            var index = Array.IndexOf(frameRates, (int)_media.Number("quickCardAnimationFps"));
+            frameRate.SelectedIndex = index >= 0 ? index : 0;
+        });
         motion.Children.Add(frameRate);
         motion.Children.Add(Copy("目标帧率也控制实时液态玻璃的背景采样频率。较高帧率更流畅，也会增加资源消耗；实际帧率受屏幕和系统负载影响。系统关闭动画时仍立即显示或隐藏。"));
 
@@ -339,10 +352,14 @@ public sealed partial class SettingsWindow
         AutomationProperties.SetName(mode, "后台资源模式");
         mode.SelectionChanged += (_, _) =>
         {
-            if (mode.SelectedIndex < 0) return;
+            if (_refreshingControls || mode.SelectedIndex < 0) return;
             _media.Set("quickCardResourceMode", modes[mode.SelectedIndex]);
             Changed();
         };
+        RegisterSettingReadback(mode, _media, "quickCardResourceMode", () => {
+            var index = Array.IndexOf(modes, _media.Text("quickCardResourceMode", "Resident"));
+            mode.SelectedIndex = index >= 0 ? index : 0;
+        });
         performance.Children.Add(mode);
         performance.Children.Add(Copy("常驻模式占用更多内存，隐藏时不播放动画；按需模式释放资源后，再次打开需要重新准备画面。"));
     }
@@ -351,12 +368,9 @@ public sealed partial class SettingsWindow
     {
         var enabled = QuickCardEnabled("weather");
         var status = Section("天气卡状态");
-        status.Children.Add(new TextBlock
-        {
-            Text = enabled ? "已启用" : "未启用",
-            FontSize = 16,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
-        });
+        var enabledStatus = new TextBlock { Text = enabled ? "已启用" : "未启用", FontSize = 16, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
+        status.Children.Add(enabledStatus);
+        RegisterSettingReadback(enabledStatus, _media, "quickCardEnabled", () => enabledStatus.Text = QuickCardEnabled("weather") ? "已启用" : "未启用");
         status.Children.Add(Copy("天气卡的启停开关位于“快捷卡片 → 卡片与顺序”的天气行。此处配置来源、城市和连接。"));
 
         RenderWeatherSettings();
@@ -383,6 +397,7 @@ public sealed partial class SettingsWindow
             BorderThickness = new Thickness(0),
             Tag = "card:" + id
         };
+        AutomationProperties.SetAutomationId(handle, "quick-card-handle-" + id);
         AutomationProperties.SetName(handle, definition.Label + "，拖动排序，Alt 加上下方向键调整");
         ToolTipService.SetToolTip(handle, "拖动调整卡片顺序；Alt + ↑ / ↓ 在本列内调整");
         handle.StartPointerDrag = (source, args) => StartQuickCardPointerDrag(source, id, args, surface);
@@ -410,6 +425,7 @@ public sealed partial class SettingsWindow
 
         var enabled = SettingsToggle.Compact(QuickCardEnabled(id), "启用" + definition.Label,
             "quick-card-enabled-" + id, changed: value => ToggleQuickCard(id, value));
+        RegisterSettingReadback(enabled, _media, "quickCardEnabled", () => enabled.IsOn = QuickCardEnabled(id));
         enabled.KeyDown += (_, args) =>
         {
             if ((InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Menu) & Windows.UI.Core.CoreVirtualKeyStates.Down) == 0)
@@ -438,6 +454,7 @@ public sealed partial class SettingsWindow
             Flyout = menu,
             VerticalAlignment = VerticalAlignment.Center
         };
+        AutomationProperties.SetAutomationId(more, "quick-card-more-" + id);
         AutomationProperties.SetName(more, definition.Label + "的更多操作");
         AddCardRow(row, more, 3);
 

@@ -85,8 +85,10 @@ internal static class UiLayoutProbe
             await SettleAsync(content);
             pageScroll.ChangeView(null, 0, null, true);
             await SettleAsync(content);
-            var spectrumCount = AssertSpectrumFieldsDirect(content, spectrumKeys);
-            checks.Add(new { kind = "settingsSpectrumAdvancedFields", requestedPhysicalWidth = width, fieldCount = spectrumCount });
+            var spectrumCount = AssertSpectrumPresets(content, spectrumKeys);
+            var spectrumPng = Path.Combine(outputDirectory, $"settings-spectrum-{width}.png");
+            await CaptureAsync(content, spectrumPng);
+            checks.Add(new { kind = "settingsSpectrumPresets", requestedPhysicalWidth = width, presetCount = spectrumCount, png = spectrumPng });
 
             window.ShowPage("sources");
             await SettleAsync(content);
@@ -253,21 +255,14 @@ internal static class UiLayoutProbe
                 throw new InvalidOperationException($"Advanced setting remained folded: {key}.");
         }
     }
-    private static int AssertSpectrumFieldsDirect(FrameworkElement content, string[] spectrumKeys)
+    private static int AssertSpectrumPresets(FrameworkElement content, string[] spectrumKeys)
     {
-        if (spectrumKeys.Length == 0) throw new InvalidOperationException("The settings fixture must include spectrum tuning fields.");
-        if (Walk(content).OfType<Expander>().Any(expander => HeaderText(expander).Contains("频谱高级调节", StringComparison.Ordinal)))
-            throw new InvalidOperationException("Spectrum tuning fields are still hidden inside an Expander.");
-        var realized = 0;
-        foreach (var key in spectrumKeys)
-        {
-            var field = Walk(content).OfType<NumberBox>()
-                .SingleOrDefault(control => AutomationProperties.GetAutomationId(control) == "setting-" + key);
-            if (field is null || field.ActualWidth <= 0 || field.ActualHeight <= 0 || Ancestor<Expander>(field) is not null)
-                throw new InvalidOperationException($"Spectrum field is not directly realized: {key}.");
-            realized++;
-        }
-        return realized;
+        var preset = Walk(content).OfType<ComboBox>().SingleOrDefault(control => AutomationProperties.GetAutomationId(control) == "setting-spectrumPreset");
+        if (preset is null || preset.ActualWidth <= 0 || preset.ActualHeight <= 0 || preset.Items.Count != 3)
+            throw new InvalidOperationException("Spectrum preset selector was not realized.");
+        if (Walk(content).OfType<NumberBox>().Any(control => spectrumKeys.Any(key => AutomationProperties.GetAutomationId(control) == "setting-" + key)))
+            throw new InvalidOperationException("Detailed spectrum tuning controls are still visible.");
+        return preset.Items.Count;
     }
     private static async Task<object> AssertOverlayDrawerAsync(SettingsWindow window, FrameworkElement content, ScrollViewer scroll)
     {

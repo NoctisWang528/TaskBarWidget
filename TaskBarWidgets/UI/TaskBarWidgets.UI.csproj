@@ -18,6 +18,7 @@
     <AssemblyName>TaskBarWidgets.UI</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\Media\SpectrumTuningSettings.cs" Link="Settings\SpectrumTuningSettings.cs" />
     <!-- Retained design references; native cards draw their own weather vectors. -->
     <Content Remove="Assets\WeatherIcons\**" />
     <Content Include="..\assets\app-icon.ico" Link="Assets\TaskBarWidgets.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

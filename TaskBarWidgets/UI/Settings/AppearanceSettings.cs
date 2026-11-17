@@ -33,7 +33,7 @@ public sealed partial class SettingsWindow
         }
         catch (OperationCanceledException) when (_closed) { throw; }
         catch (Exception error) when (error is IOException or InvalidOperationException or JsonException or OperationCanceledException) {
-            _fontListError = "字体列表暂不可用，仍可输入字体名称；重新读取后会重试。";
+            _fontListError = "字体列表暂不可用，仍可输入字体名称。";
         }
     }
 
@@ -57,17 +57,27 @@ public sealed partial class SettingsWindow
         var selected = family.Items.OfType<ComboBoxItem>().FirstOrDefault(item => string.Equals(item.Tag as string, current, StringComparison.OrdinalIgnoreCase));
         if (selected is null) { selected = new ComboBoxItem { Content = current, Tag = current }; family.Items.Add(selected); }
         family.SelectedItem = selected; family.Text = selected.Content?.ToString() ?? current;
+        var displayedFamily = family.Text;
+        RegisterSettingReadback(family, _native, "taskbar.fontName", () => {
+            var value = _native.Text("taskbar.fontName", "Segoe UI");
+            var item = family.Items.OfType<ComboBoxItem>().FirstOrDefault(option => string.Equals(option.Tag as string, value, StringComparison.OrdinalIgnoreCase));
+            if (item is null) { item = new ComboBoxItem { Content = value, Tag = value }; family.Items.Add(item); }
+            family.SelectedItem = item; family.Text = item.Content?.ToString() ?? value;
+            displayedFamily = family.Text;
+        });
         void CommitFamily(string name)
         {
+            if (_refreshingControls) return;
             name = name.Trim();
             var known = _fontOptions.FirstOrDefault(option => string.Equals(option.Value, name, StringComparison.OrdinalIgnoreCase) || string.Equals(option.Label, name, StringComparison.OrdinalIgnoreCase));
             var value = known.Value ?? name;
             if (value.Length is 0 or >= 32) { ShowError("请选择字体或输入不超过 31 个字符的字体名称。"); return; }
+            displayedFamily = known.Label ?? name;
             _native.Set("taskbar.fontName", value); Changed();
         }
         family.SelectionChanged += (_, _) => { if (family.SelectedItem is ComboBoxItem item && item.Tag is string name) CommitFamily(name); };
         family.TextSubmitted += (_, args) => { CommitFamily(args.Text); args.Handled = true; };
-        family.LostFocus += (_, _) => CommitFamily(family.Text);
+        family.LostFocus += (_, _) => { if (family.Text != displayedFamily) CommitFamily(family.Text); };
         family.KeyUp += (_, _) => {
             if (_fontOptions.Any(option => string.Equals(option.Value, family.Text, StringComparison.OrdinalIgnoreCase) || string.Equals(option.Label, family.Text, StringComparison.OrdinalIgnoreCase))) CommitFamily(family.Text);
         };
@@ -76,12 +86,14 @@ public sealed partial class SettingsWindow
         var minimum = Number(sizeField?["min"], 5); var maximum = Number(sizeField?["max"], 72);
         var size = new NumberBox { Value = _native.Number("taskbar.fontSize", 10), Minimum = minimum, Maximum = maximum, SmallChange = 1, Width = 104, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact, NumberFormatter = new DecimalFormatter { FractionDigits = 0, IntegerDigits = 1 } };
         AutomationProperties.SetName(size, "任务栏字号（磅）"); AutomationProperties.SetAutomationId(size, "setting-taskbar.fontSize");
+        RegisterSettingReadback(size, _native, "taskbar.fontSize", () => size.Value = _native.Number("taskbar.fontSize", 10));
         void CommitSize(double value)
         {
+            if (_refreshingControls) return;
             if (!double.IsFinite(value) || value < minimum || value > maximum) return;
             _native.Set("taskbar.fontSize", (int)Math.Round(value, MidpointRounding.AwayFromZero)); Changed();
         }
-        size.ValueChanged += (_, args) => { CommitSize(args.NewValue); if (double.IsFinite(args.NewValue) && args.NewValue != Math.Round(args.NewValue, MidpointRounding.AwayFromZero)) size.Value = Math.Round(args.NewValue, MidpointRounding.AwayFromZero); };
+        size.ValueChanged += (_, args) => { if (_refreshingControls) return; CommitSize(args.NewValue); if (double.IsFinite(args.NewValue) && args.NewValue != Math.Round(args.NewValue, MidpointRounding.AwayFromZero)) size.Value = Math.Round(args.NewValue, MidpointRounding.AwayFromZero); };
         size.KeyUp += (_, _) => { if (double.TryParse(size.Text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.CurrentCulture, out var value)) CommitSize(value); };
 
         var styles = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
@@ -92,6 +104,7 @@ public sealed partial class SettingsWindow
             var toggle = new ToggleButton { Content = text, IsChecked = _native.Bool(key), Width = 36, Height = 32, MinWidth = 32, Padding = new Thickness(6, 2, 6, 2) };
             AutomationProperties.SetName(toggle, label); AutomationProperties.SetAutomationId(toggle, "setting-" + key); ToolTipService.SetToolTip(toggle, label);
             toggle.Checked += (_, _) => { _native.Set(key, true); Changed(); }; toggle.Unchecked += (_, _) => { _native.Set(key, false); Changed(); };
+            RegisterSettingReadback(toggle, _native, key, () => toggle.IsChecked = _native.Bool(key));
             styles.Children.Add(toggle);
         }
         static StackPanel Labeled(string label, FrameworkElement control) {

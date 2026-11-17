@@ -1,3 +1,5 @@
+using System.Text.Json;
+using TaskbarLyrics.App;
 using System.Text.Json.Nodes;
 using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
@@ -68,37 +70,64 @@ public sealed partial class SettingsWindow
     }
     private void RenderGeneral()
     {
-        if (_schema["startup"] is JsonObject startup)
+        var registration = Section("登录启动状态");
+        var startupStatus = Copy(""); var registeredPath = Copy(""); var currentPath = Copy(""); var startupError = Copy("");
+        registration.Children.Add(startupStatus); registration.Children.Add(registeredPath);
+        registration.Children.Add(currentPath); registration.Children.Add(startupError);
+        var repair = ActionButton("修复并启用登录启动", async () => {
+            await ApplyStartupCommandAsync("general.repair_startup", true);
+        });
+        var pendingStartup = Copy("正在保存登录启动开关的更改…");
+        registration.Children.Add(pendingStartup); registration.Children.Add(repair);
+        var clear = ActionButton("清除旧启动项", async () => {
+            await ApplyStartupCommandAsync("general.auto_run", false);
+        });
+        registration.Children.Add(clear);
+        void RefreshStartup()
         {
-            var registration = Section("登录启动状态");
-            registration.Children.Add(Copy(Text(startup["status"]) switch {
+            var startup = _schema["startup"] as JsonObject;
+            registration.Visibility = startup is null ? Visibility.Collapsed : Visibility.Visible;
+            startupStatus.Text = Text(startup?["status"]) switch {
                 "enabled" => "已通过当前用户的登录计划任务启用。",
                 "repairRequired" => "启动项需要修复，请重新注册到当前程序位置。",
                 "error" => "无法读取或验证启动项。",
-                _ => "未启用登录启动。" }));
-            var path = Text(startup["registeredPath"], Text(startup["legacyPath"]));
-            if (!string.IsNullOrEmpty(path)) registration.Children.Add(Copy("已登记位置：" + path));
-            registration.Children.Add(Copy("当前程序：" + Text(startup["currentPath"])));
-            if (!string.IsNullOrEmpty(Text(startup["error"]))) registration.Children.Add(Copy(Text(startup["error"])));
-            var repair = ActionButton("修复并启用登录启动", async () => {
-                var result = await RequestAsync("applyNativeSettings", new Dictionary<string, object> { ["general.repair_startup"] = true });
-                SetNativeReadback(result, new SettingsDraft.SaveSnapshot(-1, new()));
-                RenderPage(); UpdateSaveStatus();
-            });
-            repair.IsEnabled = !_native.Pending.ContainsKey("general.auto_run");
-            if (_native.Pending.ContainsKey("general.auto_run")) registration.Children.Add(Copy("请先应用登录启动开关的更改。"));
-            registration.Children.Add(repair);
-            if (startup["needsRepair"]?.GetValue<bool>() == true)
-                registration.Children.Add(ActionButton("清除旧启动项", async () => {
-                    var result = await RequestAsync("applyNativeSettings", new Dictionary<string, object> { ["general.auto_run"] = false });
-                    SetNativeReadback(result, new SettingsDraft.SaveSnapshot(-1, new()));
-                    RenderPage(); UpdateSaveStatus();
-                }));
+                _ => "未启用登录启动。" };
+            var path = Text(startup?["registeredPath"], Text(startup?["legacyPath"]));
+            registeredPath.Text = "已登记位置：" + path;
+            registeredPath.Visibility = path.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+            currentPath.Text = "当前程序：" + Text(startup?["currentPath"]);
+            startupError.Text = Text(startup?["error"]);
+            startupError.Visibility = startupError.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+            repair.IsEnabled = clear.IsEnabled = !_native.Pending.ContainsKey("general.auto_run");
+            pendingStartup.Visibility = repair.IsEnabled ? Visibility.Collapsed : Visibility.Visible;
+            clear.Visibility = startup?["needsRepair"]?.GetValue<bool>() == true ? Visibility.Visible : Visibility.Collapsed;
         }
+        RefreshStartup();
+        RegisterReadback(registration, () => (_schema["startup"]?.ToJsonString() ?? "null") + "|" + _native.Pending.ContainsKey("general.auto_run"), RefreshStartup);
         var section = Section("应用界面");
         section.Children.Add(MediaEditor("toolWindowTheme", "界面主题", "select", choices: ["System", "Light", "Dark"], labels: ["跟随系统", "浅色", "深色"]));
-        section.Children.Add(Copy("主题立即在设置窗口和快捷卡片中同步预览，点击“应用更改”后保存；重新读取可撤销未保存的修改。开机启动由上方主程序设置管理。"));
+        section.Children.Add(Copy("主题更改会自动保存，并同步至设置窗口和快捷卡片。登录启动由上方主程序设置管理。"));
         RenderDataStorage();
+    }
+
+    private async Task ApplyStartupCommandAsync(string key, bool value)
+    {
+        if (!_settingsSyncTask.IsCompleted) await _settingsSyncTask;
+        if (_busy || _aiUsageMutating || _weatherPage?.Committing == true)
+            throw new InvalidOperationException("设置正在同步，请稍后重试。");
+        _busy = true; UpdateSaveStatus();
+        var snapshot = _native.Capture();
+        try
+        {
+            var result = await RequestAsync("applyNativeSettings", new Dictionary<string, object> { [key] = value });
+            SetNativeReadback(result, snapshot, preservePending: true);
+            RefreshSettingControls();
+        }
+        finally
+        {
+            _busy = false; UpdateSaveStatus();
+            if (_native.Pending.Count + _media.Pending.Count > 0) QueueSettingsSync();
+        }
     }
 
     private void RenderDataStorage()
@@ -251,44 +280,54 @@ public sealed partial class SettingsWindow
         foreach (var label in new[] { "关闭", "仅纯音乐时", "纯音乐或无歌词时", "始终显示" }) choice.Items.Add(label);
         choice.SelectedIndex = Math.Max(0, Array.IndexOf(modes, _media.Text("spectrumDisplayMode", "Disabled")));
         choice.SelectionChanged += async (_, _) => await GuardAsync(async () => {
-            if (choice.SelectedIndex < 0) return;
+            if (_refreshingControls || choice.SelectedIndex < 0) return;
             var mode = modes[choice.SelectedIndex];
             if (mode != "Disabled" && !_media.Bool("spectrumAudioAccessGranted")) {
                 var dialog = new ContentDialog { XamlRoot = _root.XamlRoot, RequestedTheme = _root.RequestedTheme, Title = "允许读取系统播放声音？", Content = "频谱只在需要显示时读取扬声器或耳机当前播放的声音。可随时在这里撤销。", PrimaryButtonText = "允许并启用", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close };
                 if (await dialog.ShowAsync() == ContentDialogResult.Primary) await ServiceCommandAsync("confirmSpectrumAudioAccess", JsonValue.Create(mode));
-                else RenderPage();
+                else {
+                    var refreshing = _refreshingControls;
+                    _refreshingControls = true;
+                    try { choice.SelectedIndex = Math.Max(0, Array.IndexOf(modes, _media.Text("spectrumDisplayMode", "Disabled"))); }
+                    finally { _refreshingControls = refreshing; }
+                }
             }
             else { _media.Set("spectrumDisplayMode", mode); Changed(); }
         });
+        RegisterSettingReadback(choice, _media, "spectrumDisplayMode", () => choice.SelectedIndex = Math.Max(0, Array.IndexOf(modes, _media.Text("spectrumDisplayMode", "Disabled"))));
         spectrum.Children.Add(choice);
-        spectrum.Children.Add(Copy(Text((_serviceEvents.GetValueOrDefault("spectrumCaptureState") as JsonObject)?["message"], _media.Bool("spectrumAudioAccessGranted") ? "已授权系统音频访问。" : "尚未授权系统音频访问。")));
+        string CaptureStatus() => Text((_serviceEvents.GetValueOrDefault("spectrumCaptureState") as JsonObject)?["message"], _media.Bool("spectrumAudioAccessGranted") ? "已授权系统音频访问。" : "尚未授权系统音频访问。");
+        var captureStatus = Copy(CaptureStatus()); spectrum.Children.Add(captureStatus);
+        RegisterReadback(captureStatus, CaptureStatus, () => captureStatus.Text = CaptureStatus());
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         actions.Children.Add(ActionButton("重试采集", () => ServiceCommandAsync("retrySpectrumCapture")));
         actions.Children.Add(ActionButton("停止并撤销授权", () => ServiceCommandAsync("revokeSpectrumAudioAccess"))); spectrum.Children.Add(actions);
-        if (_media.Get("spectrumTuning") is JsonObject tuning)
+        var presets = new (string Label, SpectrumTuningSettings Tuning)[] {
+            ("柔和", new() { BarCount = 24, BackendAttack = 0.50, BackendRelease = 0.25,
+                FrontendRise = 0.40, FrontendFall = 0.18, MinBarHeight = 4, BarHeightRange = 20, BarOpacity = 0.65 }),
+            ("均衡", SpectrumTuningSettings.CreateDefault()),
+            ("动感", new() { BackendAttack = 0.95, BackendRelease = 0.65,
+                FrontendRise = 0.90, FrontendFall = 0.50, BarHeightRange = 32, BarOpacity = 0.90 })
+        };
+        var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var preset = new ComboBox { Header = "频谱效果", PlaceholderText = "当前配置", HorizontalAlignment = HorizontalAlignment.Stretch };
+        AutomationProperties.SetName(preset, "频谱效果");
+        AutomationProperties.SetAutomationId(preset, "setting-spectrumPreset");
+        foreach (var option in presets)
+            preset.Items.Add(new ComboBoxItem { Content = option.Label, Tag = JsonSerializer.SerializeToNode(option.Tuning, jsonOptions) });
+        void ReadPreset()
         {
-            var tuningDraft = new SettingsDraft(); tuningDraft.Readback(tuning);
-            var fields = new StackPanel { Spacing = 4 };
-            var definitions = new (string Key, string Label, double Min, double Max, double Step)[] {
-                ("sampleWindow", "采样窗口", 256, 8192, 256), ("updateIntervalMs", "更新间隔（毫秒）", 16, 100, 1),
-                ("barCount", "频谱柱数量", 8, 32, 1), ("minFrequency", "最低频率（Hz）", 20, 19999, 1),
-                ("maxFrequency", "最高频率（Hz）", 21, 20000, 1), ("frequencyDistributionBias", "频率分布偏移", -1, 1, .01),
-                ("peakInitial", "初始峰值", .004, .2, .001), ("peakDecay", "峰值衰减", .85, .995, .001),
-                ("peakFloor", "峰值下限", .003, .08, .001), ("peakCeiling", "峰值上限", .003, 1, .01),
-                ("noiseFloor", "噪声底限", 0, .25, .001), ("outputCurve", "输出曲线", .25, 1.5, .01),
-                ("lowBandGain", "低频增益", .2, 4, .01), ("bandGainStep", "频段增益步长", -.05, .12, .001),
-                ("frequencyWeightBase", "频率权重基值", .2, 2.5, .01), ("frequencyWeightSlope", "频率权重斜率", -.1, .2, .001),
-                ("backendAttack", "采集上升速度", .05, 1, .01), ("backendRelease", "采集下降速度", .02, 1, .01),
-                ("frontendRise", "显示上升速度", .01, 1, .01), ("frontendFall", "显示下降速度", .01, 1, .01),
-                ("minBarHeight", "频谱柱最小高度", 0, 48, 1), ("barHeightRange", "频谱柱高度范围", 0, 96, 1),
-                ("barOpacity", "频谱柱不透明度", 0, 1, .01) };
-            foreach (var definition in definitions)
-            {
-                fields.Children.Add(FieldEditor(new JsonObject { ["key"] = definition.Key, ["label"] = definition.Label, ["type"] = "number", ["min"] = definition.Min, ["max"] = definition.Max, ["step"] = definition.Step }, tuningDraft,
-                    () => { var updated = new JsonObject(); foreach (var key in tuningDraft.Keys) updated[key] = tuningDraft.Get(key); _media.SetNode("spectrumTuning", updated); Changed(); }));
-            }
-            spectrum.Children.Add(fields);
+            // Opening the page must never replace an existing custom configuration.
+            var current = _media.Get("spectrumTuning") ?? JsonSerializer.SerializeToNode(SpectrumTuningSettings.CreateDefault(), jsonOptions);
+            preset.SelectedItem = preset.Items.OfType<ComboBoxItem>().FirstOrDefault(item => JsonNode.DeepEquals(item.Tag as JsonNode, current));
         }
+        ReadPreset();
+        preset.SelectionChanged += (_, _) => {
+            if (_refreshingControls || preset.SelectedItem is not ComboBoxItem item) return;
+            _media.SetNode("spectrumTuning", item.Tag as JsonNode); Changed();
+        };
+        RegisterSettingReadback(preset, _media, "spectrumTuning", ReadPreset);
+        spectrum.Children.Insert(spectrum.Children.IndexOf(choice) + 1, preset);
     }
     private void RenderLyricsAppearance()
     {
@@ -328,72 +367,100 @@ public sealed partial class SettingsWindow
         var rows = new StackPanel { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Stretch };
         _sourceOrderSurface = new Border { Child = rows, HorizontalAlignment = HorizontalAlignment.Stretch, Tag = "SourcePriorityList" };
         sources.Children.Add(_sourceOrderSurface);
-        var list = SourceList().ToList();
-        for (var index = 0; index < list.Count; index++) {
-            var source = list[index];
-            var position = index;
-            var row = new Grid { ColumnSpacing = 8, Padding = new Thickness(8, 10, 8, 10), MinHeight = 64, HorizontalAlignment = HorizontalAlignment.Stretch, Tag = "SourcePriorityRowContent" };
-            foreach (var width in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto, GridLength.Auto }) row.ColumnDefinitions.Add(new ColumnDefinition { Width = width });
-            Border? surface = null;
-            var handle = new PointerDragButton { Content = ReorderDots(), DragLabel = source.Label, Width = 32, Height = 36, Padding = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Tag = "source:" + source.Id, IsEnabled = !_sourceReorderBusy };
-            AutomationProperties.SetName(handle, source.Label + "，优先级 " + (position + 1) + "；拖动排序，Alt 加上下方向键调整，Enter 打开设置");
-            ToolTipService.SetToolTip(handle, "拖动调整优先级；Alt + ↑ / ↓ 调整，Enter 打开设置");
-            handle.StartPointerDrag = (button, args) => {
-                if (_busy || _sourceReorderBusy) return false;
-                _sourceDragId = source.Id;
-                return _pointerReorder?.Begin(button, args, null, MoveSourcePointerDrag, point => {
-                    if (SourceDropGap(point) is { } gap) { _pointerReorder.Record("source-drop", $"gap={gap}"); _ = GuardAsync(() => ReorderSourceAsync(source.Id, gap)); }
-                    else _pointerReorder?.Record("source-drop-rejected", "no-target");
-                }, surface, PointerReorder.CreateDragGhost("\uE8D6", source.Label, source.Custom ? "自定义播放器" : "内置播放器")) == true;
-            };
-            handle.Click += (_, _) => OpenSource(source.Id);
-            handle.KeyDown += async (_, args) => {
-                var alt = (InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Menu) & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0;
-                if (!alt || args.Key is not (VirtualKey.Up or VirtualKey.Down)) return;
-                args.Handled = true;
-                await GuardAsync(() => MoveSourceAsync(source.Id, args.Key == VirtualKey.Up ? -1 : 1));
-            };
-            row.Children.Add(handle);
-            var labels = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-            labels.Children.Add(new TextBlock { Text = source.Label, FontSize = 14, TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1 });
-            labels.Children.Add(new TextBlock
-            {
-                Text = $"优先级 {position + 1} · " + (source.Custom ? "自定义播放器" : "内置播放器"),
-                FontSize = 12,
-                Opacity = .72,
-                TextWrapping = TextWrapping.NoWrap,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                MaxLines = 1
-            });
-            Grid.SetColumn(labels, 1); row.Children.Add(labels);
-            var enabled = SettingsToggle.Compact(_media.Bool(source.Key, source.Id == "AppleMusic"), "启用" + source.Label,
-                "source-enabled-" + source.Id,
-                changed: value => { _media.Set(source.Key, value); Changed(); });
-            Grid.SetColumn(enabled, 2); row.Children.Add(enabled);
-            var menu = ThemeFlyout(new MenuFlyout());
-            var settings = new MenuFlyoutItem { Text = "设置" }; settings.Click += (_, _) => OpenSource(source.Id); menu.Items.Add(settings);
-            foreach (var (text, delta) in new[] { ("提高优先级", -1), ("降低优先级", 1) }) {
-                var move = new MenuFlyoutItem { Text = text, IsEnabled = !_sourceReorderBusy && position + delta >= 0 && position + delta < list.Count };
-                move.Click += async (_, _) => await GuardAsync(() => MoveSourceAsync(source.Id, delta)); menu.Items.Add(move);
+        void RefreshSources()
+        {
+            var focused = _root.XamlRoot is null ? null : FocusManager.GetFocusedElement(_root.XamlRoot) as Control;
+            var focusId = focused is not null && _sourceRows.Any(item => item.Surface.Child is Grid row && row.Children.Contains(focused))
+                ? AutomationProperties.GetAutomationId(focused) : "";
+            _sourceRows.Clear(); rows.Children.Clear();
+            var list = SourceList().ToList();
+            for (var index = 0; index < list.Count; index++) {
+                var source = list[index];
+                var position = index;
+                var row = new Grid { ColumnSpacing = 8, Padding = new Thickness(8, 10, 8, 10), MinHeight = 64, HorizontalAlignment = HorizontalAlignment.Stretch, Tag = "SourcePriorityRowContent" };
+                foreach (var width in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto, GridLength.Auto }) row.ColumnDefinitions.Add(new ColumnDefinition { Width = width });
+                Border? surface = null;
+                var handle = new PointerDragButton { Content = ReorderDots(), DragLabel = source.Label, Width = 32, Height = 36, Padding = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Tag = "source:" + source.Id, IsEnabled = !_sourceReorderBusy };
+                AutomationProperties.SetAutomationId(handle, "source-handle-" + source.Id);
+                AutomationProperties.SetName(handle, source.Label + "，优先级 " + (position + 1) + "；拖动排序，Alt 加上下方向键调整，Enter 打开设置");
+                ToolTipService.SetToolTip(handle, "拖动调整优先级；Alt + ↑ / ↓ 调整，Enter 打开设置");
+                handle.StartPointerDrag = (button, args) => {
+                    if (_busy || _sourceReorderBusy) return false;
+                    _sourceDragId = source.Id;
+                    return _pointerReorder?.Begin(button, args, null, MoveSourcePointerDrag, point => {
+                        if (SourceDropGap(point) is { } gap) { _pointerReorder.Record("source-drop", $"gap={gap}"); _ = GuardAsync(() => ReorderSourceAsync(source.Id, gap)); }
+                        else _pointerReorder?.Record("source-drop-rejected", "no-target");
+                    }, surface, PointerReorder.CreateDragGhost("\uE8D6", source.Label, source.Custom ? "自定义播放器" : "内置播放器")) == true;
+                };
+                handle.Click += (_, _) => OpenSource(source.Id);
+                handle.KeyDown += async (_, args) => {
+                    var alt = (InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Menu) & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0;
+                    if (!alt || args.Key is not (VirtualKey.Up or VirtualKey.Down)) return;
+                    args.Handled = true;
+                    await GuardAsync(() => MoveSourceAsync(source.Id, args.Key == VirtualKey.Up ? -1 : 1));
+                };
+                row.Children.Add(handle);
+                var labels = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+                labels.Children.Add(new TextBlock { Text = source.Label, FontSize = 14, TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1 });
+                labels.Children.Add(new TextBlock
+                {
+                    Text = $"优先级 {position + 1} · " + (source.Custom ? "自定义播放器" : "内置播放器"),
+                    FontSize = 12,
+                    Opacity = .72,
+                    TextWrapping = TextWrapping.NoWrap,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    MaxLines = 1
+                });
+                Grid.SetColumn(labels, 1); row.Children.Add(labels);
+                var enabled = SettingsToggle.Compact(_media.Bool(source.Key, source.Id == "AppleMusic"), "启用" + source.Label,
+                    "source-enabled-" + source.Id,
+                    changed: value => { _media.Set(source.Key, value); Changed(); });
+                RegisterSettingReadback(enabled, _media, source.Key, () => enabled.IsOn = _media.Bool(source.Key, source.Id == "AppleMusic"));
+                Grid.SetColumn(enabled, 2); row.Children.Add(enabled);
+                var menu = ThemeFlyout(new MenuFlyout());
+                var settings = new MenuFlyoutItem { Text = "设置" }; settings.Click += (_, _) => OpenSource(source.Id); menu.Items.Add(settings);
+                foreach (var (text, delta) in new[] { ("提高优先级", -1), ("降低优先级", 1) }) {
+                    var move = new MenuFlyoutItem { Text = text, IsEnabled = !_sourceReorderBusy && position + delta >= 0 && position + delta < list.Count };
+                    move.Click += async (_, _) => await GuardAsync(() => MoveSourceAsync(source.Id, delta)); menu.Items.Add(move);
+                }
+                var more = new Button { Content = new FontIcon { Glyph = "\uE712", FontSize = 16 }, Width = 36, Height = 36, Padding = new Thickness(0), Flyout = menu, VerticalAlignment = VerticalAlignment.Center };
+                AutomationProperties.SetAutomationId(more, "source-more-" + source.Id);
+                AutomationProperties.SetName(more, source.Label + "的更多操作");
+                Grid.SetColumn(more, 3); row.Children.Add(more);
+                surface = UiThemeStyles.Apply(new Border { Child = row, CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1), HorizontalAlignment = HorizontalAlignment.Stretch, Tag = "SourcePriorityRow" }, "SettingsSourceSurface");
+                surface.ContextFlyout = menu;
+                _sourceRows.Add((source.Id, surface, handle)); rows.Children.Add(surface);
             }
-            var more = new Button { Content = new FontIcon { Glyph = "\uE712", FontSize = 16 }, Width = 36, Height = 36, Padding = new Thickness(0), Flyout = menu, VerticalAlignment = VerticalAlignment.Center };
-            AutomationProperties.SetName(more, source.Label + "的更多操作");
-            Grid.SetColumn(more, 3); row.Children.Add(more);
-            surface = UiThemeStyles.Apply(new Border { Child = row, CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1), HorizontalAlignment = HorizontalAlignment.Stretch, Tag = "SourcePriorityRow" }, "SettingsSourceSurface");
-            surface.ContextFlyout = menu;
-            _sourceRows.Add((source.Id, surface, handle)); rows.Children.Add(surface);
+            if (focusId.Length > 0) {
+                var control = rows.Children.OfType<Border>().Select(item => item.Child).OfType<Grid>()
+                    .SelectMany(row => row.Children.OfType<Control>()).FirstOrDefault(item => AutomationProperties.GetAutomationId(item) == focusId);
+                DispatcherQueue.TryEnqueue(() => control?.Focus(FocusState.Programmatic));
+            }
         }
+        RefreshSources();
+        RegisterReadback(rows, () => System.Text.Json.JsonSerializer.Serialize(new {
+            Sources = SourceList().Select(source => new { source.Id, source.Label, source.Key, source.Custom }).ToArray(),
+            Busy = _sourceReorderBusy
+        }), RefreshSources);
         sources.Children.Add(ActionButton("发现正在运行的播放器", () => ServiceCommandAsync("discoverPlayerSessions")));
-        if (_serviceEvents.GetValueOrDefault("playerSessions") is JsonObject discovered && discovered["sessions"] is JsonArray sessions) {
-            if (sessions.Count == 0) sources.Children.Add(Copy("没有发现可添加的媒体会话，请先在播放器内开始播放。"));
-            foreach (var session in sessions.OfType<JsonObject>().Where(item => item["isBuiltIn"]?.ToString() != "true")) {
-                var add = ActionButton("添加 " + Text(session["displayName"]), () => ServiceCommandAsync("addPlayerSource", new JsonObject { ["sourceAppUserModelId"] = Text(session["sourceAppUserModelId"]), ["displayName"] = Text(session["displayName"]), ["iconDataUrl"] = Text(session["iconDataUrl"]), ["enabled"] = true }));
-                sources.Children.Add(add);
+        var discovery = new StackPanel { Spacing = 8 }; sources.Children.Add(discovery);
+        void RefreshDiscovery()
+        {
+            discovery.Children.Clear();
+            if (_serviceEvents.GetValueOrDefault("playerSessions") is JsonObject discovered && discovered["sessions"] is JsonArray sessions) {
+                if (sessions.Count == 0) discovery.Children.Add(Copy("没有发现可添加的媒体会话，请先在播放器内开始播放。"));
+                foreach (var session in sessions.OfType<JsonObject>().Where(item => item["isBuiltIn"]?.ToString() != "true")) {
+                    var add = ActionButton("添加 " + Text(session["displayName"]), () => ServiceCommandAsync("addPlayerSource", new JsonObject { ["sourceAppUserModelId"] = Text(session["sourceAppUserModelId"]), ["displayName"] = Text(session["displayName"]), ["iconDataUrl"] = Text(session["iconDataUrl"]), ["enabled"] = true }));
+                    discovery.Children.Add(add);
+                }
             }
         }
+        RefreshDiscovery();
+        RegisterReadback(discovery, () => _serviceEvents.GetValueOrDefault("playerSessions")?.ToJsonString() ?? "null", RefreshDiscovery);
         var local = Section("本地歌词", "优先匹配音乐目录内的同名 .lrc、.qrc 或 .krc 文件。");
         local.Children.Add(MediaEditor("enableLocalLyrics", "优先使用本地歌词"));
         var folders = new TextBox { Header = "本地音乐目录（每行一个）", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 90, Text = string.Join(Environment.NewLine, (_media.Get("localMusicFolders") as JsonArray)?.Select(item => Text(item)) ?? []) };
+        RegisterSettingReadback(folders, _media, "localMusicFolders", () => folders.Text = string.Join(Environment.NewLine, (_media.Get("localMusicFolders") as JsonArray)?.Select(item => Text(item)) ?? []));
         folders.TextChanged += (_, _) => { _media.Set("localMusicFolders", folders.Text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)); Changed(); }; local.Children.Add(folders);
     }
     private static Grid ReorderDots()
@@ -464,44 +531,82 @@ public sealed partial class SettingsWindow
         _sourceReorderBusy = true;
         _saveStatus.Text = "正在保存播放器优先级…";
         try { await ServiceCommandAsync("reorderSources", JsonSerializerNode(updated)); }
-        finally { _sourceReorderBusy = false; if (_currentPage == "sources") { RenderPage(); FocusModule("source:" + id); } UpdateSaveStatus(); }
+        finally { _sourceReorderBusy = false; if (_currentPage == "sources") { RefreshSettingControls(); FocusModule("source:" + id); } UpdateSaveStatus(); }
     }
     private void OpenSource(string id)
     {
         var source = SourceList().First(item => item.Id == id);
         _properties.Children.Clear();
         var close = new Button { Content = "关闭属性", HorizontalAlignment = HorizontalAlignment.Right }; close.Click += (_, _) => _split.IsPaneOpen = false; _properties.Children.Add(close);
-        _properties.Children.Add(new TextBlock { Text = source.Label, FontSize = 20, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        var title = new TextBlock { Text = source.Label, FontSize = 20, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
+        _properties.Children.Add(title);
+        RegisterReadback(title, () => SourceList().FirstOrDefault(item => item.Id == id).Label ?? "", () => title.Text = SourceList().FirstOrDefault(item => item.Id == id).Label ?? source.Label);
         var ordering = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         foreach (var (label, delta) in new[] { ("优先", -1), ("靠后", 1) }) ordering.Children.Add(ActionButton(label, async () => { await MoveSourceAsync(id, delta); OpenSource(id); }));
         _properties.Children.Add(ordering);
         _properties.Children.Add(MediaEditor("playerLyricOffset:" + id, "歌词同步偏移（毫秒）", "number", -5000, 5000));
         _properties.Children.Add(Copy("歌词源按优先顺序尝试，关闭某个歌词源会保留其位置。浏览器媒体仅显示元数据，不查找歌词。"));
-        if (_media.Get("playerLyricProviders:" + id) is JsonArray providers) {
-            for (var index = 0; index < providers.Count; index++) {
-                if (providers[index] is not JsonObject provider) continue;
-                var position = index;
-                var line = new Grid { ColumnSpacing = 4 };
-                for (var column = 0; column < 4; column++)
-                    line.ColumnDefinitions.Add(new ColumnDefinition { Width = column == 0 ? new GridLength(1, GridUnitType.Star) : GridLength.Auto });
-                var check = SettingsToggle.Compact(provider["enabled"]?.ToString() == "true", ProviderLabel(Text(provider["providerId"])),
-                    $"lyric-provider-enabled-{id}-{Text(provider["providerId"])}");
-                void Toggle(bool enabled) { var updated = (JsonArray)_media.Get("playerLyricProviders:" + id)!; updated[position]!["enabled"] = enabled; _media.SetNode("playerLyricProviders:" + id, updated); Changed(); }
-                check.Toggled += (_, _) => Toggle(check.IsOn);
-                line.Children.Add(new TextBlock { Text = ProviderLabel(Text(provider["providerId"])), VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap });
-                Grid.SetColumn(check, 1); line.Children.Add(check);
-                foreach (var (delta, column, glyph) in new[] { (-1, 2, "↑"), (1, 3, "↓") }) {
-                    var button = new Button { Content = glyph, MinHeight = 28, MinWidth = 28, Padding = new Thickness(4), IsEnabled = position + delta >= 0 && position + delta < providers.Count };
-                    AutomationProperties.SetName(button, (delta < 0 ? "上移" : "下移") + ProviderLabel(Text(provider["providerId"])));
-                    button.Click += (_, _) => { var updated = (JsonArray)_media.Get("playerLyricProviders:" + id)!; var moved = updated[position]!.DeepClone(); updated.RemoveAt(position); updated.Insert(position + delta, moved); _media.SetNode("playerLyricProviders:" + id, updated); Changed(); OpenSource(id); };
-                    Grid.SetColumn(button, column); line.Children.Add(button);
+        var providerRows = new StackPanel { Spacing = 12 }; _properties.Children.Add(providerRows);
+        void RefreshProviders()
+        {
+            var focused = _root.XamlRoot is null ? null : FocusManager.GetFocusedElement(_root.XamlRoot) as Control;
+            var focusId = focused is not null && providerRows.Children.OfType<Grid>().Any(row => row.Children.Contains(focused))
+                ? AutomationProperties.GetAutomationId(focused) : "";
+            providerRows.Children.Clear();
+            if (_media.Get("playerLyricProviders:" + id) is JsonArray providers) {
+                for (var index = 0; index < providers.Count; index++) {
+                    if (providers[index] is not JsonObject provider) continue;
+                    var position = index;
+                    var providerId = Text(provider["providerId"]);
+                    var line = new Grid { ColumnSpacing = 4 };
+                    for (var column = 0; column < 4; column++)
+                        line.ColumnDefinitions.Add(new ColumnDefinition { Width = column == 0 ? new GridLength(1, GridUnitType.Star) : GridLength.Auto });
+                    var check = SettingsToggle.Compact(provider["enabled"]?.ToString() == "true", ProviderLabel(Text(provider["providerId"])),
+                        $"lyric-provider-enabled-{id}-{Text(provider["providerId"])}");
+                    void Toggle(bool enabled) {
+                        if (_refreshingControls || _media.Get("playerLyricProviders:" + id) is not JsonArray updated) return;
+                        var current = updated.OfType<JsonObject>().FirstOrDefault(item => Text(item["providerId"]) == providerId);
+                        if (current is null) return;
+                        current["enabled"] = enabled; _media.SetNode("playerLyricProviders:" + id, updated); Changed();
+                    }
+                    RegisterSettingReadback(check, _media, "playerLyricProviders:" + id, () => check.IsOn =
+                        (_media.Get("playerLyricProviders:" + id) as JsonArray)?.OfType<JsonObject>().FirstOrDefault(item => Text(item["providerId"]) == providerId)?["enabled"]?.ToString() == "true");
+                    check.Toggled += (_, _) => Toggle(check.IsOn);
+                    line.Children.Add(new TextBlock { Text = ProviderLabel(Text(provider["providerId"])), VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap });
+                    Grid.SetColumn(check, 1); line.Children.Add(check);
+                    foreach (var (delta, column, glyph) in new[] { (-1, 2, "↑"), (1, 3, "↓") }) {
+                        var button = new Button { Content = glyph, MinHeight = 28, MinWidth = 28, Padding = new Thickness(4), IsEnabled = position + delta >= 0 && position + delta < providers.Count };
+                        AutomationProperties.SetName(button, (delta < 0 ? "上移" : "下移") + ProviderLabel(Text(provider["providerId"])));
+                        button.Click += (_, _) => {
+                            if (_media.Get("playerLyricProviders:" + id) is not JsonArray updated) return;
+                            var current = updated.ToList().FindIndex(item => Text(item?["providerId"]) == providerId);
+                            if (current < 0 || current + delta < 0 || current + delta >= updated.Count) return;
+                            var moved = updated[current]!.DeepClone(); updated.RemoveAt(current); updated.Insert(current + delta, moved);
+                            _media.SetNode("playerLyricProviders:" + id, updated); Changed(); OpenSource(id);
+                        };
+                        Grid.SetColumn(button, column); line.Children.Add(button);
+                    }
+                    providerRows.Children.Add(line);
                 }
-                _properties.Children.Add(line);
+            }
+            if (focusId.Length > 0) {
+                var control = providerRows.Children.OfType<Grid>().SelectMany(row => row.Children.OfType<Control>())
+                    .FirstOrDefault(item => AutomationProperties.GetAutomationId(item) == focusId);
+                DispatcherQueue.TryEnqueue(() => control?.Focus(FocusState.Programmatic));
             }
         }
+        RefreshProviders();
+        RegisterReadback(providerRows, () => new JsonArray(((_media.Get("playerLyricProviders:" + id) as JsonArray)?.OfType<JsonObject>() ?? [])
+            .Select(provider => (JsonNode?)JsonValue.Create(Text(provider["providerId"]))).ToArray()).ToJsonString(), RefreshProviders);
         if (source.Custom && (_media.Get("customPlayerSources") as JsonArray)?.OfType<JsonObject>().FirstOrDefault(item => Text(item["sourceAppUserModelId"]) == id) is { } custom) {
             var name = new TextBox { Header = "显示名称", Text = source.Label }; _properties.Children.Add(name);
-            _properties.Children.Add(ActionButton("保存播放器名称", async () => { var value = (JsonObject)custom.DeepClone(); value["displayName"] = name.Text; await ServiceCommandAsync("updatePlayerSource", value); OpenSource(id); }));
+            string CurrentName() => SourceList().FirstOrDefault(item => item.Id == id).Label ?? source.Label;
+            RegisterReadback(name, CurrentName, () => name.Text = CurrentName());
+            _properties.Children.Add(ActionButton("保存播放器名称", async () => {
+                var value = (_media.Get("customPlayerSources") as JsonArray)?.OfType<JsonObject>().FirstOrDefault(item => Text(item["sourceAppUserModelId"]) == id);
+                if (value is null) return;
+                value["displayName"] = name.Text; await ServiceCommandAsync("updatePlayerSource", value);
+            }));
             _properties.Children.Add(ActionButton("移除此播放器", () => ServiceCommandAsync("removePlayerSource", JsonValue.Create(id))));
         }
         _split.IsPaneOpen = true;
@@ -786,13 +891,25 @@ public sealed partial class SettingsWindow
 
     private async Task ServiceCommandBatchAsync(params (string Action, JsonNode? Value)[] commands)
     {
-        var snapshot = _media.Capture();
-        foreach (var (action, value) in commands)
-            ApplyServiceResponse(await RequestAsync("settingsCommand", new { action, value }), snapshot);
-        ApplyTheme();
-        if (_currentPage == "trackOffsets") RefreshOffsetsContent();
-        else RenderPage();
-        UpdateSaveStatus();
+        // A full command response must not race an automatic save/readback.
+        if (!_settingsSyncTask.IsCompleted) await _settingsSyncTask;
+        if (_busy || _aiUsageMutating) throw new InvalidOperationException("设置正在同步，请稍后重试。");
+        _busy = true; UpdateSaveStatus();
+        try
+        {
+            var snapshot = _media.Capture();
+            foreach (var (action, value) in commands)
+                ApplyServiceResponse(await RequestAsync("settingsCommand", new { action, value }), snapshot);
+            ApplyTheme();
+            if (_currentPage == "trackOffsets") RefreshOffsetsContent();
+            else if (_currentPage == "lyricDiagnostics") RenderPage();
+            else RefreshSettingControls();
+        }
+        finally
+        {
+            _busy = false; UpdateSaveStatus();
+            if (_native.Pending.Count + _media.Pending.Count > 0) QueueSettingsSync();
+        }
     }
 
     private void ApplyServiceResponse(JsonObject response, SettingsDraft.SaveSnapshot snapshot)

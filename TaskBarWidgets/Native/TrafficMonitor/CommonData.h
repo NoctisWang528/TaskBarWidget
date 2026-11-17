@@ -2,6 +2,7 @@
 #pragma once
 #include "stdafx.h"
 #include "TaskbarItemOrderHelper.h"
+#include "TaskbarDoubleClick.h"
 
 struct Date
 {
@@ -76,19 +77,6 @@ public:
 
     //是否无效
     bool IsInvalid() const;
-};
-
-//鼠标双击窗口的动作
-enum class DoubleClickAction
-{
-    CONNECTION_INFO,    //连接详情
-    HISTORY_TRAFFIC,    //历史流量统计
-    SHOW_MORE_INFO,     //显示更多信息
-    OPTIONS,            //选项设置
-    TASK_MANAGER,       //任务管理器
-    SEPCIFIC_APP,       //指定应用程序
-    RESERVED_DESKTOP_ACTION, // Retains legacy serialized action values.
-    NONE                //不执行任何动作
 };
 
 //颜色模式

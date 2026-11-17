@@ -111,9 +111,9 @@ public sealed partial class SettingsWindow
                 window._root.UpdateLayout();
                 var glass = Find<Slider>("setting-cardGlassBlur");
                 var mica = Find<Slider>("setting-cardMicaTintOpacity");
-                if ((glass is not null) != (id == "LiquidGlass") || (mica is not null) != (id == "Mica"))
+                if (IsVisible(glass) != (id == "LiquidGlass") || IsVisible(mica) != (id == "Mica"))
                     throw new InvalidOperationException("Material-specific controls were not disclosed correctly.");
-                if (glass is not null)
+                if (glass is not null && id == "LiquidGlass")
                 {
                     glass.Value = 72;
                     await DrainDispatcherAsync();
@@ -190,6 +190,14 @@ public sealed partial class SettingsWindow
             reconnectRestoresDraftAndTheme = true, leaveResetsPreview = true,
             reconnectOutsidePageDoesNotActivate = true, draftPreserved = true,
             systemHighContrastModified = false };
+
+        static bool IsVisible(FrameworkElement? element)
+        {
+            if (element is null) return false;
+            for (DependencyObject? current = element; current is not null; current = VisualTreeHelper.GetParent(current))
+                if (current is FrameworkElement { Visibility: Visibility.Collapsed }) return false;
+            return true;
+        }
 
         Task DrainDispatcherAsync()
         {

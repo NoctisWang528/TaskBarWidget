@@ -20,9 +20,9 @@ public sealed partial class SettingsWindow
         internal readonly ListView Results = new() { SelectionMode = ListViewSelectionMode.Single, MaxHeight = 230, HorizontalAlignment = HorizontalAlignment.Stretch };
         internal readonly TextBox CityCode = new() { Header = "已选择城市代码", IsReadOnly = true };
         internal readonly TextBlock CityName = Copy("正在读取已保存城市…", 14);
-        internal readonly Button SaveCity = new() { Content = "保存城市并刷新", IsEnabled = false };
+        internal readonly Button SaveCity = new() { Content = "重试城市保存", IsEnabled = false, Visibility = Visibility.Collapsed };
         internal readonly Button Refresh = new() { Content = "立即刷新已保存城市" };
-        internal readonly Button SwitchProvider = new() { Content = "切换来源并刷新" };
+        internal readonly Button SwitchProvider = new() { Content = "重试切换来源", Visibility = Visibility.Collapsed };
         internal readonly TextBlock Active = Copy("正在读取当前生效来源和城市…", 14);
         internal readonly TextBlock Draft = Copy("");
         internal readonly TextBlock Status = Copy("正在读取天气状态…", 14);
@@ -74,7 +74,7 @@ public sealed partial class SettingsWindow
             FontSize = 14,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
         });
-        var body = Section("天气", "修改后可点击上方“应用更改”统一保存，也可使用下方按钮单独保存。城市需先搜索并选择；连接配置会先验证再保存。");
+        var body = Section("天气", "选择城市后自动保存。连接配置需验证后生效。");
         page.Provider.Items.Add("中国天气网"); page.Provider.Items.Add("和风天气");
         page.Provider.SelectedIndex = 0;
         var searchRow = new Grid { ColumnSpacing = 8 };
@@ -88,7 +88,7 @@ public sealed partial class SettingsWindow
         body.Children.Add(page.SwitchProvider);
         body.Children.Add(page.Status); body.Children.Add(page.LastAttempt); body.Children.Add(page.LastSuccess); body.Children.Add(page.Message);
         page.Credentials.Children.Add(new TextBlock { Text = "和风天气连接", FontSize = 16, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        page.Credentials.Children.Add(Copy("请原样填写账户控制台提供的完整 API Host，不要自行修改主机名或后缀。程序仅检查域名格式，连接是否可用由实际请求结果判断。API Key 使用同一账户的凭据。保存前验证连接，失败保留输入且不保存；留空保留已有值。验证成功不会切换当前来源或城市，请搜索选择城市后保存，或点击“切换来源并刷新”。"));
+        page.Credentials.Children.Add(Copy("请原样填写账户控制台提供的完整 API Host，不要自行修改主机名或后缀。程序仅检查域名格式，连接是否可用由实际请求结果判断。API Key 使用同一账户的凭据。保存前验证连接，失败保留输入且不保存；留空保留已有值。验证成功后可选择来源和城市。"));
         page.Credentials.Children.Add(page.ApiHost); page.Credentials.Children.Add(page.ApiKey); page.Credentials.Children.Add(page.KeyStatus);
         var connectionActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         connectionActions.Children.Add(page.SaveCredentials); connectionActions.Children.Add(page.ClearKey); page.Credentials.Children.Add(connectionActions);
@@ -99,16 +99,19 @@ public sealed partial class SettingsWindow
             (page.CityCode, "city-code"), (page.SaveCity, "save-city"), (page.Refresh, "refresh"), (page.SwitchProvider, "switch-provider"),
             (page.ApiHost, "api-host"), (page.ApiKey, "api-key"), (page.SaveCredentials, "save-connection"), (page.ClearKey, "clear-key"), (page.Message, "message") })
             AutomationProperties.SetAutomationId(element, "weather-" + id);
-        AutomationProperties.SetName(page.Results, "城市搜索结果，选择后保存");
+        AutomationProperties.SetName(page.Results, "城市搜索结果，选择后自动保存");
         page.Provider.SelectionChanged += (_, _) => {
             if (page.Binding || !IsWeatherCurrent(page)) return;
             page.ProviderEdited = true; page.CancelOperation(); page.Searching = false; page.LoadingStatus = false;
             page.Results.Items.Clear(); page.SelectedCity = null; page.Message.IsOpen = false;
             UpdateWeatherSelection(page); UpdateSaveStatus();
+            if (_settingsSyncEnabled) _ = FlushSettingsAsync();
         };
         page.Results.SelectionChanged += (_, _) => {
+            if (page.Binding || page.Committing) return;
             page.SelectedCity = (page.Results.SelectedItem as ListViewItem)?.Tag as JsonObject;
             UpdateWeatherSelection(page); UpdateSaveStatus();
+            if (_settingsSyncEnabled) _ = FlushSettingsAsync();
         };
         page.Search.Click += async (_, _) => await SearchWeatherCityAsync(page);
         page.Query.KeyDown += async (_, args) => { if (args.Key == VirtualKey.Enter) { args.Handled = true; await SearchWeatherCityAsync(page); } };
@@ -127,7 +130,7 @@ public sealed partial class SettingsWindow
         body.Loaded += async (_, _) => { if (IsWeatherCurrent(page) && _connection.IsConnected) await ReadWeatherStatusAsync(page); };
         UpdateWeatherButtons(page);
 
-        var update = Section("天气更新", "天气卡与任务栏温度共用此频率。修改后点击上方“应用更改”，保存成功后会自动刷新天气。");
+        var update = Section("天气更新", "天气卡与任务栏温度共用此频率。");
         var updateFrequency = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, MinHeight = 32 };
         updateFrequency.Items.Add(new ComboBoxItem { Content = "每小时三次", Tag = 0 });
         updateFrequency.Items.Add(new ComboBoxItem { Content = "每小时两次", Tag = 1 });
@@ -142,12 +145,14 @@ public sealed partial class SettingsWindow
         AutomationProperties.SetAutomationId(updateFrequency, "weather-update-frequency");
         updateFrequency.SelectionChanged += (_, _) =>
         {
-            if (bindingFrequency) return;
+            if (bindingFrequency || _refreshingControls) return;
             if (updateFrequency.SelectedItem is ComboBoxItem { Tag: int value }) { _native.Set(UpdateFrequencyKey, value); Changed(); }
         };
+        RegisterSettingReadback(updateFrequency, _native, UpdateFrequencyKey, () =>
+            updateFrequency.SelectedItem = updateFrequency.Items.OfType<ComboBoxItem>().First(item => (int)item.Tag == (int)Math.Clamp(_native.Number(UpdateFrequencyKey, 1), 0, 4)));
         update.Children.Add(updateFrequency);
 
-        var alerts = Section("天气预警", "显示当前城市的官方预警；多条预警每 4 秒轮换。修改后点击“应用更改”，保存后自动刷新。获取失败时会显示错误并标明保留的旧信息。");
+        var alerts = Section("天气预警", "显示当前城市的官方预警；多条预警每 4 秒轮换。");
         const string AlertsKey = "builtins.weatherpro.dll.config.show_weather_alerts";
         const string HefengAlertsKey = "builtins.weatherpro.dll.hfw.show_weather_alert";
         var showAlerts = new CheckBox {
@@ -162,16 +167,22 @@ public sealed partial class SettingsWindow
         };
         AutomationProperties.SetAutomationId(hefengAlerts, "weather-hefeng-alerts");
         RoutedEventHandler changeAlerts = (_, _) => {
+            if (_refreshingControls) return;
             _native.Set(AlertsKey, showAlerts.IsChecked == true);
             hefengAlerts.IsEnabled = showAlerts.IsChecked == true;
             Changed();
         };
         showAlerts.Checked += changeAlerts;
         showAlerts.Unchecked += changeAlerts;
-        RoutedEventHandler changeHefengAlerts = (_, _) => { _native.Set(HefengAlertsKey, hefengAlerts.IsChecked == true); Changed(); };
+        RoutedEventHandler changeHefengAlerts = (_, _) => { if (_refreshingControls) return; _native.Set(HefengAlertsKey, hefengAlerts.IsChecked == true); Changed(); };
         hefengAlerts.Checked += changeHefengAlerts;
         hefengAlerts.Unchecked += changeHefengAlerts;
         alerts.Children.Add(hefengAlerts);
+        RegisterSettingReadback(showAlerts, _native, AlertsKey, () => {
+            showAlerts.IsChecked = _native.Bool(AlertsKey, true);
+            hefengAlerts.IsEnabled = showAlerts.IsChecked == true;
+        });
+        RegisterSettingReadback(hefengAlerts, _native, HefengAlertsKey, () => hefengAlerts.IsChecked = _native.Bool(HefengAlertsKey, true));
     }
 
     private static void WeatherMessage(WeatherEditor page, string text, InfoBarSeverity severity)
@@ -217,15 +228,17 @@ public sealed partial class SettingsWindow
         page.Query.IsEnabled = available;
         page.Results.IsEnabled = !_busy && !page.Committing;
         page.SaveCity.IsEnabled = available && !page.Searching && page.SelectedCity is not null && !WeatherCredentialsPending(page);
+        page.SaveCity.Visibility = _syncFailed && page.SelectedCity is not null ? Visibility.Visible : Visibility.Collapsed;
+        page.SwitchProvider.Visibility = _syncFailed && CanSwitchWeatherProvider(page) ? Visibility.Visible : Visibility.Collapsed;
         page.Refresh.IsEnabled = available && page.HasStatus && !page.Searching &&
             page.Provider.SelectedIndex == page.SavedProvider && page.SelectedCity is null && !WeatherCredentialsPending(page);
         page.SwitchProvider.IsEnabled = available && !page.Searching && CanSwitchWeatherProvider(page);
         page.Draft.Text = !page.HasStatus ? "" : page.Provider.SelectedIndex != page.SavedProvider
-            ? CanSwitchWeatherProvider(page) ? "来源尚未保存；点击“切换来源并刷新”可继续使用已保存城市。"
-                : WeatherCredentialsPending(page) ? "来源和连接配置尚未保存，请先保存并验证连接。"
-                : "来源尚未保存；请重新搜索并选择城市后保存。"
-            : page.SelectedCity is not null ? "城市尚未保存，请点击“保存城市并刷新”。"
-            : WeatherCredentialsPending(page) ? "连接配置尚未保存，请先保存并验证连接。" : "";
+            ? CanSwitchWeatherProvider(page) ? "将使用已保存城市自动切换来源。"
+                : WeatherCredentialsPending(page) ? "请先验证连接。"
+                : "请搜索并选择此来源的城市。"
+            : page.SelectedCity is not null ? "等待自动保存城市…"
+            : WeatherCredentialsPending(page) ? "请验证连接。" : "";
         page.Credentials.Visibility = page.Provider.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
         page.SaveCredentials.IsEnabled = available;
         page.ClearKey.IsEnabled = available && page.HasStatus;
@@ -335,20 +348,16 @@ public sealed partial class SettingsWindow
             if (!IsWeatherOperationCurrent(page, token) || page.Provider.SelectedIndex != provider || page.Query.Text.Trim() != query) return;
             foreach (var city in (reply["cities"] as JsonArray)?.OfType<JsonObject>() ?? [])
                 page.Results.Items.Add(new ListViewItem { Content = new TextBlock { Text = WeatherCityLabel(city), TextWrapping = TextWrapping.Wrap }, Tag = city.DeepClone(), HorizontalContentAlignment = HorizontalAlignment.Stretch });
-            WeatherMessage(page, page.Results.Items.Count == 0 ? "未找到城市，请尝试更完整的城市或区县名称。" : $"找到 {page.Results.Items.Count} 个城市，请选择一项后保存。", InfoBarSeverity.Informational);
+            WeatherMessage(page, page.Results.Items.Count == 0 ? "未找到城市，请尝试更完整的城市或区县名称。" : $"找到 {page.Results.Items.Count} 个城市，请选择。", InfoBarSeverity.Informational);
         });
     }
 
     private async Task<bool> SaveWeatherDraftAsync(WeatherEditor page)
     {
-        if (WeatherCredentialsPending(page)) {
-            await SaveWeatherCredentialsAsync(page, false);
-            if (!IsWeatherCurrent(page) || page.Message.Severity == InfoBarSeverity.Error || WeatherCredentialsPending(page)) return false;
-        }
         if (page.SelectedCity is not null) await SaveWeatherCityAsync(page);
         else if (page.Provider.SelectedIndex != page.SavedProvider) {
             if (!CanSwitchWeatherProvider(page)) {
-                WeatherMessage(page, "请先搜索并选择适用于当前来源的城市，再应用更改。", InfoBarSeverity.Warning);
+                WeatherMessage(page, "请搜索并选择适用于当前来源的城市。", InfoBarSeverity.Warning);
                 return false;
             }
             await SwitchWeatherProviderAsync(page);
@@ -366,9 +375,11 @@ public sealed partial class SettingsWindow
             var reply = await WeatherCommandAsync(page, new { operation = "configure", provider, city = selected }, token);
             if (!IsWeatherOperationCurrent(page, token)) return;
             page.ProviderEdited = false; page.SelectedCity = null;
+            page.Binding = true; page.Results.SelectedItem = null; page.Binding = false;
             if (reply["status"] is JsonObject status) ApplyWeatherStatus(page, status);
             else { page.SavedCity = selected; page.SavedProvider = provider; UpdateWeatherSelection(page); }
             WeatherRefreshMessage(page, "城市已保存，天气刷新完成");
+            _syncFailed = false;
         });
     }
 
@@ -396,6 +407,7 @@ public sealed partial class SettingsWindow
             page.ProviderEdited = false;
             if (reply["status"] is JsonObject status) ApplyWeatherStatus(page, status);
             WeatherRefreshMessage(page, "来源已切换，天气刷新完成");
+            _syncFailed = false;
         });
     }
 
@@ -414,6 +426,7 @@ public sealed partial class SettingsWindow
                 if (!clear) page.HostEdited = false;
                 if (reply["status"] is JsonObject status) ApplyWeatherStatus(page, status);
                 WeatherMessage(page, clear ? "已清除保存的密钥。" : "和风天气连接已验证并保存；当前生效来源和城市未改变。", InfoBarSeverity.Success);
+                if (!clear) QueueSettingsSync();
             }
             finally { payload.Remove("apiKey"); }
         });

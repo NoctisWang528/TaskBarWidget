@@ -285,7 +285,7 @@ public sealed partial class SettingsWindow
             _peripheralInventory = null;
             _ = ReadPeripheralBatteriesAsync(page, subscribe: true);
         }
-        else if (_peripheralPage is { } view) view.Status.Text = "连接已断开，保留最近读数与未应用的更改。";
+        else if (_peripheralPage is { } view) view.Status.Text = "连接已断开，保留最近读数与未保存的更改。";
     }
 
     private async Task<bool> RefreshPeripheralModuleSchemaAsync()
@@ -302,9 +302,8 @@ public sealed partial class SettingsWindow
             var schema = await RequestAsync("getNativeSettings");
             if (_closed || _busy || !ReferenceEquals(session, _peripheralSession) ||
                 version != _nativeSchemaVersion || connection != _peripheralConnectionVersion) return false;
-            var before = _layout?.Modules.Select(module => module.Id).ToArray() ?? [];
             SetNativeReadback(schema, captured, preservePending: true);
-            if (_currentPage == "taskbar" && !before.SequenceEqual(_layout!.Modules.Select(module => module.Id))) RenderPage();
+            RefreshSettingControls();
             UpdateSaveStatus();
             return true;
         }
@@ -332,10 +331,10 @@ public sealed partial class SettingsWindow
     {
         var devices = PeripheralDevices(page.Snapshot).ToDictionary(device => Text(device["id"]), StringComparer.Ordinal);
         var order = PeripheralDraft.Order(devices.Keys).Where(devices.ContainsKey).ToArray();
-        page.Status.Text = !_connection.IsConnected && ProbeRequestHandler is null ? "连接已断开，保留最近读数与未应用的更改。"
+        page.Status.Text = !_connection.IsConnected && ProbeRequestHandler is null ? "连接已断开，保留最近读数与未保存的更改。"
             : Text(page.Snapshot["error"]) is { Length: > 0 } error ? error
             : page.Snapshot["refreshing"]?.ToString() == "true" ? "正在刷新设备…"
-            : devices.Count == 0 ? "未发现外设。连接设备后可刷新。" : $"{devices.Count} 个设备 · 更改后点击“应用更改”保存";
+            : devices.Count == 0 ? "未发现外设。连接设备后可刷新。" : $"{devices.Count} 个设备";
         // Keep realized rows and focus stable; inventory changes wait until a drag ends.
         if (_pointerReorder?.IsActive == true) return;
         foreach (var id in page.Rows.Keys.Where(id => !devices.ContainsKey(id)).ToArray())

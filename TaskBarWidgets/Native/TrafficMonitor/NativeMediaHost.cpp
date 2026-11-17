@@ -19,7 +19,9 @@
 #include <deque>
 #include <filesystem>
 #include <mutex>
+#include <optional>
 #include <set>
+#include <shldisp.h>
 #include <thread>
 #include <utility>
 
@@ -28,6 +30,7 @@ using namespace winrt::Windows::Data::Json;
 namespace
 {
     constexpr size_t MaximumMessage = 4 * 1024 * 1024;
+    constexpr UINT TaskbarClickTimer = 1245;
 
     std::string Utf8(const std::wstring& value)
     {
@@ -149,7 +152,20 @@ struct NativeMediaHost::Impl
     bool pointerDown{};
     bool pointerMediaPresented{};
     POINT pointerOrigin{};
+    DWORD pointerTime{};
+    DoubleClickAction pointerSpecialAction{ DoubleClickAction::NONE };
+    bool pointerDoubleClick{};
     std::wstring pointerSource;
+    struct PendingClick
+    {
+        NativeMedia::HitAction action{ NativeMedia::HitAction::Panel };
+        std::wstring source;
+        unsigned long long gesture{};
+        POINT origin{};
+        DWORD time{};
+        DoubleClickAction specialAction{ DoubleClickAction::NONE };
+    };
+    std::optional<PendingClick> pendingClick;
     unsigned long long gestureSerial{};
     unsigned clickLogs{};
     std::wstring diagnostic;
@@ -1081,6 +1097,7 @@ struct NativeMediaHost::Impl
             }
             else if (action == L"hideCards")
             {
+                CancelPendingClick();
                 if (cards) cards->Hide(L"settings");
             }
             else if (action == L"cardMicaPreview")
@@ -1464,6 +1481,7 @@ struct NativeMediaHost::Impl
 
     void ShowMenu()
     {
+        CancelPendingClick();
         HMENU menu = CreatePopupMenu();
         const bool chinese = theApp.m_str_table.IsSimplifiedChinese() ||
             theApp.m_str_table.GetLanguageInfo().bcp_47 == L"zh-TW";
@@ -1531,9 +1549,120 @@ struct NativeMediaHost::Impl
         PostWake();
     }
 
+    void CancelPendingClick()
+    {
+        if (owner) KillTimer(owner, TaskbarClickTimer);
+        pendingClick.reset();
+    }
+
+    void DispatchSingleClick(const PendingClick& click)
+    {
+        if (click.action == NativeMedia::HitAction::Panel) Panel(click.gesture);
+        else if (mediaPresented && click.source == state.source)
+        {
+            if (click.action == NativeMedia::HitAction::Previous) Send(Command(L"previous"));
+            else if (click.action == NativeMedia::HitAction::PlayPause) Send(Command(L"playPause"));
+            else if (click.action == NativeMedia::HitAction::Next) Send(Command(L"next"));
+        }
+    }
+
+    void FlushPendingClick()
+    {
+        if (!pendingClick) return;
+        const auto click = std::move(*pendingClick);
+        CancelPendingClick();
+        DispatchSingleClick(click);
+    }
+
+    void LaunchFailure(const std::wstring& action, const std::wstring& recovery, HRESULT error = S_OK)
+    {
+        std::wstring message = L"\u65e0\u6cd5\u6253\u5f00" + action + L"\u3002\n\n" + recovery;
+        if (FAILED(error))
+        {
+            wchar_t code[32]{};
+            swprintf_s(code, L"\n\nWindows \u9519\u8bef\uff1a 0x%08X", static_cast<unsigned>(error));
+            message += code;
+            wchar_t detail[1024]{};
+            const DWORD systemError = HRESULT_FACILITY(error) == FACILITY_WIN32
+                ? HRESULT_CODE(error) : static_cast<DWORD>(error);
+            if (FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                nullptr, systemError, 0, detail, _countof(detail), nullptr))
+                message += L"\n" + std::wstring(detail);
+        }
+        MessageBoxW(owner, message.c_str(), L"TaskBarWidgets", MB_OK | MB_ICONERROR);
+    }
+
+    void WaitForDoubleClick()
+    {
+        if (!pendingClick) return;
+        const DWORD elapsed = GetTickCount() - pendingClick->time;
+        const UINT interval = TaskbarDoubleClick::Interval(GetDoubleClickTime());
+        if (elapsed > interval) FlushPendingClick();
+        // KillTimer does not remove a previously queued WM_TIMER. Recheck the
+        // deadline so that such a message cannot release a newer click early.
+        else if (!SetTimer(owner, TaskbarClickTimer, interval - elapsed + 1, nullptr))
+        {
+            CancelPendingClick();
+            LaunchFailure(L"\u4efb\u52a1\u680f\u64cd\u4f5c", L"Windows \u65e0\u6cd5\u542f\u52a8\u70b9\u51fb\u8ba1\u65f6\u5668\uff0c\u8bf7\u91cd\u65b0\u70b9\u51fb\u3002",
+                HRESULT_FROM_WIN32(ERROR_NOT_ENOUGH_MEMORY));
+        }
+    }
+
+    void ExecuteDoubleClick(DoubleClickAction action)
+    {
+        if (action == DoubleClickAction::RUN)
+        {
+            // The documented Shell operation opens the same dialog as Win+R,
+            // without synthesizing or intercepting global keyboard input.
+            winrt::com_ptr<IShellDispatch> shell;
+            HRESULT result = CoCreateInstance(__uuidof(Shell), nullptr,
+                CLSCTX_INPROC_SERVER | CLSCTX_LOCAL_SERVER, IID_PPV_ARGS(shell.put()));
+            if (SUCCEEDED(result)) result = shell->FileRun();
+            if (FAILED(result)) LaunchFailure(L"\u8fd0\u884c\u5bf9\u8bdd\u6846", L"\u8bf7\u786e\u8ba4 Windows \u8d44\u6e90\u7ba1\u7406\u5668\u6b63\u5728\u8fd0\u884c\uff0c\u7136\u540e\u91cd\u8bd5\u3002", result);
+            return;
+        }
+        std::wstring path;
+        const bool custom = action == DoubleClickAction::SEPCIFIC_APP;
+        if (custom)
+        {
+            path = TaskbarDoubleClick::NormalizeApplicationPath(theApp.m_taskbar_data.double_click_exe);
+            if (const auto* error = TaskbarDoubleClick::ApplicationPathError(path))
+            {
+                LaunchFailure(L"\u5e94\u7528\u7a0b\u5e8f", error);
+                return;
+            }
+        }
+        else if (action == DoubleClickAction::TASK_MANAGER)
+            path = theApp.m_system_dir + L"\\Taskmgr.exe";
+        else return;
+
+        const auto directory = std::filesystem::path(path).parent_path().wstring();
+        SHELLEXECUTEINFOW launch{ sizeof(launch) };
+        launch.fMask = SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC;
+        launch.hwnd = owner;
+        launch.lpVerb = L"open";
+        launch.lpFile = path.c_str();
+        launch.lpDirectory = directory.c_str();
+        launch.nShow = SW_SHOWNORMAL;
+        if (!ShellExecuteExW(&launch))
+        {
+            const DWORD error = GetLastError();
+            LaunchFailure(custom ? L"\u5e94\u7528\u7a0b\u5e8f" : L"\u4efb\u52a1\u7ba1\u7406\u5668",
+                custom ? L"\u8bf7\u5728\u201c\u8bbe\u7f6e > \u4efb\u52a1\u680f > \u4efb\u52a1\u680f\u53cc\u51fb\u201d\u4e2d\u68c0\u67e5\u5e94\u7528\u7a0b\u5e8f\u8def\u5f84\u53ca\u8bbf\u95ee\u6743\u9650\uff0c\u7136\u540e\u91cd\u8bd5\u3002"
+                       : L"\u8bf7\u68c0\u67e5 Windows \u8bbf\u95ee\u6743\u9650\u5e76\u786e\u8ba4 Taskmgr.exe \u53ef\u7528\uff0c\u7136\u540e\u91cd\u8bd5\u3002",
+                HRESULT_FROM_WIN32(error ? error : ERROR_GEN_FAILURE));
+        }
+    }
+
     bool MouseInput(UINT message, WPARAM keys, LPARAM position)
     {
-        (void)keys;
+        if (message == WM_TIMER && keys == TaskbarClickTimer)
+        {
+            WaitForDoubleClick();
+            return true;
+        }
+        if (message == WM_RBUTTONDOWN || message == WM_MOUSEWHEEL || message == WM_DESTROY)
+            CancelPendingClick();
         POINT point{ static_cast<short>(LOWORD(position)), static_cast<short>(HIWORD(position)) };
         if (message == WM_CANCELMODE || message == WM_CAPTURECHANGED)
         {
@@ -1541,15 +1670,25 @@ struct NativeMediaHost::Impl
                 Log(L"Panel gesture=" + std::to_wstring(gestureSerial) +
                     (message == WM_CANCELMODE ? L" cancelled" : L" capture-lost"));
             pointerDown = false;
+            pointerDoubleClick = false;
+            if (message == WM_CANCELMODE) CancelPendingClick();
             if (message == WM_CANCELMODE && ::GetCapture() == owner)
                 ::ReleaseCapture();
             return false;
         }
         if (message == WM_LBUTTONDOWN || message == WM_LBUTTONDBLCLK)
         {
-            pointerDown = true;
             pointerOrigin = point;
             ClientToScreen(owner, &pointerOrigin);
+            pointerTime = static_cast<DWORD>(GetMessageTime());
+            pointerSpecialAction = TaskbarDoubleClick::EffectiveAction(theApp.m_taskbar_data.double_click_action);
+            pointerDoubleClick = pendingClick && pendingClick->specialAction == pointerSpecialAction &&
+                TaskbarDoubleClick::Matches(pendingClick->time, pendingClick->origin,
+                    pointerTime, pointerOrigin, TaskbarDoubleClick::Interval(GetDoubleClickTime()),
+                    GetSystemMetrics(SM_CXDOUBLECLK), GetSystemMetrics(SM_CYDOUBLECLK));
+            if (pointerDoubleClick) CancelPendingClick();
+            else FlushPendingClick();
+            pointerDown = true;
             pointerMediaPresented = mediaPresented;
             pointerSource = state.source;
             ++gestureSerial;
@@ -1561,6 +1700,8 @@ struct NativeMediaHost::Impl
         if (message == WM_LBUTTONUP)
         {
             bool activate = pointerDown && ::GetCapture() == owner;
+            const bool doubleClick = pointerDoubleClick;
+            pointerDoubleClick = false;
             pointerDown = false;
             if (::GetCapture() == owner) ::ReleaseCapture();
             RECT bounds{}; GetClientRect(owner, &bounds);
@@ -1573,24 +1714,32 @@ struct NativeMediaHost::Impl
                 Log(L"Panel gesture=" + std::to_wstring(gestureSerial) + L" release rejected (capture/bounds/movement)");
             if (activate)
             {
+                if (doubleClick)
+                {
+                    ExecuteDoubleClick(pointerSpecialAction);
+                    return true;
+                }
                 NativeMedia::HitAction action{ NativeMedia::HitAction::Panel };
                 const bool hit = mediaPresented && pointerMediaPresented && pointerSource == state.source &&
                     renderer.HitTest(static_cast<float>(point.x),
                     static_cast<float>(point.y), action);
-                if (hit && action != NativeMedia::HitAction::None &&
-                    pointerSource == state.source)
-                {
-                    if (action == NativeMedia::HitAction::Previous) Send(Command(L"previous"));
-                    else if (action == NativeMedia::HitAction::PlayPause) Send(Command(L"playPause"));
-                    else if (action == NativeMedia::HitAction::Next) Send(Command(L"next"));
-                    else Panel(gestureSerial);
-                }
-                else if (hit && action == NativeMedia::HitAction::None)
+                if (hit && action == NativeMedia::HitAction::None)
                 {
                     // A disabled browser control consumes the gesture without opening the card.
                     if (clickLogs++ < 192) Log(L"Panel gesture=" + std::to_wstring(gestureSerial) + L" disabled media control");
                 }
-                else Panel(gestureSerial);
+                // Even a disabled media control participates in double-click
+                // recognition, but it still has no single-click command.
+                if (!hit) action = NativeMedia::HitAction::Panel;
+                PendingClick click{ action, pointerSource, gestureSerial,
+                    pointerOrigin, pointerTime, pointerSpecialAction };
+                if (pointerSpecialAction == DoubleClickAction::NONE)
+                    DispatchSingleClick(click);
+                else
+                {
+                    pendingClick = std::move(click);
+                    WaitForDoubleClick();
+                }
             }
             return true;
         }
@@ -1630,6 +1779,7 @@ NativeMediaHost::NativeMediaHost(HWND owner)
 NativeMediaHost::~NativeMediaHost()
 {
     if (!m_impl) return;
+    m_impl->MouseInput(WM_CANCELMODE, 0, 0);
     m_impl->renderer.SetVisible(false, false);
     m_impl->renderer.DetachHost();
     m_impl->EnsureTimer(false, false);
@@ -1680,6 +1830,7 @@ void NativeMediaHost::Shutdown()
     auto& instance = Shared();
     if (instance)
     {
+        instance->MouseInput(WM_CANCELMODE, 0, 0);
         instance->stop = true;
         if (instance->workerWake) SetEvent(instance->workerWake);
         // A taskbar window may still hold m_impl. Join the card STA explicitly

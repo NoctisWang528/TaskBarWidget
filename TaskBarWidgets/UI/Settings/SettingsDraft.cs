@@ -72,6 +72,7 @@ internal sealed class SettingsDraft
         SetNode("peripheralBattery", values);
     }
     public Dictionary<string, JsonNode?> Pending { get; } = new(StringComparer.Ordinal);
+    internal bool UpdatingControls { get; set; }
     public IEnumerable<string> Keys => _base.Keys;
     public JsonNode? Get(string key) => (Pending.TryGetValue(key, out var draft) ? draft : _base.GetValueOrDefault(key))?.DeepClone();
     public JsonNode? GetSaved(string key) => _base.GetValueOrDefault(key)?.DeepClone();
@@ -82,6 +83,7 @@ internal sealed class SettingsDraft
     public void Set(string key, object? value) => SetNode(key, JsonSerializer.SerializeToNode(value));
     public void SetNode(string key, JsonNode? value)
     {
+        if (UpdatingControls) return;
         if (key == "peripheralBattery") value = NormalizePeripheral(value, includeEdits: true);
         _revisions[key] = ++_revision;
         if (JsonNode.DeepEquals(_base.GetValueOrDefault(key), value)) Pending.Remove(key);

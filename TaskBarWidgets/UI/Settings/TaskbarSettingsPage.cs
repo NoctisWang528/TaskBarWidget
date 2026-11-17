@@ -44,27 +44,44 @@ public sealed partial class SettingsWindow
             descriptor["label"] = "单行组合（关闭后上下两行按列对齐）";
             combinations.Children.Add(FieldEditor(descriptor, _native));
         }
-        if (_layout is not null) {
-            for (var row = 0; row < (_layout.SingleRow ? 1 : 2); row++) {
-                var index = row;
-                combinations.Children.Add(Copy(_layout.SingleRow ? "单行组合" : row == 0 ? "上行组合" : "下行组合"));
-                var chips = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, MinHeight = 38 };
-                foreach (var module in _layout.InRow(row)) chips.Children.Add(ModuleChip(module));
-                var drop = UiThemeStyles.Apply(new Border { Tag = "ModuleLane:" + row, Child = new ScrollViewer { Content = chips, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled }, MinHeight = 52, Padding = new Thickness(8), CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1) }, "SettingsStroke");
-                if (chips.Children.Count == 0) chips.Children.Add(Copy("将模块拖到此处，或在模块属性中点击添加。"));
-                _moduleDropTargets.Add(new ModuleDropTarget(drop, index, chips));
-                combinations.Children.Add(drop);
-            }
-        }
+        var lanes = new StackPanel { Spacing = 10 };
+        combinations.Children.Add(lanes);
         var pool = Section("可用模块", "拖入组合行启用。移除的模块返回这里，标签与颜色继续保留。");
         var available = new GridView { SelectionMode = ListViewSelectionMode.None, IsItemClickEnabled = false, HorizontalAlignment = HorizontalAlignment.Stretch };
-        if (_layout is not null) foreach (var module in _layout.Ordered().Where(module => !_layout.Enabled(module.Id))) available.Items.Add(ModuleChip(module));
-        if (available.Items.Count == 0) pool.Children.Add(Copy("所有模块均已加入组合。"));
+        var allAdded = Copy("所有模块均已加入组合。");
+        pool.Children.Add(allAdded);
         var poolSurface = UiThemeStyles.Apply(new Border { Child = available, MinHeight = 52, Padding = new Thickness(4), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6) }, "SettingsStroke");
-        _moduleDropTargets.Add(new ModuleDropTarget(poolSurface, null, null));
         pool.Children.Add(poolSurface);
+        void RefreshLayout()
+        {
+            var focused = _root.XamlRoot is null ? null : FocusManager.GetFocusedElement(_root.XamlRoot) as Button;
+            var focusId = focused?.Tag as string;
+            var restoreFocus = focused is not null && (_moduleDropTargets.Any(target => target.Chips?.Children.Contains(focused) == true) || available.Items.Contains(focused));
+            _moduleDropTargets.Clear(); lanes.Children.Clear(); available.Items.Clear();
+            if (_layout is not null) {
+                for (var row = 0; row < (_layout.SingleRow ? 1 : 2); row++) {
+                    lanes.Children.Add(Copy(_layout.SingleRow ? "单行组合" : row == 0 ? "上行组合" : "下行组合"));
+                    var chips = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, MinHeight = 38 };
+                    foreach (var module in _layout.InRow(row)) chips.Children.Add(ModuleChip(module));
+                    var drop = UiThemeStyles.Apply(new Border { Tag = "ModuleLane:" + row, Child = new ScrollViewer { Content = chips, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled }, MinHeight = 52, Padding = new Thickness(8), CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1) }, "SettingsStroke");
+                    if (chips.Children.Count == 0) chips.Children.Add(Copy("将模块拖到此处，或在模块属性中点击添加。"));
+                    _moduleDropTargets.Add(new ModuleDropTarget(drop, row, chips));
+                    lanes.Children.Add(drop);
+                }
+                foreach (var module in _layout.Ordered().Where(module => !_layout.Enabled(module.Id))) available.Items.Add(ModuleChip(module));
+            }
+            allAdded.Visibility = available.Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            _moduleDropTargets.Add(new ModuleDropTarget(poolSurface, null, null));
+            if (restoreFocus && focusId is not null) FocusModule(focusId);
+        }
+        RefreshLayout();
+        RegisterReadback(lanes, TaskbarLayoutSignature, RefreshLayout);
         RenderNativeGroups("taskbar");
     }
+    private string TaskbarLayoutSignature() => System.Text.Json.JsonSerializer.Serialize(new {
+        SingleRow = _layout?.SingleRow,
+        Modules = _layout?.Ordered().Select(module => new { module.Id, module.Name, Enabled = _layout.Enabled(module.Id), Row = _layout.Row(module.Id) }).ToArray()
+    });
     private bool StartModulePointerDrag(PointerDragButton source, string id, PointerRoutedEventArgs args)
     {
         if (_busy) return false;
@@ -184,26 +201,55 @@ public sealed partial class SettingsWindow
     private void OpenModule(string id)
     {
         if (_layout is null) return;
-        var module = _layout.Modules.First(item => item.Id == id);
+        var module = _layout.Modules.FirstOrDefault(item => item.Id == id);
+        if (module is null) return;
         _properties.Children.Clear();
         var close = new Button { Content = "关闭属性", HorizontalAlignment = HorizontalAlignment.Right };
         close.Click += (_, _) => { _split.IsPaneOpen = false; FocusModule(id); }; _properties.Children.Add(close);
-        _properties.Children.Add(new TextBlock { Text = module.Name, FontSize = 20, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
-        _properties.Children.Add(Copy("修改只作用于这个模块；点击主页面的应用更改保存。"));
+        var title = new TextBlock { Text = module.Name, FontSize = 20, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
+        _properties.Children.Add(title);
+        _properties.Children.Add(Copy("修改只作用于这个模块，更改后自动保存。"));
         var rowChoice = new ComboBox { Header = "组合行", HorizontalAlignment = HorizontalAlignment.Stretch };
-        rowChoice.Items.Add("上行"); if (!_layout.SingleRow) rowChoice.Items.Add("下行"); rowChoice.SelectedIndex = _layout.Row(id);
-        rowChoice.SelectionChanged += (_, _) => { if (_layout.Enabled(id)) { _layout.Move(id, rowChoice.SelectedIndex, _layout.InRow(rowChoice.SelectedIndex).Count); Changed(); RenderPage(); OpenModule(id); } };
         _properties.Children.Add(rowChoice);
-        var add = new Button { Content = _layout.Enabled(id) ? "移回模块池" : "添加到组合", HorizontalAlignment = HorizontalAlignment.Stretch };
-        add.Click += (_, _) => { if (_layout.Enabled(id)) _layout.Remove(id); else _layout.Move(id, Math.Max(0, rowChoice.SelectedIndex), _layout.InRow(Math.Max(0, rowChoice.SelectedIndex)).Count); Changed(); RenderPage(); OpenModule(id); };
+        var add = new Button { HorizontalAlignment = HorizontalAlignment.Stretch };
         _properties.Children.Add(add);
-        if (_layout.Enabled(id)) {
-            var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            foreach (var (label, delta) in new[] { ("前移", -1), ("后移", 1) }) {
-                var move = new Button { Content = label }; move.Click += (_, _) => { var row = _layout.Row(id); var index = _layout.InRow(row).FindIndex(item => item.Id == id); _layout.Move(id, row, index + delta); Changed(); RenderPage(); OpenModule(id); }; actions.Children.Add(move);
-            }
-            _properties.Children.Add(actions);
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        foreach (var (label, delta) in new[] { ("前移", -1), ("后移", 1) }) {
+            var move = new Button { Content = label };
+            move.Click += (_, _) => {
+                if (_layout is null || !_layout.Enabled(id)) return;
+                var row = _layout.Row(id); var index = _layout.InRow(row).FindIndex(item => item.Id == id);
+                _layout.Move(id, row, index + delta); Changed(); RenderPage(); OpenModule(id);
+            };
+            actions.Children.Add(move);
         }
+        _properties.Children.Add(actions);
+        void RefreshDrawerLayout()
+        {
+            var current = _layout?.Modules.FirstOrDefault(item => item.Id == id);
+            if (current is not null) title.Text = current.Name;
+            rowChoice.IsEnabled = add.IsEnabled = current is not null;
+            var count = _layout?.SingleRow == true ? 1 : 2;
+            if (rowChoice.Items.Count != count) {
+                rowChoice.Items.Clear(); rowChoice.Items.Add("上行"); if (count == 2) rowChoice.Items.Add("下行");
+            }
+            rowChoice.SelectedIndex = Math.Clamp(_layout?.Row(id) ?? 0, 0, count - 1);
+            var enabled = current is not null && _layout!.Enabled(id);
+            add.Content = enabled ? "移回模块池" : "添加到组合";
+            actions.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
+        }
+        RefreshDrawerLayout();
+        RegisterReadback(rowChoice, TaskbarLayoutSignature, RefreshDrawerLayout);
+        rowChoice.SelectionChanged += (_, _) => {
+            if (_refreshingControls || _layout is null || rowChoice.SelectedIndex < 0 || !_layout.Enabled(id)) return;
+            _layout.Move(id, rowChoice.SelectedIndex, _layout.InRow(rowChoice.SelectedIndex).Count); Changed(); RenderPage(); OpenModule(id);
+        };
+        add.Click += (_, _) => {
+            if (_layout is null || !_layout.Modules.Any(item => item.Id == id)) return;
+            if (_layout.Enabled(id)) _layout.Remove(id);
+            else _layout.Move(id, Math.Max(0, rowChoice.SelectedIndex), _layout.InRow(Math.Max(0, rowChoice.SelectedIndex)).Count);
+            Changed(); RenderPage(); OpenModule(id);
+        };
         foreach (var field in NativeFields().Where(field => Text(field["key"]).StartsWith($"items.{id}.") && new[] { "label", "labelColor", "valueColor" }.Contains(Text(field["key"]).Split('.').Last()))) {
             var descriptor = (JsonObject)field.DeepClone();
             descriptor["label"] = Text(field["key"]).Split('.').Last() switch { "label" => "标签文本", "labelColor" => "标签颜色", _ => "数值颜色" };

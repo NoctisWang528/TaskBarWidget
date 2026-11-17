@@ -141,7 +141,7 @@ public sealed partial class SettingsWindow
             try
             {
                 await startWrite();
-                if (!mutationStarted || !window._aiUsageMutating || !window.HasPendingChanges || provider.IsEnabled || window._apply.IsEnabled)
+                if (!mutationStarted || !window._aiUsageMutating || !window.HasPendingChanges || provider.IsEnabled || window.CanSaveSettings)
                     throw new InvalidOperationException("An active AI write did not guard controls and the updater's pending-changes gate.");
                 var sources = window.NavigationPages().Single(item => Equals(item.Tag, "sources"));
                 window._navigation.SelectedItem = sources;
@@ -181,8 +181,8 @@ public sealed partial class SettingsWindow
             var renders = window.PageRenderCount;
             var writes = globalWrites;
             window.Changed();
-            if (!window._apply.IsEnabled) throw new InvalidOperationException("Global Apply fixture had no pending settings.");
-            await InvokeButton(window._apply);
+            if (!window.CanSaveSettings) throw new InvalidOperationException("Global Apply fixture had no pending settings.");
+            await window.SaveAsync();
             window.ProbeRenderPage();
             if (window.HasPendingChanges || globalWrites <= writes || window.PageRenderCount != renders ||
                 !ReferenceEquals(cancellation, window._aiUsageCancellation) ||

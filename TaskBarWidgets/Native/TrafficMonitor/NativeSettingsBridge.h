@@ -13,6 +13,7 @@
 #include <functional>
 #include <cmath>
 #include <numeric>
+#include <utility>
 
 // Descriptors and setters share one table: the Web page cannot write arbitrary INI keys.
 class NativeSettingsBridge
@@ -114,6 +115,7 @@ public:
         general.auto_run = startup.Enabled();
         Group(L"placement",L"任务栏位置与布局",L"taskbar"); Group(L"values",L"数值、单位与图表",L"taskbar");
         Group(L"appearance",L"共用任务栏外观",L"taskbar"); Group(L"monitorAppearance",L"监测颜色与绘制",L"taskbar"); Group(L"items",L"显示项、插件与排序",L"taskbar");
+        Group(L"doubleClick",L"任务栏双击",L"taskbar");
         Group(L"network",L"网络连接",L"hardware"); Group(L"sensors",L"硬件监测与传感器",L"hardware");
         Group(L"nativeGeneral",L"监测常规设置",L"general"); Group(L"builtins.battery",L"电池显示",L"hardware"); Group(L"builtins.power",L"电池与硬件功耗",L"hardware");
 #define B(member,label,group) Boolean(std::wstring(L"taskbar.")+winrt::to_hstring(#member).c_str(),label,group,taskbar.member)
@@ -150,6 +152,29 @@ public:
         Number(L"taskbar.backgroundOpacity",L"背景不透明度（%）",L"appearance",taskbar.backgroundOpacity,0,100);
 #undef B
 #undef N
+        // The choices use the existing serialized IDs, not their display order.
+        JsonArray doubleClickOptions;
+        for (const auto& [action, label] : std::initializer_list<std::pair<DoubleClickAction, const wchar_t*>>{
+            {DoubleClickAction::NONE, L"关闭"}, {DoubleClickAction::TASK_MANAGER, L"任务管理器"},
+            {DoubleClickAction::RUN, L"运行（Win+R）"}, {DoubleClickAction::SEPCIFIC_APP, L"指定应用程序"}})
+        {
+            JsonObject option;
+            option.SetNamedValue(L"value", JsonValue::CreateNumberValue(static_cast<int>(action)));
+            option.SetNamedValue(L"label", Text(label));
+            doubleClickOptions.Append(option);
+        }
+        auto& doubleClick = Add(L"taskbar.double_click_action", L"双击操作", L"doubleClick", L"select",
+            JsonValue::CreateNumberValue(static_cast<int>(TaskbarDoubleClick::EffectiveAction(taskbar.double_click_action))),
+            [this](const IJsonValue& input)
+            {
+                if (input.ValueType() != JsonValueType::Number || !NativeSettingsValidation::Integer(input.GetNumber(), 0, 8)) Invalid();
+                const auto action = static_cast<DoubleClickAction>(static_cast<int>(input.GetNumber()));
+                if (action != DoubleClickAction::NONE && TaskbarDoubleClick::EffectiveAction(action) == DoubleClickAction::NONE) Invalid();
+                taskbar.double_click_action = action;
+            });
+        doubleClick.descriptor.SetNamedValue(L"options", doubleClickOptions);
+        String(L"taskbar.double_click_exe", L"应用程序路径", L"doubleClick", taskbar.double_click_exe,
+            [this](const std::wstring& value) { taskbar.double_click_exe = TaskbarDoubleClick::NormalizeApplicationPath(value); });
         for(const auto& item:theApp.m_plugins.AllDisplayItemsWithPlugins()) items.push_back(item);
         ranks.resize(items.size());
         const auto& order=taskbar.item_order.GetItemOrderConst();
@@ -215,8 +240,7 @@ public:
         {
             std::wstring key=field.descriptor.GetNamedString(L"key").c_str();
             if(key==L"taskbar.disable_d2d" || key==L"taskbar.enable_colorful_emoji" || key==L"taskbar.dark_default_style" || key==L"taskbar.light_default_style"
-                || key==L"taskbar.transparent_color" || key==L"taskbar.auto_save_taskbar_color_settings_to_preset" || key==L"general.cpu_usage_acquire_method"
-                || key==L"taskbar.double_click_action" || key==L"taskbar.double_click_exe")
+                || key==L"taskbar.transparent_color" || key==L"taskbar.auto_save_taskbar_color_settings_to_preset" || key==L"general.cpu_usage_acquire_method")
                 field.descriptor.SetNamedValue(L"advanced",JsonValue::CreateBooleanValue(true));
             if(key.rfind(L"items.",0)==0)
             {
@@ -296,6 +320,13 @@ public:
             auto found=std::find_if(fields.begin(),fields.end(),[&](const Field& field){return field.descriptor.GetNamedString(L"key")==key;});
             if(found==fields.end()) throw std::invalid_argument("Unknown setting key; reload the settings page.");
             found->set(pair.Value());
+        }
+        if (taskbar.double_click_action == DoubleClickAction::SEPCIFIC_APP &&
+            (taskbar.double_click_action != theApp.m_taskbar_data.double_click_action ||
+                taskbar.double_click_exe != theApp.m_taskbar_data.double_click_exe))
+        {
+            if (const auto* error = TaskbarDoubleClick::ApplicationPathError(taskbar.double_click_exe))
+                throw std::invalid_argument(winrt::to_string(error));
         }
         std::vector<int> order(items.size()); std::iota(order.begin(),order.end(),0);
         std::stable_sort(order.begin(),order.end(),[this](int left,int right){return ranks[left]<ranks[right];}); taskbar.item_order.SetOrder(order); taskbar.show_tool_tip=false;
