@@ -6,7 +6,8 @@ namespace TaskBarWidgets.Media.Integration;
 
 internal static class AudioPolicyConfig
 {
-    internal static IReadOnlyDictionary<AudioRole, string?> SetDefaultEndpoint(string id, bool communications)
+    internal static IReadOnlyDictionary<AudioRole, string?> SetDefaultEndpoint(string id, bool communications,
+        Func<AudioRole, string?> getDefault)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         object? client = null;
@@ -18,6 +19,8 @@ internal static class AudioPolicyConfig
             var policy = (IPolicyConfig)client;
             foreach (var role in AudioRolePolicy.GetRoles(communications))
             {
+                // Windows can move the multimedia role along with the console role.
+                if (string.Equals(getDefault(role), id, StringComparison.OrdinalIgnoreCase)) continue;
                 try
                 {
                     Marshal.ThrowExceptionForHR(policy.SetDefaultEndpoint(id, role));

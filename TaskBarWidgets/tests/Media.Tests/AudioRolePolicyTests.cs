@@ -5,6 +5,37 @@ namespace TaskBarWidgets.Media.Tests;
 
 public sealed class AudioRolePolicyTests
 {
+    private static readonly Guid Sonic = new("b53d940c-b846-4831-9f76-d102b9b725a0");
+
+    [Fact]
+    public void OutputSwitchRestoresOffWhenWindowsChangesOnlyTheActiveFormat()
+    {
+        var off = new OutputSpatialSound(Guid.Empty, Guid.Empty);
+        Assert.Equal(Guid.Empty, off.FormatToRestore(new(Guid.Empty, Sonic)));
+        Assert.Equal(Guid.Empty, off.FormatToRestore(new(Sonic, Sonic)));
+        Assert.Null(off.FormatToRestore(off));
+    }
+
+    [Fact]
+    public void OutputSwitchKeepsTheTargetDevicesSelectedProvider()
+    {
+        var enabled = new OutputSpatialSound(Sonic, Sonic);
+        Assert.Equal(Sonic, enabled.FormatToRestore(new(Guid.Empty, Guid.Empty)));
+        Assert.Null(enabled.FormatToRestore(enabled));
+        // The active provider may already differ from the user's selected provider.
+        Assert.Null(new OutputSpatialSound(Sonic, Guid.Empty).FormatToRestore(enabled));
+    }
+
+    [Fact]
+    public void FormatRestoreFailureKeepsRoleReadbackAndReportsWarning()
+    {
+        var result = new AudioSwitchResult([new(AudioRole.Console, true, null)]) { SpatialSoundUnconfirmed = true };
+        Assert.False(result.Succeeded);
+        Assert.True(result.PartiallySucceeded);
+        Assert.True(result.Roles.Single().IsSelected);
+        Assert.Contains("空间音效", result.Message);
+    }
+
     [Fact]
     public void DefaultSwitchPreservesCommunicationsRole() =>
         Assert.Equal([AudioRole.Console, AudioRole.Multimedia], AudioRolePolicy.GetRoles(false));

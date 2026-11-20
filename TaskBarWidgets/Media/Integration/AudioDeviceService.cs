@@ -46,14 +46,23 @@ public sealed class AudioDeviceService : IDisposable, IAsyncDisposable
         return new AudioSnapshot(Read(DataFlow.Render), Read(DataFlow.Capture));
     }, cancellationToken);
 
-    public Task<AudioSwitchResult> SetDefaultAsync(string id, bool input, bool communications, CancellationToken cancellationToken = default) => RunAsync("setDefault", () =>
+    public Task<AudioSwitchResult> SetDefaultAsync(string id, bool input, bool communications, CancellationToken cancellationToken = default) => RunOperationAsync("setDefault", async () =>
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         using var device = OpenEndpoint(id, input);
-        var errors = AudioPolicyConfig.SetDefaultEndpoint(device.ID, communications);
-        Interlocked.Increment(ref _roleRevision);
+        var endpointId = device.ID;
         var flow = input ? DataFlow.Capture : DataFlow.Render;
-        return AudioRolePolicy.ReadBack(device.ID, communications, role => DefaultId(flow, (Role)role), errors);
+        string? GetDefault(AudioRole role) => DefaultId(flow, (Role)role);
+        var spatialSound = input ? null : OutputSpatialSound.TryRead(endpointId);
+        var errors = AudioPolicyConfig.SetDefaultEndpoint(endpointId, communications, GetDefault);
+        Interlocked.Increment(ref _roleRevision);
+        // Endpoint notifications and the driver's format change can follow the role writes.
+        if (!input && errors.Count > 0) await Task.Delay(250).ConfigureAwait(false);
+        var result = AudioRolePolicy.ReadBack(endpointId, communications, GetDefault, errors);
+        if (!input && result.Roles.Any(role => role.IsSelected && errors.ContainsKey(role.Role)) &&
+            !await OutputSpatialSound.PreserveAsync(endpointId, spatialSound).ConfigureAwait(false))
+            return result with { SpatialSoundUnconfirmed = true };
+        return result;
     }, cancellationToken);
 
     public Task SetVolumeAsync(string? id, double volume, bool? input = null, CancellationToken cancellationToken = default) => RunAsync("setVolume", () =>
@@ -194,7 +203,10 @@ public sealed class AudioDeviceService : IDisposable, IAsyncDisposable
         }
         _devices.Clear();
     }
-    private Task<T> RunAsync<T>(string name, Func<T> operation, CancellationToken cancellationToken)
+    private Task<T> RunAsync<T>(string name, Func<T> operation, CancellationToken cancellationToken) =>
+        RunOperationAsync(name, () => Task.FromResult(operation()), cancellationToken);
+
+    private Task<T> RunOperationAsync<T>(string name, Func<Task<T>> operation, CancellationToken cancellationToken)
     {
         var queued = Stopwatch.GetTimestamp();
         return Task.Run(async () =>
@@ -210,7 +222,7 @@ public sealed class AudioDeviceService : IDisposable, IAsyncDisposable
                 started = Stopwatch.GetTimestamp();
                 linked.Token.ThrowIfCancellationRequested();
                 ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
-                return operation();
+                return await operation().ConfigureAwait(false);
             }
             catch (Exception exception) { outcome = exception.GetType().Name; throw; }
             finally
